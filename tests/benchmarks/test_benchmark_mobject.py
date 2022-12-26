@@ -1,9 +1,11 @@
 import pytest
 
+from manim._config import tempconfig
 from manim.constants import UP
 from manim.mobject.geometry.arc import Circle, Dot
 from manim.mobject.geometry.polygram import Square
 from manim.mobject.types.vectorized_mobject import VGroup
+from manim.scene.scene import Scene
 
 TEST_SIZE = 1000
 
@@ -43,5 +45,18 @@ def test_benchmark_become_single(benchmark, group_of_circles, group_of_squares):
 def test_benchmark_become_group(benchmark, group_of_circles, group_of_squares):
     def bench():
         group_of_circles.become(group_of_squares)
+
+    benchmark(bench)
+
+
+def test_benchmark_render_scene(benchmark, group_of_circles):
+    scene = Scene()
+    scene.add(*group_of_circles)
+
+    def bench():
+        with tempconfig(
+            {"use_opengl_renderer": False, "disable_caching": True, "dry_run": True}
+        ):
+            scene.render()
 
     benchmark(bench)
