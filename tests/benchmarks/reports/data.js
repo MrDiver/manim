@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1672068495815,
+  "lastUpdate": 1672068861507,
   "repoUrl": "https://github.com/MrDiver/manim",
   "entries": {
     "Manim Benchmark": [
@@ -110,6 +110,65 @@ window.BENCHMARK_DATA = {
             "unit": "iter/sec",
             "range": "stddev: 0.015716762329075297",
             "extra": "mean: 459.5600275999914 msec\nrounds: 5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "mrdiverlp@gmail.com",
+            "name": "Tristan Schulz",
+            "username": "MrDiver"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bbfae0f15eff400d60403a2ea4a5eddf58fe041e",
+          "message": "Merge pull request #1 from MrDiver/add_benchmark\n\ntesting benchmarks",
+          "timestamp": "2022-12-26T16:26:37+01:00",
+          "tree_id": "71c792127a4b8f7df07775503f44e562ed7207d1",
+          "url": "https://github.com/MrDiver/manim/commit/bbfae0f15eff400d60403a2ea4a5eddf58fe041e"
+        },
+        "date": 1672068858020,
+        "tool": "pytest",
+        "benches": [
+          {
+            "name": "tests/benchmarks/test_benchmark_mobject.py::test_benchmark_vmobject_add",
+            "value": 0.07130009000783744,
+            "unit": "iter/sec",
+            "range": "stddev: 0.010996301788150442",
+            "extra": "mean: 14.025227736600026 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/benchmarks/test_benchmark_mobject.py::test_benchmark_shift",
+            "value": 222.85987831637703,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0025153041558950025",
+            "extra": "mean: 4.487124409986336 msec\nrounds: 200"
+          },
+          {
+            "name": "tests/benchmarks/test_benchmark_mobject.py::test_benchmark_become_single",
+            "value": 34.26402051924571,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00015258446958605205",
+            "extra": "mean: 29.185133117647744 msec\nrounds: 34"
+          },
+          {
+            "name": "tests/benchmarks/test_benchmark_mobject.py::test_benchmark_become_group",
+            "value": 26.331270320471297,
+            "unit": "iter/sec",
+            "range": "stddev: 0.017240221508528022",
+            "extra": "mean: 37.97765879994586 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/benchmarks/test_benchmark_mobject.py::test_benchmark_render_scene",
+            "value": 2.399266421412286,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0006833153990328545",
+            "extra": "mean: 416.794063000043 msec\nrounds: 5"
           }
         ]
       }
