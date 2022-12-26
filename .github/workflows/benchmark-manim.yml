@@ -82,11 +82,10 @@ jobs:
           gh-pages-branch: "gh-bech-pages"
           benchmark-data-dir-path: "dev/bench"
           github-token: "${{secrets.GITHUB_TOKEN}}"
-          auto-push: ${{github.event_name!='pull_request'}}
+          auto-push: true # ${{github.event_name!='pull_request'}}
           tool: "pytest"
           output-file-path: output.json
           external-data-json-path: ./cache/benchmark-data.json
           fail-on-alert: true
-          comment-always: true
           comment-on-alert: true
           max-items-in-chart: 10
