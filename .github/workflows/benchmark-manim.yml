@@ -81,7 +81,7 @@ jobs:
           name: "Manim Benchmark"
           gh-pages-branch: "gh-bech-pages"
           benchmark-data-dir-path: "dev/bench"
-          github-token: "${{secrets.GITHUB_TOKEN}}"
+          github-token: ""
           auto-push: ${{github.event_name!='pull_request'}}
           tool: "pytest"
           output-file-path: output.json
