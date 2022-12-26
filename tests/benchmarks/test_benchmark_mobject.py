@@ -5,7 +5,7 @@ from manim.mobject.geometry.arc import Circle, Dot
 from manim.mobject.geometry.polygram import Square
 from manim.mobject.types.vectorized_mobject import VGroup
 
-TEST_SIZE = 1000
+TEST_SIZE = 100
 
 
 @pytest.fixture
