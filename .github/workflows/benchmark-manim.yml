@@ -60,18 +60,10 @@ jobs:
           # start xvfb in background
           sudo /usr/bin/Xvfb $DISPLAY -screen 0 1280x1024x24 &
 
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v3
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
-
       - name: Install manim
         run: |
           poetry config experimental.new-installer false
           poetry install
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
 
       - name: Run Benchmarks
         run: |
