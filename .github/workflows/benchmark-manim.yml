@@ -88,4 +88,5 @@ jobs:
           external-data-json-path: ./cache/benchmark-data.json
           fail-on-alert: true
           comment-always: true
+          comment-on-alert: true
           max-items-in-chart: 10
