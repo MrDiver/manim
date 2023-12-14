@@ -627,7 +627,7 @@ class NumberLine(Line):
         """
         if label_constructor is None:
             label_constructor = self.label_constructor
-        if isinstance(label_tex, (VMobject, OpenGLVMobject)):
+        if isinstance(label_tex, (VMobject)):
             return label_tex
         else:
             return label_constructor(label_tex, **kwargs)

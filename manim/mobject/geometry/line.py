@@ -118,7 +118,7 @@ class Line(TipableVMobject):
         direction
             The direction.
         """
-        if isinstance(mob_or_point, (Mobject, OpenGLMobject)):
+        if isinstance(mob_or_point, (Mobject)):
             mob = mob_or_point
             if direction is None:
                 return mob.get_center()

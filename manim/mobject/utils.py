@@ -31,7 +31,7 @@ def get_mobject_class() -> type:
     base classes::
 
         >>> from manim.mobject.utils import get_mobject_class
-        >>> get_mobject_class().__name__ in ['Mobject', 'OpenGLMobject']
+        >>> get_mobject_class().__name__ in ['Mobject']
         True
     """
     if config.renderer == RendererType.CAIRO:

@@ -435,7 +435,7 @@ class GenericGraph(VMobject):
             label = MathTex(vertex, fill_color=label_fill_color)
         elif vertex in self._labels:
             label = self._labels[vertex]
-        elif not isinstance(label, (Mobject, OpenGLMobject)):
+        elif not isinstance(label, (Mobject)):
             label = None
 
         base_vertex_config = copy(self.default_vertex_config)

@@ -1990,7 +1990,7 @@ class VGroup(VMobject):
                         (gr-circle_red).animate.shift(RIGHT)
                     )
         """
-        if not all(isinstance(m, (VMobject, OpenGLVMobject)) for m in vmobjects):
+        if not all(isinstance(m, (VMobject)) for m in vmobjects):
             raise TypeError("All submobjects must be of type VMobject")
         return super().add(*vmobjects)
 
@@ -2358,7 +2358,7 @@ class VDict(VMobject):
             self.add_key_value_pair('s', square_obj)
 
         """
-        if not isinstance(value, (VMobject, OpenGLVMobject)):
+        if not isinstance(value, (VMobject)):
             raise TypeError("All submobjects must be of type VMobject")
         mob = value
         if self.show_keys:

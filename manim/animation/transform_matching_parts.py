@@ -73,11 +73,7 @@ class TransformMatchingAbstractBase(AnimationGroup):
         key_map: dict | None = None,
         **kwargs,
     ):
-        if isinstance(mobject, OpenGLVMobject):
-            group_type = OpenGLVGroup
-        elif isinstance(mobject, OpenGLMobject):
-            group_type = OpenGLGroup
-        elif isinstance(mobject, VMobject):
+        if isinstance(mobject, VMobject):
             group_type = VGroup
         else:
             group_type = Group
@@ -279,7 +275,7 @@ class TransformMatchingTex(TransformMatchingAbstractBase):
 
     @staticmethod
     def get_mobject_parts(mobject: Mobject) -> list[Mobject]:
-        if isinstance(mobject, (Group, VGroup, OpenGLGroup, OpenGLVGroup)):
+        if isinstance(mobject, (Group, VGroup)):
             return [
                 p
                 for s in mobject.submobjects

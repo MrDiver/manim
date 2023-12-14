@@ -230,6 +230,7 @@ class Scene:
         self.renderer.scene_finished(self)
 
         # Show info only if animations are rendered or to get image
+        # TODO: Remove this from here it has nothing to do with the scene and should be handled outside this class
         if (
             self.renderer.num_plays
             or config["format"] == "png"
@@ -240,6 +241,7 @@ class Scene:
             )
 
         # If preview open up the render after rendering.
+        # TODO: Move this to a seperate class because it has nothing to do with the scene
         if preview:
             config["preview"] = True
 
@@ -1304,6 +1306,7 @@ class Scene:
 
         self.interact(shell, keyboard_thread)
 
+    # TODO: Move window creation and management into a different class so that it works outside of a specific renderer
     def interact(self, shell, keyboard_thread):
         event_handler = RerunSceneHandler(self.queue)
         file_observer = Observer()

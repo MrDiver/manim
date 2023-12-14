@@ -132,7 +132,7 @@ class SampleSpace(Rectangle):
         braces = VGroup()
         for label, part in zip(labels, parts):
             brace = Brace(part, direction, min_num_quads=min_num_quads, buff=buff)
-            if isinstance(label, (Mobject, OpenGLMobject)):
+            if isinstance(label, (Mobject)):
                 label_mob = label
             else:
                 label_mob = MathTex(label)
