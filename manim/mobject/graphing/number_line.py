@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from manim.mobject.opengl.opengl_vectorized_mobject import OpenGLVMobject
-
 __all__ = ["NumberLine", "UnitInterval"]
 
 

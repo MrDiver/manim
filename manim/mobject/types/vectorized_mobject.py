@@ -29,9 +29,6 @@ import numpy as np
 import numpy.typing as npt
 from PIL.Image import Image
 from typing_extensions import Self
-
-from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
-from manim.mobject.opengl.opengl_vectorized_mobject import OpenGLVMobject
 from manim.mobject.three_d.three_d_utils import (
     get_3d_vmob_gradient_start_and_end_points,
 )
@@ -1875,7 +1872,7 @@ class VMobject(Mobject):
         return self
 
 
-class VGroup(VMobject, metaclass=ConvertToOpenGL):
+class VGroup(VMobject):
     """A group of vectorized mobjects.
 
     This can be used to group multiple :class:`~.VMobject` instances together
@@ -2032,12 +2029,12 @@ class VGroup(VMobject, metaclass=ConvertToOpenGL):
             >>> new_obj = VMobject()
             >>> vgroup[0] = new_obj
         """
-        if not all(isinstance(m, (VMobject, OpenGLVMobject)) for m in value):
+        if not all(isinstance(m, (VMobject)) for m in value):
             raise TypeError("All submobjects must be of type VMobject")
         self.submobjects[key] = value
 
 
-class VDict(VMobject, metaclass=ConvertToOpenGL):
+class VDict(VMobject):
     """A VGroup-like class, also offering submobject access by
     key, like a python dict
 
@@ -2375,7 +2372,7 @@ class VDict(VMobject, metaclass=ConvertToOpenGL):
         super().add(value)
 
 
-class VectorizedPoint(VMobject, metaclass=ConvertToOpenGL):
+class VectorizedPoint(VMobject):
     def __init__(
         self,
         location: Point3D = ORIGIN,
@@ -2396,13 +2393,12 @@ class VectorizedPoint(VMobject, metaclass=ConvertToOpenGL):
         )
         self.set_points(np.array([location]))
 
-    basecls = OpenGLVMobject if config.renderer == RendererType.OPENGL else VMobject
 
-    @basecls.width.getter
+    @VMobject.width.getter
     def width(self) -> float:
         return self.artificial_width
 
-    @basecls.height.getter
+    @VMobject.height.getter
     def height(self) -> float:
         return self.artificial_height
 
@@ -2503,7 +2499,7 @@ class CurvesAsSubmobjects(VGroup):
         return submobjs_with_pts
 
 
-class DashedVMobject(VMobject, metaclass=ConvertToOpenGL):
+class DashedVMobject(VMobject):
     """A :class:`VMobject` composed of dashes instead of lines.
 
     Parameters
@@ -2657,7 +2653,4 @@ class DashedVMobject(VMobject, metaclass=ConvertToOpenGL):
                 )
         # Family is already taken care of by get_subcurve
         # implementation
-        if config.renderer == RendererType.OPENGL:
-            self.match_style(vmobject, recurse=False)
-        else:
-            self.match_style(vmobject, family=False)
+        self.match_style(vmobject, family=False)

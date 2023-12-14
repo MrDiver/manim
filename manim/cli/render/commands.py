@@ -85,39 +85,20 @@ def render(
         return click_args
 
     config.digest_args(click_args)
-    file = Path(config.input_file)
     if config.renderer == RendererType.OPENGL:
-        from manim.renderer.opengl_renderer import OpenGLRenderer
-
+        console.print(
+            "[red]The OpenGL renderer was removed[/red] in version 0.19.0 if you need it please install manim==0.18.0.",
+        )
+        exit(0)
+    file = Path(config.input_file)
+    for SceneClass in scene_classes_from_file(file):
         try:
-            renderer = OpenGLRenderer()
-            keep_running = True
-            while keep_running:
-                for SceneClass in scene_classes_from_file(file):
-                    with tempconfig({}):
-                        scene = SceneClass(renderer)
-                        rerun = scene.render()
-                    if rerun or config["write_all"]:
-                        renderer.num_plays = 0
-                        continue
-                    else:
-                        keep_running = False
-                        break
-                if config["write_all"]:
-                    keep_running = False
-
+            with tempconfig({}):
+                scene = SceneClass()
+                scene.render()
         except Exception:
             error_console.print_exception()
             sys.exit(1)
-    else:
-        for SceneClass in scene_classes_from_file(file):
-            try:
-                with tempconfig({}):
-                    scene = SceneClass()
-                    scene.render()
-            except Exception:
-                error_console.print_exception()
-                sys.exit(1)
 
     if config.notify_outdated_version:
         manim_info_url = "https://pypi.org/pypi/manim/json"

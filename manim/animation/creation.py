@@ -81,8 +81,6 @@ import numpy as np
 if TYPE_CHECKING:
     from manim.mobject.text.text_mobject import Text
 
-from manim.mobject.opengl.opengl_surface import OpenGLSurface
-from manim.mobject.opengl.opengl_vectorized_mobject import OpenGLVMobject
 from manim.utils.color import ManimColor
 
 from .. import config

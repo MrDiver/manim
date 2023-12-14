@@ -21,8 +21,6 @@ from typing import TYPE_CHECKING, Callable, Iterable, Literal, TypeVar, Union
 import numpy as np
 from typing_extensions import Self, TypeAlias
 
-from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
-
 from .. import config, logger
 from ..constants import *
 from ..utils.color import (
@@ -2925,7 +2923,7 @@ class Mobject:
         return self
 
 
-class Group(Mobject, metaclass=ConvertToOpenGL):
+class Group(Mobject):
     """Groups together multiple :class:`Mobjects <.Mobject>`.
 
     Notes

@@ -22,8 +22,6 @@ __all__ = [
 
 import numpy as np
 
-from manim.mobject.opengl.opengl_mobject import OpenGLMobject
-
 from ..animation.transform import Transform
 from ..constants import ORIGIN
 from ..mobject.mobject import Group, Mobject

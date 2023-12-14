@@ -34,7 +34,6 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from manim.mobject.mobject import Mobject
-from manim.mobject.opengl.opengl_mobject import OpenGLPoint
 
 from .. import config, logger
 from ..animation.animation import Animation, Wait, prepare_animation
@@ -42,7 +41,6 @@ from ..camera.camera import Camera
 from ..constants import *
 from ..gui.gui import configure_pygui
 from ..renderer.cairo_renderer import CairoRenderer
-from ..renderer.opengl_renderer import OpenGLRenderer
 from ..renderer.shader import Object3D
 from ..utils import opengl, space_ops
 from ..utils.exceptions import EndSceneEarlyException, RerunSceneException
@@ -129,13 +127,6 @@ class Scene:
         self.key_to_function_map = {}
         self.mouse_press_callbacks = []
         self.interactive_mode = False
-
-        if config.renderer == RendererType.OPENGL:
-            # Items associated with interaction
-            self.mouse_point = OpenGLPoint()
-            self.mouse_drag_point = OpenGLPoint()
-            if renderer is None:
-                renderer = OpenGLRenderer()
 
         if renderer is None:
             self.renderer = CairoRenderer(
@@ -429,16 +420,10 @@ class Scene:
         list
             List of mobject family members.
         """
-        if config.renderer == RendererType.OPENGL:
-            family_members = []
-            for mob in self.mobjects:
-                family_members.extend(mob.get_family())
-            return family_members
-        elif config.renderer == RendererType.CAIRO:
-            return extract_mobject_family_members(
-                self.mobjects,
-                use_z_index=self.renderer.camera.use_z_index,
-            )
+        return extract_mobject_family_members(
+            self.mobjects,
+            use_z_index=self.renderer.camera.use_z_index,
+        )
 
     def add(self, *mobjects: Mobject):
         """
@@ -456,28 +441,15 @@ class Scene:
             The same scene after adding the Mobjects in.
 
         """
-        if config.renderer == RendererType.OPENGL:
-            new_mobjects = []
-            new_meshes = []
-            for mobject_or_mesh in mobjects:
-                if isinstance(mobject_or_mesh, Object3D):
-                    new_meshes.append(mobject_or_mesh)
-                else:
-                    new_mobjects.append(mobject_or_mesh)
-            self.remove(*new_mobjects)
-            self.mobjects += new_mobjects
-            self.remove(*new_meshes)
-            self.meshes += new_meshes
-        elif config.renderer == RendererType.CAIRO:
-            mobjects = [*mobjects, *self.foreground_mobjects]
-            self.restructure_mobjects(to_remove=mobjects)
-            self.mobjects += mobjects
-            if self.moving_mobjects:
-                self.restructure_mobjects(
-                    to_remove=mobjects,
-                    mobject_list_name="moving_mobjects",
-                )
-                self.moving_mobjects += mobjects
+        mobjects = [*mobjects, *self.foreground_mobjects]
+        self.restructure_mobjects(to_remove=mobjects)
+        self.mobjects += mobjects
+        if self.moving_mobjects:
+            self.restructure_mobjects(
+                to_remove=mobjects,
+                mobject_list_name="moving_mobjects",
+            )
+            self.moving_mobjects += mobjects
         return self
 
     def add_mobjects_from_animations(self, animations):
@@ -503,26 +475,9 @@ class Scene:
         *mobjects
             The mobjects to remove.
         """
-        if config.renderer == RendererType.OPENGL:
-            mobjects_to_remove = []
-            meshes_to_remove = set()
-            for mobject_or_mesh in mobjects:
-                if isinstance(mobject_or_mesh, Object3D):
-                    meshes_to_remove.add(mobject_or_mesh)
-                else:
-                    mobjects_to_remove.append(mobject_or_mesh)
-            self.mobjects = restructure_list_to_exclude_certain_family_members(
-                self.mobjects,
-                mobjects_to_remove,
-            )
-            self.meshes = list(
-                filter(lambda mesh: mesh not in set(meshes_to_remove), self.meshes),
-            )
-            return self
-        elif config.renderer == RendererType.CAIRO:
-            for list_name in "mobjects", "foreground_mobjects":
-                self.restructure_mobjects(mobjects, list_name, False)
-            return self
+        for list_name in "mobjects", "foreground_mobjects":
+            self.restructure_mobjects(mobjects, list_name, False)
+        return self
 
     def replace(self, old_mobject: Mobject, new_mobject: Mobject) -> None:
         """Replace one mobject in the scene with another, preserving draw order.
@@ -1066,28 +1021,6 @@ class Scene:
             All other keywords are passed to the renderer.
 
         """
-        # If we are in interactive embedded mode, make sure this is running on the main thread (required for OpenGL)
-        if (
-            self.interactive_mode
-            and config.renderer == RendererType.OPENGL
-            and threading.current_thread().name != "MainThread"
-        ):
-            kwargs.update(
-                {
-                    "subcaption": subcaption,
-                    "subcaption_duration": subcaption_duration,
-                    "subcaption_offset": subcaption_offset,
-                }
-            )
-            self.queue.put(
-                (
-                    "play",
-                    args,
-                    kwargs,
-                )
-            )
-            return
-
         start_time = self.renderer.time
         self.renderer.play(self, *args, **kwargs)
         run_time = self.renderer.time - start_time
@@ -1223,13 +1156,12 @@ class Scene:
             animation._setup_scene(self)
             animation.begin()
 
-        if config.renderer == RendererType.CAIRO:
-            # Paint all non-moving objects onto the screen, so they don't
-            # have to be rendered every frame
-            (
-                self.moving_mobjects,
-                self.static_mobjects,
-            ) = self.get_moving_and_static_mobjects(self.animations)
+        # Paint all non-moving objects onto the screen, so they don't
+        # have to be rendered every frame
+        (
+            self.moving_mobjects,
+            self.static_mobjects,
+        ) = self.get_moving_and_static_mobjects(self.animations)
 
     def is_current_animation_frozen_frame(self) -> bool:
         """Returns whether the current animation produces a static frame (generally a Wait)."""

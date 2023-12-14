@@ -129,11 +129,7 @@ else:
             with tempconfig(local_ns.get("config", {})):
                 config.digest_args(args)
 
-                renderer = None
-                if config.renderer == RendererType.OPENGL:
-                    from manim.renderer.opengl_renderer import OpenGLRenderer
-
-                    renderer = OpenGLRenderer()
+                renderer = CairoRenderer()
 
                 try:
                     SceneClass = local_ns[config["scene_names"][0]]

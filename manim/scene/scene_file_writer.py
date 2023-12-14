@@ -383,14 +383,11 @@ class SceneFileWriter:
         frame_or_renderer
             Pixel array of the frame.
         """
-        if config.renderer == RendererType.OPENGL:
-            self.write_opengl_frame(frame_or_renderer)
-        elif config.renderer == RendererType.CAIRO:
-            frame = frame_or_renderer
-            if write_to_movie():
-                self.writing_process.stdin.write(frame.tobytes())
-            if is_png_format() and not config["dry_run"]:
-                self.output_image_from_array(frame)
+        frame = frame_or_renderer
+        if write_to_movie():
+            self.writing_process.stdin.write(frame.tobytes())
+        if is_png_format() and not config["dry_run"]:
+            self.output_image_from_array(frame)
 
     def write_opengl_frame(self, renderer: OpenGLRenderer):
         if write_to_movie():
@@ -480,11 +477,8 @@ class SceneFileWriter:
         fps = config["frame_rate"]
         if fps == int(fps):  # fps is integer
             fps = int(fps)
-        if config.renderer == RendererType.OPENGL:
-            width, height = self.renderer.get_pixel_shape()
-        else:
-            height = config["pixel_height"]
-            width = config["pixel_width"]
+        height = config["pixel_height"]
+        width = config["pixel_width"]
 
         command = [
             config.ffmpeg_executable,
@@ -505,8 +499,6 @@ class SceneFileWriter:
             "-metadata",
             f"comment=Rendered with Manim Community v{__version__}",
         ]
-        if config.renderer == RendererType.OPENGL:
-            command += ["-vf", "vflip"]
         if is_webm_format():
             command += ["-vcodec", "libvpx-vp9", "-auto-alt-ref", "0"]
         # .mov format

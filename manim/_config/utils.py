@@ -1355,37 +1355,6 @@ class ManimConfig(MutableMapping):
         if isinstance(value, str):
             value = value.lower()
         renderer = RendererType(value)
-        try:
-            from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
-            from manim.mobject.opengl.opengl_mobject import OpenGLMobject
-            from manim.mobject.opengl.opengl_vectorized_mobject import OpenGLVMobject
-
-            from ..mobject.mobject import Mobject
-            from ..mobject.types.vectorized_mobject import VMobject
-
-            for cls in ConvertToOpenGL._converted_classes:
-                if renderer == RendererType.OPENGL:
-                    conversion_dict = {
-                        Mobject: OpenGLMobject,
-                        VMobject: OpenGLVMobject,
-                    }
-                else:
-                    conversion_dict = {
-                        OpenGLMobject: Mobject,
-                        OpenGLVMobject: VMobject,
-                    }
-
-                cls.__bases__ = tuple(
-                    conversion_dict.get(base, base) for base in cls.__bases__
-                )
-        except ImportError:
-            # The renderer is set during the initial import of the
-            # library for the first time. The imports above cause an
-            # ImportError due to circular imports. However, the
-            # metaclass sets stuff up correctly in this case, so we
-            # can just do nothing.
-            pass
-
         self._set_from_enum("renderer", renderer, RendererType)
 
     @property

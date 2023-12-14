@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Callable, Iterable, Sequence
 
 import numpy as np
 
-from manim.mobject.opengl.opengl_mobject import OpenGLGroup
 from manim.utils.parameter_parsing import flatten_iterable_parameters
 
 from .._config import config
@@ -20,8 +19,6 @@ from ..utils.iterables import remove_list_redundancies
 from ..utils.rate_functions import linear
 
 if TYPE_CHECKING:
-    from manim.mobject.opengl.opengl_vectorized_mobject import OpenGLVGroup
-
     from ..mobject.types.vectorized_mobject import VGroup
 
 __all__ = ["AnimationGroup", "Succession", "LaggedStart", "LaggedStartMap"]

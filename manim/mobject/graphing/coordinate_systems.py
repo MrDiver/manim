@@ -27,8 +27,6 @@ from manim.mobject.geometry.polygram import Polygon, Rectangle, RegularPolygon
 from manim.mobject.graphing.functions import ImplicitFunction, ParametricFunction
 from manim.mobject.graphing.number_line import NumberLine
 from manim.mobject.graphing.scale import LinearBase
-from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
-from manim.mobject.opengl.opengl_surface import OpenGLSurface
 from manim.mobject.text.tex_mobject import MathTex
 from manim.mobject.three_d.three_dimensions import Surface
 from manim.mobject.types.vectorized_mobject import (
@@ -910,28 +908,17 @@ class CoordinateSystem:
                         )
                     self.add(axes, trig_plane)
         """
-        if config.renderer == RendererType.CAIRO:
-            surface = Surface(
-                lambda u, v: self.c2p(u, v, function(u, v)),
-                u_range=u_range,
-                v_range=v_range,
-                **kwargs,
-            )
-            if colorscale:
-                surface.set_fill_by_value(
-                    axes=self.copy(),
-                    colorscale=colorscale,
-                    axis=colorscale_axis,
-                )
-        elif config.renderer == RendererType.OPENGL:
-            surface = OpenGLSurface(
-                lambda u, v: self.c2p(u, v, function(u, v)),
-                u_range=u_range,
-                v_range=v_range,
+        surface = Surface(
+            lambda u, v: self.c2p(u, v, function(u, v)),
+            u_range=u_range,
+            v_range=v_range,
+            **kwargs,
+        )
+        if colorscale:
+            surface.set_fill_by_value(
                 axes=self.copy(),
                 colorscale=colorscale,
-                colorscale_axis=colorscale_axis,
-                **kwargs,
+                axis=colorscale_axis,
             )
 
         return surface
@@ -1781,7 +1768,7 @@ class CoordinateSystem:
         return T_label_group
 
 
-class Axes(VGroup, CoordinateSystem, metaclass=ConvertToOpenGL):
+class Axes(VGroup, CoordinateSystem):
     """Creates a set of axes.
 
     Parameters

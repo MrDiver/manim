@@ -18,7 +18,6 @@ from ...utils.iterables import hash_obj
 from ..geometry.arc import Circle
 from ..geometry.line import Line
 from ..geometry.polygram import Polygon, Rectangle, RoundedRectangle
-from ..opengl.opengl_compatibility import ConvertToOpenGL
 from ..types.vectorized_mobject import VMobject
 
 __all__ = ["SVGMobject", "VMobjectFromSVGPath"]
@@ -31,7 +30,7 @@ def _convert_point_to_3d(x: float, y: float) -> np.ndarray:
     return np.array([x, y, 0.0])
 
 
-class SVGMobject(VMobject, metaclass=ConvertToOpenGL):
+class SVGMobject(VMobject):
     """A vectorized mobject created from importing an SVG file.
 
     Parameters
@@ -446,7 +445,7 @@ class SVGMobject(VMobject, metaclass=ConvertToOpenGL):
             self.set_width(self.svg_width)
 
 
-class VMobjectFromSVGPath(VMobject, metaclass=ConvertToOpenGL):
+class VMobjectFromSVGPath(VMobject):
     """A vectorized mobject representing an SVG path.
 
     .. note::
@@ -493,16 +492,7 @@ class VMobjectFromSVGPath(VMobject, metaclass=ConvertToOpenGL):
 
     def init_points(self) -> None:
         # TODO: cache mobject in a re-importable way
-
         self.handle_commands()
-
-        if config.renderer == "opengl":
-            if self.should_subdivide_sharp_curves:
-                # For a healthy triangulation later
-                self.subdivide_sharp_curves()
-            if self.should_remove_null_curves:
-                # Get rid of any null curves
-                self.set_points(self.get_points_without_null_curves())
 
     generate_points = init_points
 

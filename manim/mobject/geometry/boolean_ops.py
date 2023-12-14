@@ -7,7 +7,6 @@ from pathops import Path as SkiaPath
 from pathops import PathVerb, difference, intersection, union, xor
 
 from manim import config
-from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
 from manim.mobject.types.vectorized_mobject import VMobject
 from manim.typing import Point2D_Array
 
@@ -16,7 +15,7 @@ from ...constants import RendererType
 __all__ = ["Union", "Intersection", "Difference", "Exclusion"]
 
 
-class _BooleanOps(VMobject, metaclass=ConvertToOpenGL):
+class _BooleanOps(VMobject):
     """This class contains some helper functions which
     helps to convert to and from skia objects and manim
     objects (:class:`~.VMobject`).
@@ -80,27 +79,16 @@ class _BooleanOps(VMobject, metaclass=ConvertToOpenGL):
             return path
 
         # In OpenGL it's quadratic beizer curves while on Cairo it's cubic...
-        if config.renderer == RendererType.OPENGL:
-            subpaths = vmobject.get_subpaths_from_points(points)
-            for subpath in subpaths:
-                quads = vmobject.get_bezier_tuples_from_points(subpath)
-                start = subpath[0]
-                path.moveTo(*start[:2])
-                for p0, p1, p2 in quads:
-                    path.quadTo(*p1[:2], *p2[:2])
-                if vmobject.consider_points_equals(subpath[0], subpath[-1]):
-                    path.close()
-        elif config.renderer == RendererType.CAIRO:
-            subpaths = vmobject.gen_subpaths_from_points_2d(points)
-            for subpath in subpaths:
-                quads = vmobject.gen_cubic_bezier_tuples_from_points(subpath)
-                start = subpath[0]
-                path.moveTo(*start[:2])
-                for p0, p1, p2, p3 in quads:
-                    path.cubicTo(*p1[:2], *p2[:2], *p3[:2])
+        subpaths = vmobject.gen_subpaths_from_points_2d(points)
+        for subpath in subpaths:
+            quads = vmobject.gen_cubic_bezier_tuples_from_points(subpath)
+            start = subpath[0]
+            path.moveTo(*start[:2])
+            for p0, p1, p2, p3 in quads:
+                path.cubicTo(*p1[:2], *p2[:2], *p3[:2])
 
-                if vmobject.consider_points_equals_2d(subpath[0], subpath[-1]):
-                    path.close()
+            if vmobject.consider_points_equals_2d(subpath[0], subpath[-1]):
+                path.close()
 
         return path
 

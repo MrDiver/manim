@@ -29,8 +29,6 @@ from manim.constants import *
 from manim.mobject.geometry.arc import Circle
 from manim.mobject.geometry.polygram import Square
 from manim.mobject.mobject import *
-from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
-from manim.mobject.opengl.opengl_mobject import OpenGLMobject
 from manim.mobject.types.vectorized_mobject import VGroup, VMobject
 from manim.utils.color import (
     BLUE,
@@ -46,12 +44,12 @@ from manim.utils.iterables import tuplify
 from manim.utils.space_ops import normalize, perpendicular_bisector, z_to_vector
 
 
-class ThreeDVMobject(VMobject, metaclass=ConvertToOpenGL):
+class ThreeDVMobject(VMobject):
     def __init__(self, shade_in_3d: bool = True, **kwargs):
         super().__init__(shade_in_3d=shade_in_3d, **kwargs)
 
 
-class Surface(VGroup, metaclass=ConvertToOpenGL):
+class Surface(VGroup):
     """Creates a Parametric Surface using a checkerboard pattern.
 
     Parameters
@@ -321,10 +319,7 @@ class Surface(VGroup, metaclass=ConvertToOpenGL):
                             new_colors[i],
                             color_index,
                         )
-                        if config.renderer == RendererType.OPENGL:
-                            mob.set_color(mob_color, recurse=False)
-                        elif config.renderer == RendererType.CAIRO:
-                            mob.set_color(mob_color, family=False)
+                        mob.set_color(mob_color, family=False)
                         break
 
         return self
@@ -385,13 +380,7 @@ class Sphere(Surface):
         v_range: Sequence[float] = (0, PI),
         **kwargs,
     ) -> None:
-        if config.renderer == RendererType.OPENGL:
-            res_value = (101, 51)
-        elif config.renderer == RendererType.CAIRO:
-            res_value = (24, 12)
-        else:
-            raise Exception("Unknown renderer")
-
+        res_value = (24, 12)
         resolution = resolution if resolution is not None else res_value
 
         self.radius = radius
@@ -795,12 +784,8 @@ class Cylinder(Surface):
 
     def add_bases(self) -> None:
         """Adds the end caps of the cylinder."""
-        if config.renderer == RendererType.OPENGL:
-            color = self.color
-            opacity = self.opacity
-        elif config.renderer == RendererType.CAIRO:
-            color = self.fill_color
-            opacity = self.fill_opacity
+        color = self.fill_color
+        opacity = self.fill_opacity
 
         self.base_top = Circle(
             radius=self.radius,
@@ -1203,11 +1188,7 @@ class Torus(Surface):
         resolution: tuple[int, int] | None = None,
         **kwargs,
     ) -> None:
-        if config.renderer == RendererType.OPENGL:
-            res_value = (101, 101)
-        elif config.renderer == RendererType.CAIRO:
-            res_value = (24, 24)
-
+        res_value = (24, 24)
         resolution = resolution if resolution is not None else res_value
 
         self.R = major_radius
