@@ -66,11 +66,15 @@ class VectorPass:
             "stroke_curves": GrowableBuffer(context, "stroke curves", _STORAGE),
         }
         self._indirect = GrowableBuffer(context, "vector draws", wgpu.BufferUsage.INDIRECT)
-        self._layout = self._create_bind_group_layout()
-        self._shader = context.shader("vector.wgsl")
+        # Shader and layout depend on whether the meshes' depth buffer is
+        # multisampled; they are (re)built by _use_variant().
+        self._multisampled: bool | None = None
+        self._layout: wgpu.GPUBindGroupLayout | None = None
+        self._shader: wgpu.GPUShaderModule | None = None
         self._pipelines: dict[tuple[Role, int], wgpu.GPURenderPipeline] = {}
         self._bind_group: wgpu.GPUBindGroup | None = None
         self._mask_layers: wgpu.GPUTextureView | None = None
+        self._mesh_depth: wgpu.GPUTextureView | None = None
         # (first draw, draw count) of each list in the indirect buffer.
         self._opaque = (0, 0)
         self._transparent = (0, 0)
@@ -80,12 +84,21 @@ class VectorPass:
 
     # -- per frame ----------------------------------------------------------
 
-    def prepare(self, batch: VectorBatch, mask_layers: wgpu.GPUTextureView) -> None:
+    def prepare(
+        self,
+        batch: VectorBatch,
+        mask_layers: wgpu.GPUTextureView,
+        mesh_depth: wgpu.GPUTextureView,
+        multisampled: bool,
+    ) -> None:
         """Upload the frame's batch. Must be called before drawing.
 
         ``mask_layers`` is the 2D array texture holding one layer per clip
         scope; content draws sample it, mask draws write to a copy of it.
+        ``mesh_depth`` is the meshes' depth buffer that hides shapes behind
+        meshes (see ``hidden_by_meshes`` in vector.wgsl).
         """
+        changed = self._use_variant(multisampled)
         grown = False
         for name, buffer in self._buffers.items():
             grown |= buffer.upload(getattr(batch, name))
@@ -101,8 +114,9 @@ class VectorPass:
         self._shadows = dict(zip(shadow_scopes, ranges[2 : 2 + len(shadow_scopes)]))
         self._masks = ranges[2 + len(shadow_scopes) :]
 
-        if grown or self._bind_group is None or mask_layers is not self._mask_layers:
-            self._mask_layers = mask_layers
+        inputs_changed = mask_layers is not self._mask_layers or mesh_depth is not self._mesh_depth
+        if grown or changed or self._bind_group is None or inputs_changed:
+            self._mask_layers, self._mesh_depth = mask_layers, mesh_depth
             self._bind_group = self._create_bind_group(self._frame_uniform, 0)
             self._shadow_groups.clear()
 
@@ -199,7 +213,19 @@ class VectorPass:
             fragment={"module": self._shader, "entry_point": "fs_shadow", "targets": []},
         )
 
-    def _create_bind_group_layout(self) -> wgpu.GPUBindGroupLayout:
+    def _use_variant(self, multisampled: bool) -> bool:
+        """Build shader, layout and pipelines for the mesh depth's sample
+        count; returns True if they changed."""
+        if multisampled == self._multisampled:
+            return False
+        replacements = {} if multisampled else {"texture_depth_multisampled_2d": "texture_depth_2d"}
+        self._multisampled = multisampled
+        self._shader = self._context.shader("vector.wgsl", replacements)
+        self._layout = self._create_bind_group_layout(multisampled)
+        self._pipelines.clear()
+        return True
+
+    def _create_bind_group_layout(self, multisampled: bool) -> wgpu.GPUBindGroupLayout:
         vertex, fragment = wgpu.ShaderStage.VERTEX, wgpu.ShaderStage.FRAGMENT
         entries = [
             {
@@ -227,10 +253,18 @@ class VectorPass:
                 },
             }
         )
+        entries.append(
+            {
+                "binding": 2 + len(self._buffers),
+                "visibility": fragment,
+                "texture": {"sample_type": wgpu.TextureSampleType.depth, "multisampled": multisampled},
+            }
+        )
         return self._context.device.create_bind_group_layout(entries=entries)
 
     def _create_bind_group(self, frames: wgpu.GPUBuffer, offset: int) -> wgpu.GPUBindGroup:
-        # Binding order matches vector.wgsl: frame, storage buffers, masks.
+        # Binding order matches vector.wgsl: frame, storage buffers, masks,
+        # mesh depth.
         entries = [{"binding": 0, "resource": {"buffer": frames, "offset": offset, "size": FRAME_DTYPE.itemsize}}]
         buffers = [b.buffer for b in self._buffers.values()]
         entries += [
@@ -238,4 +272,5 @@ class VectorPass:
             for i, buffer in enumerate(buffers)
         ]
         entries.append({"binding": 1 + len(buffers), "resource": self._mask_layers})
+        entries.append({"binding": 2 + len(buffers), "resource": self._mesh_depth})
         return self._context.device.create_bind_group(layout=self._layout, entries=entries)

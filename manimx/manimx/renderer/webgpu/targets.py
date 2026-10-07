@@ -51,6 +51,9 @@ class RenderTargets:
         # G-buffer: sampled per sample by the lighting pass.
         self.gbuffer = [texture(f"gbuffer {i}", f, usage=_ATTACHMENT | _SAMPLED) for i, f in enumerate(GBUFFER_FORMATS)]
         self.depth = texture("depth", DEPTH_FORMAT, usage=_ATTACHMENT | _SAMPLED)
+        # The vector pass orders shapes with biased depth in its own buffer
+        # and tests against the meshes' depth (above) explicitly.
+        self.vector_depth = texture("vector depth", DEPTH_FORMAT)
 
         # Resolved outputs, read by the composer.
         self.lit = texture("lit", HDR_FORMAT, sample_count=1, usage=_ATTACHMENT | _SAMPLED | wgpu.TextureUsage.COPY_SRC)
@@ -100,15 +103,22 @@ class RenderTargets:
     def vector_attachment(self) -> dict:
         return _color(self.vector, self._vector_msaa)
 
-    def depth_attachment(self, clear: bool) -> dict:
-        """The shared depth buffer: cleared by the geometry pass, then reused
-        by the vector pass so 2D shapes are hidden behind meshes."""
-        return {
-            "view": self.gbuffer_views[-1],
-            "depth_clear_value": 1.0,
-            "depth_load_op": wgpu.LoadOp.clear if clear else wgpu.LoadOp.load,
-            "depth_store_op": wgpu.StoreOp.store,
-        }
+    def depth_attachment(self) -> dict:
+        """The meshes' depth buffer, written by the geometry pass."""
+        return _depth(self.gbuffer_views[-1])
+
+    def vector_depth_attachment(self) -> dict:
+        """The vector pass's own depth buffer (painter's-order layers)."""
+        return _depth(self.vector_depth.create_view())
+
+
+def _depth(view: wgpu.GPUTextureView) -> dict:
+    return {
+        "view": view,
+        "depth_clear_value": 1.0,
+        "depth_load_op": wgpu.LoadOp.clear,
+        "depth_store_op": wgpu.StoreOp.store,
+    }
 
 
 def _color(output: wgpu.GPUTexture, msaa: wgpu.GPUTexture | None) -> dict:

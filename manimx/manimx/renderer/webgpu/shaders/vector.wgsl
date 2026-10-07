@@ -18,6 +18,11 @@
 // coplanar ones. This reproduces Manim's painter's order while keeping real
 // 3D depth (see `layered_depth`).
 //
+// That bias only orders vector shapes among themselves: they have their own
+// depth buffer. Occlusion by meshes is a separate, unbiased test against the
+// G-buffer depth (`hidden_by_meshes`). Otherwise a late shape with a large
+// layer could be pulled in front of a mesh surface it is behind.
+//
 // Clipping: each ClippingGroup's mask is first rendered with this same
 // shader (entry point `fs_mask`) into one layer of `mask_layers`. Content
 // inside the group reads its layer at its own pixel and multiplies its
@@ -93,6 +98,7 @@ struct StrokeCurve {
 @group(0) @binding(4) var<storage, read> stroke_points: array<StrokePoint>;
 @group(0) @binding(5) var<storage, read> stroke_curves: array<StrokeCurve>;
 @group(0) @binding(6) var mask_layers: texture_2d_array<f32>;
+@group(0) @binding(7) var mesh_depth: texture_depth_multisampled_2d;
 
 // ---------------------------------------------------------------------------
 // Shared vertex output
@@ -125,8 +131,7 @@ const LAYER_SLOPE_SCALE: f32 = 1.0 / 64.0;
 /// interpolated depth by more than that, and coplanar layers z-fight. Adding
 /// a fraction of the depth slope (like a slope-scaled polygon offset) keeps
 /// the layers apart at any angle.
-fn layered_depth(depth: f32, layer: f32) -> f32 {
-    let slope = fwidth(depth);
+fn layered_depth(depth: f32, layer: f32, slope: f32) -> f32 {
     return depth - layer * (frame.layer_depth_step + LAYER_SLOPE_SCALE * slope);
 }
 
@@ -172,11 +177,30 @@ fn faces_camera(object: Object) -> bool {
 }
 
 @fragment
-fn fs_main(in: VertexOutput) -> FragmentOutput {
+fn fs_main(in: VertexOutput, @builtin(sample_index) sample: u32) -> FragmentOutput {
+    // Derivatives must be taken before any fragment may be discarded.
+    let slope = fwidth(in.clip_position.z);
+    if hidden_by_meshes(in.clip_position, sample, slope) {
+        discard;
+    }
     var out: FragmentOutput;
     out.color = premultiplied(shade(in));
-    out.depth = layered_depth(in.clip_position.z, in.layer);
+    out.depth = layered_depth(in.clip_position.z, in.layer, slope);
     return out;
+}
+
+/// Whether a mesh is in front of this sample. Shapes lying on a mesh surface
+/// stay visible, since vector shapes are drawn on top of meshes in painter's
+/// order. Coplanar surfaces rasterized from different triangles differ by
+/// the rasterizer's sub-pixel snapping, about 1/256 of a pixel's depth
+/// change, so the tolerance is a small fraction of it: a larger one would
+/// let shapes just behind a surface show through at grazing angles, where
+/// a pixel spans a long depth range.
+const MESH_DEPTH_TOLERANCE: f32 = 1.0 / 32.0;
+
+fn hidden_by_meshes(position: vec4<f32>, sample: u32, slope: f32) -> bool {
+    let mesh = textureLoad(mesh_depth, vec2<i32>(floor(position.xy)), i32(sample));
+    return position.z > mesh + MESH_DEPTH_TOLERANCE * slope + 1e-7;
 }
 
 /// Mask passes render without a depth buffer: color (alpha) only.

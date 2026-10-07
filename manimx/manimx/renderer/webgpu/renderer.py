@@ -86,7 +86,7 @@ class WGPURenderer(Renderer):
 
         device = self.context.device
         device.queue.write_buffer(self._frame_uniform, 0, camera_frame(config, len(meshes.lights)))
-        self._vector_pass.prepare(vectors, targets.mask_layers_view)
+        self._vector_pass.prepare(vectors, targets.mask_layers_view, targets.gbuffer_views[-1], samples > 1)
         self._mesh_pass.prepare(meshes, targets.mask_layers_view)
         shadows = build_shadow_views(scene, meshes.light_items, meshes.lights, self.cache, config)
         shadows_changed = self._shadow_pass.prepare(shadows, config.shadow_resolution)
@@ -105,7 +105,7 @@ class WGPURenderer(Renderer):
 
         geometry_pass = encoder.begin_render_pass(
             color_attachments=targets.gbuffer_attachments(),
-            depth_stencil_attachment=targets.depth_attachment(clear=True),
+            depth_stencil_attachment=targets.depth_attachment(),
             timestamp_writes=self.profiler.pass_timing("geometry"),
         )
         self._mesh_pass.draw(geometry_pass, samples)
@@ -119,7 +119,7 @@ class WGPURenderer(Renderer):
 
         vector_pass = encoder.begin_render_pass(
             color_attachments=[targets.vector_attachment()],
-            depth_stencil_attachment=targets.depth_attachment(clear=False),
+            depth_stencil_attachment=targets.vector_depth_attachment(),
             timestamp_writes=self.profiler.pass_timing("vectors"),
         )
         self._vector_pass.draw_frame(vector_pass, samples)
