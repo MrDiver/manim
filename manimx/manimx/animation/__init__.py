@@ -5,13 +5,14 @@ renderer; it produces render state (manimx.objects) that any renderer can
 draw.
 """
 
-from .kinds import COLOR, DISCRETE, PATH, ROTATION, SCALAR, SignalKind
+from .kinds import COLOR, DISCRETE, FACTOR, PATH, ROTATION, SCALAR, SignalKind
 from .signals import DerivedSignal, RootSignal, Signal, TimeSignals, Vector3Signal, derive
 from .snapshot import version_token
 
 __all__ = [
     "COLOR",
     "DISCRETE",
+    "FACTOR",
     "PATH",
     "ROTATION",
     "SCALAR",

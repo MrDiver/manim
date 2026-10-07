@@ -64,6 +64,22 @@ class ScalarKind(SignalKind):
         return change * alpha
 
 
+class FactorKind(ScalarKind):
+    """Positive scale factors. Relative changes multiply ("scale by 2" twice
+    is 4), and a fraction of a change is geometric: half of "by 4" is
+    "by 2", so a scale animation looks uniform in speed."""
+
+    name = "factor"
+
+    def combine(self, value: float, change: float) -> float:
+        return value * change
+
+    def scale(self, change: float, alpha: float) -> float:
+        if change <= 0.0:
+            raise ValueError(f"scale factors must be positive, got {change}")
+        return change**alpha
+
+
 class RotationKind(SignalKind):
     """Unit quaternions. Interpolation follows the shortest arc (slerp);
     relative changes compose (``change * value``, i.e. applied after)."""
@@ -164,6 +180,7 @@ class DiscreteKind(SignalKind):
 
 
 SCALAR = ScalarKind()
+FACTOR = FactorKind()
 ROTATION = RotationKind()
 COLOR = ColorKind()
 PATH = PathKind()

@@ -210,11 +210,13 @@ class Vector3Signal:
 
     __slots__ = ("x", "y", "z")
 
-    def __init__(self, value: tuple[float, float, float] = (0.0, 0.0, 0.0), name: str = "") -> None:
+    def __init__(
+        self, value: tuple[float, float, float] = (0.0, 0.0, 0.0), name: str = "", kind: SignalKind = SCALAR
+    ) -> None:
         x, y, z = value
-        self.x = RootSignal(x, name=f"{name}.x")
-        self.y = RootSignal(y, name=f"{name}.y")
-        self.z = RootSignal(z, name=f"{name}.z")
+        self.x = RootSignal(x, kind, name=f"{name}.x")
+        self.y = RootSignal(y, kind, name=f"{name}.y")
+        self.z = RootSignal(z, kind, name=f"{name}.z")
 
     @property
     def axes(self) -> tuple[RootSignal, RootSignal, RootSignal]:
