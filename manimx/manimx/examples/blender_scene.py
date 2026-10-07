@@ -1,0 +1,163 @@
+"""A 3D test scene in the style of Blender's default viewport.
+
+World ``+z`` is up, like Blender and Manim's 3D scenes. The scene contains
+
+* a ground grid on the XY plane with Blender-colored X (red) and Y (green)
+  axes and a vertical Z axis (blue),
+* the Manim logo standing upright in the middle, turned about ``z``,
+* the renderer's stress-test shapes (joints, caps, per-point styles,
+  transparency, clipping, a mirrored back side) placed around it in
+  different orientations.
+
+It exists to check cameras, 3D transforms and depth: render it with each
+camera from :func:`views` and every view must look plausible.
+"""
+
+from __future__ import annotations
+
+import math
+
+import numpy as np
+
+from ..objects import CapStyle, ClippingGroup, Fill, Group, JointType, Shape2D, Stroke, Transform
+from ..objects.geometry import circle, regular_polygon, square
+from ..renderer.config import Camera, RenderConfig
+from ..renderer.scene_graph import bounding_box
+from ..utils.color import BLUE, GREEN, ORANGE, PURPLE, RED, WHITE, YELLOW
+from .manim_logo import manim_logo
+
+BACKGROUND = "#3d3d3d"  # Blender's viewport gray
+GRID_COLOR = "#6b6b6b"
+AXIS_X = "#ff3352"
+AXIS_Y = "#8bdc00"
+AXIS_Z = "#2890ff"
+
+GRID_EXTENT = 10
+TO_UPRIGHT = (1.0, 0.0, 0.0)
+"""Rotating a shape by 90 degrees about x stands its XY plane up (local y -> world z)."""
+
+
+def blender_scene() -> Group:
+    return Group("scene", children=[_ground(), _upright_logo(), _stress_ring()])
+
+
+def views(pixel_width: int = 1920, pixel_height: int = 1080) -> dict[str, RenderConfig]:
+    """Named cameras around the scene."""
+    perspective = {"field_of_view": math.radians(40.0), "near": 0.5, "far": 200.0}
+    cameras = {
+        # Blender's default camera direction, pulled back to fit the scene.
+        "default": Camera.look_at((16.5, -15.5, 11.0), (0.0, 0.0, 2.0), **perspective),
+        "front": Camera.look_at((0.0, -24.0, 4.0), (0.0, 0.0, 3.0), **perspective),
+        "side": Camera.look_at((24.0, 0.0, 6.0), (0.0, 0.0, 3.0), **perspective),
+        "top": Camera.look_at((0.0, 0.0, 26.0), up=(0.0, 1.0, 0.0), **perspective),
+        "below": Camera.look_at((10.0, 12.0, -9.0), (0.0, 0.0, 1.0), **perspective),
+        "isometric": Camera.look_at((20.0, -20.0, 20.0), frame_height=18.0, near=1.0, far=100.0),
+    }
+    return {
+        name: RenderConfig(pixel_width=pixel_width, pixel_height=pixel_height, background_color=BACKGROUND, camera=camera)
+        for name, camera in cameras.items()
+    }
+
+
+def _ground() -> Group:
+    """Grid lines and axes on the XY plane, plus the vertical Z axis."""
+    coordinates = [c for c in range(-GRID_EXTENT, GRID_EXTENT + 1) if c != 0]
+    lines = [((c, -GRID_EXTENT), (c, GRID_EXTENT)) for c in coordinates]
+    lines += [((-GRID_EXTENT, c), (GRID_EXTENT, c)) for c in coordinates]
+    # One shape, one open subpath per grid line.
+    grid = Shape2D(
+        "grid",
+        points=np.vstack([Shape2D.from_corners("line", line).points for line in lines]),
+        stroke=Stroke(GRID_COLOR, width=2.0),
+    )
+    extent = (-GRID_EXTENT, GRID_EXTENT)
+    x_axis = Shape2D.from_corners("x-axis", [(extent[0], 0), (extent[1], 0)], stroke=Stroke(AXIS_X, width=3.0))
+    y_axis = Shape2D.from_corners("y-axis", [(0, extent[0]), (0, extent[1])], stroke=Stroke(AXIS_Y, width=3.0))
+    z_axis = Shape2D.from_corners(
+        "z-axis",
+        [(0, 0), (0, 8)],
+        stroke=Stroke(AXIS_Z, width=3.0),
+        transform=Transform().rotated(math.pi / 2, TO_UPRIGHT),
+    )
+    return Group("ground", children=[grid, x_axis, y_axis, z_axis])
+
+
+def _upright_logo() -> Group:
+    """The logo standing on the ground at the origin, turned towards the default camera."""
+    logo = manim_logo()
+    low, high = bounding_box(logo)
+    height = high[1] - low[1]
+    scale = 1.6
+    placement = Transform(position=(0.0, 0.0, scale * height / 2 + 0.2), scale=(scale, scale, scale))
+    return Group(
+        "upright-logo",
+        children=[logo],
+        transform=placement.rotated(math.pi / 2, TO_UPRIGHT).rotated(math.radians(30.0), (0, 0, 1)),
+    )
+
+
+def _stress_ring() -> Group:
+    """Stress-test shapes on a circle around the logo, each oriented differently."""
+    zigzag = Group(
+        "zigzags",
+        children=[
+            Shape2D.from_corners(
+                f"zigzag-{joint.name}",
+                [(-1.0, -0.5), (-0.5, 0.5), (0.0, -0.5), (0.5, 0.5), (1.0, -0.5)],
+                stroke=Stroke(WHITE, width=20, joint=joint, cap=cap),
+                transform=Transform(position=(0.0, 1.5 - 1.5 * i, 0.0)),
+            )
+            for i, (joint, cap) in enumerate(
+                [(JointType.MITER, CapStyle.BUTT), (JointType.ROUND, CapStyle.ROUND), (JointType.BEVEL, CapStyle.SQUARE)]
+            )
+        ],
+    )
+    rainbow = circle("rainbow", radius=1.4, stroke=Stroke([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED], width=[6, 30, 6, 30, 6]))
+    pentagon = regular_polygon("pentagon", 5, radius=1.5, fill=Fill([RED, BLUE], opacity=0.7), stroke=Stroke(YELLOW, width=10, opacity=0.6))
+    squares = Group(
+        "transparent-squares",
+        children=[
+            square("back", fill=Fill(RED, opacity=0.5), stroke=Stroke(WHITE, width=6), transform=Transform(position=(-0.5, 0.5, 0.0))),
+            square("front", fill=Fill(BLUE, opacity=0.5), stroke=Stroke(WHITE, width=6), transform=Transform(position=(0.5, -0.5, 0.0))),
+        ],
+    )
+    clipped = ClippingGroup(
+        "clipped-stripes",
+        mask=regular_polygon("hexagon", 6, radius=1.5, fill=Fill(opacity=1.0), stroke=Stroke(width=0)),
+        content=Group(
+            "stripes",
+            children=[
+                square(f"stripe-{i}", side_length=0.5, fill=Fill(color, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(-1.75 + 0.5 * i, 0.0, 0.0), scale=(1.0, 7.0, 1.0)))
+                for i, color in enumerate([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED, ORANGE])
+            ],
+        ),
+    )
+    mirrored = Group(
+        "mirrored",
+        children=[
+            circle("disc", fill=Fill(GREEN, opacity=1.0), stroke=Stroke(WHITE, width=8)),
+            square("inner", side_length=0.8, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0)),
+        ],
+    )
+
+    # (shape, angle on the ring, extra orientation applied before placement)
+    placements = [
+        (zigzag, 0.0, Transform().rotated(math.pi / 2, TO_UPRIGHT)),
+        (rainbow, 60.0, Transform().rotated(math.pi / 2, TO_UPRIGHT).rotated(math.radians(40), (0, 0, 1))),
+        (pentagon, 120.0, Transform(position=(0.0, 0.0, -1.3))),  # lying flat
+        (squares, 180.0, Transform().rotated(math.radians(60), TO_UPRIGHT)),  # leaning back
+        (clipped, 240.0, Transform().rotated(math.pi / 2, TO_UPRIGHT).rotated(math.radians(-70), (0, 0, 1))),
+        (mirrored, 300.0, Transform().rotated(math.pi / 2, TO_UPRIGHT).rotated(math.pi, (0, 0, 1))),  # back side to the center
+    ]
+    radius = 6.5
+    children = []
+    for shape, degrees, orientation in placements:
+        angle = math.radians(degrees)
+        position = (radius * math.cos(angle), radius * math.sin(angle), 1.8)
+        shape.transform = Transform(
+            position=tuple(np.add(position, orientation.position)),
+            rotation=orientation.rotation,
+            scale=orientation.scale,
+        )
+        children.append(shape)
+    return Group("stress-ring", children=children)

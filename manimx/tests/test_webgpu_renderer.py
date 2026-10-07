@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from manimx import Fill, Group, Stroke, Transform
+from manimx import ClippingGroup, Fill, Group, Stroke, Transform
 from manimx.objects.geometry import circle, square
 from manimx.renderer import RemoveObjects, RenderConfig, Renderer, WGPURenderer
 from manimx.utils.color import BLUE, RED
@@ -98,3 +98,42 @@ def test_without_msaa(renderer: WGPURenderer) -> None:
     image = render(renderer, square("s", fill=Fill(RED, opacity=1.0)), msaa_samples=1)
 
     assert pixel(image, 0, 0) == (*RED.to_int_rgb(), 255)
+
+
+def test_clipping_shows_content_only_inside_mask(renderer: WGPURenderer) -> None:
+    clip = ClippingGroup(
+        "clip",
+        mask=circle("mask", radius=1.0, fill=Fill(opacity=1.0), stroke=Stroke(width=0.0)),
+        content=square("content", side_length=4.0, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0)),
+    )
+
+    image = render(renderer, clip)
+
+    assert pixel(image, 0, 0) == (*RED.to_int_rgb(), 255)
+    assert pixel(image, 1.6, 1.6) == BACKGROUND  # inside the square, outside the circle
+
+
+def test_soft_mask_multiplies_alpha(renderer: WGPURenderer) -> None:
+    clip = ClippingGroup(
+        "clip",
+        mask=square("mask", fill=Fill(opacity=0.5), stroke=Stroke(width=0.0)),
+        content=square("content", fill=Fill("#FFFFFF", opacity=1.0), stroke=Stroke(width=0.0)),
+    )
+
+    r, g, b, _ = pixel(render(renderer, clip), 0, 0)
+    assert 120 <= r <= 135 and r == g == b
+
+
+def test_nested_masks_intersect(renderer: WGPURenderer) -> None:
+    def band(name: str, x: float) -> object:
+        return square(name, side_length=2.0, fill=Fill(opacity=1.0), stroke=Stroke(width=0.0), transform=Transform(position=(x, 0.0, 0.0)))
+
+    content = square("content", side_length=6.0, fill=Fill(BLUE, opacity=1.0), stroke=Stroke(width=0.0))
+    inner = ClippingGroup("inner", mask=band("right", 0.5), content=content)
+    outer = ClippingGroup("outer", mask=band("left", -0.5), content=inner)
+
+    image = render(renderer, outer)
+
+    assert pixel(image, 0.0, 0.0) == (*BLUE.to_int_rgb(), 255)  # in both bands
+    assert pixel(image, -1.2, 0.0) == BACKGROUND  # only in the outer band
+    assert pixel(image, 1.2, 0.0) == BACKGROUND  # only in the inner band

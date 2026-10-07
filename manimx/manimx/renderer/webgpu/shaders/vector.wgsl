@@ -17,6 +17,12 @@
 // camera per layer, so later objects win the depth test against earlier,
 // coplanar ones. This reproduces Manim's painter's order while keeping real
 // 3D depth (see `layered_depth`).
+//
+// Clipping: each ClippingGroup's mask is first rendered with this same
+// shader (entry point `fs_mask`) into one layer of `mask_layers`. Content
+// inside the group reads its layer at its own pixel and multiplies its
+// alpha by the mask's alpha. Masks of nested groups are themselves clipped
+// by the enclosing mask, so one lookup covers all enclosing groups.
 
 // ---------------------------------------------------------------------------
 // Bindings (layouts mirror the numpy dtypes in vector_batch.py)
@@ -36,12 +42,14 @@ struct Frame {
     _pad1: f32,
 };
 
+const NO_CLIP: i32 = -1;
+
 struct Object {
     model: mat4x4<f32>,
     layer: f32,                 // fill layer; the stroke uses layer + 1
+    clip: i32,                  // layer in `mask_layers`, or NO_CLIP
     _pad0: f32,
     _pad1: f32,
-    _pad2: f32,
 };
 
 const KIND_FILL: u32 = 0u;
@@ -90,6 +98,7 @@ struct StrokeCurve {
 @group(0) @binding(3) var<storage, read> fill_vertices: array<FillVertex>;
 @group(0) @binding(4) var<storage, read> stroke_points: array<StrokePoint>;
 @group(0) @binding(5) var<storage, read> stroke_curves: array<StrokeCurve>;
+@group(0) @binding(6) var mask_layers: texture_2d_array<f32>;
 
 // ---------------------------------------------------------------------------
 // Shared vertex output
@@ -99,6 +108,7 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(3) @interpolate(flat) layer: f32,
+    @location(4) @interpolate(flat) clip: i32,
     // Interpolated per MSAA sample, so the curve test in the fragment shader
     // runs per sample and curved edges get the same antialiasing as polygon
     // edges.
@@ -146,8 +156,22 @@ struct FragmentOutput {
     @builtin(frag_depth) depth: f32,
 };
 
+/// Frame passes: color plus the layered depth.
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOutput {
+    var out: FragmentOutput;
+    out.color = shade(in);
+    out.depth = layered_depth(in.clip_position.z, in.layer);
+    return out;
+}
+
+/// Mask passes render without a depth buffer: color (alpha) only.
+@fragment
+fn fs_mask(in: VertexOutput) -> @location(0) vec4<f32> {
+    return shade(in);
+}
+
+fn shade(in: VertexOutput) -> vec4<f32> {
     // Loop-Blinn curve test: u^2 - v is negative on the chord side of the
     // quadratic and positive on the control-point side.
     if in.side != 0.0 {
@@ -156,10 +180,16 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
             discard;
         }
     }
-    var out: FragmentOutput;
-    out.color = in.color;
-    out.depth = layered_depth(in.clip_position.z, in.layer);
-    return out;
+    var color = in.color;
+    if in.clip != NO_CLIP {
+        let pixel = vec2<i32>(floor(in.clip_position.xy));
+        color.a *= textureLoad(mask_layers, pixel, in.clip, 0).a;
+    }
+    // Fully masked fragments must not write depth and hide what is behind.
+    if color.a <= 0.0 {
+        discard;
+    }
+    return color;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +203,7 @@ fn fill_vertex(object: Object, vertex_index: u32) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = project(world);
     out.layer = object.layer;
+    out.clip = object.clip;
     out.color = vertex.color;
     out.uv = vertex.uv;
     out.side = vertex.side;
@@ -320,6 +351,7 @@ fn stroke_vertex(object: Object, record: StrokeCurve, vertex_index: u32) -> Vert
     out.uv = vec2<f32>(0.0);
     out.side = 0.0;
     out.layer = object.layer + 1.0;
+    out.clip = object.clip;
 
     if vertex_index < RIBBON_VERTICES {
         let world = ribbon_position(object, curve, record, vertex_index);

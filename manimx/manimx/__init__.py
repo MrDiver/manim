@@ -16,7 +16,7 @@ from .objects import (
     Transform,
     quaternion_from_axis_angle,
 )
-from .renderer import SVGRenderer
+from .renderer import RenderConfig, Renderer, WGPURenderer
 from .testing import assert_snapshot, visual_test
 
 
@@ -34,9 +34,11 @@ __all__ = [
     "RenderObject",
     "Shape2D",
     "Shape3D",
-    "SVGRenderer",
+    "RenderConfig",
+    "Renderer",
     "Stroke",
     "Transform",
+    "WGPURenderer",
     "__version__",
     "assert_snapshot",
     "package_name",

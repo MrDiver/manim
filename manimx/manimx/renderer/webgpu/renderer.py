@@ -6,9 +6,13 @@
 The renderer has no scene state of its own. Each call flattens the given
 tree, reuses cached per-object data (fill meshes) where the object's
 versioned fields are unchanged, uploads everything into shared buffers and
-encodes one render pass:
+encodes the passes:
 
-    clear -> opaque vector draws -> transparent vector draws (sorted)
+    for each clip scope (parents first):
+        mask pass: draw the mask shapes into a scratch target,
+                   copy the result into the scope's layer of the mask array
+    frame pass: clear -> opaque draws -> transparent draws (sorted);
+                clipped content multiplies its alpha by its mask layer
 
 :meth:`WGPURenderer.render_texture` returns the resolved GPU texture without
 reading it back, which is the hook for a later compositor.
@@ -22,7 +26,7 @@ import wgpu
 from ...objects import RenderObject
 from ..base import Renderer
 from ..config import RenderConfig
-from ..scene_graph import flatten
+from ..scene_graph import flatten_scene
 from .gpu import COLOR_FORMAT, DEPTH_FORMAT, GPUContext
 from .vector_batch import VectorBatch
 from .vector_pass import VectorPass
@@ -70,29 +74,37 @@ class WGPURenderer(Renderer):
 
     def render_texture(self, root: RenderObject, config: RenderConfig) -> wgpu.GPUTexture:
         """Render ``root`` into a single-sampled RGBA texture on the GPU."""
-        items = flatten(root)
-        batch = VectorBatch.build(items, self.cache, config.camera.position)
+        scene = flatten_scene(root)
+        batch = VectorBatch.build(scene, self.cache, config.camera.position)
+        targets = self._render_targets(config, mask_count=len(scene.clips))
 
         device = self.context.device
         device.queue.write_buffer(self._frame_uniform, 0, _frame_uniform_data(config))
-        self._vector_pass.prepare(batch)
+        self._vector_pass.prepare(batch, targets.mask_layers_view)
 
-        targets = self._render_targets(config)
         encoder = device.create_command_encoder(label="frame")
-        render_pass = encoder.begin_render_pass(
+        for scope in range(len(scene.clips)):
+            mask_pass = encoder.begin_render_pass(color_attachments=[targets.mask_attachment()])
+            self._vector_pass.draw_mask(mask_pass, config.msaa_samples, scope)
+            mask_pass.end()
+            targets.copy_mask_to_layer(encoder, scope)
+
+        frame_pass = encoder.begin_render_pass(
             color_attachments=[targets.color_attachment(config.background_rgba)],
             depth_stencil_attachment=targets.depth_attachment(),
         )
-        self._vector_pass.draw(render_pass, config.msaa_samples)
-        render_pass.end()
+        self._vector_pass.draw_frame(frame_pass, config.msaa_samples)
+        frame_pass.end()
         device.queue.submit([encoder.finish()])
         return targets.output
 
-    def _render_targets(self, config: RenderConfig) -> _RenderTargets:
+    def _render_targets(self, config: RenderConfig, mask_count: int) -> _RenderTargets:
         size = (config.pixel_width, config.pixel_height, config.msaa_samples)
-        if self._targets is None or self._targets.size != size:
-            self._targets = _RenderTargets(self.context.device, *size)
-        return self._targets
+        targets = self._targets
+        if targets is None or targets.size != size or targets.mask_capacity < mask_count:
+            capacity = max(mask_count, 2 * targets.mask_capacity if targets else 1)
+            self._targets = targets = _RenderTargets(self.context.device, *size, mask_capacity=capacity)
+        return targets
 
 
 def _frame_uniform_data(config: RenderConfig) -> np.ndarray:
@@ -119,10 +131,13 @@ def _frame_uniform_data(config: RenderConfig) -> np.ndarray:
 
 
 class _RenderTargets:
-    """Multisampled color + depth attachments and the resolved output."""
+    """Frame attachments, the resolved output, and the clip mask textures."""
 
-    def __init__(self, device: wgpu.GPUDevice, width: int, height: int, samples: int) -> None:
+    def __init__(
+        self, device: wgpu.GPUDevice, width: int, height: int, samples: int, mask_capacity: int
+    ) -> None:
         self.size = (width, height, samples)
+        self.mask_capacity = mask_capacity
         self.output = device.create_texture(
             label="output",
             size=(width, height, 1),
@@ -150,20 +165,50 @@ class _RenderTargets:
             usage=wgpu.TextureUsage.RENDER_ATTACHMENT,
         )
 
+        # One layer per clip scope, sampled by clipped content. Mask passes
+        # cannot render into it directly while it is bound for sampling, so
+        # they render into a scratch target that is copied into the layer.
+        self._mask_layers = device.create_texture(
+            label="mask layers",
+            size=(width, height, mask_capacity),
+            format=COLOR_FORMAT,
+            usage=wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST,
+        )
+        self.mask_layers_view = self._mask_layers.create_view(
+            dimension=wgpu.TextureViewDimension.d2_array
+        )
+        self._mask_scratch = device.create_texture(
+            label="mask scratch",
+            size=(width, height, 1),
+            format=COLOR_FORMAT,
+            usage=wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.COPY_SRC,
+        )
+        self._mask_msaa = (
+            device.create_texture(
+                label="mask msaa",
+                size=(width, height, 1),
+                format=COLOR_FORMAT,
+                sample_count=samples,
+                usage=wgpu.TextureUsage.RENDER_ATTACHMENT,
+            )
+            if samples > 1
+            else None
+        )
+
+    def mask_attachment(self) -> dict:
+        """Transparent black scratch target; mask shapes accumulate alpha."""
+        return _attachment(self._mask_scratch, self._mask_msaa, (0.0, 0.0, 0.0, 0.0))
+
+    def copy_mask_to_layer(self, encoder: wgpu.GPUCommandEncoder, layer: int) -> None:
+        width, height, _ = self.size
+        encoder.copy_texture_to_texture(
+            {"texture": self._mask_scratch, "mip_level": 0, "origin": (0, 0, 0)},
+            {"texture": self._mask_layers, "mip_level": 0, "origin": (0, 0, layer)},
+            (width, height, 1),
+        )
+
     def color_attachment(self, clear: tuple[float, float, float, float]) -> dict:
-        attachment = {
-            "clear_value": clear,
-            "load_op": wgpu.LoadOp.clear,
-            "store_op": wgpu.StoreOp.store,
-        }
-        if self._msaa_color is None:
-            attachment["view"] = self.output.create_view()
-        else:
-            # Render into the multisampled texture, resolve into the output.
-            attachment["view"] = self._msaa_color.create_view()
-            attachment["resolve_target"] = self.output.create_view()
-            attachment["store_op"] = wgpu.StoreOp.discard
-        return attachment
+        return _attachment(self.output, self._msaa_color, clear)
 
     def depth_attachment(self) -> dict:
         return {
@@ -172,3 +217,24 @@ class _RenderTargets:
             "depth_load_op": wgpu.LoadOp.clear,
             "depth_store_op": wgpu.StoreOp.store,
         }
+
+
+def _attachment(
+    output: wgpu.GPUTexture,
+    msaa: wgpu.GPUTexture | None,
+    clear: tuple[float, float, float, float],
+) -> dict:
+    """Color attachment that clears, renders, and ends up in ``output``."""
+    attachment = {
+        "clear_value": clear,
+        "load_op": wgpu.LoadOp.clear,
+        "store_op": wgpu.StoreOp.store,
+    }
+    if msaa is None:
+        attachment["view"] = output.create_view()
+    else:
+        # Render into the multisampled texture, resolve into the output.
+        attachment["view"] = msaa.create_view()
+        attachment["resolve_target"] = output.create_view()
+        attachment["store_op"] = wgpu.StoreOp.discard
+    return attachment

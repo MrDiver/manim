@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from manimx import CapStyle, Fill, Group, JointType, Shape2D, Stroke, Transform
+from manimx import CapStyle, ClippingGroup, Fill, Group, JointType, Shape2D, Stroke, Transform
 from manimx.examples.manim_logo import config as logo_config
 from manimx.examples.manim_logo import manim_logo
 from manimx.objects.geometry import circle, regular_polygon, square
@@ -124,3 +124,34 @@ def test_shapes_in_3d(renderer: WGPURenderer, update_references: bool) -> None:
     image = renderer.render(Group("root", children=[flipped, *tilted]), config())
 
     check(image, "shapes_in_3d", update_references)
+
+
+def test_clipping(renderer: WGPURenderer, update_references: bool) -> None:
+    stripes = Group(
+        "stripes",
+        children=[
+            square(f"stripe-{i}", side_length=0.5, fill=Fill(color, opacity=1.0), stroke=Stroke(WHITE, width=4), transform=Transform(position=(-2.0 + 0.5 * i, 0.0, 0.0), scale=(1.0, 8.0, 1.0)))
+            for i, color in enumerate([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED, ORANGE, YELLOW])
+        ],
+    )
+    soft_mask = Group(
+        "soft-mask",
+        children=[
+            circle("disc", radius=1.6, fill=Fill(opacity=1.0), stroke=Stroke(width=0)),
+            square("veil", side_length=1.2, fill=Fill(opacity=0.4), stroke=Stroke(width=20, opacity=1.0), transform=Transform(position=(2.0, 0.0, 0.0))),
+        ],
+    )
+    hard = ClippingGroup("hard", mask=regular_polygon("star", 6, radius=1.8, fill=Fill(opacity=1.0), stroke=Stroke(width=0)), content=stripes, transform=Transform(position=(-3.5, 0.0, 0.0)))
+    soft = ClippingGroup("soft", mask=soft_mask, content=square("content", side_length=4.0, fill=Fill([BLUE, GREEN], opacity=1.0), stroke=Stroke(width=0)), transform=Transform(position=(1.5, 0.0, 0.0)).rotated(0.5, (0, 1, 0)))
+    image = renderer.render(Group("root", children=[hard, soft]), config(background_color="#222222"))
+
+    check(image, "clipping", update_references)
+
+
+@pytest.mark.parametrize("view", ["default", "front", "side", "top", "below", "isometric"])
+def test_blender_scene(renderer: WGPURenderer, update_references: bool, view: str) -> None:
+    from manimx.examples.blender_scene import blender_scene, views
+
+    image = renderer.render(blender_scene(), views(480, 270)[view])
+
+    check(image, f"blender_scene_{view}", update_references)

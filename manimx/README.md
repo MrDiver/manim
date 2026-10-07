@@ -22,4 +22,7 @@ uv run mutmut results
 ```
 
 Pytest enforces 90% branch coverage. `tests/test_state.py` tests the state
-harness. `tests/test_visual.py` tests deterministic SVG snapshots with Syrupy.
+harness. `tests/test_visual.py` renders scenes with the WebGPU renderer and
+compares them with reference PNGs in `tests/references`
+(`uv run pytest --update-references` regenerates them; review before
+committing).

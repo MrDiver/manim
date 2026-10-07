@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass, field
 
 import numpy as np
+import quaternion
 
 from ..objects.transform import Transform
 from ..utils.color import BLACK, ManimColor, ParsableManimColor
@@ -30,6 +31,31 @@ class Camera:
     field_of_view: float | None = None
     near: float = 0.1
     far: float = 100.0
+
+    @classmethod
+    def look_at(
+        cls,
+        eye: tuple[float, float, float],
+        target: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        up: tuple[float, float, float] = (0.0, 0.0, 1.0),
+        **options: object,
+    ) -> Camera:
+        """Camera at ``eye`` looking at ``target``, with ``up`` pointing up on screen.
+
+        The default ``up`` is world ``+z`` (Blender's and Manim's 3D
+        convention); pass ``up=(0, 1, 0)`` for a camera above the XY plane.
+        """
+        eye_vector = np.asarray(eye, dtype=np.float64)
+        forward = np.asarray(target, dtype=np.float64) - eye_vector
+        forward /= np.linalg.norm(forward)
+        right = np.cross(forward, up)
+        if np.linalg.norm(right) < 1e-9:
+            raise ValueError("camera up direction is parallel to the view direction")
+        right /= np.linalg.norm(right)
+        screen_up = np.cross(right, forward)
+        # The camera looks along its local -z, so local +z points backwards.
+        rotation = quaternion.from_rotation_matrix(np.column_stack([right, screen_up, -forward]))
+        return cls(transform=Transform(position=eye, rotation=rotation), **options)  # type: ignore[arg-type]
 
     @property
     def position(self) -> np.ndarray:

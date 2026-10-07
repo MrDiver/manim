@@ -9,7 +9,7 @@ from manimx import ClippingGroup, Fill, Group, JointType, RenderObject, Shape2D,
 from manimx.objects.geometry import arc_points, circle, square
 from manimx.renderer import ClearScene, MobjectDataCache, RemoveObjects
 from manimx.renderer.config import Camera, RenderConfig
-from manimx.renderer.scene_graph import bounding_box, flatten
+from manimx.renderer.scene_graph import NO_CLIP, bounding_box, flatten, flatten_scene
 from manimx.renderer.tessellation import SIDE_CHORD, SIDE_CONTROL, SIDE_SOLID, tessellate_fill
 from manimx.renderer.webgpu.vector_batch import NO_NEIGHBOR, STROKE_WIDTH_SCALE, VectorBatch
 
@@ -31,10 +31,41 @@ def test_flatten_composes_transforms_and_keeps_painter_order() -> None:
 
 
 def test_flatten_rejects_unsupported_objects() -> None:
-    with pytest.raises(NotImplementedError, match="ClippingGroup"):
-        flatten(ClippingGroup("clip"))
     with pytest.raises(TypeError, match="RenderObject"):
         flatten(RenderObject("plain"))
+    nested_in_mask = ClippingGroup("outer", mask=ClippingGroup("inner"), content=Shape2D("c"))
+    with pytest.raises(NotImplementedError, match="inside a mask"):
+        flatten(nested_in_mask)
+
+
+def test_clipping_groups_open_nested_scopes() -> None:
+    outer_mask, inner_mask = Shape2D("outer-mask"), Shape2D("inner-mask")
+    free, outer_content, inner_content = Shape2D("free"), Shape2D("outer-content"), Shape2D("inner-content")
+    inner = ClippingGroup("inner", mask=inner_mask, content=inner_content)
+    outer = ClippingGroup(
+        "outer",
+        mask=outer_mask,
+        content=Group("both", children=[outer_content, inner]),
+        transform=Transform(position=(1.0, 0.0, 0.0)),
+    )
+
+    scene = flatten_scene(Group("root", children=[free, outer]))
+
+    assert [item.obj for item in scene.items] == [free, outer_content, inner_content]
+    assert [item.clip for item in scene.items] == [NO_CLIP, 0, 1]
+    assert [scope.parent for scope in scene.clips] == [NO_CLIP, 0]
+    assert [item.obj for item in scene.clips[0].mask] == [outer_mask]
+    # The inner mask is drawn under the outer scope, which clips it.
+    assert [(item.obj, item.clip) for item in scene.clips[1].mask] == [(inner_mask, 0)]
+    np.testing.assert_allclose(scene.clips[0].mask[0].world[:3, 3], [1.0, 0.0, 0.0])
+
+
+def test_clipping_group_without_mask_does_not_clip() -> None:
+    content = Shape2D("content")
+
+    scene = flatten_scene(ClippingGroup("clip", content=content))
+
+    assert scene.clips == [] and scene.items[0].clip == NO_CLIP
 
 
 def test_bounding_box_uses_world_anchors() -> None:
@@ -154,7 +185,7 @@ def _batch(*shapes: Shape2D, cache: MobjectDataCache | None = None) -> VectorBat
     root = Group("root", children=list(shapes))
     if cache is None:  # not `or`: an empty cache is falsy
         cache = MobjectDataCache()
-    return VectorBatch.build(flatten(root), cache, np.array([0.0, 0.0, 11.0]))
+    return VectorBatch.build(flatten_scene(root), cache, np.array([0.0, 0.0, 11.0]))
 
 
 def test_batch_links_closed_subpaths_into_a_loop() -> None:
@@ -210,6 +241,19 @@ def test_batch_reuses_cached_fill_mesh_until_points_change() -> None:
     assert cache.get(shape.uid, "fill-mesh", shape.version("points", "fill")) is not mesh
 
 
+def test_batch_draws_masks_separately_and_clipped_content_transparent() -> None:
+    mask = circle("mask", fill=Fill(opacity=1.0), stroke=Stroke(width=0.0))
+    content = square("content", fill=Fill(opacity=1.0), stroke=Stroke(width=0.0))
+    clip = ClippingGroup("clip", mask=mask, content=content)
+
+    batch = VectorBatch.build(flatten_scene(clip), MobjectDataCache(), np.zeros(3))
+
+    assert len(batch.opaque_draws) == 0
+    assert len(batch.transparent_draws) == 1
+    assert len(batch.mask_draws) == 1 and len(batch.mask_draws[0]) == 1
+    assert list(batch.objects["clip"]) == [0, NO_CLIP]  # content, then mask
+
+
 def test_batch_skips_empty_and_invisible_styles() -> None:
     batch = _batch(Shape2D("empty"), square("nothing", fill=Fill(opacity=0.0), stroke=Stroke(width=0.0)))
 
@@ -237,3 +281,15 @@ def test_perspective_camera_maps_near_and_far_planes() -> None:
     near, far = projection @ [0, 0, -1.0, 1], projection @ [0, 0, -10.0, 1]
     assert near[2] / near[3] == pytest.approx(0.0)
     assert far[2] / far[3] == pytest.approx(1.0)
+
+
+def test_look_at_points_the_camera_at_the_target() -> None:
+    camera = Camera.look_at((10.0, -10.0, 5.0), (1.0, 1.0, 1.0))
+    view = camera.view_matrix()
+
+    target = view @ [1.0, 1.0, 1.0, 1.0]
+    np.testing.assert_allclose(target[:2], [0.0, 0.0], atol=1e-9)
+    assert target[2] < 0.0  # in front of the camera (it looks along -z)
+    assert (view @ [0.0, 0.0, 1.0, 0.0])[1] > 0.0  # world up is screen up
+    with pytest.raises(ValueError, match="parallel"):
+        Camera.look_at((0.0, 0.0, 5.0))

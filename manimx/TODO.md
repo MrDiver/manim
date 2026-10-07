@@ -6,8 +6,8 @@
 - [x] Enable pytest marker `visual`.
 - [x] Add `tests/test_visual.py`.
 - [x] Generate `tests/__snapshots__/test_visual.ambr`.
-- [ ] Replace static SVG fixture with real `manimx` renderer output.
-- [ ] Render one deterministic shape to SVG or PNG.
+- [x] Replace static SVG fixture with real `manimx` renderer output.
+- [x] Render deterministic scenes to PNG and compare with reference images.
 - [ ] Keep fixture input deterministic: fixed size, camera, colors, seed, and frame.
 - [ ] Test same input twice and confirm identical output.
 - [ ] Change one shape property and confirm snapshot failure.
