@@ -1,0 +1,61 @@
+[project]
+name = "manimx"
+version = "0.1.0"
+description = "Small, test-first animation engine prototype."
+requires-python = ">=3.11"
+dependencies = [
+    "mapbox-earcut>=2.1.0",
+    "numpy>=2.4.6",
+    "numpy-quaternion>=2024.0.0",
+    "pillow>=11.0",
+    "typing-extensions>=4.16.0",
+    "wgpu>=0.32.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.10.0,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = "manimx"
+
+[dependency-groups]
+test = [
+    "mutmut>=3.4.0",
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+    "syrupy>=4.8.0",
+]
+
+[tool.uv]
+default-groups = ["test"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "--strict-markers",
+    "--cov=manimx",
+    "--cov-branch",
+    "--cov-fail-under=90",
+    "--cov-report=term-missing",
+]
+markers = [
+    "visual: deterministic visual regression tests",
+    "state: immutable state and timeline tests",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["manimx"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+]
+
+[tool.mutmut]
+source_paths = ["manimx/"]
+pytest_add_cli_args = ["--no-cov"]
+pytest_add_cli_args_test_selection = ["tests/"]
