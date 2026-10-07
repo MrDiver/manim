@@ -1,8 +1,8 @@
 """Rendering benchmarks (pytest-benchmark). Not part of the normal test run.
 
-    uv run pytest benchmarks --no-cov                       # run and print
-    uv run pytest benchmarks --no-cov --benchmark-autosave  # store a baseline
-    uv run pytest benchmarks --no-cov --benchmark-compare --benchmark-compare-fail=mean:15%
+    uv run pytest manimx/renderer/benchmarks --no-cov                       # run and print
+    uv run pytest manimx/renderer/benchmarks --no-cov --benchmark-autosave  # store a baseline
+    uv run pytest manimx/renderer/benchmarks --no-cov --benchmark-compare --benchmark-compare-fail=mean:15%
 
 Each benchmark measures wall time of a complete frame (CPU work, GPU work
 and read-back), then renders once more with GPU timestamps and stores the

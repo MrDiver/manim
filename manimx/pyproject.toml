@@ -34,7 +34,7 @@ test = [
 default-groups = ["test"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "manimx/renderer/tests"]
 addopts = [
     "--strict-markers",
     "--cov=manimx",
@@ -50,6 +50,7 @@ markers = [
 [tool.coverage.run]
 branch = true
 source = ["manimx"]
+omit = ["manimx/renderer/tests/*", "manimx/renderer/benchmarks/*"]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -59,5 +60,6 @@ exclude_lines = [
 
 [tool.mutmut]
 source_paths = ["manimx/"]
+do_not_mutate = ["manimx/renderer/tests/*", "manimx/renderer/benchmarks/*"]
 pytest_add_cli_args = ["--no-cov"]
 pytest_add_cli_args_test_selection = ["tests/"]
