@@ -14,6 +14,7 @@ struct Frame {
     light_count: u32,           // entries used in the lights buffer
     exposure: f32,              // multiplies lit colors before tone mapping
     ambient: vec4<f32>,         // linear RGB ambient light, w unused
+    shadow: vec4<f32>,          // softness, samples, map resolution, enabled (0 / 1)
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;

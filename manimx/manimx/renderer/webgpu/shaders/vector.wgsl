@@ -44,6 +44,10 @@ struct Object {
 /// object's XY plane (Shape2D).
 const FLAG_CAMERA_FACING: u32 = 1u;
 
+/// Draw the object only while its local +z axis faces the camera (masks of
+/// one-sided clipping groups, e.g. the faces of a portal cube).
+const FLAG_FRONT_ONLY: u32 = 2u;
+
 const KIND_FILL: u32 = 0u;
 const KIND_STROKE: u32 = 1u;
 
@@ -135,10 +139,16 @@ fn vs_main(
     @builtin(instance_index) instance_index: u32,
 ) -> VertexOutput {
     let instance = instances[instance_index];
-    if instance.kind == KIND_FILL {
-        return fill_vertex(objects[instance.object], vertex_index);
+    let object = objects[instance.object];
+    if (object.flags & FLAG_FRONT_ONLY) != 0u && !faces_camera(object) {
+        var culled: VertexOutput;
+        culled.clip_position = CULLED;
+        return culled;
     }
-    return stroke_vertex(objects[instance.object], stroke_curves[instance.curve], vertex_index);
+    if instance.kind == KIND_FILL {
+        return fill_vertex(object, vertex_index);
+    }
+    return stroke_vertex(object, stroke_curves[instance.curve], vertex_index);
 }
 
 struct FragmentOutput {
@@ -151,6 +161,16 @@ struct FragmentOutput {
 /// The vector layer starts out transparent and is composited over the lit
 /// 3D layer later, so colors are premultiplied by alpha: that makes MSAA
 /// resolve and "over" blending exact for partially covered pixels.
+/// Whether the object's plane shows its front (+z) side to the camera. A
+/// plane faces the camera either everywhere or nowhere, so testing its
+/// origin decides for the whole object.
+fn faces_camera(object: Object) -> bool {
+    let x_axis = (object.model * vec4<f32>(1.0, 0.0, 0.0, 0.0)).xyz;
+    let y_axis = (object.model * vec4<f32>(0.0, 1.0, 0.0, 0.0)).xyz;
+    let origin = (object.model * vec4<f32>(0.0, 0.0, 0.0, 1.0)).xyz;
+    return dot(cross(x_axis, y_axis), towards_camera(origin)) > 0.0;
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOutput {
     var out: FragmentOutput;
@@ -520,4 +540,21 @@ fn fan_corner(start: vec3<f32>, normal: vec3<f32>, angle: f32, triangle: u32, co
     }
     let step = f32(triangle + corner - 1u) / f32(FAN_TRIANGLES);
     return vec4<f32>(rotate_in_plane(start, normal, angle * step), 1.0);
+}
+
+// ---------------------------------------------------------------------------
+// Shadow maps: depth only, seen from a light (the frame uniform then holds
+// the light's view, so camera-facing curves face the light). Fills keep
+// their exact curve test; clipping is ignored (masks are screen space);
+// translucent pixels cast a shadow from half opacity up.
+// ---------------------------------------------------------------------------
+
+@fragment
+fn fs_shadow(in: VertexOutput) {
+    if in.side != 0.0 && (in.uv.x * in.uv.x - in.uv.y) * in.side < 0.0 {
+        discard;
+    }
+    if in.color.a < 0.5 {
+        discard;
+    }
 }

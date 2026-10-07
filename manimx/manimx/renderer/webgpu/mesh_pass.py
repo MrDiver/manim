@@ -1,8 +1,8 @@
-"""GPU side of the mesh pipeline: buffers, textures, pipelines, draws.
+"""GPU side of the mesh geometry pass: buffers, textures, pipelines, draws.
 
 :meth:`MeshPass.prepare` uploads a :class:`MeshBatch`; :meth:`MeshPass.draw`
-issues one ``multi_draw_indexed_indirect`` per material texture set. Meshes
-are opaque and drawn into the frame pass before the vector shapes.
+issues one ``multi_draw_indexed_indirect`` per material texture set into the
+G-buffer (see gbuffer.wgsl). Lighting happens later in the lighting pass.
 
 Textures are uploaded once per (texture, color space) and kept while any
 frame uses them; mip levels are generated on the CPU when uploading.
@@ -16,7 +16,8 @@ from PIL import Image
 from wgpu.backends.wgpu_native.extras import multi_draw_indexed_indirect
 
 from ...objects import Texture
-from .gpu import COLOR_FORMAT, DEPTH_FORMAT, GPUContext, GrowableBuffer
+from .frame import FRAME_DTYPE
+from .gpu import DEPTH_FORMAT, GBUFFER_FORMATS, SHADOW_FORMAT, GPUContext, GrowableBuffer
 from .mesh_batch import DRAW_INDEXED_DTYPE, MeshBatch, TextureSet
 
 _STORAGE = wgpu.BufferUsage.STORAGE
@@ -36,7 +37,6 @@ class MeshPass:
             "objects": GrowableBuffer(context, "mesh objects", _STORAGE),
             "vertices": GrowableBuffer(context, "mesh vertices", _STORAGE),
             "materials": GrowableBuffer(context, "materials", _STORAGE),
-            "lights": GrowableBuffer(context, "lights", _STORAGE),
         }
         self._indices = GrowableBuffer(context, "mesh indices", wgpu.BufferUsage.INDEX)
         self._indirect = GrowableBuffer(context, "mesh draws", wgpu.BufferUsage.INDIRECT)
@@ -60,19 +60,28 @@ class MeshPass:
         self._scene_group: wgpu.GPUBindGroup | None = None
         self._mask_layers: wgpu.GPUTextureView | None = None
         self._draw_groups: list[tuple[wgpu.GPUBindGroup, int, int]] = []
+        self._shadows: dict[int, tuple[int, int]] = {}
+        self._shadow_groups: dict[tuple[int, int], wgpu.GPUBindGroup] = {}
+        self._shadow_pipeline: wgpu.GPURenderPipeline | None = None
 
     # -- per frame ----------------------------------------------------------
 
-    def prepare(self, batch: MeshBatch, mask_layers: wgpu.GPUTextureView) -> int:
-        """Upload the frame's meshes and lights; returns the light count."""
+    def prepare(self, batch: MeshBatch, mask_layers: wgpu.GPUTextureView) -> None:
+        """Upload the frame's meshes and their materials."""
         grown = False
         for name, buffer in self._buffers.items():
             grown |= buffer.upload(getattr(batch, name))
         self._indices.upload(batch.indices)
-        self._indirect.upload(batch.draws)
+        # Material groups' draws first, then the shadow casters per scope.
+        self._indirect.upload(np.concatenate([batch.draws, *batch.shadow_draws.values()]))
+        self._shadows, first = {}, len(batch.draws)
+        for scope, draws in batch.shadow_draws.items():
+            self._shadows[scope] = (first, len(draws))
+            first += len(draws)
         if grown or self._scene_group is None or mask_layers is not self._mask_layers:
             self._mask_layers = mask_layers
-            self._scene_group = self._create_scene_group()
+            self._scene_group = self._create_scene_group(self._frame_uniform, 0)
+            self._shadow_groups.clear()
 
         used_textures: set[tuple[int, bool]] = set()
         used_groups: set[tuple[int, ...]] = set()
@@ -92,7 +101,6 @@ class MeshPass:
         # Forget textures and bind groups no longer used by any mesh.
         self._textures = {k: v for k, v in self._textures.items() if k in used_textures}
         self._material_groups = {k: v for k, v in self._material_groups.items() if k in used_groups}
-        return len(batch.lights)
 
     def draw(self, render_pass: wgpu.GPURenderPassEncoder, sample_count: int) -> None:
         if not self._draw_groups:
@@ -108,6 +116,39 @@ class MeshPass:
                 offset=first * DRAW_INDEXED_DTYPE.itemsize,
                 count=count,
             )
+
+    def draw_shadow(self, render_pass: wgpu.GPURenderPassEncoder, frames: wgpu.GPUBuffer, offset: int, scope: int) -> None:
+        """Draw the depth of ``scope``'s shadow-casting meshes, seen from the frame at ``offset``."""
+        first, count = self._shadows.get(scope, (0, 0))
+        if count == 0:
+            return
+        key = (id(frames), offset)
+        if key not in self._shadow_groups:
+            self._shadow_groups[key] = self._create_scene_group(frames, offset)
+        render_pass.set_pipeline(self._get_shadow_pipeline())
+        render_pass.set_bind_group(0, self._shadow_groups[key])
+        render_pass.set_index_buffer(self._indices.buffer, wgpu.IndexFormat.uint32)
+        multi_draw_indexed_indirect(
+            render_pass, self._indirect.buffer, offset=first * DRAW_INDEXED_DTYPE.itemsize, count=count
+        )
+
+    def _get_shadow_pipeline(self) -> wgpu.GPURenderPipeline:
+        if self._shadow_pipeline is None:
+            device = self._context.device
+            self._shadow_pipeline = device.create_render_pipeline(
+                label="mesh shadow",
+                layout=device.create_pipeline_layout(bind_group_layouts=[self._scene_layout]),
+                vertex={"module": self._shader, "entry_point": "vs_main", "buffers": []},
+                primitive={"topology": wgpu.PrimitiveTopology.triangle_list, "cull_mode": wgpu.CullMode.none},
+                depth_stencil={
+                    "format": SHADOW_FORMAT,
+                    "depth_write_enabled": True,
+                    "depth_compare": wgpu.CompareFunction.less,
+                    "depth_bias_slope_scale": 1.5,
+                },
+                fragment={"module": self._shader, "entry_point": "fs_shadow", "targets": []},
+            )
+        return self._shadow_pipeline
 
     # -- textures -----------------------------------------------------------
 
@@ -166,7 +207,11 @@ class MeshPass:
                     "depth_compare": wgpu.CompareFunction.less,
                 },
                 multisample={"count": sample_count},
-                fragment={"module": self._shader, "entry_point": "fs_main", "targets": [{"format": COLOR_FORMAT}]},
+                fragment={
+                    "module": self._shader,
+                    "entry_point": "fs_main",
+                    "targets": [{"format": f} for f in GBUFFER_FORMATS],
+                },
             )
         return self._pipelines[sample_count]
 
@@ -180,9 +225,8 @@ class MeshPass:
                 {"binding": 1, "visibility": vertex | fragment, "buffer": storage},  # objects
                 {"binding": 2, "visibility": vertex, "buffer": storage},  # vertices
                 {"binding": 3, "visibility": fragment, "buffer": storage},  # materials
-                {"binding": 4, "visibility": fragment, "buffer": storage},  # lights
                 {
-                    "binding": 5,
+                    "binding": 4,
                     "visibility": fragment,
                     "texture": {"sample_type": wgpu.TextureSampleType.float, "view_dimension": wgpu.TextureViewDimension.d2_array},
                 },
@@ -196,13 +240,14 @@ class MeshPass:
         material = device.create_bind_group_layout(entries=[*textures, sampler])
         return scene, material
 
-    def _create_scene_group(self) -> wgpu.GPUBindGroup:
-        buffers = [self._frame_uniform, *(b.buffer for b in self._buffers.values())]
-        entries = [
-            {"binding": i, "resource": {"buffer": buffer, "offset": 0, "size": buffer.size}}
+    def _create_scene_group(self, frames: wgpu.GPUBuffer, offset: int) -> wgpu.GPUBindGroup:
+        entries = [{"binding": 0, "resource": {"buffer": frames, "offset": offset, "size": FRAME_DTYPE.itemsize}}]
+        buffers = [b.buffer for b in self._buffers.values()]
+        entries += [
+            {"binding": 1 + i, "resource": {"buffer": buffer, "offset": 0, "size": buffer.size}}
             for i, buffer in enumerate(buffers)
         ]
-        entries.append({"binding": len(buffers), "resource": self._mask_layers})
+        entries.append({"binding": 1 + len(buffers), "resource": self._mask_layers})
         return self._context.device.create_bind_group(layout=self._scene_layout, entries=entries)
 
 

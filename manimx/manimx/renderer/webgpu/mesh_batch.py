@@ -7,7 +7,8 @@ surface.wgsl and lighting.wgsl):
 * ``vertices``   all mesh vertices, interleaved (cached per mesh version)
 * ``indices``    all triangle indices, relative to each mesh's first vertex
 * ``materials``  material factors, deduplicated by material object
-* ``lights``     all lights in world space (or the default lights)
+* ``lights``     all lights in world space (or the default lights); their
+                 ``shadow_view`` is filled in by shadow_views.py
 
 Draws are grouped by the material's texture set, because textures are bound
 per group (bind group 1); each group is one multi_draw_indexed_indirect.
@@ -25,7 +26,7 @@ from ...objects.material import linear_rgb
 from ...objects.mesh import MeshData
 from ..cache import MobjectDataCache
 from ..config import RenderConfig
-from ..scene_graph import FlatScene, LightItem
+from ..scene_graph import NO_CLIP, FlatScene, LightItem
 
 MESH_OBJECT_DTYPE = np.dtype(
     [
@@ -58,7 +59,9 @@ LIGHT_DTYPE = np.dtype(
         ("color", "<f4", 3),
         ("inner_cone_cos", "<f4"),
         ("outer_cone_cos", "<f4"),
-        ("_pad", "<f4", 3),
+        ("shadow_view", "<i4"),
+        ("size", "<f4"),
+        ("scope", "<i4"),
     ]
 )
 # WebGPU's DrawIndexedIndirectArgs.
@@ -99,21 +102,25 @@ class MeshBatch:
     indices: np.ndarray
     materials: np.ndarray
     lights: np.ndarray
+    light_items: list[LightItem]
     groups: list[DrawGroup]
+    shadow_draws: dict[int, np.ndarray]
+    """Per clip scope (NO_CLIP: all), draws of the meshes that cast shadows
+    for that scope's lights (texture groups do not matter)."""
 
     @property
     def draws(self) -> np.ndarray:
         """All draw commands, group after group."""
-        rows = [draw for group in self.groups for draw in group.draws]
-        return np.array(rows, dtype=np.int64).astype(np.uint32).view(DRAW_INDEXED_DTYPE).reshape(-1) if rows else np.zeros(0, DRAW_INDEXED_DTYPE)
+        return _indexed_args([draw for group in self.groups for draw in group.draws])
 
     @staticmethod
     def build(scene: FlatScene, cache: MobjectDataCache, config: RenderConfig) -> MeshBatch:
-        objects, vertices, indices, materials = [], [], [], []
+        objects, vertices, indices, materials, shadow_draws = [], [], [], [], []
         material_slots: dict[int, int] = {}
         groups: dict[tuple[int, ...], DrawGroup] = {}
         vertex_count = index_count = 0
 
+        light_items = scene.lights or (default_lights(config) if config.default_lights else [])
         for item in scene.items:
             shape = item.obj
             if not isinstance(shape, Shape3D) or shape.mesh.triangle_count == 0:
@@ -136,7 +143,10 @@ class MeshBatch:
 
             key = tuple(t.uid if t else 0 for t in material.textures)
             group = groups.setdefault(key, DrawGroup(material.textures))
-            group.draws.append((len(shape.mesh.indices), 1, index_count, vertex_count, len(objects)))
+            draw = (len(shape.mesh.indices), 1, index_count, vertex_count, len(objects))
+            group.draws.append(draw)
+            if shape.cast_shadows:
+                shadow_draws.append((draw, item.clip))
 
             objects.append(entry)
             vertices.append(mesh_vertices)
@@ -149,8 +159,13 @@ class MeshBatch:
             vertices=np.concatenate(vertices) if vertices else np.zeros(0, MESH_VERTEX_DTYPE),
             indices=np.concatenate(indices) if indices else np.zeros(0, np.uint32),
             materials=np.array(materials, dtype=MATERIAL_DTYPE) if materials else np.zeros(0, MATERIAL_DTYPE),
-            lights=light_array(scene.lights, config),
+            lights=light_array(light_items, config),
+            light_items=light_items,
             groups=list(groups.values()),
+            shadow_draws={
+                scope: _indexed_args([draw for draw, clip in shadow_draws if scene.in_scope(clip, scope)])
+                for scope in (NO_CLIP, *range(len(scene.clips)))
+            },
         )
 
 
@@ -182,10 +197,14 @@ def _material_entry(material: PbrMaterial) -> np.ndarray:
 # --------------------------------------------------------------------------
 
 
+def _indexed_args(rows: list[tuple[int, int, int, int, int]]) -> np.ndarray:
+    if not rows:
+        return np.zeros(0, DRAW_INDEXED_DTYPE)
+    return np.array(rows, dtype=np.int64).astype(np.uint32).view(DRAW_INDEXED_DTYPE).reshape(-1)
+
+
 def light_array(lights: list[LightItem], config: RenderConfig) -> np.ndarray:
-    """World-space light records; the default lights if the scene has none."""
-    if not lights and config.default_lights:
-        lights = default_lights(config)
+    """World-space light records (shadow views are assigned separately)."""
     array = np.zeros(len(lights), LIGHT_DTYPE)
     for row, item in zip(array, lights):
         light = item.light
@@ -194,6 +213,9 @@ def light_array(lights: list[LightItem], config: RenderConfig) -> np.ndarray:
         direction = -item.world[:3, 2]
         row["direction"] = direction / np.linalg.norm(direction)
         row["color"] = np.array(linear_rgb(light.color)) * light.intensity
+        row["size"] = light.size
+        row["shadow_view"] = -1
+        row["scope"] = item.clip
         if isinstance(light, DirectionalLight):
             row["kind"] = LIGHT_DIRECTIONAL
         elif isinstance(light, SpotLight):

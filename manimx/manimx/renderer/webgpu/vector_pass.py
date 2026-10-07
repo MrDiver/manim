@@ -19,7 +19,8 @@ import numpy as np
 import wgpu
 from wgpu.backends.wgpu_native.extras import multi_draw_indirect
 
-from .gpu import COLOR_FORMAT, DEPTH_FORMAT, GPUContext, GrowableBuffer
+from .frame import FRAME_DTYPE
+from .gpu import COLOR_FORMAT, DEPTH_FORMAT, SHADOW_FORMAT, GPUContext, GrowableBuffer
 from .vector_batch import DRAW_INDIRECT_DTYPE, VectorBatch
 
 _STORAGE = wgpu.BufferUsage.STORAGE
@@ -49,6 +50,8 @@ class Role(Enum):
     """Frame pass with blending, drawn back to front after the opaque list."""
     MASK = "mask"
     """Clip mask pass: blending, no depth buffer."""
+    SHADOW = "shadow"
+    """Shadow map pass: depth only, seen from a light."""
 
 
 class VectorPass:
@@ -72,6 +75,8 @@ class VectorPass:
         self._opaque = (0, 0)
         self._transparent = (0, 0)
         self._masks: list[tuple[int, int]] = []
+        self._shadows: dict[int, tuple[int, int]] = {}
+        self._shadow_groups: dict[tuple[int, int], wgpu.GPUBindGroup] = {}
 
     # -- per frame ----------------------------------------------------------
 
@@ -85,17 +90,21 @@ class VectorPass:
         for name, buffer in self._buffers.items():
             grown |= buffer.upload(getattr(batch, name))
 
-        lists = [batch.opaque_draws, batch.transparent_draws, *batch.mask_draws]
+        shadow_scopes = list(batch.shadow_draws)
+        lists = [batch.opaque_draws, batch.transparent_draws, *batch.shadow_draws.values(), *batch.mask_draws]
         self._indirect.upload(np.concatenate(lists))
         ranges, first = [], 0
         for draws in lists:
             ranges.append((first, len(draws)))
             first += len(draws)
-        self._opaque, self._transparent, *self._masks = ranges
+        self._opaque, self._transparent = ranges[:2]
+        self._shadows = dict(zip(shadow_scopes, ranges[2 : 2 + len(shadow_scopes)]))
+        self._masks = ranges[2 + len(shadow_scopes) :]
 
         if grown or self._bind_group is None or mask_layers is not self._mask_layers:
             self._mask_layers = mask_layers
-            self._bind_group = self._create_bind_group()
+            self._bind_group = self._create_bind_group(self._frame_uniform, 0)
+            self._shadow_groups.clear()
 
     def draw_mask(self, render_pass: wgpu.GPURenderPassEncoder, sample_count: int, scope: int) -> None:
         """Draw the mask shapes of clip scope ``scope``."""
@@ -107,6 +116,14 @@ class VectorPass:
         render_pass.set_bind_group(0, self._bind_group)
         self._draw(render_pass, Role.OPAQUE, sample_count, self._opaque)
         self._draw(render_pass, Role.TRANSPARENT, sample_count, self._transparent)
+
+    def draw_shadow(self, render_pass: wgpu.GPURenderPassEncoder, frames: wgpu.GPUBuffer, offset: int, scope: int) -> None:
+        """Draw the depth of ``scope``'s shadow casters, seen from the frame at ``offset``."""
+        key = (id(frames), offset)
+        if key not in self._shadow_groups:
+            self._shadow_groups[key] = self._create_bind_group(frames, offset)
+        render_pass.set_bind_group(0, self._shadow_groups[key])
+        self._draw(render_pass, Role.SHADOW, 1, self._shadows.get(scope, (0, 0)))
 
     def _draw(
         self,
@@ -140,6 +157,8 @@ class VectorPass:
         if role is not Role.OPAQUE:
             target["blend"] = _ALPHA_BLEND
         depth_stencil = None
+        if role is Role.SHADOW:
+            return self._create_shadow_pipeline()
         if role is not Role.MASK:
             depth_stencil = {
                 "format": DEPTH_FORMAT,
@@ -162,6 +181,22 @@ class VectorPass:
             depth_stencil=depth_stencil,
             multisample={"count": sample_count},
             fragment={"module": self._shader, "entry_point": entry_point, "targets": [target]},
+        )
+
+    def _create_shadow_pipeline(self) -> wgpu.GPURenderPipeline:
+        device = self._context.device
+        return device.create_render_pipeline(
+            label="vector shadow",
+            layout=device.create_pipeline_layout(bind_group_layouts=[self._layout]),
+            vertex={"module": self._shader, "entry_point": "vs_main", "buffers": []},
+            primitive={"topology": wgpu.PrimitiveTopology.triangle_list, "cull_mode": wgpu.CullMode.none},
+            depth_stencil={
+                "format": SHADOW_FORMAT,
+                "depth_write_enabled": True,
+                "depth_compare": wgpu.CompareFunction.less,
+                "depth_bias_slope_scale": 1.5,
+            },
+            fragment={"module": self._shader, "entry_point": "fs_shadow", "targets": []},
         )
 
     def _create_bind_group_layout(self) -> wgpu.GPUBindGroupLayout:
@@ -194,12 +229,13 @@ class VectorPass:
         )
         return self._context.device.create_bind_group_layout(entries=entries)
 
-    def _create_bind_group(self) -> wgpu.GPUBindGroup:
+    def _create_bind_group(self, frames: wgpu.GPUBuffer, offset: int) -> wgpu.GPUBindGroup:
         # Binding order matches vector.wgsl: frame, storage buffers, masks.
-        buffers = [self._frame_uniform, *(b.buffer for b in self._buffers.values())]
-        entries = [
-            {"binding": i, "resource": {"buffer": buffer, "offset": 0, "size": buffer.size}}
+        entries = [{"binding": 0, "resource": {"buffer": frames, "offset": offset, "size": FRAME_DTYPE.itemsize}}]
+        buffers = [b.buffer for b in self._buffers.values()]
+        entries += [
+            {"binding": 1 + i, "resource": {"buffer": buffer, "offset": 0, "size": buffer.size}}
             for i, buffer in enumerate(buffers)
         ]
-        entries.append({"binding": len(buffers), "resource": self._mask_layers})
+        entries.append({"binding": 1 + len(buffers), "resource": self._mask_layers})
         return self._context.device.create_bind_group(layout=self._layout, entries=entries)

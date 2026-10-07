@@ -14,9 +14,21 @@ SHADER_DIRECTORY = Path(__file__).parent / "shaders"
 COLOR_FORMAT = wgpu.TextureFormat.rgba8unorm
 """Colors are stored and blended in sRGB values, like Manim's Cairo renderer."""
 DEPTH_FORMAT = wgpu.TextureFormat.depth32float
+SHADOW_FORMAT = wgpu.TextureFormat.depth32float
+HDR_FORMAT = wgpu.TextureFormat.rgba16float
+"""Linear radiance of lit meshes, before tone mapping."""
+GBUFFER_FORMATS = (
+    wgpu.TextureFormat.rgba8unorm_srgb,  # base color, occlusion
+    wgpu.TextureFormat.rgba16float,  # world normal, roughness
+    wgpu.TextureFormat.rgba16float,  # emissive radiance, metallic
+    wgpu.TextureFormat.r16float,  # clip scope (selects the lights), -1 for none
+)
+"""Color targets of the G-buffer, see shaders/gbuffer.wgsl."""
 
 REQUIRED_FEATURES = ("indirect-first-instance",)
 """``first_instance`` in indirect draws selects the per-draw instance records."""
+OPTIONAL_FEATURES = ("timestamp-query",)
+"""Used when available: GPU pass timings for the profiler."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,28 +41,39 @@ class GPUContext:
         missing = [f for f in REQUIRED_FEATURES if f not in adapter.features]
         if missing:
             raise RuntimeError(f"GPU adapter lacks required features: {missing}")
-        device = adapter.request_device_sync(required_features=list(REQUIRED_FEATURES))
+        optional = [f for f in OPTIONAL_FEATURES if f in adapter.features]
+        device = adapter.request_device_sync(required_features=[*REQUIRED_FEATURES, *optional])
         return GPUContext(device)
 
-    def shader(self, filename: str) -> wgpu.GPUShaderModule:
-        return self.device.create_shader_module(label=filename, code=load_wgsl(filename))
+    def shader(self, filename: str, replacements: dict[str, str] | None = None) -> wgpu.GPUShaderModule:
+        """Compile a shader file (after #include expansion and the given
+        plain-text ``replacements``, used for small variants)."""
+        code = load_wgsl(filename)
+        for old, new in (replacements or {}).items():
+            code = code.replace(old, new)
+        return self.device.create_shader_module(label=filename, code=code)
 
 
 _INCLUDE = re.compile(r'^#include "([\w./-]+)"\s*$', re.MULTILINE)
 
 
 def load_wgsl(filename: str, included: set[str] | None = None) -> str:
-    """WGSL source with ``#include "file.wgsl"`` lines replaced by that file.
+    """WGSL source of a shader file with its ``#include`` lines expanded.
 
-    WGSL has no module system; this lets pipelines share structs and
-    functions (frame uniforms, material evaluation, lighting) so each piece
-    can later move to another pass, e.g. lighting into a deferred pass.
+    WGSL has no module system; ``#include "file.wgsl"`` lets pipelines share
+    structs and functions (frame uniforms, material evaluation, lighting).
     Each file is included at most once per shader.
     """
     if included is None:
         included = set()
     included.add(filename)
-    code = (SHADER_DIRECTORY / filename).read_text(encoding="utf-8")
+    return expand_includes((SHADER_DIRECTORY / filename).read_text(encoding="utf-8"), included)
+
+
+def expand_includes(code: str, included: set[str] | None = None) -> str:
+    """Expand ``#include`` lines in WGSL source given as a string."""
+    if included is None:
+        included = set()
 
     def include(match: re.Match[str]) -> str:
         name = match.group(1)

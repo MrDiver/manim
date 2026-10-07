@@ -26,10 +26,25 @@ from .transform import Quaternion, Transform
 @dataclass(slots=True, eq=False)
 class Light(RenderObject):
     """``intensity`` scales the radiance directly: a white diffuse surface
-    lit head-on by a directional light of intensity pi appears pure white."""
+    lit head-on by a directional light of intensity pi appears pure white.
+
+    ``cast_shadows`` turns this light's shadows on (RenderConfig.shadows
+    must be on too). ``size`` is how large the light appears, which sets
+    how soft its shadows get away from the caster (contact-hardening
+    shadows): the radius in world units for point and spot lights, the
+    angular diameter in radians for directional lights. Zero gives hard
+    shadows.
+
+    A light inside a :class:`ClippingGroup`'s content is scoped to that
+    group: it only lights, and only gets shadows from, objects in the same
+    group (including nested groups). Lights outside any clipping group
+    light everything.
+    """
 
     color: ParsableManimColor = WHITE
     intensity: float = 1.0
+    cast_shadows: bool = True
+    size: float = 0.1
 
 
 @dataclass(slots=True, eq=False)
@@ -37,6 +52,7 @@ class DirectionalLight(Light):
     """Parallel light (like the sun). Its position does not matter."""
 
     intensity: float = 3.0
+    size: float = 0.03  # angular diameter in radians, about 1.7 degrees
 
     @classmethod
     def aimed(cls, id: str, direction: tuple[float, float, float], **kwargs: Any) -> Self:

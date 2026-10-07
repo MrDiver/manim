@@ -12,8 +12,9 @@ content subtree carry the index of the scope. Scopes nest: a mask inside
 another scope's content is itself clipped by that outer scope, so the
 innermost scope already describes the combined mask.
 
-Lights are collected with their world matrices wherever they are in the
-tree (inside a mask they are ignored, since masks only contribute alpha).
+Lights are collected with their world matrices and the clip scope they
+sit in, which limits them to objects of that scope (inside a mask they are
+ignored, since masks only contribute alpha).
 """
 
 from __future__ import annotations
@@ -56,6 +57,8 @@ class ClipScope:
 class LightItem:
     light: Light
     world: np.ndarray
+    clip: int = NO_CLIP
+    """The clip scope the light is limited to, or NO_CLIP for everything."""
 
 
 @dataclass(slots=True, eq=False)
@@ -65,6 +68,16 @@ class FlatScene:
     clips: list[ClipScope] = field(default_factory=list)
     """Clip scopes, every parent before its children."""
     lights: list[LightItem] = field(default_factory=list)
+
+    def in_scope(self, clip: int, scope: int) -> bool:
+        """Whether something in clip scope ``clip`` belongs to ``scope``
+        (the scope itself or one nested in it). Everything is in NO_CLIP."""
+        while True:
+            if clip == scope or scope == NO_CLIP:
+                return True
+            if clip == NO_CLIP:
+                return False
+            clip = self.clips[clip].parent
 
 
 def flatten_scene(root: RenderObject) -> FlatScene:
@@ -116,7 +129,7 @@ def _walk(
 
     if isinstance(obj, Light):
         if mask_of is None:
-            scene.lights.append(LightItem(obj, world))
+            scene.lights.append(LightItem(obj, world, clip))
     elif isinstance(obj, Shape3D) and mask_of is not None:
         raise NotImplementedError("3D meshes cannot be part of a mask")
     elif isinstance(obj, (BezierPath, Shape3D)):

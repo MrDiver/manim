@@ -36,6 +36,8 @@ class BezierPath(RenderObject):
 
     points: np.ndarray = versioned(default_factory=_no_points)
     stroke: Stroke = versioned(default_factory=Stroke)
+    cast_shadows: bool = True
+    """Whether this path blocks light for lit meshes behind it."""
 
     def __setattr__(self, name: str, value: object) -> None:
         # Validate on every assignment, including the one in __init__.

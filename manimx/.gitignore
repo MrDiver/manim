@@ -1,0 +1,2 @@
+# pytest-benchmark baselines are machine specific
+.benchmarks/

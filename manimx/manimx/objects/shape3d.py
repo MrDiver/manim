@@ -19,3 +19,5 @@ class Shape3D(RenderObject):
 
     mesh: MeshData = versioned(default_factory=box_mesh)
     material: PbrMaterial = versioned(default_factory=PbrMaterial)
+    cast_shadows: bool = True
+    """Whether this mesh blocks light (it always receives shadows)."""

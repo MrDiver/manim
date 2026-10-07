@@ -17,15 +17,19 @@ struct Light {
     color: vec3<f32>,           // linear RGB times intensity
     inner_cone_cos: f32,        // spot only
     outer_cone_cos: f32,        // spot only
-    _pad0: f32,
-    _pad1: f32,
-    _pad2: f32,
+    shadow_view: i32,           // first shadow map layer, or -1 without shadows
+    size: f32,                  // radius, or angular diameter for directional lights
+    scope: i32,                 // clip scope the light is limited to, or -1
 };
+
+#include "shadows.wgsl"
 
 const PI_LIGHTING: f32 = 3.14159265358979;
 
 /// Radiance leaving `surface` towards `view` (unit vector to the viewer).
-fn shade_surface(surface: Surface, view: vec3<f32>) -> vec3<f32> {
+/// `scope` is the surface's clip scope: scoped lights only reach surfaces
+/// inside their scope (needs `scope_parents` from the including shader).
+fn shade_surface(surface: Surface, view: vec3<f32>, scope: i32) -> vec3<f32> {
     var color = surface.emissive;
     // Uniform ambient light, darkened by ambient occlusion. Without an
     // environment map, metals would only show their highlights and look
@@ -36,9 +40,27 @@ fn shade_surface(surface: Surface, view: vec3<f32>) -> vec3<f32> {
     let f0 = mix(vec3<f32>(0.04), surface.base_color, surface.metallic);
     color += frame.ambient.rgb * (diffuse_color + f0) * surface.occlusion;
     for (var i = 0u; i < frame.light_count; i++) {
-        color += light_contribution(lights[i], surface, view);
+        if light_reaches(lights[i].scope, scope) {
+            color += light_contribution(lights[i], surface, view);
+        }
     }
     return color;
+}
+
+/// Whether a light limited to `light_scope` reaches a surface in `scope`:
+/// the surface's scope must be the light's or nested inside it.
+fn light_reaches(light_scope: i32, scope: i32) -> bool {
+    if light_scope < 0 {
+        return true;  // unscoped lights reach everything
+    }
+    var current = scope;
+    for (var depth = 0; depth < 64 && current >= 0; depth++) {
+        if current == light_scope {
+            return true;
+        }
+        current = scope_parents[current];
+    }
+    return false;
 }
 
 fn light_contribution(light: Light, surface: Surface, view: vec3<f32>) -> vec3<f32> {
@@ -60,7 +82,11 @@ fn light_contribution(light: Light, surface: Surface, view: vec3<f32>) -> vec3<f
     if n_dot_l <= 0.0 || attenuation <= 0.0 {
         return vec3<f32>(0.0);
     }
-    return brdf(surface, to_light, view) * light.color * attenuation * n_dot_l;
+    let visibility = shadow_visibility(light, surface);
+    if visibility <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    return brdf(surface, to_light, view) * light.color * attenuation * n_dot_l * visibility;
 }
 
 /// KHR_lights_punctual's recommended smooth cut-off at `range`.

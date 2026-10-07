@@ -1,24 +1,18 @@
-// Mesh pipeline: lit Shape3D meshes, forward shaded.
+// Mesh geometry pass: writes Shape3D surfaces into the G-buffer.
 //
 // Like the vector pipeline, all meshes share storage buffers (vertex
 // pulling) and are drawn with multi_draw_indexed_indirect; `first_instance`
 // selects the object. Draws are grouped by material texture set, since the
 // textures live in a separate bind group (group 1).
 //
-// The fragment shader is deliberately thin glue:
-//
-//   evaluate_surface()   material.wgsl  material + textures -> Surface
-//   shade_surface()      lighting.wgsl  Surface + lights    -> linear color
-//   tone map + encode    color.wgsl     linear              -> sRGB frame
-//
-// A deferred renderer would stop after evaluate_surface() and write the
-// Surface into a G-buffer; the other two steps would move into a lighting
-// pass unchanged.
+// Deferred shading: this pass only evaluates materials (material.wgsl) and
+// stores the resulting Surface (gbuffer.wgsl). Lighting happens afterwards,
+// once per MSAA sample, in deferred_lighting.wgsl, so the number of lights
+// does not multiply the cost of overdraw.
 
 #include "frame.wgsl"
 #include "material.wgsl"
-#include "lighting.wgsl"
-#include "color.wgsl"
+#include "gbuffer.wgsl"
 
 // Mirrors MESH_OBJECT_DTYPE in mesh_batch.py.
 struct MeshObject {
@@ -42,8 +36,7 @@ struct MeshVertex {
 @group(0) @binding(1) var<storage, read> objects: array<MeshObject>;
 @group(0) @binding(2) var<storage, read> vertices: array<MeshVertex>;
 @group(0) @binding(3) var<storage, read> materials: array<Material>;
-@group(0) @binding(4) var<storage, read> lights: array<Light>;
-@group(0) @binding(5) var mask_layers: texture_2d_array<f32>;
+@group(0) @binding(4) var mask_layers: texture_2d_array<f32>;
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -75,7 +68,7 @@ fn vs_main(
 }
 
 @fragment
-fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
+fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> GBuffer {
     let object = objects[in.object];
     // Meshes are opaque, so clipping is a hard cut at half mask coverage.
     if object.clip >= 0 {
@@ -91,17 +84,10 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front_facing: bool) -> @loca
     input.tangent = in.tangent;
     input.uv = in.uv;
     input.front_facing = front_facing;
-    let surface = evaluate_surface(materials[object.material], input);
-
-    let view = view_direction(in.world_position);
-    let radiance = shade_surface(surface, view) * frame.exposure;
-    return vec4<f32>(linear_to_srgb(tone_map_pbr_neutral(radiance)), 1.0);
+    return encode_gbuffer(evaluate_surface(materials[object.material], input), object.clip);
 }
 
-/// Unit vector from a world point towards the viewer.
-fn view_direction(point: vec3<f32>) -> vec3<f32> {
-    if frame.projection[3][3] == 1.0 {  // orthographic
-        return normalize((frame.inverse_view * vec4<f32>(0.0, 0.0, 1.0, 0.0)).xyz);
-    }
-    return normalize(frame.camera_position.xyz - point);
-}
+/// Shadow maps: depth only, seen from a light (frame.view_projection is
+/// the light's view). Meshes always block light completely.
+@fragment
+fn fs_shadow() {}

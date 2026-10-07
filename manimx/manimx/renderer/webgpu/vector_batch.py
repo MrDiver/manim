@@ -39,6 +39,9 @@ NO_NEIGHBOR = -1
 
 FLAG_CAMERA_FACING = 1
 """Object flag: the stroke ribbon faces the camera (all paths except Shape2D)."""
+FLAG_FRONT_ONLY = 2
+"""Object flag: drawn only while its local +z axis faces the camera
+(masks of one-sided clipping groups)."""
 
 # Keep in sync with STROKE_VERTEX_COUNT in vector.wgsl:
 # SEGMENTS * 6 ribbon vertices + 2 fans of FAN_TRIANGLES * 3 vertices.
@@ -91,6 +94,8 @@ class _Draw:
     layer: int
     mask_of: int = NO_CLIP
     """Scope whose mask this draw belongs to, or NO_CLIP for the frame."""
+    casts_shadow: bool = False
+    clip: int = NO_CLIP
 
 
 @dataclass(slots=True)
@@ -104,6 +109,9 @@ class VectorBatch:
     transparent_draws: np.ndarray
     mask_draws: list[np.ndarray]
     """Per clip scope, the draws that render its mask (painter's order)."""
+    shadow_draws: dict[int, np.ndarray]
+    """Per clip scope (NO_CLIP: all), the draws of shapes and curves that
+    cast shadows for lights of that scope. Masks never cast shadows."""
 
     @staticmethod
     def build(scene: FlatScene, cache: MobjectDataCache, camera_position: np.ndarray) -> VectorBatch:
@@ -112,8 +120,8 @@ class VectorBatch:
             builder.add(item)
         for index, scope in enumerate(scene.clips):
             for item in scope.mask:
-                builder.add(item, mask_of=index)
-        return builder.finish(len(scene.clips))
+                builder.add(item, mask_of=index, front_only=scope.group.one_sided)
+        return builder.finish(scene)
 
 
 @dataclass(slots=True)
@@ -130,7 +138,7 @@ class _BatchBuilder:
     stroke_point_count: int = 0
     stroke_curve_count: int = 0
 
-    def add(self, item: DrawItem, mask_of: int = NO_CLIP) -> None:
+    def add(self, item: DrawItem, mask_of: int = NO_CLIP, front_only: bool = False) -> None:
         shape = item.obj
         if not isinstance(shape, BezierPath) or shape.num_curves == 0:
             return
@@ -141,7 +149,7 @@ class _BatchBuilder:
         entry["model"] = item.world.T  # WGSL matrices are column-major
         entry["layer"] = layer
         entry["clip"] = item.clip
-        entry["flags"] = 0 if isinstance(shape, Shape2D) else FLAG_CAMERA_FACING
+        entry["flags"] = (0 if isinstance(shape, Shape2D) else FLAG_CAMERA_FACING) | (FLAG_FRONT_ONLY if front_only else 0)
         self.objects.append(entry)
 
         center = item.world @ np.append(shape.points_3d().mean(axis=0), 1.0)
@@ -155,6 +163,8 @@ class _BatchBuilder:
                 continue
             draw.opaque &= not clipped
             draw.mask_of = mask_of
+            draw.casts_shadow = shape.cast_shadows and mask_of == NO_CLIP
+            draw.clip = item.clip
             self.draws.append(draw)
 
     # -- fill ---------------------------------------------------------------
@@ -219,7 +229,8 @@ class _BatchBuilder:
 
     # -- encoding -----------------------------------------------------------
 
-    def finish(self, scope_count: int) -> VectorBatch:
+    def finish(self, scene: FlatScene) -> VectorBatch:
+        scope_count = len(scene.clips)
         frame = [d for d in self.draws if d.mask_of == NO_CLIP]
         opaque = [d for d in frame if d.opaque]
         # Transparent draws: farthest first; coplanar shapes in painter's order.
@@ -243,6 +254,10 @@ class _BatchBuilder:
             opaque_draws=_draw_args(opaque),
             transparent_draws=_draw_args(transparent),
             mask_draws=masks,
+            shadow_draws={
+                scope: _draw_args([d for d in frame if d.casts_shadow and scene.in_scope(d.clip, scope)])
+                for scope in (NO_CLIP, *range(scope_count))
+            },
         )
 
 

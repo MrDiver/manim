@@ -110,6 +110,14 @@ class RenderConfig:
     """Multiplies lit mesh colors before tone mapping."""
     default_lights: bool = True
     """Light meshes with a key light when the scene contains no lights."""
+    shadows: bool = True
+    """Master switch for all shadows (lights and objects have their own)."""
+    shadow_resolution: int = 2048
+    """Width and height of every shadow map in texels."""
+    shadow_softness: float = 1.0
+    """Multiplies every light's ``size``: 0 gives hard shadows everywhere."""
+    shadow_samples: int = 16
+    """Taps per shadow lookup; more give smoother penumbras."""
 
     @property
     def aspect_ratio(self) -> float:

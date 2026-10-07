@@ -208,3 +208,59 @@ def test_curves_3d(renderer: WGPURenderer, update_references: bool) -> None:
     image = renderer.render(scene, config(background_color="#3d3d3d", camera=_perspective((14, -14, 10), (0, 0, 2))))
 
     check(image, "curves_3d", update_references)
+
+
+def test_motion_blur_bloom_and_aces(renderer: WGPURenderer, update_references: bool) -> None:
+    from manimx import Curve3D, DirectionalLight, PbrMaterial, Shape3D, sphere_mesh
+    from manimx.renderer import Bloom, FrameComposer, MotionBlur, ToneMap, ToneMapOperator
+
+    def scene_at(t: float) -> Group:
+        spin = square("spin", side_length=2, fill=Fill(BLUE, opacity=1), stroke=Stroke(WHITE, width=6), transform=Transform(position=(-3.5, 0, 0)).rotated(6 * t))
+        ball = circle("ball", radius=0.6, fill=Fill(RED, opacity=1), stroke=Stroke(width=0), transform=Transform(position=(-1 + 8 * (t % 1), 2, 0)))
+        glow = [
+            Shape3D(f"glow-{i}", mesh=sphere_mesh(0.5), material=PbrMaterial("#202020", emissive=color, emissive_strength=6), transform=Transform(position=(1 + 1.6 * i, -1.5, 0)))
+            for i, color in enumerate([YELLOW, "#58C4DD", "#FC6255"])
+        ]
+        helix = Curve3D.parametric(
+            "helix", lambda u: (3 + math.cos(u + 4 * t), -0.2 + 0.08 * u, math.sin(u + 4 * t)), (0, 6 * math.pi), 96, stroke=Stroke([YELLOW, RED], width=8)
+        )
+        return Group("root", children=[spin, ball, *glow, helix, DirectionalLight.aimed("sun", (0.3, -0.5, -1))])
+
+    composer = FrameComposer(renderer, [MotionBlur(samples=24, shutter=1 / 12), Bloom(intensity=0.25), ToneMap(ToneMapOperator.ACES)])
+    image = composer.compose(scene_at, config(background_color="#1e1e1e", time=0.3))
+
+    check(image, "motion_blur_bloom_aces", update_references)
+
+
+def test_shadows(renderer: WGPURenderer, update_references: bool) -> None:
+    from manimx import Curve3D, DirectionalLight, PbrMaterial, PointLight, Shape3D, SpotLight, box_mesh, sphere_mesh
+    from manimx.examples.manim_logo import manim_logo
+
+    logo = manim_logo()
+    logo.transform = Transform(position=(0, 0.5, 1.8), scale=(0.6, 0.6, 0.6)).rotated(math.pi / 2, (1, 0, 0))
+    scene = Group(
+        "root",
+        children=[
+            Shape3D("floor", mesh=box_mesh(16, 16, 0.2), material=PbrMaterial("#d0d0d0", roughness=0.9), transform=Transform(position=(0, 0, -0.1))),
+            Shape3D("ball", mesh=sphere_mesh(1.0), material=PbrMaterial(RED, roughness=0.4), transform=Transform(position=(-3, 1, 1.0))),
+            Shape3D("post", mesh=box_mesh(0.4, 0.4, 4), material=PbrMaterial(BLUE), transform=Transform(position=(3, 2, 2))),
+            logo,
+            Curve3D.parametric("helix", lambda t: (3 + 0.8 * math.cos(t), -2.5 + 0.8 * math.sin(t), 0.3 + 0.12 * t), (0, 6 * math.pi), 96, stroke=Stroke(YELLOW, width=12)),
+            DirectionalLight.aimed("sun", (0.6, 1.0, -1.2), intensity=2.5),
+            SpotLight.aimed("spot", (-5, -3, 6), (-3, 1, 0), intensity=80, inner_cone_angle=0.35, outer_cone_angle=0.5, color="#ffd9a0", size=0.3),
+            PointLight("bulb", intensity=6, color="#a0c8ff", transform=Transform(position=(1.5, -2.0, 1.2)), size=0.05),
+        ],
+    )
+
+    image = renderer.render(scene, config(background_color="#3d3d3d", ambient_intensity=0.08, camera=_perspective((9, -12, 8), (0, 0, 1))))
+
+    check(image, "shadows", update_references)
+
+
+@pytest.mark.parametrize("view", ["front", "right", "back", "left", "front-right", "back-left"])
+def test_portal_cube(renderer: WGPURenderer, update_references: bool, view: str) -> None:
+    from manimx.examples.portal_cube import portal_cube, views
+
+    image = renderer.render(portal_cube(), views(480, 270)[view])
+
+    check(image, f"portal_cube_{view}", update_references)

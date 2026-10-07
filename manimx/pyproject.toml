@@ -25,6 +25,7 @@ module-name = "manimx"
 test = [
     "mutmut>=3.4.0",
     "pytest>=8.3.0",
+    "pytest-benchmark>=5.3.0",
     "pytest-cov>=6.0.0",
     "syrupy>=4.8.0",
 ]
