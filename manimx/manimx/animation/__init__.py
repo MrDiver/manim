@@ -7,6 +7,7 @@ draw.
 
 from .kinds import COLOR, DISCRETE, PATH, ROTATION, SCALAR, SignalKind
 from .signals import DerivedSignal, RootSignal, Signal, TimeSignals, Vector3Signal, derive
+from .snapshot import version_token
 
 __all__ = [
     "COLOR",
@@ -21,4 +22,5 @@ __all__ = [
     "TimeSignals",
     "Vector3Signal",
     "derive",
+    "version_token",
 ]

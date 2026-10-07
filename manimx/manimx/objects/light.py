@@ -12,6 +12,7 @@ convention); use the ``aimed`` constructors to point them.
 from __future__ import annotations
 
 import math
+from collections.abc import Hashable, Mapping
 from dataclasses import dataclass
 from typing import Any, Self
 
@@ -85,7 +86,8 @@ class SpotLight(Light):
     inner_cone_angle: float = 0.0
     outer_cone_angle: float = math.pi / 4
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, versions: Mapping[str, Hashable] | None = None) -> None:
+        Light.__post_init__(self, versions)
         if not 0.0 <= self.inner_cone_angle < self.outer_cone_angle <= math.pi / 2:
             raise ValueError("cone angles need 0 <= inner < outer <= pi / 2")
 

@@ -1,16 +1,28 @@
 from __future__ import annotations
 
 import itertools
-from dataclasses import dataclass, field
+from collections.abc import Hashable, Mapping
+from dataclasses import KW_ONLY, InitVar, dataclass, field
 
 from .transform import Quaternion, Transform
 from .versioning import versioned_fields
 
-__all__ = ["Quaternion", "RenderObject"]
+__all__ = ["Quaternion", "RenderObject", "new_uid"]
 
 # Runtime ids are never reused within a process, so renderer caches can key
 # on them without ever confusing a new object with a deleted one.
 _next_uid = itertools.count(1)
+
+
+def new_uid() -> int:
+    """A fresh process-unique uid.
+
+    Objects get one automatically. The animation engine allocates one per
+    scene object up front and passes it to every render object it builds
+    for that scene object (``uid=``), so all snapshots of it share their
+    identity, and the renderer's caches recognize it from frame to frame.
+    """
+    return next(_next_uid)
 
 
 @dataclass(slots=True, eq=False)
@@ -20,30 +32,62 @@ class RenderObject:
     Nodes compare by identity. Geometry and style live only on leaf objects
     such as :class:`Shape2D`; groups only arrange their children.
 
-    :attr:`uid` is unique for the lifetime of the process. Fields declared
-    with :func:`~.versioning.versioned` additionally count their assignments,
-    see :meth:`version`.
+    Identity and change tracking, which the renderer's caches rely on:
+
+    * :attr:`uid` is unique for the lifetime of the process. Pass ``uid=``
+      to give a new object the identity of an earlier one: a snapshot of
+      the same scene object at another time.
+    * Fields declared with :func:`~.versioning.versioned` have a version
+      token, see :meth:`version`. By default it counts assignments. Pass
+      ``versions={"points": token, ...}`` to set the tokens explicitly,
+      e.g. from the versions of the signals a snapshot was built from: then
+      two snapshots built from unchanged signals have equal tokens and
+      share cached data. Assigning a field afterwards still gives it a new,
+      distinct token.
     """
 
     id: str
     transform: Transform = field(default_factory=Transform)
     visible: bool = True
-    uid: int = field(default_factory=lambda: next(_next_uid), init=False)
-    _versions: dict[str, int] = field(default_factory=dict, init=False, repr=False)
+    _: KW_ONLY
+    uid: int = field(default_factory=new_uid)
+    versions: InitVar[Mapping[str, Hashable] | None] = None
+    _versions: dict[str, Hashable] = field(default_factory=dict, init=False, repr=False)
+
+    def __post_init__(self, versions: Mapping[str, Hashable] | None) -> None:
+        if not versions:
+            return
+        known = versioned_fields(type(self))
+        unknown = sorted(set(versions) - known)
+        if unknown:
+            raise ValueError(f"{type(self).__name__} has no versioned fields {unknown}")
+        self._versions.update(versions)
 
     def __setattr__(self, name: str, value: object) -> None:
         object.__setattr__(self, name, value)
+        # _versions is declared before every subclass field, so it exists by
+        # the time __init__ assigns a versioned field.
         if name in versioned_fields(type(self)):
-            try:
-                versions = self._versions
-            except AttributeError:  # assigned by __init__ before _versions exists
-                return
-            versions[name] = versions.get(name, 0) + 1
+            self._versions[name] = _next_token(self._versions.get(name, 0))
 
-    def version(self, *fields: str) -> tuple[int, ...]:
-        """Assignment count of each named versioned field (a cache key part)."""
+    def version(self, *fields: str) -> tuple[Hashable, ...]:
+        """Version token of each named versioned field (a cache key part).
+
+        Tokens are only compared for equality: equal tokens promise equal
+        field values.
+        """
         known = versioned_fields(type(self))
         for name in fields:
             if name not in known:
                 raise ValueError(f"{type(self).__name__}.{name} is not versioned")
         return tuple(self._versions.get(name, 0) for name in fields)
+
+
+def _next_token(token: Hashable) -> Hashable:
+    """The token after an assignment: counters count up; explicit tokens
+    get a suffix, so the result differs from every token seen before."""
+    if isinstance(token, int):
+        return token + 1
+    if isinstance(token, tuple) and len(token) == 2 and token[0] == "assigned":
+        return ("assigned", (token[1][0], token[1][1] + 1))
+    return ("assigned", (token, 1))
