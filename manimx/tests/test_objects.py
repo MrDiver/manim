@@ -210,8 +210,14 @@ def test_geometry_matches_manim() -> None:
     np.testing.assert_allclose(rectangle("r", 4, 2).points[0], [2.0, 1.0])
 
 
-def test_shape3d_stores_vertices() -> None:
-    assert Shape3D("tri", vertices=[(0.0, 0.0, 0.0)]).vertices == [(0.0, 0.0, 0.0)]
+def test_shape3d_versions_mesh_and_material() -> None:
+    from manimx import PbrMaterial, sphere_mesh
+
+    shape = Shape3D("mesh")
+    before = shape.version("mesh", "material")
+    shape.material = PbrMaterial(roughness=0.1)
+    shape.mesh = sphere_mesh()
+    assert shape.version("mesh", "material") == (before[0] + 1, before[1] + 1)
 
 
 # --- reference image helper ---------------------------------------------------

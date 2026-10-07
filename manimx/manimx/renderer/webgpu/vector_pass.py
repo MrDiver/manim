@@ -24,11 +24,11 @@ from .vector_batch import DRAW_INDIRECT_DTYPE, VectorBatch
 
 _STORAGE = wgpu.BufferUsage.STORAGE
 
-# Standard "over" blending for straight (non-premultiplied) alpha. In mask
-# passes the alpha channel accumulates the union of all mask shapes.
+# "Over" blending for premultiplied colors (see fs_main in vector.wgsl). In
+# mask passes the alpha channel accumulates the union of all mask shapes.
 _ALPHA_BLEND = {
     "color": {
-        "src_factor": wgpu.BlendFactor.src_alpha,
+        "src_factor": wgpu.BlendFactor.one,
         "dst_factor": wgpu.BlendFactor.one_minus_src_alpha,
         "operation": wgpu.BlendOperation.add,
     },

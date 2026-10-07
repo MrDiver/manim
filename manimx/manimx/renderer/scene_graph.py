@@ -11,6 +11,9 @@ scope (they form the mask and are not drawn themselves); the leaves of its
 content subtree carry the index of the scope. Scopes nest: a mask inside
 another scope's content is itself clipped by that outer scope, so the
 innermost scope already describes the combined mask.
+
+Lights are collected with their world matrices wherever they are in the
+tree (inside a mask they are ignored, since masks only contribute alpha).
 """
 
 from __future__ import annotations
@@ -19,7 +22,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..objects import ClippingGroup, Group, RenderObject, Shape2D, Shape3D
+from ..objects import ClippingGroup, Group, Light, RenderObject, Shape2D, Shape3D
+from ..objects.path import BezierPath
 
 NO_CLIP = -1
 
@@ -28,7 +32,7 @@ NO_CLIP = -1
 class DrawItem:
     """One drawable leaf with everything resolved from its ancestors."""
 
-    obj: Shape2D | Shape3D
+    obj: BezierPath | Shape3D
     world: np.ndarray
     """Local-to-world 4x4 matrix: product of all ancestor transforms."""
     order: int
@@ -48,12 +52,19 @@ class ClipScope:
     """Leaves forming the mask, drawn into the mask instead of the frame."""
 
 
+@dataclass(frozen=True, slots=True, eq=False)
+class LightItem:
+    light: Light
+    world: np.ndarray
+
+
 @dataclass(slots=True, eq=False)
 class FlatScene:
     items: list[DrawItem] = field(default_factory=list)
     """Visible leaves in painter's order."""
     clips: list[ClipScope] = field(default_factory=list)
     """Clip scopes, every parent before its children."""
+    lights: list[LightItem] = field(default_factory=list)
 
 
 def flatten_scene(root: RenderObject) -> FlatScene:
@@ -103,7 +114,12 @@ def _walk(
     # Child transforms compose with the parent: world = parent @ local.
     world = parent_world @ obj.transform.matrix()
 
-    if isinstance(obj, (Shape2D, Shape3D)):
+    if isinstance(obj, Light):
+        if mask_of is None:
+            scene.lights.append(LightItem(obj, world))
+    elif isinstance(obj, Shape3D) and mask_of is not None:
+        raise NotImplementedError("3D meshes cannot be part of a mask")
+    elif isinstance(obj, (BezierPath, Shape3D)):
         target = scene.items if mask_of is None else mask_of.mask
         target.append(DrawItem(obj, world, order=len(target), clip=clip))
     elif isinstance(obj, Group):

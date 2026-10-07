@@ -8,8 +8,9 @@ from dataclasses import dataclass, field
 import numpy as np
 import quaternion
 
+from ..objects.material import linear_rgb
 from ..objects.transform import Transform
-from ..utils.color import BLACK, ManimColor, ParsableManimColor
+from ..utils.color import BLACK, WHITE, ManimColor, ParsableManimColor
 
 DEFAULT_FRAME_HEIGHT = 8.0
 """Manim's default frame height in world units."""
@@ -102,6 +103,13 @@ class RenderConfig:
     """Seconds, exposed to shaders as ``frame.time``."""
     layer_depth_step: float = 2e-7
     """Depth offset between consecutive 2D layers, see ``vector.wgsl``."""
+    ambient_color: ParsableManimColor = WHITE
+    ambient_intensity: float = 0.15
+    """Constant ambient light on meshes, on top of the scene's lights."""
+    exposure: float = 1.0
+    """Multiplies lit mesh colors before tone mapping."""
+    default_lights: bool = True
+    """Light meshes with a key light when the scene contains no lights."""
 
     @property
     def aspect_ratio(self) -> float:
@@ -115,3 +123,8 @@ class RenderConfig:
     def background_rgba(self) -> tuple[float, float, float, float]:
         r, g, b = ManimColor.parse(self.background_color).to_rgb()
         return (float(r), float(g), float(b), self.background_opacity)
+
+    @property
+    def ambient_linear(self) -> tuple[float, float, float]:
+        r, g, b = np.array(linear_rgb(self.ambient_color)) * self.ambient_intensity
+        return (float(r), float(g), float(b))

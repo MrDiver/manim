@@ -11,8 +11,9 @@ encodes the passes:
     for each clip scope (parents first):
         mask pass: draw the mask shapes into a scratch target,
                    copy the result into the scope's layer of the mask array
-    frame pass: clear -> opaque draws -> transparent draws (sorted);
-                clipped content multiplies its alpha by its mask layer
+    frame pass: clear -> lit meshes (Shape3D) -> opaque vector draws
+                -> transparent vector draws (sorted); clipped content
+                multiplies its alpha by its mask layer
 
 :meth:`WGPURenderer.render_texture` returns the resolved GPU texture without
 reading it back, which is the hook for a later compositor.
@@ -28,10 +29,12 @@ from ..base import Renderer
 from ..config import RenderConfig
 from ..scene_graph import flatten_scene
 from .gpu import COLOR_FORMAT, DEPTH_FORMAT, GPUContext
+from .mesh_batch import MeshBatch
+from .mesh_pass import MeshPass
 from .vector_batch import VectorBatch
 from .vector_pass import VectorPass
 
-# Mirrors `struct Frame` in the shaders.
+# Mirrors `struct Frame` in shaders/frame.wgsl.
 FRAME_DTYPE = np.dtype(
     [
         ("view", "<f4", (4, 4)),
@@ -43,10 +46,12 @@ FRAME_DTYPE = np.dtype(
         ("viewport", "<f4", 4),
         ("time", "<f4"),
         ("layer_depth_step", "<f4"),
-        ("_pad", "<f4", 2),
+        ("light_count", "<u4"),
+        ("exposure", "<f4"),
+        ("ambient", "<f4", 4),
     ]
 )
-assert FRAME_DTYPE.itemsize == 368
+assert FRAME_DTYPE.itemsize == 384
 
 
 class WGPURenderer(Renderer):
@@ -60,6 +65,7 @@ class WGPURenderer(Renderer):
             usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST,
         )
         self._vector_pass = VectorPass(self.context, self._frame_uniform)
+        self._mesh_pass = MeshPass(self.context, self._frame_uniform)
         self._targets: _RenderTargets | None = None
 
     def render(self, root: RenderObject, config: RenderConfig) -> np.ndarray:
@@ -75,12 +81,14 @@ class WGPURenderer(Renderer):
     def render_texture(self, root: RenderObject, config: RenderConfig) -> wgpu.GPUTexture:
         """Render ``root`` into a single-sampled RGBA texture on the GPU."""
         scene = flatten_scene(root)
-        batch = VectorBatch.build(scene, self.cache, config.camera.position)
+        vectors = VectorBatch.build(scene, self.cache, config.camera.position)
+        meshes = MeshBatch.build(scene, self.cache, config)
         targets = self._render_targets(config, mask_count=len(scene.clips))
 
         device = self.context.device
-        device.queue.write_buffer(self._frame_uniform, 0, _frame_uniform_data(config))
-        self._vector_pass.prepare(batch, targets.mask_layers_view)
+        self._vector_pass.prepare(vectors, targets.mask_layers_view)
+        light_count = self._mesh_pass.prepare(meshes, targets.mask_layers_view)
+        device.queue.write_buffer(self._frame_uniform, 0, _frame_uniform_data(config, light_count))
 
         encoder = device.create_command_encoder(label="frame")
         for scope in range(len(scene.clips)):
@@ -93,6 +101,7 @@ class WGPURenderer(Renderer):
             color_attachments=[targets.color_attachment(config.background_rgba)],
             depth_stencil_attachment=targets.depth_attachment(),
         )
+        self._mesh_pass.draw(frame_pass, config.msaa_samples)
         self._vector_pass.draw_frame(frame_pass, config.msaa_samples)
         frame_pass.end()
         device.queue.submit([encoder.finish()])
@@ -107,7 +116,7 @@ class WGPURenderer(Renderer):
         return targets
 
 
-def _frame_uniform_data(config: RenderConfig) -> np.ndarray:
+def _frame_uniform_data(config: RenderConfig, light_count: int) -> np.ndarray:
     camera = config.camera
     view = camera.view_matrix()
     projection = camera.projection_matrix(config.aspect_ratio)
@@ -127,6 +136,9 @@ def _frame_uniform_data(config: RenderConfig) -> np.ndarray:
     )
     frame["time"] = config.time
     frame["layer_depth_step"] = config.layer_depth_step
+    frame["light_count"] = light_count
+    frame["exposure"] = config.exposure
+    frame["ambient"][:3] = config.ambient_linear
     return frame
 
 

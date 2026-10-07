@@ -155,3 +155,56 @@ def test_blender_scene(renderer: WGPURenderer, update_references: bool, view: st
     image = renderer.render(blender_scene(), views(480, 270)[view])
 
     check(image, f"blender_scene_{view}", update_references)
+
+
+def _perspective(eye: tuple, target: tuple) -> object:
+    from manimx.renderer import Camera
+
+    return Camera.look_at(eye, target, field_of_view=math.radians(45), near=0.5, far=200.0)
+
+
+def test_meshes_and_lights(renderer: WGPURenderer, update_references: bool) -> None:
+    from manimx import DirectionalLight, PbrMaterial, PointLight, Shape3D, SpotLight, Texture, box_mesh, sphere_mesh, torus_mesh
+    from manimx.examples.blender_scene import _ground
+
+    i, j = np.indices((64, 64))
+    checker = ((i // 8 + j // 8) % 2 * 200 + 40).astype(np.uint8)
+    texture = Texture(np.stack([checker, checker, checker, np.full_like(checker, 255)], axis=-1))
+    shapes = [
+        Shape3D("plastic", mesh=sphere_mesh(1.2), material=PbrMaterial(RED, roughness=0.3), transform=Transform(position=(-3, 0, 1.2))),
+        Shape3D("gold", mesh=sphere_mesh(1.2), material=PbrMaterial("#d4af37", metallic=1.0, roughness=0.25), transform=Transform(position=(0, 0, 1.2))),
+        Shape3D("torus", mesh=torus_mesh(1.0, 0.4), material=PbrMaterial(BLUE, roughness=0.6), transform=Transform(position=(3, 0, 1.2)).rotated(1.0, (1, 0, 0))),
+        Shape3D("box", mesh=box_mesh(2, 2, 2), material=PbrMaterial(WHITE, base_color_texture=texture), transform=Transform(position=(0, -4, 1)).rotated(0.6, (0, 0, 1))),
+        SpotLight.aimed("spot", (0, -4, 6), (0, -4, 0), color=YELLOW, intensity=60, inner_cone_angle=0.25, outer_cone_angle=0.35),
+        DirectionalLight.aimed("sun", (-1, 1, -2), intensity=2.5),
+        PointLight("lamp", color=GREEN, intensity=15, transform=Transform(position=(-3, -2, 2))),
+    ]
+    scene = Group("root", children=[_ground(), *shapes])
+
+    image = renderer.render(scene, config(background_color="#3d3d3d", camera=_perspective((9, -12, 7), (0, -1, 1))))
+
+    check(image, "meshes_and_lights", update_references)
+
+
+def test_curves_3d(renderer: WGPURenderer, update_references: bool) -> None:
+    from manimx import Curve3D
+    from manimx.examples.blender_scene import _ground
+
+    rainbow = [RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE]
+    curves = [
+        Curve3D.parametric("helix", lambda t: (2 * math.cos(t), 2 * math.sin(t), 0.25 * t), (0, 8 * math.pi), 128, stroke=Stroke(rainbow, width=12)),
+        Curve3D.parametric(
+            "trefoil",
+            lambda t: (math.sin(t) + 2 * math.sin(2 * t), math.cos(t) - 2 * math.cos(2 * t), -math.sin(3 * t)),
+            (0, 2 * math.pi),
+            96,
+            stroke=Stroke([WHITE, BLUE], width=[4, 30, 4]),
+            transform=Transform(position=(7, -2, 3)),
+        ),
+        Curve3D.from_corners("zigzag", [(0, 0, 0), (1, 0, 2), (2, 0, 0), (3, 1, 2), (4, 2, 0)], stroke=Stroke(YELLOW, width=25, joint=JointType.ROUND, cap=CapStyle.ROUND), transform=Transform(position=(-8, 3, 0))),
+    ]
+    scene = Group("root", children=[_ground(), *curves])
+
+    image = renderer.render(scene, config(background_color="#3d3d3d", camera=_perspective((14, -14, 10), (0, 0, 2))))
+
+    check(image, "curves_3d", update_references)

@@ -28,19 +28,7 @@
 // Bindings (layouts mirror the numpy dtypes in vector_batch.py)
 // ---------------------------------------------------------------------------
 
-struct Frame {
-    view: mat4x4<f32>,
-    projection: mat4x4<f32>,
-    view_projection: mat4x4<f32>,
-    inverse_view: mat4x4<f32>,
-    inverse_projection: mat4x4<f32>,
-    camera_position: vec4<f32>,
-    viewport: vec4<f32>,        // width, height, 1 / width, 1 / height
-    time: f32,
-    layer_depth_step: f32,
-    _pad0: f32,
-    _pad1: f32,
-};
+#include "frame.wgsl"
 
 const NO_CLIP: i32 = -1;
 
@@ -48,9 +36,13 @@ struct Object {
     model: mat4x4<f32>,
     layer: f32,                 // fill layer; the stroke uses layer + 1
     clip: i32,                  // layer in `mask_layers`, or NO_CLIP
-    _pad0: f32,
-    _pad1: f32,
+    flags: u32,                 // FLAG_* bits
+    _pad: f32,
 };
+
+/// The stroke ribbon faces the camera (Curve3D) instead of lying in the
+/// object's XY plane (Shape2D).
+const FLAG_CAMERA_FACING: u32 = 1u;
 
 const KIND_FILL: u32 = 0u;
 const KIND_STROKE: u32 = 1u;
@@ -73,9 +65,8 @@ struct FillVertex {
 };
 
 struct StrokePoint {
-    position: vec2<f32>,        // local 2D
+    position: vec3<f32>,        // local; z = 0 for Shape2D
     width: f32,                 // full stroke width in world units
-    _pad: f32,
     color: vec4<f32>,
 };
 
@@ -92,7 +83,6 @@ struct StrokeCurve {
     _pad: u32,
 };
 
-@group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var<storage, read> objects: array<Object>;
 @group(0) @binding(2) var<storage, read> instances: array<Instance>;
 @group(0) @binding(3) var<storage, read> fill_vertices: array<FillVertex>;
@@ -156,11 +146,15 @@ struct FragmentOutput {
     @builtin(frag_depth) depth: f32,
 };
 
-/// Frame passes: color plus the layered depth.
+/// Vector layer passes: premultiplied color plus the layered depth.
+///
+/// The vector layer starts out transparent and is composited over the lit
+/// 3D layer later, so colors are premultiplied by alpha: that makes MSAA
+/// resolve and "over" blending exact for partially covered pixels.
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOutput {
     var out: FragmentOutput;
-    out.color = shade(in);
+    out.color = premultiplied(shade(in));
     out.depth = layered_depth(in.clip_position.z, in.layer);
     return out;
 }
@@ -168,7 +162,11 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 /// Mask passes render without a depth buffer: color (alpha) only.
 @fragment
 fn fs_mask(in: VertexOutput) -> @location(0) vec4<f32> {
-    return shade(in);
+    return premultiplied(shade(in));
+}
+
+fn premultiplied(color: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(color.rgb * color.a, color.a);
 }
 
 fn shade(in: VertexOutput) -> vec4<f32> {
@@ -211,9 +209,20 @@ fn fill_vertex(object: Object, vertex_index: u32) -> VertexOutput {
 }
 
 // ---------------------------------------------------------------------------
-// Stroke: one instance per cubic curve, expanded into a flat ribbon that lies
-// in the shape's plane. Widths are in world units and ignore the object's
-// scale, like Manim's stroke widths.
+// Stroke: one instance per cubic curve, expanded into a flat ribbon. Widths
+// are in world units and ignore the object's scale, like Manim's stroke
+// widths.
+//
+// The ribbon is built around a "ribbon normal" n: its edges are offset along
+// cross(n, tangent), and joint and cap fans rotate around n.
+//
+//   Shape2D: n is the shape's plane normal, so the ribbon lies in the plane.
+//   Curve3D: n points from the curve towards the camera at every point, so
+//            the ribbon always faces the viewer. Being in world units, it
+//            gets thinner with distance under a perspective camera.
+//
+// Neighbouring curves evaluate n at their shared anchor, so they agree on
+// the joint geometry.
 //
 // Vertex index layout of one curve instance:
 //
@@ -249,21 +258,42 @@ struct Curve {
     p: array<vec3<f32>, 4>,
     width: vec4<f32>,
     color: array<vec4<f32>, 4>,
-    normal: vec3<f32>,          // plane normal of the shape in world space
+    normal: vec3<f32>,          // ribbon normal, see `oriented`
+    facing: bool,               // FLAG_CAMERA_FACING
 };
 
 fn load_curve(object: Object, first_point: u32) -> Curve {
     var curve: Curve;
     for (var i = 0u; i < 4u; i++) {
         let point = stroke_points[first_point + i];
-        curve.p[i] = (object.model * vec4<f32>(point.position, 0.0, 1.0)).xyz;
+        curve.p[i] = (object.model * vec4<f32>(point.position, 1.0)).xyz;
         curve.width[i] = point.width;
         curve.color[i] = point.color;
     }
     let x_axis = (object.model * vec4<f32>(1.0, 0.0, 0.0, 0.0)).xyz;
     let y_axis = (object.model * vec4<f32>(0.0, 1.0, 0.0, 0.0)).xyz;
     curve.normal = normalize(cross(x_axis, y_axis));
+    curve.facing = (object.flags & FLAG_CAMERA_FACING) != 0u;
     return curve;
+}
+
+/// The curve with its ribbon normal set for a ribbon vertex at `point`.
+fn oriented(curve: Curve, point: vec3<f32>) -> Curve {
+    var result = curve;
+    if curve.facing {
+        result.normal = towards_camera(point);
+    }
+    return result;
+}
+
+/// Unit vector from `point` towards the viewer.
+fn towards_camera(point: vec3<f32>) -> vec3<f32> {
+    // Orthographic projections keep w = 1: every point sees the camera
+    // along the same direction, the camera's backwards (+z) axis.
+    if frame.projection[3][3] == 1.0 {
+        return normalize((frame.inverse_view * vec4<f32>(0.0, 0.0, 1.0, 0.0)).xyz);
+    }
+    return normalize(frame.camera_position.xyz - point);
 }
 
 fn bernstein(t: f32) -> vec4<f32> {
@@ -303,9 +333,14 @@ fn curve_tangent(curve: Curve, t: f32) -> vec3<f32> {
     return normalize(curve.p[3] - curve.p[0] + vec3<f32>(1e-9, 0.0, 0.0));
 }
 
-/// In-plane unit vector to the left of the tangent.
+/// Unit vector to the left of the tangent, perpendicular to the ribbon normal.
 fn left_of(curve: Curve, tangent: vec3<f32>) -> vec3<f32> {
-    return normalize(cross(curve.normal, tangent));
+    let left = cross(curve.normal, tangent);
+    if length(left) < 1e-6 {
+        // The curve points straight at the camera; any perpendicular will do.
+        return normalize(cross(curve.normal, vec3<f32>(0.577, 0.577, 0.577)));
+    }
+    return normalize(left);
 }
 
 /// Rotate `v` (lying in the shape's plane) by `angle` around the plane normal.
@@ -345,7 +380,7 @@ fn miter_succeeds(own: vec3<f32>, other: vec3<f32>, joint: u32) -> bool {
 }
 
 fn stroke_vertex(object: Object, record: StrokeCurve, vertex_index: u32) -> VertexOutput {
-    let curve = load_curve(object, record.first_point);
+    var curve = load_curve(object, record.first_point);
 
     var out: VertexOutput;
     out.uv = vec2<f32>(0.0);
@@ -364,6 +399,7 @@ fn stroke_vertex(object: Object, record: StrokeCurve, vertex_index: u32) -> Vert
     let at_end = vertex_index >= RIBBON_VERTICES + FAN_VERTICES;
     let t = select(0.0, 1.0, at_end);
     let center = curve_point(curve, t);
+    curve = oriented(curve, center);
     let half_width = curve_half_width(curve, t);
     let tangent = curve_tangent(curve, t);
     let left = left_of(curve, tangent);
@@ -398,7 +434,7 @@ fn stroke_vertex(object: Object, record: StrokeCurve, vertex_index: u32) -> Vert
 }
 
 /// World position (xyz) and curve parameter (w) of a ribbon vertex.
-fn ribbon_position(object: Object, curve: Curve, record: StrokeCurve, vertex_index: u32) -> vec4<f32> {
+fn ribbon_position(object: Object, base: Curve, record: StrokeCurve, vertex_index: u32) -> vec4<f32> {
     // Two triangles per segment: (a-left, a-right, b-left), (b-left, a-right, b-right).
     let segment = vertex_index / 6u;
     let corner = vertex_index % 6u;
@@ -406,6 +442,7 @@ fn ribbon_position(object: Object, curve: Curve, record: StrokeCurve, vertex_ind
     let on_left = corner == 0u || corner == 2u || corner == 3u;
 
     let t = f32(segment + select(0u, 1u, at_b)) / f32(SEGMENTS);
+    let curve = oriented(base, curve_point(base, t));
     let tangent = curve_tangent(curve, t);
     var offset = left_of(curve, tangent);
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,8 +33,32 @@ class GPUContext:
         return GPUContext(device)
 
     def shader(self, filename: str) -> wgpu.GPUShaderModule:
-        code = (SHADER_DIRECTORY / filename).read_text(encoding="utf-8")
-        return self.device.create_shader_module(label=filename, code=code)
+        return self.device.create_shader_module(label=filename, code=load_wgsl(filename))
+
+
+_INCLUDE = re.compile(r'^#include "([\w./-]+)"\s*$', re.MULTILINE)
+
+
+def load_wgsl(filename: str, included: set[str] | None = None) -> str:
+    """WGSL source with ``#include "file.wgsl"`` lines replaced by that file.
+
+    WGSL has no module system; this lets pipelines share structs and
+    functions (frame uniforms, material evaluation, lighting) so each piece
+    can later move to another pass, e.g. lighting into a deferred pass.
+    Each file is included at most once per shader.
+    """
+    if included is None:
+        included = set()
+    included.add(filename)
+    code = (SHADER_DIRECTORY / filename).read_text(encoding="utf-8")
+
+    def include(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name in included:
+            return f"// {name} already included"
+        return load_wgsl(name, included)
+
+    return _INCLUDE.sub(include, code)
 
 
 class GrowableBuffer:

@@ -1,4 +1,4 @@
-"""Pack all Shape2D draws of a frame into shared GPU-ready arrays.
+"""Pack all vector draws (Shape2D, Curve3D) of a frame into shared GPU arrays.
 
 This module is pure numpy: it builds the "super buffers" that ``vector.wgsl``
 reads and the indirect draw commands that index into them. Keeping it free of
@@ -6,7 +6,7 @@ GPU calls makes the data layout testable on its own.
 
 Buffers (dtypes mirror the WGSL structs one to one):
 
-* ``objects``        one entry per Shape2D: model matrix, depth layer, clip
+* ``objects``        one entry per path: model matrix, depth layer, clip, flags
 * ``instances``      what each draw instance generates (fill or stroke curve)
 * ``fill_vertices``  all tessellated fill triangles, concatenated
 * ``stroke_points``  all control points with per-point stroke width / color
@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ...objects import Shape2D
-from ...objects.shape2d import POINTS_PER_CURVE, TOLERANCE_FOR_POINT_EQUALITY
+from ...objects.path import POINTS_PER_CURVE, TOLERANCE_FOR_POINT_EQUALITY, BezierPath
 from ..cache import MobjectDataCache
 from ..scene_graph import NO_CLIP, DrawItem, FlatScene
 from ..tessellation import FillMesh, tessellate_fill
@@ -37,12 +37,15 @@ KIND_FILL = 0
 KIND_STROKE = 1
 NO_NEIGHBOR = -1
 
+FLAG_CAMERA_FACING = 1
+"""Object flag: the stroke ribbon faces the camera (all paths except Shape2D)."""
+
 # Keep in sync with STROKE_VERTEX_COUNT in vector.wgsl:
 # SEGMENTS * 6 ribbon vertices + 2 fans of FAN_TRIANGLES * 3 vertices.
 STROKE_VERTEX_COUNT = 24 * 6 + 2 * 8 * 3
 
 OBJECT_DTYPE = np.dtype(
-    [("model", "<f4", (4, 4)), ("layer", "<f4"), ("clip", "<i4"), ("_pad", "<f4", 2)]
+    [("model", "<f4", (4, 4)), ("layer", "<f4"), ("clip", "<i4"), ("flags", "<u4"), ("_pad", "<f4")]
 )
 INSTANCE_DTYPE = np.dtype(
     [("kind", "<u4"), ("object", "<u4"), ("curve", "<u4"), ("_pad", "<u4")]
@@ -51,7 +54,7 @@ FILL_VERTEX_DTYPE = np.dtype(
     [("position", "<f4", 2), ("uv", "<f4", 2), ("color", "<f4", 4), ("side", "<f4"), ("_pad", "<f4", 3)]
 )
 STROKE_POINT_DTYPE = np.dtype(
-    [("position", "<f4", 2), ("width", "<f4"), ("_pad", "<f4"), ("color", "<f4", 4)]
+    [("position", "<f4", 3), ("width", "<f4"), ("color", "<f4", 4)]
 )
 STROKE_CURVE_DTYPE = np.dtype(
     [
@@ -129,7 +132,7 @@ class _BatchBuilder:
 
     def add(self, item: DrawItem, mask_of: int = NO_CLIP) -> None:
         shape = item.obj
-        if not isinstance(shape, Shape2D) or shape.num_curves == 0:
+        if not isinstance(shape, BezierPath) or shape.num_curves == 0:
             return
         object_index = len(self.objects)
         # Two layers per object: the fill at 2 * order, its stroke one above.
@@ -138,9 +141,10 @@ class _BatchBuilder:
         entry["model"] = item.world.T  # WGSL matrices are column-major
         entry["layer"] = layer
         entry["clip"] = item.clip
+        entry["flags"] = 0 if isinstance(shape, Shape2D) else FLAG_CAMERA_FACING
         self.objects.append(entry)
 
-        center = item.world @ np.append(shape.points.mean(axis=0), [0.0, 1.0])
+        center = item.world @ np.append(shape.points_3d().mean(axis=0), 1.0)
         distance = float(np.linalg.norm(center[:3] - self.camera_position))
         clipped = item.clip != NO_CLIP
         for draw in (
@@ -155,7 +159,9 @@ class _BatchBuilder:
 
     # -- fill ---------------------------------------------------------------
 
-    def _add_fill(self, shape: Shape2D, object_index: int, distance: float, layer: int) -> _Draw | None:
+    def _add_fill(self, shape: BezierPath, object_index: int, distance: float, layer: int) -> _Draw | None:
+        if not isinstance(shape, Shape2D):
+            return None  # only 2D shapes have a fill
         opacity = shape.fill.opacity
         if not np.any(opacity > 0.0):
             return None
@@ -179,7 +185,7 @@ class _BatchBuilder:
 
     # -- stroke -------------------------------------------------------------
 
-    def _add_stroke(self, shape: Shape2D, object_index: int, distance: float, layer: int) -> _Draw | None:
+    def _add_stroke(self, shape: BezierPath, object_index: int, distance: float, layer: int) -> _Draw | None:
         stroke = shape.stroke
         if not (np.any(stroke.width > 0.0) and np.any(stroke.opacity > 0.0)):
             return None
@@ -187,7 +193,7 @@ class _BatchBuilder:
         first_curve = self.stroke_curve_count
 
         points = np.zeros(len(shape.points), STROKE_POINT_DTYPE)
-        points["position"] = shape.points
+        points["position"] = shape.points_3d()
         points["width"] = shape.stroke_widths() * STROKE_WIDTH_SCALE
         points["color"] = shape.stroke_rgba()
         curves = _link_curves(shape, first_point)
@@ -240,7 +246,7 @@ class _BatchBuilder:
         )
 
 
-def _link_curves(shape: Shape2D, first_point: int) -> np.ndarray:
+def _link_curves(shape: BezierPath, first_point: int) -> np.ndarray:
     """Stroke curve records with previous/next links inside each subpath.
 
     Closed subpaths link their last curve back to the first one so the

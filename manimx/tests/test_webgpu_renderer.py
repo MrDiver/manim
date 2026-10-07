@@ -137,3 +137,47 @@ def test_nested_masks_intersect(renderer: WGPURenderer) -> None:
     assert pixel(image, 0.0, 0.0) == (*BLUE.to_int_rgb(), 255)  # in both bands
     assert pixel(image, -1.2, 0.0) == BACKGROUND  # only in the outer band
     assert pixel(image, 1.2, 0.0) == BACKGROUND  # only in the inner band
+
+
+# --- meshes and lights ------------------------------------------------------------
+
+
+def _brightness(image: np.ndarray, x: float, y: float) -> int:
+    return sum(int(channel) for channel in pixel(image, x, y)[:3])
+
+
+def test_mesh_is_lit_from_the_light_side(renderer: WGPURenderer) -> None:
+    from manimx import DirectionalLight, PbrMaterial, Shape3D, sphere_mesh
+
+    sphere = Shape3D("sphere", mesh=sphere_mesh(2.0), material=PbrMaterial("#FFFFFF", roughness=1.0))
+    light = DirectionalLight.aimed("sun", (1.0, 0.0, 0.0))  # shines towards +x
+
+    image = render(renderer, sphere, light, ambient_intensity=0.0)
+
+    assert _brightness(image, -1.5, 0.0) > 200  # faces the light
+    assert _brightness(image, 1.5, 0.0) == 0  # faces away, no ambient
+
+
+def test_spot_light_cone(renderer: WGPURenderer) -> None:
+    from manimx import PbrMaterial, Shape3D, SpotLight, box_mesh
+
+    floor = Shape3D("floor", mesh=box_mesh(8.0, 8.0, 0.1), material=PbrMaterial("#FFFFFF", roughness=1.0))
+    spot = SpotLight.aimed("spot", (0.0, 0.0, 4.0), (0.0, 0.0, 0.0), intensity=40.0, outer_cone_angle=0.3)
+
+    image = render(renderer, floor, spot, ambient_intensity=0.0)
+
+    assert _brightness(image, 0.0, 0.0) > 200  # inside the cone
+    assert _brightness(image, 3.0, 0.0) == 0  # outside the cone
+
+
+def test_meshes_and_vectors_share_depth(renderer: WGPURenderer) -> None:
+    from manimx import PbrMaterial, Shape3D, box_mesh
+
+    wall = Shape3D("wall", mesh=box_mesh(4.0, 4.0, 0.2), material=PbrMaterial("#000000", roughness=1.0))
+    behind = square("behind", fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(0.0, 0.0, -1.0)))
+    front = circle("front", radius=0.5, fill=Fill(BLUE, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(1.0, 0.0, 1.0)))
+
+    image = render(renderer, front, wall, behind, ambient_intensity=0.0, default_lights=False)
+
+    assert pixel(image, -1.5, 0.0)[:3] == (0, 0, 0)  # the wall hides the red square
+    assert pixel(image, 1.0, 0.0) == (*BLUE.to_int_rgb(), 255)  # the circle is in front
