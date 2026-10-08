@@ -123,7 +123,7 @@ def test_remove_objects_command_drops_whole_subtree() -> None:
 
 def _filled_area(points: np.ndarray) -> float:
     """Area covered by a fill mesh, using the parabolic segment rule."""
-    mesh = tessellate_fill(points, np.ones((len(points), 4)))
+    mesh = tessellate_fill(points)
     triangles = mesh.positions.reshape(-1, 3, 2)
     sides = mesh.side[::3]
     edges1, edges2 = triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
@@ -163,19 +163,28 @@ def test_tessellation_closes_open_paths() -> None:
 def test_tessellation_skips_degenerate_paths() -> None:
     line = Shape2D.from_corners("l", [(0, 0), (1, 0)]).points
 
-    assert len(tessellate_fill(line, np.ones((4, 4)))) == 0
-    assert len(tessellate_fill(np.zeros((0, 2)), np.zeros((0, 4)))) == 0
+    assert len(tessellate_fill(line)) == 0
+    assert len(tessellate_fill(np.zeros((0, 2)))) == 0
 
 
-def test_tessellation_interpolates_point_colors() -> None:
-    points = square("s").points
-    colors = np.zeros((len(points), 4))
-    colors[:, 0] = np.linspace(0.0, 1.0, len(points))
+def test_tessellation_records_where_every_vertex_comes_from() -> None:
+    """Vertices carry (curve, t) instead of a color: the GPU colors them from
+    the shape's per-point fill colors, so color changes never re-tessellate."""
+    points = np.vstack([arc_points(1.0), arc_points(0.5)])  # two subpaths
+    mesh = tessellate_fill(points)
+    curves = points.reshape(-1, 4, 2)
 
-    mesh = tessellate_fill(points, colors)
-
-    assert mesh.colors[:, 0].min() >= 0.0 and mesh.colors[:, 0].max() <= 1.0
-    assert len(np.unique(mesh.colors[:, 0])) > 1
+    assert set(np.unique(mesh.curve)) == set(range(len(curves)))  # both subpaths, global indices
+    assert mesh.t.min() >= 0.0 and mesh.t.max() <= 1.0
+    # Curve triangles start and end on their source cubic.
+    curved = np.flatnonzero(mesh.side != SIDE_SOLID)[::3]
+    for first in curved:
+        for corner in (0, 2):
+            index = first + corner
+            control = curves[mesh.curve[index]]
+            t = mesh.t[index]
+            weights = np.array([(1 - t) ** 3, 3 * (1 - t) ** 2 * t, 3 * (1 - t) * t**2, t**3])
+            np.testing.assert_allclose(mesh.positions[index], weights @ control, atol=1e-9)
 
 
 # --- vector batch -----------------------------------------------------------------
@@ -229,16 +238,16 @@ def test_batch_reuses_cached_fill_mesh_until_points_change() -> None:
     cache = MobjectDataCache()
     shape = circle("c", fill=Fill(opacity=1.0))
     _batch(shape, cache=cache)
-    mesh = cache.get(shape.uid, "fill-mesh", shape.version("points", "fill"))
+    mesh = cache.get(shape.uid, "fill-mesh", shape.version("points"))
     assert mesh is not None
 
     shape.transform = shape.transform.translated((1.0, 0.0, 0.0))
     _batch(shape, cache=cache)
-    assert cache.get(shape.uid, "fill-mesh", shape.version("points", "fill")) is mesh
+    assert cache.get(shape.uid, "fill-mesh", shape.version("points")) is mesh
 
     shape.points = arc_points(2.0)
     _batch(shape, cache=cache)
-    assert cache.get(shape.uid, "fill-mesh", shape.version("points", "fill")) is not mesh
+    assert cache.get(shape.uid, "fill-mesh", shape.version("points")) is not mesh
 
 
 def test_batch_draws_masks_separately_and_clipped_content_transparent() -> None:

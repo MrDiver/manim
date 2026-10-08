@@ -31,22 +31,21 @@ def test_the_animation_ends_exactly_as_the_static_logo(renderer: WGPURenderer) -
     np.testing.assert_array_equal(animated, static)
 
 
-def test_moving_and_turning_never_retriangulates(renderer: WGPURenderer, monkeypatch: pytest.MonkeyPatch) -> None:
-    """While shapes only move and rotate (2.16 s to 3.66 s, after the last
-    lagged fade-in ends), their fills come from the renderer's cache:
-    snapshots keep uid and version tokens."""
+def test_each_shape_is_triangulated_once_for_the_whole_animation(
+    renderer: WGPURenderer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fades, moves, turns and pulses never re-triangulate: snapshots keep
+    uid and version tokens, and fill meshes depend on the points alone
+    (colors and opacity are looked up per point on the GPU)."""
     prepared = AnimatedLogo().prepare()
     calls = []
     original = vector_batch.tessellate_fill
     monkeypatch.setattr(vector_batch, "tessellate_fill", lambda *args: calls.append(1) or original(*args))
 
-    renderer.render(prepared.state_at(2.2), config(160, 90))
-    first = len(calls)
-    for t in np.linspace(2.25, 3.6, 10):
+    for t in np.linspace(0.0, prepared.duration, 40):
         renderer.render(prepared.state_at(t), config(160, 90))
 
-    assert first <= 3  # at most once per shape
-    assert len(calls) == first
+    assert len(calls) == 4  # circle, square, triangle and the M
 
 
 def test_motion_blur_through_prepared_scene(renderer: WGPURenderer) -> None:

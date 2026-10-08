@@ -62,6 +62,7 @@ class VectorPass:
             "objects": GrowableBuffer(context, "vector objects", _STORAGE),
             "instances": GrowableBuffer(context, "vector instances", _STORAGE),
             "fill_vertices": GrowableBuffer(context, "fill vertices", _STORAGE),
+            "fill_colors": GrowableBuffer(context, "fill colors", _STORAGE),
             "stroke_points": GrowableBuffer(context, "stroke points", _STORAGE),
             "stroke_curves": GrowableBuffer(context, "stroke curves", _STORAGE),
         }

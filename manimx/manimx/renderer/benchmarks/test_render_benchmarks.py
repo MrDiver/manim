@@ -121,8 +121,7 @@ def test_glyphs_warm_cache_1080p(measure, renderer) -> None:
 def test_glyph_tessellation_cpu(benchmark) -> None:
     """CPU cost of triangulating one complex glyph (what a cache miss costs)."""
     points = np.load(M_GLYPH_POINTS)
-    colors = np.ones((len(points), 4))
-    benchmark(tessellate_fill, points, colors)
+    benchmark(tessellate_fill, points)
 
 
 # --- 3D ---------------------------------------------------------------------------

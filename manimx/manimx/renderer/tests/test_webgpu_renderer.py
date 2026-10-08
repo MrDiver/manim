@@ -87,11 +87,11 @@ def test_back_side_renders_like_front(renderer: WGPURenderer) -> None:
 def test_remove_command_clears_renderer_cache(renderer: WGPURenderer) -> None:
     shape = circle("c", fill=Fill(RED, opacity=1.0))
     render(renderer, shape)
-    assert renderer.cache.get(shape.uid, "fill-mesh", shape.version("points", "fill")) is not None
+    assert renderer.cache.get(shape.uid, "fill-mesh", shape.version("points")) is not None
 
     renderer.submit(RemoveObjects.subtree(shape))
 
-    assert renderer.cache.get(shape.uid, "fill-mesh", shape.version("points", "fill")) is None
+    assert renderer.cache.get(shape.uid, "fill-mesh", shape.version("points")) is None
 
 
 def test_without_msaa(renderer: WGPURenderer) -> None:

@@ -8,7 +8,10 @@ Buffers (dtypes mirror the WGSL structs one to one):
 
 * ``objects``        one entry per path: model matrix, depth layer, clip, flags
 * ``instances``      what each draw instance generates (fill or stroke curve)
-* ``fill_vertices``  all tessellated fill triangles, concatenated
+* ``fill_vertices``  all tessellated fill triangles, concatenated; geometry
+                     only (cached per points version)
+* ``fill_colors``    per-point fill RGBA of every filled shape, rebuilt each
+                     frame; vertices get their color from it on the GPU
 * ``stroke_points``  all control points with per-point stroke width / color
 * ``stroke_curves``  one entry per cubic curve with neighbour links for joints
 
@@ -48,13 +51,13 @@ FLAG_FRONT_ONLY = 2
 STROKE_VERTEX_COUNT = 24 * 6 + 2 * 8 * 3
 
 OBJECT_DTYPE = np.dtype(
-    [("model", "<f4", (4, 4)), ("layer", "<f4"), ("clip", "<i4"), ("flags", "<u4"), ("_pad", "<f4")]
+    [("model", "<f4", (4, 4)), ("layer", "<f4"), ("clip", "<i4"), ("flags", "<u4"), ("fill_colors", "<u4")]
 )
 INSTANCE_DTYPE = np.dtype(
     [("kind", "<u4"), ("object", "<u4"), ("curve", "<u4"), ("_pad", "<u4")]
 )
 FILL_VERTEX_DTYPE = np.dtype(
-    [("position", "<f4", 2), ("uv", "<f4", 2), ("color", "<f4", 4), ("side", "<f4"), ("_pad", "<f4", 3)]
+    [("position", "<f4", 2), ("uv", "<f4", 2), ("side", "<f4"), ("curve", "<u4"), ("t", "<f4"), ("_pad", "<f4")]
 )
 STROKE_POINT_DTYPE = np.dtype(
     [("position", "<f4", 3), ("width", "<f4"), ("color", "<f4", 4)]
@@ -78,7 +81,7 @@ DRAW_INDIRECT_DTYPE = np.dtype(
 
 assert OBJECT_DTYPE.itemsize == 80
 assert INSTANCE_DTYPE.itemsize == 16
-assert FILL_VERTEX_DTYPE.itemsize == 48
+assert FILL_VERTEX_DTYPE.itemsize == 32
 assert STROKE_POINT_DTYPE.itemsize == 32
 assert STROKE_CURVE_DTYPE.itemsize == 32
 assert DRAW_INDIRECT_DTYPE.itemsize == 16
@@ -103,6 +106,8 @@ class VectorBatch:
     objects: np.ndarray
     instances: np.ndarray
     fill_vertices: np.ndarray
+    fill_colors: np.ndarray
+    """(K, 4) float32 RGBA: per-point fill colors of all filled shapes."""
     stroke_points: np.ndarray
     stroke_curves: np.ndarray
     opaque_draws: np.ndarray
@@ -131,6 +136,8 @@ class _BatchBuilder:
     objects: list[np.ndarray] = field(default_factory=list)
     instances: list[tuple[int, int, int, int]] = field(default_factory=list)
     fill_meshes: list[FillMesh] = field(default_factory=list)
+    fill_colors: list[np.ndarray] = field(default_factory=list)
+    fill_color_count: int = 0
     stroke_points: list[np.ndarray] = field(default_factory=list)
     stroke_curves: list[np.ndarray] = field(default_factory=list)
     draws: list[_Draw] = field(default_factory=list)
@@ -175,14 +182,17 @@ class _BatchBuilder:
         opacity = shape.fill.opacity
         if not np.any(opacity > 0.0):
             return None
+        # The triangulation depends on the points only; colors and opacity
+        # are looked up per point on the GPU, so fades never re-tessellate.
         mesh = self.cache.get_or_create(
-            shape.uid,
-            "fill-mesh",
-            shape.version("points", "fill"),
-            lambda: tessellate_fill(shape.points, shape.fill_rgba()),
+            shape.uid, "fill-mesh", shape.version("points"), lambda: tessellate_fill(shape.points)
         )
         if len(mesh) == 0:
             return None
+        colors = shape.fill_rgba().astype(np.float32)
+        self.objects[object_index]["fill_colors"] = self.fill_color_count
+        self.fill_colors.append(colors)
+        self.fill_color_count += len(colors)
         draw = _Draw(
             args=(len(mesh), 1, self.fill_vertex_count, self._add_instance(KIND_FILL, object_index)),
             opaque=bool(np.all(opacity >= 1.0)),
@@ -249,6 +259,7 @@ class _BatchBuilder:
             if self.instances
             else np.zeros(0, INSTANCE_DTYPE),
             fill_vertices=_fill_vertices(self.fill_meshes),
+            fill_colors=np.concatenate(self.fill_colors) if self.fill_colors else np.zeros((0, 4), np.float32),
             stroke_points=_concat(self.stroke_points, STROKE_POINT_DTYPE),
             stroke_curves=_concat(self.stroke_curves, STROKE_CURVE_DTYPE),
             opaque_draws=_draw_args(opaque),
@@ -320,8 +331,9 @@ def _fill_vertices(meshes: list[FillMesh]) -> np.ndarray:
     vertices = np.zeros(sum(len(m) for m in meshes), FILL_VERTEX_DTYPE)
     vertices["position"] = np.concatenate([m.positions for m in meshes])
     vertices["uv"] = np.concatenate([m.uv for m in meshes])
-    vertices["color"] = np.concatenate([m.colors for m in meshes])
     vertices["side"] = np.concatenate([m.side for m in meshes])
+    vertices["curve"] = np.concatenate([m.curve for m in meshes])
+    vertices["t"] = np.concatenate([m.t for m in meshes])
     return vertices
 
 

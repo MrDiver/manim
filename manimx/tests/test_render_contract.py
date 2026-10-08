@@ -90,14 +90,14 @@ def test_snapshots_from_unchanged_signals_share_cached_triangulations() -> None:
         return shape
 
     first = snapshot()
-    mesh = cache.get(uid, "fill-mesh", first.version("points", "fill"))
+    mesh = cache.get(uid, "fill-mesh", first.version("points"))
     assert mesh is not None
 
     x.set(3.0)  # moving never touches the triangulation
     moved = snapshot()
-    assert cache.get(uid, "fill-mesh", moved.version("points", "fill")) is mesh
+    assert cache.get(uid, "fill-mesh", moved.version("points")) is mesh
 
     radius.set(2.0)  # changing the shape does
     grown = snapshot()
-    assert cache.get(uid, "fill-mesh", grown.version("points", "fill")) is not mesh
+    assert cache.get(uid, "fill-mesh", grown.version("points")) is not mesh
     assert len(cache) == 1  # the stale entry was replaced, not kept

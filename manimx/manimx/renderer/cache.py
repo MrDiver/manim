@@ -10,7 +10,7 @@ live objects:
 * ``kind`` names what was derived, e.g. ``"fill-mesh"``. One object can own
   many kinds of data.
 * ``version`` is whatever the producer derived the data from, usually
-  ``obj.version("points", "fill")``. A lookup with a different version is a
+  ``obj.version("points")``. A lookup with a different version is a
   miss, and the next ``put`` replaces the stale entry, so each object keeps at
   most one entry per kind.
 """

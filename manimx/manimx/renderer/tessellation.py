@@ -19,6 +19,13 @@ Curve Rendering using Programmable Graphics Hardware", 2005):
 
 Everything is in the shape's local 2D coordinates; transforms are applied on
 the GPU, so moving a shape never re-tessellates it.
+
+The mesh holds geometry only. Instead of a color, every vertex records
+where it comes from: the index of its source cubic and the parameter ``t``
+on it. The GPU computes the vertex color from the shape's per-point fill
+colors, the same cubic Bezier of the curve's four point colors at ``t``.
+So a triangulation depends on the points alone, and fades or color changes
+never re-tessellate.
 """
 
 from __future__ import annotations
@@ -56,31 +63,33 @@ class FillMesh:
     positions: np.ndarray  # (M, 2) local coordinates
     uv: np.ndarray  # (M, 2) implicit-curve coordinates
     side: np.ndarray  # (M,) one of the SIDE_* constants
-    colors: np.ndarray  # (M, 4) RGBA
+    curve: np.ndarray  # (M,) index of the source cubic (colors come from its points)
+    t: np.ndarray  # (M,) parameter on the source cubic
 
     def __len__(self) -> int:
         return len(self.positions)
 
     @staticmethod
     def empty() -> FillMesh:
-        return FillMesh(np.zeros((0, 2)), np.zeros((0, 2)), np.zeros(0), np.zeros((0, 4)))
+        return FillMesh(np.zeros((0, 2)), np.zeros((0, 2)), np.zeros(0), np.zeros(0, np.uint32), np.zeros(0))
 
 
 @dataclass(slots=True)
 class _Quadratic:
-    """One quadratic Bezier with the fill color at each control point."""
+    """One quadratic Bezier with each control point's source on the original
+    cubics, as ``(curve index, t)``."""
 
     start: np.ndarray
     control: np.ndarray
     end: np.ndarray
-    start_color: np.ndarray
-    control_color: np.ndarray
-    end_color: np.ndarray
+    start_source: tuple[int, float]
+    control_source: tuple[int, float]
+    end_source: tuple[int, float]
 
     def reversed(self) -> _Quadratic:
         return _Quadratic(
             self.end, self.control, self.start,
-            self.end_color, self.control_color, self.start_color,
+            self.end_source, self.control_source, self.start_source,
         )  # fmt: skip
 
     def bend(self) -> float:
@@ -95,20 +104,17 @@ class _Quadratic:
         return s * s * self.start + 2 * s * t * self.control + t * t * self.end
 
 
-def tessellate_fill(
-    points: np.ndarray, colors: np.ndarray, tolerance: float = DEFAULT_TOLERANCE
-) -> FillMesh:
+def tessellate_fill(points: np.ndarray, tolerance: float = DEFAULT_TOLERANCE) -> FillMesh:
     """Triangulate a ``VMobject``-layout point array (see :class:`Shape2D`).
 
-    ``colors`` holds one RGBA per point. Open subpaths are closed with a
-    straight line, like Cairo does when filling.
+    Open subpaths are closed with a straight line, like Cairo does when
+    filling.
     """
     curves = points.reshape(-1, POINTS_PER_CURVE, 2)
-    curve_colors = colors.reshape(-1, POINTS_PER_CURVE, 4)
     rings = [
         ring
         for start, stop in _subpath_ranges(curves)
-        if len(ring := _ring(curves[start:stop], curve_colors[start:stop], tolerance)) > 0
+        if len(ring := _ring(curves[start:stop], start, tolerance)) > 0
     ]
     if not rings:
         return FillMesh.empty()
@@ -133,27 +139,27 @@ def _subpath_ranges(curves: np.ndarray) -> list[tuple[int, int]]:
     return list(zip(breaks[:-1], breaks[1:]))
 
 
-def _ring(curves: np.ndarray, colors: np.ndarray, tolerance: float) -> list[_Quadratic]:
+def _ring(curves: np.ndarray, first_curve: int, tolerance: float) -> list[_Quadratic]:
     """Closed list of quadratics approximating one subpath."""
     ring = [
         quadratic
-        for curve, curve_colors in zip(curves, colors)
-        for quadratic in _cubic_to_quadratics(curve, curve_colors, tolerance)
+        for index, curve in enumerate(curves)
+        for quadratic in _cubic_to_quadratics(curve, first_curve + index, tolerance)
     ]
     first, last = ring[0], ring[-1]
     if np.linalg.norm(last.end - first.start) > TOLERANCE_FOR_POINT_EQUALITY:
+        # The closing line is straight, so its control point never becomes a
+        # vertex; any source will do for it.
         ring.append(
             _Quadratic(
                 last.end, (last.end + first.start) / 2, first.start,
-                last.end_color, (last.end_color + first.start_color) / 2, first.start_color,
+                last.end_source, last.end_source, first.start_source,
             )
         )  # fmt: skip
     return ring if abs(_signed_area(ring)) > 1e-12 else []
 
 
-def _cubic_to_quadratics(
-    curve: np.ndarray, colors: np.ndarray, tolerance: float
-) -> list[_Quadratic]:
+def _cubic_to_quadratics(curve: np.ndarray, curve_index: int, tolerance: float) -> list[_Quadratic]:
     """Split one cubic into quadratics whose error stays below ``tolerance``.
 
     A single quadratic with control ``(3(p1 + p2) - p0 - p3) / 4`` deviates by
@@ -174,7 +180,7 @@ def _cubic_to_quadratics(
         quadratics.append(
             _Quadratic(
                 q0, (3 * (q1 + q2) - q0 - q3) / 4, q3,
-                _bezier(colors, t0), _bezier(colors, (t0 + t1) / 2), _bezier(colors, t1),
+                (curve_index, t0), (curve_index, (t0 + t1) / 2), (curve_index, t1),
             )
         )  # fmt: skip
     return quadratics
@@ -267,20 +273,20 @@ class _MeshBuilder:
         self._positions: list[np.ndarray] = []
         self._uv: list[np.ndarray] = []
         self._side: list[np.ndarray] = []
-        self._colors: list[np.ndarray] = []
+        self._sources: list[np.ndarray] = []
 
     def add_polygon(self, outer: list[_Quadratic], holes: list[list[_Quadratic]]) -> None:
         vertices: list[np.ndarray] = []
-        colors: list[np.ndarray] = []
+        sources: list[tuple[int, float]] = []
         ring_ends: list[int] = []
         for ring in (outer, *holes):
             for q in ring:
                 vertices.append(q.start)
-                colors.append(q.start_color)
+                sources.append(q.start_source)
                 bend = q.bend()
                 if bend > _BEND_EPSILON:  # concave: the ring walks around the control
                     vertices.append(q.control)
-                    colors.append(q.control_color)
+                    sources.append(q.control_source)
                     self._add_curve_triangle(q, SIDE_CONTROL)
                 elif bend < -_BEND_EPSILON:  # convex: the curve triangle adds the bulge
                     self._add_curve_triangle(q, SIDE_CHORD)
@@ -290,13 +296,13 @@ class _MeshBuilder:
         indices = mapbox_earcut.triangulate_float64(vertex_array, np.array(ring_ends, dtype=np.uint32))
         count = len(indices)
         self._positions.append(vertex_array[indices])
-        self._colors.append(np.array(colors)[indices])
+        self._sources.append(np.array(sources)[indices])
         self._uv.append(np.zeros((count, 2)))
         self._side.append(np.full(count, SIDE_SOLID))
 
     def _add_curve_triangle(self, q: _Quadratic, side: float) -> None:
         self._positions.append(np.array([q.start, q.control, q.end]))
-        self._colors.append(np.array([q.start_color, q.control_color, q.end_color]))
+        self._sources.append(np.array([q.start_source, q.control_source, q.end_source]))
         self._uv.append(_CURVE_UV)
         self._side.append(np.full(3, side))
 
@@ -307,5 +313,6 @@ class _MeshBuilder:
             positions=np.concatenate(self._positions),
             uv=np.concatenate(self._uv),
             side=np.concatenate(self._side),
-            colors=np.concatenate(self._colors),
+            curve=np.concatenate(self._sources)[:, 0].astype(np.uint32),
+            t=np.concatenate(self._sources)[:, 1],
         )

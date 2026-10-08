@@ -42,7 +42,7 @@ struct Object {
     layer: f32,                 // fill layer; the stroke uses layer + 1
     clip: i32,                  // layer in `mask_layers`, or NO_CLIP
     flags: u32,                 // FLAG_* bits
-    _pad: f32,
+    fill_colors: u32,           // index of the shape's first point in `fill_colors`
 };
 
 /// The stroke ribbon faces the camera (Curve3D) instead of lying in the
@@ -63,14 +63,15 @@ struct Instance {
     _pad: u32,
 };
 
+// Geometry only: the color comes from the shape's per-point fill colors,
+// so a triangulation stays valid while colors and opacity animate.
 struct FillVertex {
     position: vec2<f32>,        // local 2D
     uv: vec2<f32>,              // implicit curve coordinates
-    color: vec4<f32>,
     side: f32,                  // 0 solid, +1 keep control side, -1 keep chord side
-    _pad0: f32,
-    _pad1: f32,
-    _pad2: f32,
+    curve: u32,                 // source cubic, relative to the shape
+    t: f32,                     // parameter on the source cubic
+    _pad: f32,
 };
 
 struct StrokePoint {
@@ -95,10 +96,11 @@ struct StrokeCurve {
 @group(0) @binding(1) var<storage, read> objects: array<Object>;
 @group(0) @binding(2) var<storage, read> instances: array<Instance>;
 @group(0) @binding(3) var<storage, read> fill_vertices: array<FillVertex>;
-@group(0) @binding(4) var<storage, read> stroke_points: array<StrokePoint>;
-@group(0) @binding(5) var<storage, read> stroke_curves: array<StrokeCurve>;
-@group(0) @binding(6) var mask_layers: texture_2d_array<f32>;
-@group(0) @binding(7) var mesh_depth: texture_depth_multisampled_2d;
+@group(0) @binding(4) var<storage, read> fill_colors: array<vec4<f32>>;
+@group(0) @binding(5) var<storage, read> stroke_points: array<StrokePoint>;
+@group(0) @binding(6) var<storage, read> stroke_curves: array<StrokeCurve>;
+@group(0) @binding(7) var mask_layers: texture_2d_array<f32>;
+@group(0) @binding(8) var mesh_depth: texture_depth_multisampled_2d;
 
 // ---------------------------------------------------------------------------
 // Shared vertex output
@@ -238,6 +240,18 @@ fn shade(in: VertexOutput) -> vec4<f32> {
 // Fill: pre-tessellated triangles (see tessellation.py)
 // ---------------------------------------------------------------------------
 
+/// The fill color at a vertex: the cubic Bezier of its source curve's four
+/// point colors at the vertex's parameter t.
+fn fill_color(object: Object, vertex: FillVertex) -> vec4<f32> {
+    let first = object.fill_colors + vertex.curve * 4u;
+    let s = 1.0 - vertex.t;
+    let t = vertex.t;
+    return s * s * s * fill_colors[first]
+        + 3.0 * s * s * t * fill_colors[first + 1u]
+        + 3.0 * s * t * t * fill_colors[first + 2u]
+        + t * t * t * fill_colors[first + 3u];
+}
+
 fn fill_vertex(object: Object, vertex_index: u32) -> VertexOutput {
     let vertex = fill_vertices[vertex_index];
     let world = (object.model * vec4<f32>(vertex.position, 0.0, 1.0)).xyz;
@@ -246,7 +260,7 @@ fn fill_vertex(object: Object, vertex_index: u32) -> VertexOutput {
     out.clip_position = project(world);
     out.layer = object.layer;
     out.clip = object.clip;
-    out.color = vertex.color;
+    out.color = fill_color(object, vertex);
     out.uv = vertex.uv;
     out.side = vertex.side;
     return out;
