@@ -14,7 +14,7 @@ import importlib
 import subprocess
 import time
 
-from manimx.renderer import FrameComposer, MotionBlur, RenderConfig, WGPURenderer
+from manimx.renderer import Camera, FrameComposer, MotionBlur, RenderConfig, WGPURenderer
 
 
 def main() -> None:
@@ -25,6 +25,7 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
     parser.add_argument("--background", default="#ece6e2")
+    parser.add_argument("--frame-height", type=float, default=8.0, help="world units shown vertically")
     parser.add_argument("--blur-samples", type=int, default=8, help="1 disables motion blur")
     args = parser.parse_args()
 
@@ -33,7 +34,12 @@ def main() -> None:
 
     renderer = WGPURenderer()
     composer = FrameComposer(renderer, [MotionBlur(samples=args.blur_samples, shutter=0.5 / args.fps)])
-    base = RenderConfig(pixel_width=args.width, pixel_height=args.height, background_color=args.background)
+    base = RenderConfig(
+        pixel_width=args.width,
+        pixel_height=args.height,
+        background_color=args.background,
+        camera=Camera(frame_height=args.frame_height),
+    )
 
     frames = round(prepared.duration * args.fps) + 1
     ffmpeg = subprocess.Popen(

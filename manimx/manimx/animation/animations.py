@@ -26,6 +26,7 @@ import quaternion
 from ..objects.transform import quaternion_from_axis_angle
 from .rate_functions import smooth
 from .signals import RootSignal, Signal
+from .authoring import current as authoring_current
 from .tracks import Change, RateFunction
 
 if TYPE_CHECKING:
@@ -259,6 +260,49 @@ class Indicate(Animation):
         return float(self.scale_factor**alpha)
 
     def mobjects(self) -> Sequence[Mobject]:
+        return (self.mobject,)
+
+
+@dataclass(eq=False)
+class GrowFromCenter(Animation):
+    """Grow a mobject from nothing (scale 0) to its authored scale."""
+
+    mobject: Mobject
+    run_time: float = 1.0
+    rate: RateFunction = smooth
+
+    def __post_init__(self) -> None:
+        # The authored scale at the moment the animation is created.
+        self._target = tuple(authoring_current(axis) for axis in self.mobject.scale.axes)
+
+    def targets(self) -> Sequence[Target]:
+        return [Target(axis, Change.ABSOLUTE) for axis in self.mobject.scale.axes]
+
+    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
+        return self._target[self.mobject.scale.axes.index(signal)] * alpha
+
+    def mobjects(self) -> Sequence[Mobject]:
+        return (self.mobject,)
+
+
+@dataclass(eq=False)
+class ShrinkToCenter(Animation):
+    """Shrink a mobject to nothing and remove it."""
+
+    mobject: Mobject
+    run_time: float = 1.0
+    rate: RateFunction = smooth
+
+    def targets(self) -> Sequence[Target]:
+        return [Target(axis, Change.ABSOLUTE) for axis in self.mobject.scale.axes]
+
+    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
+        return start_value * (1.0 - alpha)
+
+    def mobjects(self) -> Sequence[Mobject]:
+        return (self.mobject,)
+
+    def removes(self) -> Sequence[Mobject]:
         return (self.mobject,)
 
 

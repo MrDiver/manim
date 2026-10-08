@@ -24,6 +24,7 @@ from typing import Any
 import numpy as np
 import quaternion
 
+from ..objects import ClippingGroup as RenderClippingGroup
 from ..objects import Fill, Shape2D, Stroke, Transform
 from ..objects import Group as RenderGroup
 from ..objects import RenderObject, new_uid
@@ -136,6 +137,12 @@ class Mobject:
         return [(axis, REL, float(f)) for axis, f in zip(self.scale.axes, factors) if f != 1.0]
 
     @animatable
+    def set_scale(self, scale: float | Sequence[float]) -> ChangeList:
+        """Set the scale (absolute; ``scale_by`` multiplies instead)."""
+        values = np.broadcast_to(np.asarray(scale, dtype=np.float64), (3,))
+        return [(axis, ABS, float(v)) for axis, v in zip(self.scale.axes, values)]
+
+    @animatable
     def set_alpha(self, alpha: float) -> ChangeList:
         return [(self.alpha, ABS, alpha)]
 
@@ -152,9 +159,16 @@ class Mobject:
 
     def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RenderObject | None:
         """Render state for the current signal values (None if invisible)."""
+        if self._collapsed():
+            return None
         alphas = (*alphas, self.alpha)
         children = [snapshot for child in self.children if (snapshot := child.snapshot(alphas)) is not None]
         return RenderGroup(self.name, children=children, transform=self._transform(), uid=self.uid)
+
+    def _collapsed(self) -> bool:
+        """Scaled to nothing: invisible, and a zero scale would leave the
+        shape's plane without a normal."""
+        return any(abs(axis.value) < 1e-9 for axis in self.scale.axes)
 
     def _transform(self) -> Transform:
         return Transform(position=self.position.value, rotation=self.rotation.value, scale=self.scale.value)
@@ -217,6 +231,8 @@ class VMobject(Mobject):
         return [(self.fill_color, ABS, _rgb(color)), (self.stroke_color, ABS, _rgb(color))]
 
     def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RenderObject | None:
+        if self._collapsed():
+            return None
         alphas = (*alphas, self.alpha)
         alpha = math.prod(signal.value for signal in alphas)
         shape = Shape2D(
@@ -254,6 +270,31 @@ class Group(Mobject):
         return self
 
 
+class ClippingGroup(Mobject):
+    """Shows ``content`` only inside ``mask`` (the renderer's soft alpha
+    mask: the mask's fill and stroke opacity, as drawn, multiply the
+    content). The mask itself is never drawn. Transform and alpha apply to
+    both, so scaling the group scales the mask with its content."""
+
+    def __init__(self, mask: Mobject, content: Mobject, name: str | None = None, one_sided: bool = False) -> None:
+        super().__init__(name)
+        self.mask = mask
+        self.content = content
+        self.one_sided = one_sided
+        self.children = [mask, content]
+
+    def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RenderObject | None:
+        if self._collapsed():
+            return None
+        alphas = (*alphas, self.alpha)
+        mask, content = self.mask.snapshot(alphas), self.content.snapshot(alphas)
+        if mask is None or content is None:
+            return None  # nothing to show through
+        return RenderClippingGroup(
+            self.name, mask=mask, content=content, one_sided=self.one_sided, transform=self._transform(), uid=self.uid
+        )
+
+
 # --------------------------------------------------------------------------
 # Shapes
 # --------------------------------------------------------------------------
@@ -286,6 +327,13 @@ class RegularPolygon(VMobject):
         super().__init__(regular_polygon("polygon", n, radius).points, name, **style)
 
 
+class Polyline(VMobject):
+    """Straight segments through ``corners`` (closed into a polygon if asked)."""
+
+    def __init__(self, corners: Sequence[Sequence[float]], closed: bool = False, name: str | None = None, **style: Any) -> None:
+        super().__init__(Shape2D.from_corners("polyline", corners, closed=closed).points, name, **style)
+
+
 class Triangle(RegularPolygon):
     def __init__(self, radius: float = 1.0, name: str | None = None, **style: Any) -> None:
         super().__init__(3, radius, name, **style)
@@ -298,4 +346,17 @@ def _vector(value: Sequence[float]) -> tuple[float, float, float]:
     return (float(array[0]), float(array[1]), float(array[2]))
 
 
-__all__ = ["Circle", "Dot", "Group", "Mobject", "Rectangle", "RegularPolygon", "Square", "Triangle", "VMobject", "animatable"]
+__all__ = [
+    "Circle",
+    "ClippingGroup",
+    "Dot",
+    "Group",
+    "Mobject",
+    "Polyline",
+    "Rectangle",
+    "RegularPolygon",
+    "Square",
+    "Triangle",
+    "VMobject",
+    "animatable",
+]

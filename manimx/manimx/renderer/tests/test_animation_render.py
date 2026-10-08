@@ -62,3 +62,27 @@ def test_motion_blur_through_prepared_scene(renderer: WGPURenderer) -> None:
 
 def _at(settings, time: float):
     return dataclasses.replace(settings, time=time)
+
+
+def test_navigation_badge_properties(renderer: WGPURenderer) -> None:
+    from manimx.examples.navigation import Navigation
+    from manimx.examples.navigation import config as navigation_config
+
+    prepared = Navigation().prepare()
+    settings = navigation_config(320, 180)
+
+    def frame(t: float) -> np.ndarray:
+        return renderer.render(prepared.state_at(t), settings).astype(int)
+
+    background = frame(0.0)
+    assert len(np.unique(background.reshape(-1, 4), axis=0)) == 1  # empty before it grows
+    assert np.array_equal(frame(prepared.duration), background)  # and empty again at the end
+
+    # The streets keep moving on their own (a derived signal of time).
+    inside = (slice(70, 110), slice(140, 180))
+    assert not np.array_equal(frame(2.0)[inside], frame(2.3)[inside])
+
+    # Outside the circle, at the badge's height, only background: the map
+    # (much larger than the circle) is clipped by the mask.
+    outside = frame(2.0)[90, 20:60]
+    assert np.all(outside == background[90, 20:60])

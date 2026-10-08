@@ -309,3 +309,56 @@ def test_builder_overrides_and_shapes() -> None:
     assert repr(Square(name="s")) == "Square('s')"
     prepared.refresh()  # nothing moved: values unchanged
     assert position(prepared.state_at(5.0), "pentagon") == (1.0, 1.0, 0.0)
+
+
+def test_grow_from_center_and_shrink_to_center() -> None:
+    from manimx.animation import GrowFromCenter, ShrinkToCenter
+
+    def construct(scene):
+        square = Square(name="square", fill_opacity=1.0)
+        square.set_scale(2.0)
+        scene.play(GrowFromCenter(square), rate=linear)
+        scene.play(ShrinkToCenter(square), rate=linear)
+
+    prepared = prepare(construct)
+
+    assert objects(prepared.state_at(0.0)) == {}  # scale 0: nothing to draw
+    assert objects(prepared.state_at(0.5))["square"].transform.scale == (1.0, 1.0, 1.0)
+    assert objects(prepared.state_at(1.0))["square"].transform.scale == (2.0, 2.0, 2.0)
+    assert objects(prepared.state_at(1.5))["square"].transform.scale == (1.0, 1.0, 1.0)
+    assert objects(prepared.state_at(2.0)) == {}  # shrunk and removed
+
+
+def test_clipping_groups_snapshot_to_render_clipping_groups() -> None:
+    from manimx import ClippingGroup as RenderClippingGroup
+    from manimx.animation import ClippingGroup, Polyline
+
+    def construct(scene):
+        mask = Circle(name="mask", fill_opacity=1.0)
+        lines = Polyline([(-2, 0), (2, 0)], name="line")
+        clip = ClippingGroup(mask, lines, name="clip", one_sided=True)
+        scene.add(clip)
+        scene.play(clip.animate.shift(UP), rate=linear)
+        scene.play(mask.animate.set_alpha(0.0), rate=linear)
+
+    prepared = prepare(construct)
+    clip = objects(prepared.state_at(1.0))["clip"]
+
+    assert isinstance(clip, RenderClippingGroup) and clip.one_sided
+    assert clip.mask.id == "mask" and clip.content.id == "line"
+    assert clip.transform.position == (0.0, 1.0, 0.0)
+    assert prepared.state_at(2.0).children[0].mask.fill.opacity[0] == 0.0  # mask faded: content hidden by the renderer
+
+
+def test_clipping_group_without_visible_parts_is_skipped() -> None:
+    from manimx.animation import ClippingGroup, GrowFromCenter
+
+    def construct(scene):
+        content = Square(name="content")
+        clip = ClippingGroup(Circle(name="mask"), content, name="clip")
+        scene.play(GrowFromCenter(content), rate=linear)  # content collapsed at t = 0
+        scene.add(clip)
+
+    prepared = prepare(construct)
+
+    assert "clip" not in objects(prepared.state_at(0.0)) and "clip" in objects(prepared.state_at(1.0))

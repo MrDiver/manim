@@ -289,3 +289,14 @@ def test_animated_logo_motion_blur(renderer: WGPURenderer, update_references: bo
     image = composer.compose(prepared.state_at, dataclasses.replace(animated_config(480, 270), time=2.0))
 
     check(image, "animated_logo_motion_blur", update_references)
+
+
+@pytest.mark.parametrize("time", [0.9, 2.0, 3.2, 4.1, 5.6])
+def test_navigation_badge(renderer: WGPURenderer, update_references: bool, time: float) -> None:
+    from manimx.examples.navigation import Navigation
+    from manimx.examples.navigation import config as navigation_config
+
+    prepared = Navigation().prepare()
+    image = renderer.render(prepared.state_at(time), navigation_config(480, 270))
+
+    check(image, f"navigation_{time:.1f}s", update_references)
