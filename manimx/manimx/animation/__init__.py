@@ -20,6 +20,7 @@ from .animations import (
     SignalChange,
     Target,
 )
+from .audio import Sound, SoundEvent, mix, write_wav
 from .cameras import Camera, View
 from .constants import DEGREES, DL, DOWN, DR, IN, LEFT, ORIGIN, OUT, PI, RIGHT, TAU, UL, UP, UR
 from .kinds import COLOR, DISCRETE, FACTOR, PATH, ROTATION, SCALAR, SignalKind
@@ -108,6 +109,8 @@ __all__ = [
     "SignalKind",
     "SignalTrack",
     "Simulation",
+    "Sound",
+    "SoundEvent",
     "Square",
     "Target",
     "TimeSignals",
@@ -122,6 +125,8 @@ __all__ = [
     "World3D",
     "animatable",
     "derive",
+    "mix",
     "rate_functions",
     "version_token",
+    "write_wav",
 ]

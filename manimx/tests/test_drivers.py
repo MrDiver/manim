@@ -1,12 +1,13 @@
 """The offline render driver: pipelining, sinks and worker processes."""
 
 import shutil
+import subprocess
 
 import numpy as np
 import pytest
 from PIL import Image
 
-from manimx.animation import Scene
+from manimx.animation import Scene, Sound
 from manimx.drivers import (
     FrameList,
     FramePipeline,
@@ -119,3 +120,27 @@ def test_sink_errors_stop_the_render() -> None:
     with pytest.raises(RuntimeError, match="writing frames failed") as error:
         render(SOURCE, Broken(), settings())
     assert isinstance(error.value.__cause__, OSError) and Broken.closed
+
+
+BOUNCING = "manimx.examples.bouncing:Bouncing"
+
+
+@pytest.mark.skipif(shutil.which("ffprobe") is None, reason="needs ffmpeg")
+def test_sounds_are_muxed_into_videos_and_written_next_to_images(tmp_path) -> None:
+    short = RenderSettings(config(64, 36), fps=10, end=2.0)
+    render(BOUNCING, VideoFile(tmp_path / "with_sound.mp4"), short)
+    render(BOUNCING, ImageSequence(tmp_path / "frames"), short)
+    render(SOURCE, VideoFile(tmp_path / "silent.mp4"), short)  # no sounds: no audio track
+    render(BOUNCING, VideoFile(tmp_path / "muted.mp4"), RenderSettings(config(64, 36), fps=10, end=2.0, audio=False))
+
+    def streams(name):
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(tmp_path / name)],
+            capture_output=True, text=True, check=True,
+        )  # fmt: skip
+        return result.stdout.split()
+
+    assert streams("with_sound.mp4") == ["video", "audio"]
+    assert streams("silent.mp4") == ["video"] and streams("muted.mp4") == ["video"]
+    sound = Sound.load(tmp_path / "frames" / "audio.wav")
+    assert sound.duration == pytest.approx(2.1) and np.abs(sound.samples).max() > 0.05

@@ -66,6 +66,8 @@ class FrameSource:
 
     state_at: Callable[[float], RenderObject | ViewState]
     duration: float
+    audio: Callable[[float, float, int], np.ndarray] | None = None
+    """``audio(start, end, sample_rate)``: stereo float32 samples, if any."""
 
 
 @dataclass(frozen=True)
@@ -81,6 +83,9 @@ class RenderSettings:
     """Frames on the GPU at once, per process."""
     chunk: int = 8
     """Consecutive frames a worker process renders at a time."""
+    sample_rate: int = 48_000
+    audio: bool = True
+    """Pass the source's sounds to the sink (if it has any)."""
 
     def frame_times(self, duration: float) -> list[float]:
         end = duration if self.end is None else self.end
@@ -116,8 +121,19 @@ def load_source(spec: Any) -> FrameSource:
     if isinstance(target, FrameSource):
         return target
     if hasattr(target, "state_at") and hasattr(target, "duration"):
-        return FrameSource(target.state_at, target.duration)
+        audio = getattr(target, "audio", None)
+        return FrameSource(target.state_at, target.duration, audio if callable(audio) else None)
     raise TypeError(f"cannot render {target!r}: it needs duration and state_at")
+
+
+def _format(source: FrameSource, settings: RenderSettings, times: list[float]) -> FrameFormat:
+    """The sink's format, with the audio of exactly the rendered frames."""
+    config = settings.config
+    audio = None
+    if settings.audio and source.audio is not None and times:
+        samples = source.audio(times[0], times[0] + len(times) / settings.fps, settings.sample_rate)
+        audio = samples if np.any(samples) else None  # no sounds: no audio track
+    return FrameFormat(config.pixel_width, config.pixel_height, settings.fps, audio, settings.sample_rate)
 
 
 def render(
@@ -223,7 +239,7 @@ def _render_here(source: FrameSource, sink: FrameSink, settings: RenderSettings,
     times = settings.frame_times(source.duration)
     config = settings.config
     pipeline = FramePipeline(FrameComposer(WGPURenderer(), settings.effects), config, settings.in_flight)
-    sink.open(FrameFormat(config.pixel_width, config.pixel_height, settings.fps))
+    sink.open(_format(source, settings, times))
     try:
         writer = _Writer(sink, len(times), progress, capacity=2 * settings.in_flight + 4)
         for index, t in enumerate(times):
@@ -249,7 +265,8 @@ def _render_in_workers(
         pickle.dumps(spec)
     except Exception as error:
         raise TypeError("worker processes need a picklable source, e.g. 'module:attr'") from error
-    times = settings.frame_times(load_source(spec).duration)
+    source = load_source(spec)
+    times = settings.frame_times(source.duration)
     config = settings.config
     frame_bytes = config.pixel_width * config.pixel_height * 4
     shape = (config.pixel_height, config.pixel_width, 4)
@@ -277,7 +294,7 @@ def _render_in_workers(
         for worker in range(workers)
     ]
 
-    sink.open(FrameFormat(config.pixel_width, config.pixel_height, settings.fps))
+    sink.open(_format(source, settings, times))
     writer: _Writer | None = None
     try:
         for process in processes:

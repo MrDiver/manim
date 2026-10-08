@@ -17,6 +17,7 @@ view into shared memory); copy it to keep it.
 from __future__ import annotations
 
 import subprocess
+import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,12 +25,17 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from ..animation.audio import write_wav
 
-@dataclass(frozen=True, slots=True)
+
+@dataclass(frozen=True, slots=True, eq=False)
 class FrameFormat:
     width: int
     height: int
     fps: float
+    audio: np.ndarray | None = None
+    """Stereo float32 samples for exactly the rendered frames, or None."""
+    sample_rate: int = 48_000
 
 
 class FrameSink:
@@ -71,15 +77,25 @@ class VideoFile(FrameSink):
     codec_args: list[str] = field(
         default_factory=lambda: ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p"]
     )
+    audio_args: list[str] = field(default_factory=lambda: ["-c:a", "aac", "-b:a", "192k"])
     ffmpeg: str = "ffmpeg"
     _process: subprocess.Popen | None = field(default=None, init=False, repr=False)
+    _audio_directory: tempfile.TemporaryDirectory | None = field(default=None, init=False, repr=False)
 
     def open(self, format: FrameFormat) -> None:
         command = [
             self.ffmpeg, "-y", "-loglevel", "error",
             "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{format.width}x{format.height}", "-r", str(format.fps),
-            "-i", "-", *self.codec_args, str(self.path),
+            "-i", "-",
         ]  # fmt: skip
+        if format.audio is not None:
+            # The mix is known before the first frame, so ffmpeg muxes it
+            # in the same pass; a temporary WAV keeps stdin for video.
+            self._audio_directory = tempfile.TemporaryDirectory(prefix="manimx-audio-")
+            audio_path = Path(self._audio_directory.name) / "audio.wav"
+            write_wav(audio_path, format.audio, format.sample_rate)
+            command += ["-i", str(audio_path), "-map", "0:v", "-map", "1:a", *self.audio_args]
+        command += [*self.codec_args, str(self.path)]
         self._process = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def write(self, index: int, image: np.ndarray) -> None:
@@ -94,6 +110,9 @@ class VideoFile(FrameSink):
         errors = self._process.stderr.read().decode(errors="replace")
         code = self._process.wait()
         self._process = None
+        if self._audio_directory is not None:
+            self._audio_directory.cleanup()
+            self._audio_directory = None
         if code != 0:
             raise RuntimeError(f"ffmpeg failed with exit code {code}: {errors.strip()}")
 
@@ -111,8 +130,13 @@ class ImageSequence(FrameSink):
     _pool: ThreadPoolExecutor | None = field(default=None, init=False, repr=False)
     _writes: list[Future] = field(default_factory=list, init=False, repr=False)
 
+    audio_name: str = "audio.wav"
+    """Written next to the frames when the source has sounds."""
+
     def open(self, format: FrameFormat) -> None:
         Path(self.directory).mkdir(parents=True, exist_ok=True)
+        if format.audio is not None:
+            write_wav(Path(self.directory) / self.audio_name, format.audio, format.sample_rate)
         self._pool = ThreadPoolExecutor(self.threads, thread_name_prefix="png")
 
     def write(self, index: int, image: np.ndarray) -> None:

@@ -42,6 +42,7 @@ from ..objects import Group as RenderGroup
 from ..objects import Quaternion, Transform, new_uid
 from ..renderer.config import Camera as RenderCamera
 from ..renderer.config import ViewState
+from .audio import DEFAULT_SAMPLE_RATE, Sound, mix
 from .cameras import Camera, View
 from .scene import PreparedScene, Segment
 from .time_map import MonotoneMap
@@ -250,6 +251,32 @@ class Clip:
             return 0.0
         return included[0].compiled_start if t < included[0].start else included[-1].compiled_end
 
+    def placed_sounds(self) -> list[tuple[float, float, Sound, float]]:
+        """``(global time, skip, sound, gain)`` of the clip's sounds.
+
+        A sound starts at the global time its scene point is shown and
+        then plays at its own speed (time maps never change pitch). Sounds
+        in skipped segments or after the cut's end are left out; a sound
+        that started before the cut's start plays on from where the cut
+        enters it.
+        """
+        if self.timeline is not None:
+            self.timeline._ensure_resolved()
+        placed = []
+        for timing, segment in zip(self.timings, self.scene.segments, strict=True):
+            compiled = self._compiled_range(segment)
+            if timing is None or compiled is None:
+                continue
+            for event in segment.sounds:
+                at = segment.offset + event.time
+                if at > compiled[1]:
+                    continue
+                if at < compiled[0]:
+                    placed.append((timing.start, compiled[0] - at, event.sound, event.gain))
+                else:
+                    placed.append((timing.global_at(at), 0.0, event.sound, event.gain))
+        return placed
+
     def _compiled_range(self, segment: Segment) -> tuple[float, float] | None:
         """The part of ``segment`` inside the cut, in compiled time."""
         first = 0.0 if self.cut_in is None else self.cut_in - segment.play_offset
@@ -351,6 +378,12 @@ class Timeline:
                 state = clip.scene.state_at(compiled, global_time=t)
                 children.append(clip._group(state.children))
         return RenderGroup(world.name, children=children, uid=world.uid)
+
+    def audio(self, start: float = 0.0, end: float | None = None, sample_rate: int = DEFAULT_SAMPLE_RATE) -> np.ndarray:
+        """Every clip's sounds mixed on the global timeline, stereo float32
+        for ``[start, end)`` (default: the whole timeline)."""
+        placed = [entry for clip in self.clips for entry in clip.placed_sounds()]
+        return mix(placed, start, self.duration if end is None else end, sample_rate)
 
     def view_at(self, view: View, t: float) -> ViewState:
         """The view's world and camera at global time ``t``."""

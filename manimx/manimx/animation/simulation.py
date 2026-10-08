@@ -49,11 +49,13 @@ from __future__ import annotations
 import bisect
 import math
 from collections.abc import Callable, Iterable, Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from .animations import Animation, Target
+from .audio import DEFAULT_SAMPLE_RATE, Sound
 from .authoring import _active
 from .signal_tracks import Change, linear
 from .signals import RootSignal
@@ -103,6 +105,8 @@ class Simulation(Animation):
         """Simulated time since the start (read it inside the step function)."""
         self.events: list[tuple[str, float]] = []
         """Events emitted while baking, with their simulated times."""
+        self.sounds: list[tuple[Sound, float, float]] = []
+        """Sounds started while baking: ``(sound, gain, simulated time)``."""
         self.times: np.ndarray = np.zeros(0)
         """Keyframe times (simulated time) once baked."""
         self._keyframes: dict[int, tuple[RootSignal, list[Any]]] = {}
@@ -113,6 +117,16 @@ class Simulation(Animation):
     def emit(self, event: str) -> None:
         """Fire ``event`` at the current simulated time (e.g. a collision)."""
         self.events.append((event, self.time))
+
+    def play_sound(self, sound: str | Path | Sound, gain: float = 1.0) -> Sound:
+        """Start a sound at the current simulated time (e.g. on a bounce)."""
+        sound = sound if isinstance(sound, Sound) else Sound.load(sound)
+        self.sounds.append((sound, gain, self.time))
+        return sound
+
+    def play_wave(self, samples: np.ndarray, sample_rate: int = DEFAULT_SAMPLE_RATE, gain: float = 1.0) -> Sound:
+        """Start a sound made from an array at the current simulated time."""
+        return self.play_sound(Sound(samples, sample_rate), gain)
 
     # -- the animation contract -----------------------------------------------
 

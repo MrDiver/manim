@@ -38,8 +38,11 @@ global timeline only changes the mapping to compiled time.
 from __future__ import annotations
 
 import bisect
+from pathlib import Path
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+
+import numpy as np
 
 from ..objects import Group as RenderGroup
 from .animations import Animation, AnimationBuilder, SetValue, SignalChange, as_animation
@@ -48,6 +51,7 @@ from .mobjects import Mobject
 from .signals import RootSignal, Signal, TimeSignals
 from .signal_tracks import Change, Placement, RateFunction, SignalTrack, linear
 from .simulation import Simulation
+from .audio import DEFAULT_SAMPLE_RATE, Sound, SoundEvent, mix
 
 SEGMENT_GAP = 1.0
 """Compiled time between two segments; nothing is ever placed inside it."""
@@ -84,6 +88,7 @@ class Segment:
     play_offset: float = 0.0
     """Playing time (compiled time without gaps) at the segment's start."""
     cues: tuple[Cue, ...] = ()
+    sounds: tuple[SoundEvent, ...] = ()
 
     @property
     def end(self) -> float:
@@ -159,6 +164,18 @@ class Scene:
         time map speeds up or slows down smoothly to get there."""
         self._authoring().cue(name)
 
+    def play_sound(self, sound: str | Path | Sound, gain: float = 1.0) -> Sound:
+        """Start a sound (a file or a :class:`Sound`) at this point; the
+        cursor does not move (``self.wait(sound.duration)`` waits for it)."""
+        sound = sound if isinstance(sound, Sound) else Sound.load(sound)
+        self._authoring().play_sound(sound, gain)
+        return sound
+
+    def play_wave(self, samples: np.ndarray, sample_rate: int = DEFAULT_SAMPLE_RATE, gain: float = 1.0) -> Sound:
+        """Start a sound made from an array (mono ``(count,)`` or ``(count,
+        2)``, values in [-1, 1]) at this point, like :meth:`play_sound`."""
+        return self.play_sound(Sound(samples, sample_rate), gain)
+
     def _authoring(self) -> SceneCompiler:
         if self._compiler is None:
             raise RuntimeError("add, remove, play, wait, wait_for and emit can only be used inside construct()")
@@ -182,6 +199,7 @@ class SceneCompiler:
         self.segment_event: str | None = None
         self.segment_emits: list[Emit] = []
         self.segment_cues: list[Cue] = []
+        self.segment_sounds: list[SoundEvent] = []
 
     # -- used by authoring.py -------------------------------------------------
 
@@ -240,6 +258,8 @@ class SceneCompiler:
                 duration = animation.bake(self, begin)
                 for event, at in animation.events:
                     self.segment_emits.append(Emit(event, begin + at - self.segment_start))
+                for sound, gain, at in animation.sounds:
+                    self.play_sound(sound, gain, at=begin + at)
                 self.place(animation, begin, duration, linear)
             else:
                 self.place(animation, begin, duration, rate or animation.rate)
@@ -266,6 +286,10 @@ class SceneCompiler:
     def cue(self, name: str) -> None:
         self.segment_cues.append(Cue(name, self.cursor - self.segment_start))
 
+    def play_sound(self, sound: Sound, gain: float, at: float | None = None) -> None:
+        time = self.cursor if at is None else at
+        self.segment_sounds.append(SoundEvent(sound, time - self.segment_start, gain))
+
     def _close_segment(self) -> None:
         # A segment lasts until its cursor and until its last animation ends.
         end = max([self.cursor, *(p.end for p in self.placements if p.start >= self.segment_start)])
@@ -274,11 +298,13 @@ class SceneCompiler:
             Segment(
                 len(self.segments), self.segment_start, end - self.segment_start,
                 self.segment_event, tuple(self.segment_emits), play_offset, tuple(self.segment_cues),
+                tuple(self.segment_sounds),
             )
         )  # fmt: skip
         self.cursor = end
         self.segment_emits = []
         self.segment_cues = []
+        self.segment_sounds = []
 
     def place(self, animation: Animation, start: float, duration: float, rate: RateFunction | None = None) -> Placement:
         placement = Placement(animation, start, duration, self.order, rate or animation.rate)
@@ -343,6 +369,16 @@ class PreparedScene:
         self.evaluate(t, global_time)
         children = [snapshot for mobject in self.roots if mobject.present.value and (snapshot := mobject.snapshot()) is not None]
         return RenderGroup("scene", children=children)
+
+    def sounds(self) -> list[tuple[float, Sound, float]]:
+        """``(compiled time, sound, gain)`` of every sound in the scene."""
+        return [(segment.offset + event.time, event.sound, event.gain) for segment in self.segments for event in segment.sounds]
+
+    def audio(self, start: float = 0.0, end: float | None = None, sample_rate: int = DEFAULT_SAMPLE_RATE) -> np.ndarray:
+        """The scene's sounds mixed on its compiled time axis (what
+        ``state_at`` shows), stereo float32 for ``[start, end)``."""
+        placed = [(time, 0.0, sound, gain) for time, sound, gain in self.sounds()]
+        return mix(placed, start, self.duration if end is None else end, sample_rate)
 
     def evaluate(self, t: float, global_time: float | None = None) -> None:
         """Set every signal to its value at compiled time ``t`` without
