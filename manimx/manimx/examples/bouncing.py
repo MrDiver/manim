@@ -29,7 +29,8 @@ RADIUS = 0.25
 COLORS = ("#e07a5f", "#f2cc8f", "#81b29a", "#5ea3d0", "#c38fd6")
 
 
-HALF_WIDTH = 7.1  # world units from the center to the frame's edge
+MAX_IMPACT = 10.0  # m/s, about the first impact from the highest ball
+PAN_WIDTH = 4.0  # world units from the center at which a sound is fully on one side
 
 
 def plop(pitch: float = 1.0, sample_rate: int = DEFAULT_SAMPLE_RATE) -> np.ndarray:
@@ -41,7 +42,7 @@ def plop(pitch: float = 1.0, sample_rate: int = DEFAULT_SAMPLE_RATE) -> np.ndarr
     return (0.6 * np.sin(phase) * envelope).astype(np.float32)
 
 
-def reverb_tail(dry: np.ndarray, seconds: float = 1.2, wet: float = 0.35, seed: int = 0, sample_rate: int = DEFAULT_SAMPLE_RATE) -> np.ndarray:
+def reverb_tail(dry: np.ndarray, seconds: float = 1.2, wet: float = 0.2, seed: int = 0, sample_rate: int = DEFAULT_SAMPLE_RATE) -> np.ndarray:
     """The stereo reverb of mono ``dry``, shape ``(count, 2)``.
 
     A room's impulse response is roughly noise that dies away (-60 dB
@@ -66,8 +67,11 @@ def reverb_tail(dry: np.ndarray, seconds: float = 1.2, wet: float = 0.35, seed: 
 def panned(dry: np.ndarray, tail: np.ndarray, position: float) -> np.ndarray:
     """Stereo ``dry`` placed at ``position`` (-1 left .. 1 right) with
     constant power (cos/sin, scaled so the center keeps full level), plus
-    the room's ``tail``, which does not move with the source."""
-    angle = (min(max(position, -1.0), 1.0) + 1.0) * np.pi / 4
+    the room's ``tail``, which does not move with the source. The
+    position is pushed outwards (a power below one), so sounds off the
+    center already lean clearly to their side."""
+    position = min(max(position, -1.0), 1.0)
+    angle = (np.sign(position) * abs(position) ** 0.6 + 1.0) * np.pi / 4
     stereo = tail.copy()
     stereo[: len(dry)] += np.sqrt(2) * np.outer(dry, [np.cos(angle), np.sin(angle)])
     return stereo
@@ -95,8 +99,9 @@ class Bouncing(Scene):
                     velocity[1] = impact * 0.82
                     simulation.emit("bounce")
                     if impact > 0.5:  # resting balls stay quiet
-                        stereo = panned(sound, room, ball.position.x.value / HALF_WIDTH)
-                        simulation.play_wave(stereo, gain=min(1.0, impact / 8.0))
+                        stereo = panned(sound, room, ball.position.x.value / PAN_WIDTH)
+                        # Loudness follows the impact speed (squared-ish: soft bounces fade fast).
+                        simulation.play_wave(stereo, gain=min(1.0, impact / MAX_IMPACT) ** 1.5)
                 if x - RADIUS < wall_x:
                     ball.shift(RIGHT * (wall_x - x + RADIUS))
                     velocity[0] = max(velocity[0], 0.0) + 6.0 * dt * 60  # pushed by the moving wall
