@@ -106,7 +106,7 @@ class Simulation(Animation):
         self.events: list[tuple[str, float]] = []
         """Events emitted while baking, with their simulated times."""
         self.sounds: list[tuple[Sound, float, float]] = []
-        """Sounds started while baking: ``(sound, gain, simulated time)``."""
+        """Sounds started while baking: ``(sound, volume, simulated time)``."""
         self.times: np.ndarray = np.zeros(0)
         """Keyframe times (simulated time) once baked."""
         self._keyframes: dict[int, tuple[RootSignal, list[Any]]] = {}
@@ -118,15 +118,21 @@ class Simulation(Animation):
         """Fire ``event`` at the current simulated time (e.g. a collision)."""
         self.events.append((event, self.time))
 
-    def play_sound(self, sound: str | Path | Sound, gain: float = 1.0) -> Sound:
+    def play_sound(self, sound: str | Path | Sound, volume: float = 1.0) -> Sound:
         """Start a sound at the current simulated time (e.g. on a bounce)."""
         sound = sound if isinstance(sound, Sound) else Sound.load(sound)
-        self.sounds.append((sound, gain, self.time))
+        self.sounds.append((sound, volume, self.time))
         return sound
 
-    def play_wave(self, samples: np.ndarray, sample_rate: int = DEFAULT_SAMPLE_RATE, gain: float = 1.0) -> Sound:
-        """Start a sound made from an array at the current simulated time."""
-        return self.play_sound(Sound(samples, sample_rate), gain)
+    def play_wave(
+        self, samples: np.ndarray | str | Path, sample_rate: int = DEFAULT_SAMPLE_RATE, volume: float = 1.0
+    ) -> Sound:
+        """Start a wave at the current simulated time: an array (mono
+        ``(count,)`` or stereo ``(count, 2)``, values in [-1, 1], at
+        ``sample_rate``) or a sound file (its own sample rate applies).
+        ``volume`` scales the samples (1: as recorded)."""
+        sound = Sound.load(samples) if isinstance(samples, (str, Path)) else Sound(samples, sample_rate)
+        return self.play_sound(sound, volume)
 
     # -- the animation contract -----------------------------------------------
 

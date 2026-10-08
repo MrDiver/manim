@@ -101,7 +101,7 @@ class Bouncing(Scene):
                     if impact > 0.5:  # resting balls stay quiet
                         stereo = panned(sound, room, ball.position.x.value / PAN_WIDTH)
                         # Loudness follows the impact speed (squared-ish: soft bounces fade fast).
-                        simulation.play_wave(stereo, gain=min(1.0, impact / MAX_IMPACT) ** 1.5)
+                        simulation.play_wave(stereo, volume=min(1.0, impact / MAX_IMPACT) ** 1.5)
                 if x - RADIUS < wall_x:
                     ball.shift(RIGHT * (wall_x - x + RADIUS))
                     velocity[0] = max(velocity[0], 0.0) + 6.0 * dt * 60  # pushed by the moving wall

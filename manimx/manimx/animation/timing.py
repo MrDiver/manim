@@ -252,7 +252,7 @@ class Clip:
         return included[0].compiled_start if t < included[0].start else included[-1].compiled_end
 
     def placed_sounds(self) -> list[tuple[float, float, Sound, float]]:
-        """``(global time, skip, sound, gain)`` of the clip's sounds.
+        """``(global time, skip, sound, volume)`` of the clip's sounds.
 
         A sound starts at the global time its scene point is shown and
         then plays at its own speed (time maps never change pitch). Sounds
@@ -272,9 +272,9 @@ class Clip:
                 if at > compiled[1]:
                     continue
                 if at < compiled[0]:
-                    placed.append((timing.start, compiled[0] - at, event.sound, event.gain))
+                    placed.append((timing.start, compiled[0] - at, event.sound, event.volume))
                 else:
-                    placed.append((timing.global_at(at), 0.0, event.sound, event.gain))
+                    placed.append((timing.global_at(at), 0.0, event.sound, event.volume))
         return placed
 
     def _compiled_range(self, segment: Segment) -> tuple[float, float] | None:

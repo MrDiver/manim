@@ -117,10 +117,11 @@ def test_scenes_play_sounds_without_moving_the_cursor(tmp_path) -> None:
     def construct(scene):
         scene.add(Dot())
         scene.wait(0.1)
-        sound = scene.play_sound(path, gain=0.5)
+        sound = scene.play_sound(path, volume=0.5)
         assert sound.duration == pytest.approx(0.01)
         scene.play_wave(click(), RATE)
-        scene.play_wave(np.stack([np.zeros(10), click()], axis=1), RATE, gain=2.0)  # stereo: right only
+        scene.play_wave(path, volume=0.0)  # files work too; silent here
+        scene.play_wave(np.stack([np.zeros(10), click()], axis=1), RATE, volume=2.0)  # stereo: right only
         scene.wait(0.2)
 
     scene = prepared(construct)

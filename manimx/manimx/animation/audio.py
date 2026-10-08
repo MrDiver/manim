@@ -77,26 +77,26 @@ class SoundEvent:
     sound: Sound
     time: float
     """Time within the segment."""
-    gain: float = 1.0
+    volume: float = 1.0
 
 
 def mix(
     placed: Iterable[tuple[float, float, Sound, float]], start: float, end: float, sample_rate: int = DEFAULT_SAMPLE_RATE
 ) -> np.ndarray:
-    """Mix ``(time, skip, sound, gain)`` entries into stereo float32 samples
+    """Mix ``(time, skip, sound, volume)`` entries into stereo float32 samples
     for times ``[start, end)``; ``skip`` seconds of a sound are left out
     (it was cut). The result is not clipped."""
     count = max(0, round((end - start) * sample_rate))
     output = np.zeros((count, 2), dtype=np.float32)
     converted: dict[int, np.ndarray] = {}  # one sound often plays many times
-    for time, skip, sound, gain in placed:
+    for time, skip, sound, volume in placed:
         samples = converted.get(id(sound))
         if samples is None:
             samples = converted[id(sound)] = sound.as_stereo(sample_rate)
         first = round((time - start) * sample_rate) - round(skip * sample_rate)
         lo, hi = max(first, 0), min(first + len(samples), count)
         if lo < hi:
-            output[lo:hi] += gain * samples[lo - first : hi - first]
+            output[lo:hi] += volume * samples[lo - first : hi - first]
     return output
 
 

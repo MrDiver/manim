@@ -164,17 +164,22 @@ class Scene:
         time map speeds up or slows down smoothly to get there."""
         self._authoring().cue(name)
 
-    def play_sound(self, sound: str | Path | Sound, gain: float = 1.0) -> Sound:
+    def play_sound(self, sound: str | Path | Sound, volume: float = 1.0) -> Sound:
         """Start a sound (a file or a :class:`Sound`) at this point; the
         cursor does not move (``self.wait(sound.duration)`` waits for it)."""
         sound = sound if isinstance(sound, Sound) else Sound.load(sound)
-        self._authoring().play_sound(sound, gain)
+        self._authoring().play_sound(sound, volume)
         return sound
 
-    def play_wave(self, samples: np.ndarray, sample_rate: int = DEFAULT_SAMPLE_RATE, gain: float = 1.0) -> Sound:
-        """Start a sound made from an array (mono ``(count,)`` or ``(count,
-        2)``, values in [-1, 1]) at this point, like :meth:`play_sound`."""
-        return self.play_sound(Sound(samples, sample_rate), gain)
+    def play_wave(
+        self, samples: np.ndarray | str | Path, sample_rate: int = DEFAULT_SAMPLE_RATE, volume: float = 1.0
+    ) -> Sound:
+        """Start a wave at this point, like :meth:`play_sound`: an array (mono
+        ``(count,)`` or stereo ``(count, 2)``, values in [-1, 1], at
+        ``sample_rate``) or a sound file (its own sample rate applies).
+        ``volume`` scales the samples (1: as recorded)."""
+        sound = Sound.load(samples) if isinstance(samples, (str, Path)) else Sound(samples, sample_rate)
+        return self.play_sound(sound, volume)
 
     def _authoring(self) -> SceneCompiler:
         if self._compiler is None:
@@ -258,8 +263,8 @@ class SceneCompiler:
                 duration = animation.bake(self, begin)
                 for event, at in animation.events:
                     self.segment_emits.append(Emit(event, begin + at - self.segment_start))
-                for sound, gain, at in animation.sounds:
-                    self.play_sound(sound, gain, at=begin + at)
+                for sound, volume, at in animation.sounds:
+                    self.play_sound(sound, volume, at=begin + at)
                 self.place(animation, begin, duration, linear)
             else:
                 self.place(animation, begin, duration, rate or animation.rate)
@@ -286,9 +291,9 @@ class SceneCompiler:
     def cue(self, name: str) -> None:
         self.segment_cues.append(Cue(name, self.cursor - self.segment_start))
 
-    def play_sound(self, sound: Sound, gain: float, at: float | None = None) -> None:
+    def play_sound(self, sound: Sound, volume: float, at: float | None = None) -> None:
         time = self.cursor if at is None else at
-        self.segment_sounds.append(SoundEvent(sound, time - self.segment_start, gain))
+        self.segment_sounds.append(SoundEvent(sound, time - self.segment_start, volume))
 
     def _close_segment(self) -> None:
         # A segment lasts until its cursor and until its last animation ends.
@@ -371,13 +376,13 @@ class PreparedScene:
         return RenderGroup("scene", children=children)
 
     def sounds(self) -> list[tuple[float, Sound, float]]:
-        """``(compiled time, sound, gain)`` of every sound in the scene."""
-        return [(segment.offset + event.time, event.sound, event.gain) for segment in self.segments for event in segment.sounds]
+        """``(compiled time, sound, volume)`` of every sound in the scene."""
+        return [(segment.offset + event.time, event.sound, event.volume) for segment in self.segments for event in segment.sounds]
 
     def audio(self, start: float = 0.0, end: float | None = None, sample_rate: int = DEFAULT_SAMPLE_RATE) -> np.ndarray:
         """The scene's sounds mixed on its compiled time axis (what
         ``state_at`` shows), stereo float32 for ``[start, end)``."""
-        placed = [(time, 0.0, sound, gain) for time, sound, gain in self.sounds()]
+        placed = [(time, 0.0, sound, volume) for time, sound, volume in self.sounds()]
         return mix(placed, start, self.duration if end is None else end, sample_rate)
 
     def evaluate(self, t: float, global_time: float | None = None) -> None:
