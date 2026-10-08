@@ -120,10 +120,13 @@ def test_scenes_play_sounds_without_moving_the_cursor(tmp_path) -> None:
         sound = scene.play_sound(path, gain=0.5)
         assert sound.duration == pytest.approx(0.01)
         scene.play_wave(click(), RATE)
+        scene.play_wave(np.stack([np.zeros(10), click()], axis=1), RATE, gain=2.0)  # stereo: right only
         scene.wait(0.2)
 
     scene = prepared(construct)
     assert scene.duration == pytest.approx(0.3)
+    stereo = scene.audio(sample_rate=RATE)
+    assert stereo[100, 1] - stereo[100, 0] == pytest.approx(1.0, abs=1e-3)
     audio = scene.audio(sample_rate=RATE)
     assert audio.shape == (300, 2) and onsets(audio) == [0.1]
     assert audio[100, 0] == pytest.approx(0.25 + 0.5, abs=1e-3)
