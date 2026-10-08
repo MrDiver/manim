@@ -42,6 +42,7 @@ from .snapshot import version_token
 from .time_map import MonotoneMap
 from .timing import NEVER, Clip, InvalidCue, Ramp, SegmentTiming, Timeline, UnresolvedEvents
 from .signal_tracks import Change, Entry, Placement, SignalTrack
+from .worlds import World, World2D, World3D
 
 __all__ = [
     "COLOR",
@@ -111,6 +112,9 @@ __all__ = [
     "UnresolvedEvents",
     "VMobject",
     "Vector3Signal",
+    "World",
+    "World2D",
+    "World3D",
     "animatable",
     "derive",
     "rate_functions",

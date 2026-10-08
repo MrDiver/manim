@@ -338,3 +338,16 @@ class PreparedScene:
         index = max(0, bisect.bisect_right([s.offset for s in self.segments], t) - 1)
         segment = self.segments[index]
         return segment.play_offset + min(max(t - segment.offset, 0.0), segment.duration)
+
+    def compiled_time_at(self, playing: float) -> float:
+        """The compiled time showing playing time ``playing`` (clamped).
+
+        A playing time on a boundary maps to the end of the earlier
+        segment, which is what the scene shows while holding there.
+        """
+        if not self.segments:
+            return min(max(playing, 0.0), self.duration)
+        playing = min(max(playing, 0.0), self.playing_time)
+        index = max(0, bisect.bisect_left([s.play_offset for s in self.segments], playing) - 1)
+        segment = self.segments[index]
+        return segment.offset + min(playing - segment.play_offset, segment.duration)
