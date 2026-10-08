@@ -33,6 +33,7 @@ uv run python scripts/benchmark_project.py example-project --check-reference /tm
 | 0. Baseline | 74.5 | 13.43 | 407.6 | 2.12 | 3.91 | 9.24 | 3.68 |
 | A. Cached stroke records | 87.5 | 11.43 | 452.2 | 2.09 | 1.97 | 7.29 | 4.06* |
 | B. No 3D stages without meshes | 119.6 | 8.36 | 556.3 | 2.02 | 1.88 | 4.32 | 1.72 |
+| C. Renderer as a service | 134.9 | 7.41 | 603.9 | 1.99 | 1.87 | 3.51 | 1.75 |
 
 \* GPU time is sampled on 60 frames with a full sync per frame and varies by
 about ±10% between runs. Step A does not change any GPU work.
@@ -110,3 +111,49 @@ last frame equals a fresh renderer's. Breaking the clear makes it fail.
 
 Result: +37% (87.5 → 119.6 fps). GPU time drops from about 3.7 to 1.7 ms per
 frame, and `render_layers` from 7.3 to 4.3 ms.
+
+### C. The renderer as a service
+
+The renderer is meant to be a long-lived service: built once per process,
+keeping everything it creates across all calls. Within one render call it
+already lived for all frames, but every call (each driver `render()`,
+`manimx still`, each worker process) created its own renderer with its own
+GPU device. Even within a call, these were recreated for every sub-frame:
+
+- **render target views and attachments** for the lit, vector and mask
+  scratch targets and the vector depth;
+- **in the composer:** a bind group and texture views for every fullscreen
+  pass (composite, finalize, bloom, shader effects);
+- **command encoders and submissions:** two per sub-frame.
+
+Now:
+
+- **`WGPURenderer.shared()`** is the process's renderer service: one device,
+  created on first use. Drivers render through it, so the CLI, tests and
+  later the web UI keep shaders, pipelines, buffers, targets and per-object
+  data across calls. Rendering stays single-threaded per renderer.
+- **`renderer.composer(effects)`** keeps one composer per effect chain, with
+  its pipelines and texture pool.
+- **`ResourceCache`**, owned by the renderer, keeps views per texture (weakly,
+  so they go with their texture) and bind groups keyed by their layout and
+  the identity of everything they bind (LRU-bounded, 512 entries).
+  Fullscreen pipelines keep their bind group layout, because each
+  `get_bind_group_layout()` call returns a new object, which would defeat
+  the cache.
+- **Render targets** build their attachments once.
+- **One command encoder and one submission per sub-frame:** the renderer
+  records into the composer's encoder. All buffer writes of a sub-frame land
+  before its submission, and the previous sub-frame is already submitted, so
+  sharing the same buffers stays correct.
+- **The per-object cache is bounded:** a long-lived cache would otherwise
+  keep data for objects that never come back (a rebuilt timeline has new
+  uids). Every render is a generation; every 1024 renders, entries unused
+  for 1024 renders are dropped.
+
+New tests cover the shared instance and composers per effect chain, reuse
+and LRU eviction in the resource cache, renders after size changes matching
+a fresh renderer, and cache sweeping. The test suite runs faster too (11.2 →
+9.6 s), since driver and CLI tests now share one renderer.
+
+Result: +13% (119.6 → 134.9 fps). The composite drops from 0.72 to 0.37 ms
+per frame, and `render_layers` from 4.3 to 3.5 ms.

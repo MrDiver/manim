@@ -32,7 +32,7 @@ import wgpu
 from ...objects import RenderObject
 from ..config import RenderConfig, ViewState
 from ..effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap
-from .gpu import COLOR_FORMAT, HDR_FORMAT, GPUContext, expand_includes
+from .gpu import COLOR_FORMAT, HDR_FORMAT, GPUContext, ResourceCache, expand_includes
 from .profiler import GpuProfiler
 from .renderer import WGPURenderer
 
@@ -63,10 +63,11 @@ class FrameComposer:
         self.effects = tuple(effects)
         _validate(self.effects)
         self._context = renderer.context
-        self._passes = _Fullscreen(self._context)
+        self._resources = renderer.resources
+        self._passes = _Fullscreen(self._context, self._resources)
         self._textures = _TexturePool(self._context.device)
         self._bloom = _BloomProcessor(self._context, self._passes, self._textures, renderer.profiler)
-        self._shaders = _ShaderProcessor(self._context, renderer.frame_uniform, self._textures)
+        self._shaders = _ShaderProcessor(self._context, renderer.frame_uniform, self._textures, self._resources)
         self._composite_params = self._context.device.create_buffer(
             size=_UNIFORM_STRIDE * 64, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST
         )
@@ -92,8 +93,11 @@ class FrameComposer:
             sub_config = dataclasses.replace(config, time=time)
             if isinstance(scene_now, ViewState):
                 scene_now, sub_config = scene_now.root, dataclasses.replace(sub_config, camera=scene_now.camera)
-            layers = self.renderer.render_layers(scene_now, sub_config)
-            encoder = device.create_command_encoder(label="compose")
+            # One submission per sub-frame: the renderer's passes and the
+            # composite share an encoder. Buffer writes for this sub-frame
+            # land before it; the previous one is already submitted.
+            encoder = device.create_command_encoder(label="sub-frame")
+            layers = self.renderer.render_layers(scene_now, sub_config, encoder)
             lit = layers.lit
             for effect in self.effects:
                 if isinstance(effect, Bloom):
@@ -110,7 +114,7 @@ class FrameComposer:
                 frame = self._shaders.apply(encoder, frame, effect, "frame")
         output = self._textures.get("output", size, COLOR_FORMAT, extra_usage=wgpu.TextureUsage.COPY_SRC)
         self._passes.run(
-            encoder, "finalize.wgsl", "fs_finalize", output, [frame.create_view()], timing=self.renderer.profiler.pass_timing("finalize")
+            encoder, "finalize.wgsl", "fs_finalize", output, [self._resources.view(frame)], timing=self.renderer.profiler.pass_timing("finalize")
         )
         device.queue.submit([encoder.finish()])
         return output
@@ -146,8 +150,8 @@ class FrameComposer:
             accumulator,
             [
                 {"buffer": self._composite_params, "offset": offset, "size": COMPOSITE_PARAMS_DTYPE.itemsize},
-                lit.create_view(),
-                vector.create_view(),
+                self._resources.view(lit),
+                self._resources.view(vector),
             ],
             blend=_ADDITIVE,
             clear=first,  # the first sub-frame starts a new frame
@@ -196,9 +200,11 @@ class _Fullscreen:
     """Runs fullscreen-triangle passes; pipelines are cached per shader,
     entry point, target format and blend mode."""
 
-    def __init__(self, context: GPUContext) -> None:
+    def __init__(self, context: GPUContext, resources: ResourceCache) -> None:
         self._context = context
-        self._pipelines: dict[tuple, wgpu.GPURenderPipeline] = {}
+        self.resources = resources
+        self._resources = resources
+        self._pipelines: dict[tuple, tuple[wgpu.GPURenderPipeline, wgpu.GPUBindGroupLayout]] = {}
         self.linear_clamp = context.device.create_sampler(
             mag_filter=wgpu.FilterMode.linear,
             min_filter=wgpu.FilterMode.linear,
@@ -206,20 +212,23 @@ class _Fullscreen:
             address_mode_v=wgpu.AddressMode.clamp_to_edge,
         )
 
-    def pipeline(self, shader: str, entry_point: str, format: str, blend: dict | None = None) -> wgpu.GPURenderPipeline:
+    def pipeline(self, shader: str, entry_point: str, format: str, blend: dict | None = None) -> tuple[wgpu.GPURenderPipeline, wgpu.GPUBindGroupLayout]:
+        """The pipeline and its bind group layout (kept: each
+        ``get_bind_group_layout`` call returns a new object)."""
         key = (shader, entry_point, format, blend is not None)
         if key not in self._pipelines:
             module = self._context.shader(shader)
             target = {"format": format}
             if blend is not None:
                 target["blend"] = blend
-            self._pipelines[key] = self._context.device.create_render_pipeline(
+            pipeline = self._context.device.create_render_pipeline(
                 label=f"{shader}:{entry_point}",
                 layout=wgpu.AutoLayoutMode.auto,
                 vertex={"module": module, "entry_point": "vs_fullscreen", "buffers": []},
                 primitive={"topology": wgpu.PrimitiveTopology.triangle_list},
                 fragment={"module": module, "entry_point": entry_point, "targets": [target]},
             )
+            self._pipelines[key] = (pipeline, pipeline.get_bind_group_layout(0))
         return self._pipelines[key]
 
     def run(
@@ -234,12 +243,9 @@ class _Fullscreen:
         timing: dict | None = None,
     ) -> None:
         """Draw one fullscreen pass; ``resources`` are bindings 0, 1, 2, ..."""
-        view = target if isinstance(target, wgpu.GPUTextureView) else target.create_view()
-        pipeline = self.pipeline(shader, entry_point, view.texture.format, blend)
-        bind_group = self._context.device.create_bind_group(
-            layout=pipeline.get_bind_group_layout(0),
-            entries=[{"binding": i, "resource": r} for i, r in enumerate(resources)],
-        )
+        view = self._resources.view(target)
+        pipeline, layout = self.pipeline(shader, entry_point, view.texture.format, blend)
+        bind_group = self._resources.bind_group(layout, resources)
         render_pass = encoder.begin_render_pass(
             color_attachments=[
                 {
@@ -275,7 +281,8 @@ class _BloomProcessor:
         levels = max(1, min(bloom.levels, int(np.log2(max(1, min(width, height) // 4)))))
         chain = self._textures.get("bloom chain", (max(1, width // 2), max(1, height // 2)), HDR_FORMAT, mip_levels=levels)
         output = self._textures.get("bloom output", (width, height), HDR_FORMAT)
-        mips = [chain.create_view(base_mip_level=i, mip_level_count=1) for i in range(levels)]
+        cache = self._passes.resources
+        mips = [cache.view(chain, base_mip_level=i, mip_level_count=1) for i in range(levels)]
         slot = iter(range(64))
 
         def step(entry: str, source: wgpu.GPUTexture | wgpu.GPUTextureView, source_size: tuple[int, int], target, **kwargs) -> None:
@@ -285,15 +292,15 @@ class _BloomProcessor:
             params["intensity"], params["radius"] = bloom.intensity, bloom.radius
             offset = next(slot) * _UNIFORM_STRIDE
             self._context.device.queue.write_buffer(self._params, offset, params)
-            source_view = source if isinstance(source, wgpu.GPUTextureView) else source.create_view()
-            resources = [
+            source_view = cache.view(source)
+            bindings = [
                 {"buffer": self._params, "offset": offset, "size": BLOOM_PARAMS_DTYPE.itemsize},
                 source_view,
                 self._passes.linear_clamp,
             ]
             if entry == "fs_combine":
-                resources.append(mips[0])
-            self._passes.run(encoder, "bloom.wgsl", entry, target, resources, timing=self._profiler.pass_timing("bloom"), **kwargs)
+                bindings.append(mips[0])
+            self._passes.run(encoder, "bloom.wgsl", entry, target, bindings, timing=self._profiler.pass_timing("bloom"), **kwargs)
 
         def mip_size(level: int) -> tuple[int, int]:
             return max(1, chain.width >> level), max(1, chain.height >> level)
@@ -337,8 +344,9 @@ fn fs_effect(in: FullscreenVertex) -> @location(0) vec4<f32> {{
 class _ShaderProcessor:
     """GPU side of :class:`ShaderEffect`: wraps user code in a template."""
 
-    def __init__(self, context: GPUContext, frame_uniform: wgpu.GPUBuffer, textures: _TexturePool) -> None:
+    def __init__(self, context: GPUContext, frame_uniform: wgpu.GPUBuffer, textures: _TexturePool, resources: ResourceCache) -> None:
         self._context = context
+        self._resources = resources
         self._frame_uniform = frame_uniform
         self._textures = textures
         self._sampler = context.device.create_sampler(
@@ -368,17 +376,17 @@ class _ShaderProcessor:
         values[: len(effect.values)] = effect.values
         offset = (self._uses % 64) * _UNIFORM_STRIDE
         device.queue.write_buffer(self._values, offset, values)
-        bind_group = device.create_bind_group(
-            layout=self._layout,
-            entries=[
-                {"binding": 0, "resource": {"buffer": self._frame_uniform, "offset": 0, "size": self._frame_uniform.size}},
-                {"binding": 1, "resource": source.create_view()},
-                {"binding": 2, "resource": self._sampler},
-                {"binding": 3, "resource": {"buffer": self._values, "offset": offset, "size": 64}},
+        bind_group = self._resources.bind_group(
+            self._layout,
+            [
+                {"buffer": self._frame_uniform, "offset": 0, "size": self._frame_uniform.size},
+                self._resources.view(source),
+                self._sampler,
+                {"buffer": self._values, "offset": offset, "size": 64},
             ],
         )
         render_pass = encoder.begin_render_pass(
-            color_attachments=[{"view": output.create_view(), "clear_value": (0, 0, 0, 0), "load_op": wgpu.LoadOp.clear, "store_op": wgpu.StoreOp.store}]
+            color_attachments=[{"view": self._resources.view(output), "clear_value": (0, 0, 0, 0), "load_op": wgpu.LoadOp.clear, "store_op": wgpu.StoreOp.store}]
         )
         render_pass.set_pipeline(self._pipeline(effect.code))
         render_pass.set_bind_group(0, bind_group)

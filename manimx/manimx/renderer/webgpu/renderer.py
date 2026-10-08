@@ -25,15 +25,20 @@ is a composer with default settings plus a read-back.
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
+
 import numpy as np
 import wgpu
 
 from ...objects import RenderObject, Shape3D
 from ..base import Renderer
 from ..config import RenderConfig
+from ..effects import Effect
 from ..scene_graph import flatten_scene
 from .frame import FRAME_DTYPE, camera_frame
-from .gpu import GPUContext
+from .gpu import GPUContext, ResourceCache
 from .lighting_pass import LightingPass
 from .mesh_batch import MeshBatch
 from .mesh_pass import MeshPass
@@ -44,11 +49,42 @@ from .targets import RenderLayers, RenderTargets
 from .vector_batch import VectorBatch
 from .vector_pass import VectorPass
 
+if TYPE_CHECKING:
+    from .composer import FrameComposer
+
+CACHE_MAX_AGE = 1024
+"""Renders after which unused per-object cache entries are dropped."""
+
+_shared: WGPURenderer | None = None
+_shared_lock = threading.Lock()
+
+
 class WGPURenderer(Renderer):
+    """The WebGPU renderer, meant to be used as a long-lived service.
+
+    Everything it builds is kept across calls: the device, pipelines,
+    buffers, render targets, views and bind groups, per-object data
+    (tessellations, stroke records) and composers per effect chain. A
+    process should therefore render through one instance,
+    :meth:`shared`, instead of creating renderers per call. Rendering is
+    not thread-safe; one thread renders at a time.
+    """
+
+    @classmethod
+    def shared(cls) -> WGPURenderer:
+        """The process's renderer service, created on first use."""
+        global _shared
+        with _shared_lock:
+            if _shared is None:
+                _shared = cls()
+            return _shared
+
     def __init__(self, context: GPUContext | None = None, profile: bool = False) -> None:
         super().__init__()
         self.context = context or GPUContext.create()
         self.profiler = GpuProfiler(self.context.device)
+        self.resources = ResourceCache(self.context.device)
+        """Views and bind groups shared by the renderer and its composers."""
         self.profiler.enabled &= profile
         device = self.context.device
         self._frame_uniform = device.create_buffer(
@@ -63,7 +99,7 @@ class WGPURenderer(Renderer):
         self._targets: RenderTargets | None = None
         self._empty_3d: RenderTargets | None = None
         """Targets whose G-buffer and lit layer are known to be empty."""
-        self._composer = None
+        self._composers: dict[tuple, Any] = {}
 
     @property
     def frame_uniform(self) -> wgpu.GPUBuffer:
@@ -72,14 +108,28 @@ class WGPURenderer(Renderer):
 
     def render(self, root: RenderObject, config: RenderConfig) -> np.ndarray:
         """Render ``root`` to ``(H, W, 4)`` uint8 RGBA with default compositing."""
-        if self._composer is None:
+        return self.composer().compose(root, config)
+
+    def composer(self, effects: Sequence[Effect] = ()) -> FrameComposer:
+        """The composer for an effect chain, kept like everything else (its
+        pipelines and textures survive across calls)."""
+        key = tuple(effects)
+        composer = self._composers.get(key)
+        if composer is None:
             from .composer import FrameComposer  # the composer imports this module
 
-            self._composer = FrameComposer(self)
-        return self._composer.compose(root, config)
+            composer = self._composers[key] = FrameComposer(self, key)
+        return composer
 
-    def render_layers(self, root: RenderObject, config: RenderConfig) -> RenderLayers:
-        """Render ``root`` into the lit and vector layers (GPU textures)."""
+    def render_layers(self, root: RenderObject, config: RenderConfig, encoder: wgpu.GPUCommandEncoder | None = None) -> RenderLayers:
+        """Render ``root`` into the lit and vector layers (GPU textures).
+
+        With ``encoder`` the passes are recorded into it and the caller
+        submits (the composer adds its passes to the same submission);
+        without, they are submitted right away.
+        """
+        if self.cache.next_generation() % CACHE_MAX_AGE == 0:
+            self.cache.sweep(CACHE_MAX_AGE)
         scene = flatten_scene(root)
         vectors = VectorBatch.build(scene, self.cache, config.camera.position)
         targets = self._render_targets(config, mask_count=len(scene.clips))
@@ -102,7 +152,9 @@ class WGPURenderer(Renderer):
             scope_parents = np.array([scope.parent for scope in scene.clips], dtype=np.int32)
             self._lighting_pass.prepare(meshes.lights, scope_parents, targets.gbuffer_views, samples, self._shadow_pass, shadows_changed)
 
-        encoder = device.create_command_encoder(label="frame")
+        own_encoder = encoder is None
+        if encoder is None:
+            encoder = device.create_command_encoder(label="frame")
         if meshes is not None:
             self._shadow_pass.draw(encoder, self._mesh_pass, self._vector_pass, self.profiler)
         for scope in range(len(scene.clips)):
@@ -139,7 +191,8 @@ class WGPURenderer(Renderer):
         self._vector_pass.draw_frame(vector_pass, samples)
         vector_pass.end()
 
-        device.queue.submit([encoder.finish()])
+        if own_encoder:
+            device.queue.submit([encoder.finish()])
         return targets.layers
 
     def _render_targets(self, config: RenderConfig, mask_count: int) -> RenderTargets:

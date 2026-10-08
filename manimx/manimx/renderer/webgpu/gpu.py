@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import weakref
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -114,3 +116,57 @@ class GrowableBuffer:
     def _allocate(self, size: int) -> wgpu.GPUBuffer:
         size = (size + 3) // 4 * 4  # buffer sizes must be multiples of 4
         return self._device.create_buffer(label=self._label, size=size, usage=self._usage)
+
+
+class ResourceCache:
+    """Views and bind groups that live as long as what they refer to.
+
+    Creating a view or a bind group is cheap on the GPU but costs a round
+    of Python-to-native calls; frames that bind the same textures and
+    buffers (every frame, every motion-blur sub-frame) reuse them instead.
+
+    * Views are cached per texture in a weak-key map: they go away with
+      their texture.
+    * Bind groups are keyed by their layout and the identity of every
+      resource (and buffer range). An entry holds its resources, so an id
+      cannot be reused while the entry exists; the least recently used
+      entries are dropped beyond ``capacity`` (e.g. after resizes).
+    """
+
+    def __init__(self, device: wgpu.GPUDevice, capacity: int = 512) -> None:
+        self._device = device
+        self._capacity = capacity
+        self._views: weakref.WeakKeyDictionary[wgpu.GPUTexture, dict[tuple, wgpu.GPUTextureView]] = weakref.WeakKeyDictionary()
+        self._bind_groups: OrderedDict[tuple, tuple[wgpu.GPUBindGroup, tuple]] = OrderedDict()
+
+    def view(self, texture: wgpu.GPUTexture | wgpu.GPUTextureView, **descriptor: object) -> wgpu.GPUTextureView:
+        """A view of ``texture`` (a view passes through unchanged)."""
+        if isinstance(texture, wgpu.GPUTextureView):
+            return texture
+        views = self._views.setdefault(texture, {})
+        key = tuple(sorted(descriptor.items()))
+        view = views.get(key)
+        if view is None:
+            view = views[key] = texture.create_view(**descriptor)
+        return view
+
+    def bind_group(self, layout: wgpu.GPUBindGroupLayout, resources: list) -> wgpu.GPUBindGroup:
+        """A bind group with ``resources`` as bindings 0, 1, 2, ..."""
+        key = (id(layout), *(_resource_key(resource) for resource in resources))
+        entry = self._bind_groups.get(key)
+        if entry is not None:
+            self._bind_groups.move_to_end(key)
+            return entry[0]
+        group = self._device.create_bind_group(
+            layout=layout, entries=[{"binding": i, "resource": r} for i, r in enumerate(resources)]
+        )
+        self._bind_groups[key] = (group, (layout, *resources))
+        if len(self._bind_groups) > self._capacity:
+            self._bind_groups.popitem(last=False)
+        return group
+
+
+def _resource_key(resource: object) -> tuple:
+    if isinstance(resource, dict):  # a buffer binding
+        return (id(resource["buffer"]), resource.get("offset", 0), resource.get("size"))
+    return (id(resource),)

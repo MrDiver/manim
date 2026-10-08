@@ -72,6 +72,18 @@ class RenderTargets:
         # Color targets in GBUFFER_FORMATS order, then the depth buffer.
         self.gbuffer_views = (*(t.create_view() for t in self.gbuffer), self.depth.create_view())
 
+        # Attachments are built once: every frame renders into the same
+        # views (creating views per frame was measurable Python overhead).
+        self._mask_attachment = _color(self._mask_scratch, self._mask_msaa)
+        self._lit_attachment = _color(self.lit, self._lit_msaa)
+        self._vector_attachment = _color(self.vector, self._vector_msaa)
+        self._gbuffer_attachments = [
+            {"view": view, "clear_value": (0, 0, 0, 0), "load_op": wgpu.LoadOp.clear, "store_op": wgpu.StoreOp.store}
+            for view in self.gbuffer_views[:-1]
+        ]
+        self._depth_attachment = _depth(self.gbuffer_views[-1])
+        self._vector_depth_attachment = _depth(self.vector_depth.create_view())
+
     @property
     def layers(self) -> RenderLayers:
         width, height, _ = self.size
@@ -81,7 +93,7 @@ class RenderTargets:
 
     def mask_attachment(self) -> dict:
         """Transparent scratch target; mask shapes accumulate alpha."""
-        return _color(self._mask_scratch, self._mask_msaa)
+        return self._mask_attachment
 
     def copy_mask_to_layer(self, encoder: wgpu.GPUCommandEncoder, layer: int) -> None:
         width, height, _ = self.size
@@ -92,24 +104,21 @@ class RenderTargets:
         )
 
     def gbuffer_attachments(self) -> list[dict]:
-        return [
-            {"view": view, "clear_value": (0, 0, 0, 0), "load_op": wgpu.LoadOp.clear, "store_op": wgpu.StoreOp.store}
-            for view in self.gbuffer_views[:-1]
-        ]
+        return self._gbuffer_attachments
 
     def lit_attachment(self) -> dict:
-        return _color(self.lit, self._lit_msaa)
+        return self._lit_attachment
 
     def vector_attachment(self) -> dict:
-        return _color(self.vector, self._vector_msaa)
+        return self._vector_attachment
 
     def depth_attachment(self) -> dict:
         """The meshes' depth buffer, written by the geometry pass."""
-        return _depth(self.gbuffer_views[-1])
+        return self._depth_attachment
 
     def vector_depth_attachment(self) -> dict:
         """The vector pass's own depth buffer (painter's-order layers)."""
-        return _depth(self.vector_depth.create_view())
+        return self._vector_depth_attachment
 
 
 def _depth(view: wgpu.GPUTextureView) -> dict:
