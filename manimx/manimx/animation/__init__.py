@@ -38,6 +38,7 @@ from .mobjects import (
     animatable,
 )
 from .scene import SEGMENT_GAP, Cue, Emit, PreparedScene, Scene, Segment
+from .simulation import Simulation
 from .signals import DerivedSignal, RootSignal, Signal, TimeSignals, Vector3Signal, derive
 from .snapshot import version_token
 from .time_map import MonotoneMap
@@ -106,6 +107,7 @@ __all__ = [
     "SignalChange",
     "SignalKind",
     "SignalTrack",
+    "Simulation",
     "Square",
     "Target",
     "TimeSignals",

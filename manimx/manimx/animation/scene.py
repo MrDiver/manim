@@ -46,7 +46,8 @@ from .animations import Animation, AnimationBuilder, SetValue, SignalChange, as_
 from .authoring import _active
 from .mobjects import Mobject
 from .signals import RootSignal, Signal, TimeSignals
-from .signal_tracks import Change, Placement, RateFunction, SignalTrack
+from .signal_tracks import Change, Placement, RateFunction, SignalTrack, linear
+from .simulation import Simulation
 
 SEGMENT_GAP = 1.0
 """Compiled time between two segments; nothing is ever placed inside it."""
@@ -103,7 +104,7 @@ class Scene:
     def prepare(self) -> PreparedScene:
         """Run :meth:`construct` once and return the evaluable scene."""
         if self._prepared is None:
-            compiler = SceneCompiler()
+            compiler = SceneCompiler(self.time)
             self._compiler = compiler
             token = _active.set(compiler)
             try:
@@ -167,7 +168,8 @@ class Scene:
 class SceneCompiler:
     """Builds the timeline while ``construct()`` runs (see authoring.py)."""
 
-    def __init__(self) -> None:
+    def __init__(self, time: TimeSignals | None = None) -> None:
+        self.time = time or TimeSignals()
         self.cursor = 0.0
         self.order = 0
         self.tracks: dict[int, SignalTrack] = {}
@@ -222,14 +224,25 @@ class SceneCompiler:
             raise ValueError("play() needs at least one animation")
         start = self.cursor
         end = start
-        for index, animation in enumerate(animations):
-            duration = animation.run_time if run_time is None else run_time
+        # Simulations are baked last, so they see the other animations of
+        # this call as inputs (e.g. an animated paddle pushing a ball).
+        order = sorted(range(len(animations)), key=lambda i: isinstance(animations[i], Simulation))
+        for index in order:
+            animation = animations[index]
+            simulated = isinstance(animation, Simulation)
+            duration = animation.run_time if run_time is None or simulated else run_time
             begin = start + index * lag_ratio * duration
             # Mobjects appear when their own animation begins: a lagged
             # FadeIn must not show its mobject before its fade starts.
             self.cursor = begin
             self.add([m for m in animation.mobjects() if not self._is_inside_present(m)])
-            self.place(animation, begin, duration, rate or animation.rate)
+            if simulated:
+                duration = animation.bake(self, begin)
+                for event, at in animation.events:
+                    self.segment_emits.append(Emit(event, begin + at - self.segment_start))
+                self.place(animation, begin, duration, linear)
+            else:
+                self.place(animation, begin, duration, rate or animation.rate)
             end = max(end, begin + duration)
             if animation.removes():
                 self.cursor = begin + duration
@@ -286,6 +299,13 @@ class SceneCompiler:
         return PreparedScene(
             duration, list(self.tracks.values()), list(self.roots), time, list(self.placements), list(self.segments)
         )
+
+    def set_time(self, t: float) -> None:
+        """Set the time signals for compiled time ``t`` of the scene being
+        compiled (used while baking simulations; the global time is not
+        known yet, so it equals the scene time)."""
+        playing = sum(segment.duration for segment in self.segments) + max(t - self.segment_start, 0.0)
+        self.time.set(scene_time=playing, global_time=playing)
 
     def _is_inside_present(self, mobject: Mobject) -> bool:
         """Present itself, or part of a present group."""
