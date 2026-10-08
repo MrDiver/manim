@@ -60,6 +60,16 @@ class Emit:
 
 
 @dataclass(frozen=True, slots=True)
+class Cue:
+    """A sync point: the clip's time map passes through it when the bound
+    event fires (see timing.py), without holding."""
+
+    name: str
+    time: float
+    """Time within the segment."""
+
+
+@dataclass(frozen=True, slots=True)
 class Segment:
     """The stretch of a scene between two ``wait_for`` calls."""
 
@@ -72,6 +82,7 @@ class Segment:
     emits: tuple[Emit, ...] = ()
     play_offset: float = 0.0
     """Playing time (compiled time without gaps) at the segment's start."""
+    cues: tuple[Cue, ...] = ()
 
     @property
     def end(self) -> float:
@@ -140,6 +151,13 @@ class Scene:
         """Fire ``event`` at this point of the scene."""
         self._authoring().emit(event)
 
+    def cue(self, name: str) -> None:
+        """Mark a sync point: when the event bound to ``name`` fires (by
+        default the event of the same name, e.g. a spoken word), the scene
+        is at this point. Unlike ``wait_for`` it never holds; the clip's
+        time map speeds up or slows down smoothly to get there."""
+        self._authoring().cue(name)
+
     def _authoring(self) -> SceneCompiler:
         if self._compiler is None:
             raise RuntimeError("add, remove, play, wait, wait_for and emit can only be used inside construct()")
@@ -161,6 +179,7 @@ class SceneCompiler:
         self.segment_start = 0.0
         self.segment_event: str | None = None
         self.segment_emits: list[Emit] = []
+        self.segment_cues: list[Cue] = []
 
     # -- used by authoring.py -------------------------------------------------
 
@@ -231,6 +250,9 @@ class SceneCompiler:
     def emit(self, event: str) -> None:
         self.segment_emits.append(Emit(event, self.cursor - self.segment_start))
 
+    def cue(self, name: str) -> None:
+        self.segment_cues.append(Cue(name, self.cursor - self.segment_start))
+
     def _close_segment(self) -> None:
         # A segment lasts until its cursor and until its last animation ends.
         end = max([self.cursor, *(p.end for p in self.placements if p.start >= self.segment_start)])
@@ -238,11 +260,12 @@ class SceneCompiler:
         self.segments.append(
             Segment(
                 len(self.segments), self.segment_start, end - self.segment_start,
-                self.segment_event, tuple(self.segment_emits), play_offset,
+                self.segment_event, tuple(self.segment_emits), play_offset, tuple(self.segment_cues),
             )
         )  # fmt: skip
         self.cursor = end
         self.segment_emits = []
+        self.segment_cues = []
 
     def place(self, animation: Animation, start: float, duration: float, rate: RateFunction | None = None) -> Placement:
         placement = Placement(animation, start, duration, self.order, rate or animation.rate)
