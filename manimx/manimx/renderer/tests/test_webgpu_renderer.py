@@ -181,3 +181,26 @@ def test_meshes_and_vectors_share_depth(renderer: WGPURenderer) -> None:
 
     assert pixel(image, -1.5, 0.0)[:3] == (0, 0, 0)  # the wall hides the red square
     assert pixel(image, 1.0, 0.0) == (*BLUE.to_int_rgb(), 255)  # the circle is in front
+
+
+def test_frames_without_meshes_after_meshes_start_from_empty_3d_layers() -> None:
+    """Mesh-free frames skip the deferred passes and rely on an empty
+    G-buffer and lit layer: a mesh frame in between must not leave its
+    depth (hiding shapes) or light behind."""
+    from manimx import PbrMaterial, Shape3D, sphere_mesh
+
+    try:
+        reused = WGPURenderer()
+    except Exception as error:  # pragma: no cover - depends on the machine
+        pytest.skip(f"no usable GPU: {error}")
+    flat = square("flat", fill=Fill(RED, opacity=1.0), transform=Transform(position=(0.0, 0.0, -2.0)))
+    sphere = Shape3D("sphere", mesh=sphere_mesh(2.0), material=PbrMaterial("#FFFFFF", emissive="#FFFFFF"))
+
+    expected = render(WGPURenderer(), flat)
+    first = render(reused, flat)
+    with_mesh = render(reused, flat, sphere)
+    after = render(reused, flat)
+
+    np.testing.assert_array_equal(first, expected)
+    assert pixel(with_mesh, 0.0, 0.0) != pixel(expected, 0.0, 0.0)  # the sphere hides the square
+    np.testing.assert_array_equal(after, expected)

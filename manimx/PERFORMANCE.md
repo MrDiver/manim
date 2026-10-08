@@ -32,6 +32,7 @@ uv run python scripts/benchmark_project.py example-project --check-reference /tm
 |---|---|---|---|---|---|---|---|
 | 0. Baseline | 74.5 | 13.43 | 407.6 | 2.12 | 3.91 | 9.24 | 3.68 |
 | A. Cached stroke records | 87.5 | 11.43 | 452.2 | 2.09 | 1.97 | 7.29 | 4.06* |
+| B. No 3D stages without meshes | 119.6 | 8.36 | 556.3 | 2.02 | 1.88 | 4.32 | 1.72 |
 
 \* GPU time is sampled on 60 frames with a full sync per frame and varies by
 about ±10% between runs. Step A does not change any GPU work.
@@ -82,3 +83,30 @@ transform, but were rebuilt for every sub-frame. Now:
 
 Moving shapes now only offset the cached records by their position in the
 frame's buffers.
+
+### B. No 3D stages without meshes
+
+Lights, shadows and the deferred passes (geometry, lighting) only affect
+meshes (Shape3D). The example project has none, yet every sub-frame built
+a mesh batch with the default key light, built shadow views for 2D shapes
+that cast shadows onto nothing, and ran a full-screen lighting pass over
+an empty G-buffer: 1.6 ms of CPU and 1.9 ms of GPU per frame.
+
+Now a frame without meshes skips all of that. Two things still have to be
+right:
+
+- **The G-buffer's depth must be empty.** Vector shapes are depth-tested
+  against the meshes' depth, so stale depth from an earlier frame with
+  meshes would hide them.
+- **The lit layer must be empty**, because the composite reads it.
+
+The renderer therefore clears both once, with load-op clears and no draws,
+and remembers it for the current targets. Following mesh-free frames skip
+those passes completely; a frame with meshes, or new targets (a size
+change), resets the state.
+`test_frames_without_meshes_after_meshes_start_from_empty_3d_layers`
+renders flat, then flat with a sphere, then flat again, and checks that the
+last frame equals a fresh renderer's. Breaking the clear makes it fail.
+
+Result: +37% (87.5 → 119.6 fps). GPU time drops from about 3.7 to 1.7 ms per
+frame, and `render_layers` from 7.3 to 4.3 ms.

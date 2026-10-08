@@ -28,7 +28,7 @@ from __future__ import annotations
 import numpy as np
 import wgpu
 
-from ...objects import RenderObject
+from ...objects import RenderObject, Shape3D
 from ..base import Renderer
 from ..config import RenderConfig
 from ..scene_graph import flatten_scene
@@ -61,6 +61,8 @@ class WGPURenderer(Renderer):
         self._lighting_pass = LightingPass(self.context, self._frame_uniform)
         self._shadow_pass = ShadowPass(self.context)
         self._targets: RenderTargets | None = None
+        self._empty_3d: RenderTargets | None = None
+        """Targets whose G-buffer and lit layer are known to be empty."""
         self._composer = None
 
     @property
@@ -80,21 +82,29 @@ class WGPURenderer(Renderer):
         """Render ``root`` into the lit and vector layers (GPU textures)."""
         scene = flatten_scene(root)
         vectors = VectorBatch.build(scene, self.cache, config.camera.position)
-        meshes = MeshBatch.build(scene, self.cache, config)
         targets = self._render_targets(config, mask_count=len(scene.clips))
         samples = config.msaa_samples
+        # Lights, shadows and the deferred passes only affect meshes. A
+        # frame without meshes skips them; its G-buffer (whose depth the
+        # vector pass tests against) and lit layer only need to be empty,
+        # and stay empty as long as the next frames have no meshes either.
+        has_meshes = any(isinstance(item.obj, Shape3D) for item in scene.items)
+        clear_3d = not has_meshes and self._empty_3d is not targets
+        meshes = MeshBatch.build(scene, self.cache, config) if has_meshes else None
 
         device = self.context.device
-        device.queue.write_buffer(self._frame_uniform, 0, camera_frame(config, len(meshes.lights)))
+        device.queue.write_buffer(self._frame_uniform, 0, camera_frame(config, len(meshes.lights) if meshes else 0))
         self._vector_pass.prepare(vectors, targets.mask_layers_view, targets.gbuffer_views[-1], samples > 1)
-        self._mesh_pass.prepare(meshes, targets.mask_layers_view)
-        shadows = build_shadow_views(scene, meshes.light_items, meshes.lights, self.cache, config)
-        shadows_changed = self._shadow_pass.prepare(shadows, config.shadow_resolution)
-        scope_parents = np.array([scope.parent for scope in scene.clips], dtype=np.int32)
-        self._lighting_pass.prepare(meshes.lights, scope_parents, targets.gbuffer_views, samples, self._shadow_pass, shadows_changed)
+        if meshes is not None:
+            self._mesh_pass.prepare(meshes, targets.mask_layers_view)
+            shadows = build_shadow_views(scene, meshes.light_items, meshes.lights, self.cache, config)
+            shadows_changed = self._shadow_pass.prepare(shadows, config.shadow_resolution)
+            scope_parents = np.array([scope.parent for scope in scene.clips], dtype=np.int32)
+            self._lighting_pass.prepare(meshes.lights, scope_parents, targets.gbuffer_views, samples, self._shadow_pass, shadows_changed)
 
         encoder = device.create_command_encoder(label="frame")
-        self._shadow_pass.draw(encoder, self._mesh_pass, self._vector_pass, self.profiler)
+        if meshes is not None:
+            self._shadow_pass.draw(encoder, self._mesh_pass, self._vector_pass, self.profiler)
         for scope in range(len(scene.clips)):
             mask_pass = encoder.begin_render_pass(
                 color_attachments=[targets.mask_attachment()], timestamp_writes=self.profiler.pass_timing("masks")
@@ -103,19 +113,23 @@ class WGPURenderer(Renderer):
             mask_pass.end()
             targets.copy_mask_to_layer(encoder, scope)
 
-        geometry_pass = encoder.begin_render_pass(
-            color_attachments=targets.gbuffer_attachments(),
-            depth_stencil_attachment=targets.depth_attachment(),
-            timestamp_writes=self.profiler.pass_timing("geometry"),
-        )
-        self._mesh_pass.draw(geometry_pass, samples)
-        geometry_pass.end()
+        if meshes is not None or clear_3d:
+            geometry_pass = encoder.begin_render_pass(
+                color_attachments=targets.gbuffer_attachments(),
+                depth_stencil_attachment=targets.depth_attachment(),
+                timestamp_writes=self.profiler.pass_timing("geometry"),
+            )
+            if meshes is not None:
+                self._mesh_pass.draw(geometry_pass, samples)
+            geometry_pass.end()
 
-        lighting_pass = encoder.begin_render_pass(
-            color_attachments=[targets.lit_attachment()], timestamp_writes=self.profiler.pass_timing("lighting")
-        )
-        self._lighting_pass.draw(lighting_pass)
-        lighting_pass.end()
+            lighting_pass = encoder.begin_render_pass(
+                color_attachments=[targets.lit_attachment()], timestamp_writes=self.profiler.pass_timing("lighting")
+            )
+            if meshes is not None:
+                self._lighting_pass.draw(lighting_pass)
+            lighting_pass.end()
+        self._empty_3d = targets if meshes is None else None
 
         vector_pass = encoder.begin_render_pass(
             color_attachments=[targets.vector_attachment()],
