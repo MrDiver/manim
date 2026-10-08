@@ -86,3 +86,34 @@ def test_navigation_badge_properties(renderer: WGPURenderer) -> None:
     # (much larger than the circle) is clipped by the mask.
     outside = frame(2.0)[90, 20:60]
     assert np.all(outside == background[90, 20:60])
+
+
+def test_views_render_through_their_camera_and_blur_camera_moves(renderer: WGPURenderer) -> None:
+    from manimx.animation import RIGHT, Camera, Dot, Scene, Timeline, View
+    from manimx.animation.rate_functions import linear
+    from manimx.renderer import RenderConfig
+
+    camera = Camera(name="camera")
+
+    class Pan(Scene):
+        def construct(self):
+            self.add(Dot(radius=0.3, name="dot"))
+            self.play(camera.animate.shift(RIGHT * 2), run_time=1, rate=linear)
+
+    timeline = Timeline()
+    timeline.add(Pan().prepare())
+    view = timeline.view(View(timeline.worlds[0], camera))
+    settings = RenderConfig(pixel_width=160, pixel_height=90)
+
+    def dot_columns(image: np.ndarray) -> np.ndarray:
+        return np.nonzero(image[45, :, 0] > 128)[0]
+
+    start = dot_columns(renderer.render(view(0.0).root, settings))
+    composer = FrameComposer(renderer)
+    end = dot_columns(composer.compose(view, _at(settings, 1.0)))
+    assert start.mean() == pytest.approx(80, abs=1)  # centered
+    assert end.mean() == pytest.approx(80 - 2 * 160 / (8 * 16 / 9), abs=1)  # the camera moved right by 2 units
+
+    blurred = FrameComposer(renderer, [MotionBlur(samples=8, shutter=0.5)]).compose(view, _at(settings, 0.5))
+    partial = (blurred[45, :, 0] > 10) & (blurred[45, :, 0] < 245)
+    assert partial.sum() > 4  # the dot smears along the camera move

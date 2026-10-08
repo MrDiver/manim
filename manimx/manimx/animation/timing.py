@@ -33,13 +33,16 @@ hold until they fire.
 from __future__ import annotations
 
 import bisect
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from ..objects import Group as RenderGroup
 from ..objects import Quaternion, Transform, new_uid
+from ..renderer.config import Camera as RenderCamera
+from ..renderer.config import ViewState
+from .cameras import Camera, View
 from .scene import PreparedScene, Segment
 from .time_map import MonotoneMap
 from .worlds import World, World3D
@@ -235,6 +238,18 @@ class Clip:
             return timing.compiled_end  # holding until the next segment
         return timing.compiled_at(t)
 
+    def held_time(self, t: float) -> float:
+        """Like :meth:`compiled_time`, but holding the first state before
+        the clip starts and the last one after it ends (a camera keeps its
+        placement when its camera scene is not playing)."""
+        compiled = self.compiled_time(t)
+        if compiled is not None:
+            return compiled
+        included = [timing for timing in self.timings if timing is not None]
+        if not included:
+            return 0.0
+        return included[0].compiled_start if t < included[0].start else included[-1].compiled_end
+
     def _compiled_range(self, segment: Segment) -> tuple[float, float] | None:
         """The part of ``segment`` inside the cut, in compiled time."""
         first = 0.0 if self.cut_in is None else self.cut_in - segment.play_offset
@@ -336,6 +351,39 @@ class Timeline:
                 state = clip.scene.state_at(compiled, global_time=t)
                 children.append(clip._group(state.children))
         return RenderGroup(world.name, children=children, uid=world.uid)
+
+    def view_at(self, view: View, t: float) -> ViewState:
+        """The view's world and camera at global time ``t``."""
+        root = self.state_at(t, view.world)
+        clip = self._clip_of(view.camera)
+        if clip is not None and clip.world is not view.world:
+            raise ValueError(f"camera {view.camera.name!r} plays in world {clip.world.name!r}, not {view.world.name!r}")
+        return ViewState(root, self.camera_at(view.camera, t))
+
+    def view(self, view: View) -> Callable[[float], ViewState]:
+        """``t -> view_at(view, t)``, a scene function for the FrameComposer."""
+        return lambda t: self.view_at(view, t)
+
+    def camera_at(self, camera: Camera, t: float) -> RenderCamera:
+        """The renderer camera of ``camera`` at global time ``t``.
+
+        The camera's clip (the clip whose scene contains it) is evaluated
+        at its held time, so a camera keeps its placement before and after
+        its camera scene plays; the clip's transform places it in the
+        world. A camera in no clip keeps its initial values.
+        """
+        self._ensure_resolved()
+        clip = self._clip_of(camera)
+        if clip is None:
+            return camera.render_camera()
+        clip.scene.evaluate(clip.held_time(t), global_time=t)
+        return camera.render_camera(clip.transform)
+
+    def _clip_of(self, camera: Camera) -> Clip | None:
+        for clip in self.clips:
+            if any(camera in root.family() for root in clip.scene.roots):
+                return clip
+        return None
 
     def segments(self) -> Iterable[tuple[Clip, int, float, float]]:
         """``(clip, segment index, global start, global end)`` of every

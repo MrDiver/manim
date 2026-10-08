@@ -1,7 +1,7 @@
 from .base import Renderer
 from .cache import MobjectDataCache
 from .commands import CacheCommand, ClearScene, RemoveObjects
-from .config import Camera, RenderConfig
+from .config import Camera, RenderConfig, ViewState
 from .effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap, ToneMapOperator
 from .webgpu import FrameComposer, RenderLayers, WGPURenderer
 
@@ -21,5 +21,6 @@ __all__ = [
     "ShaderEffect",
     "ToneMap",
     "ToneMapOperator",
+    "ViewState",
     "WGPURenderer",
 ]

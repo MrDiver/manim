@@ -20,6 +20,7 @@ from .animations import (
     SignalChange,
     Target,
 )
+from .cameras import Camera, View
 from .constants import DEGREES, DL, DOWN, DR, IN, LEFT, ORIGIN, OUT, PI, RIGHT, TAU, UL, UP, UR
 from .kinds import COLOR, DISCRETE, FACTOR, PATH, ROTATION, SCALAR, SignalKind
 from .mobjects import (
@@ -69,6 +70,7 @@ __all__ = [
     "UR",
     "Animation",
     "AnimationBuilder",
+    "Camera",
     "Change",
     "ChangeSignals",
     "Circle",
@@ -112,6 +114,7 @@ __all__ = [
     "UnresolvedEvents",
     "VMobject",
     "Vector3Signal",
+    "View",
     "World",
     "World2D",
     "World3D",

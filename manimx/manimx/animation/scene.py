@@ -320,11 +320,16 @@ class PreparedScene:
         follow by propagation; then the present mobjects are snapshotted in
         the order they were added.
         """
+        self.evaluate(t, global_time)
+        children = [snapshot for mobject in self.roots if mobject.present.value and (snapshot := mobject.snapshot()) is not None]
+        return RenderGroup("scene", children=children)
+
+    def evaluate(self, t: float, global_time: float | None = None) -> None:
+        """Set every signal to its value at compiled time ``t`` without
+        building render state (e.g. to read a camera)."""
         self.time.set(scene_time=self.playing_time_at(t), global_time=t if global_time is None else global_time)
         for track in self.tracks:
             track.signal.set(track.value_at(t))
-        children = [snapshot for mobject in self.roots if mobject.present.value and (snapshot := mobject.snapshot()) is not None]
-        return RenderGroup("scene", children=children)
 
     def refresh(self) -> None:
         """Recompute cached start values after placements were edited."""

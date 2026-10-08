@@ -30,14 +30,15 @@ import numpy as np
 import wgpu
 
 from ...objects import RenderObject
-from ..config import RenderConfig
+from ..config import RenderConfig, ViewState
 from ..effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap
 from .gpu import COLOR_FORMAT, HDR_FORMAT, GPUContext, expand_includes
 from .profiler import GpuProfiler
 from .renderer import WGPURenderer
 
-SceneSource = RenderObject | Callable[[float], RenderObject]
-"""A fixed scene, or a function returning the scene at a given time."""
+SceneSource = RenderObject | ViewState | Callable[[float], RenderObject | ViewState]
+"""A fixed scene, or a function returning the scene at a given time; with a
+:class:`ViewState`, its camera replaces the config's."""
 
 _SAMPLED = wgpu.TextureUsage.TEXTURE_BINDING
 _ATTACHMENT = wgpu.TextureUsage.RENDER_ATTACHMENT
@@ -88,7 +89,10 @@ class FrameComposer:
 
         for index, (time, weight) in enumerate(self._sub_frames(scene, config.time)):
             scene_now = scene(time) if callable(scene) else scene
-            layers = self.renderer.render_layers(scene_now, dataclasses.replace(config, time=time))
+            sub_config = dataclasses.replace(config, time=time)
+            if isinstance(scene_now, ViewState):
+                scene_now, sub_config = scene_now.root, dataclasses.replace(sub_config, camera=scene_now.camera)
+            layers = self.renderer.render_layers(scene_now, sub_config)
             encoder = device.create_command_encoder(label="compose")
             lit = layers.lit
             for effect in self.effects:

@@ -9,6 +9,7 @@ import numpy as np
 import quaternion
 
 from ..objects.material import linear_rgb
+from ..objects.render_object import RenderObject
 from ..objects.transform import Transform
 from ..utils.color import BLACK, WHITE, ManimColor, ParsableManimColor
 
@@ -136,3 +137,17 @@ class RenderConfig:
     def ambient_linear(self) -> tuple[float, float, float]:
         r, g, b = np.array(linear_rgb(self.ambient_color)) * self.ambient_intensity
         return (float(r), float(g), float(b))
+
+
+@dataclass(frozen=True, slots=True)
+class ViewState:
+    """A scene tree together with the camera looking at it.
+
+    Scene functions passed to the :class:`~.webgpu.FrameComposer` may
+    return one instead of a bare tree; the camera then replaces
+    ``RenderConfig.camera`` for that render. With motion blur, every
+    sub-frame gets the camera of its own time, so camera moves blur too.
+    """
+
+    root: RenderObject
+    camera: Camera
