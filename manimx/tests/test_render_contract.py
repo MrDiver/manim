@@ -100,4 +100,4 @@ def test_snapshots_from_unchanged_signals_share_cached_triangulations() -> None:
     radius.set(2.0)  # changing the shape does
     grown = snapshot()
     assert cache.get(uid, "fill-mesh", grown.version("points")) is not mesh
-    assert len(cache) == 1  # the stale entry was replaced, not kept
+    assert len(cache) == 2  # fill mesh and center: stale entries were replaced, not kept

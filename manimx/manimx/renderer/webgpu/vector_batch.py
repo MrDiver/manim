@@ -134,7 +134,9 @@ class _BatchBuilder:
     cache: MobjectDataCache
     camera_position: np.ndarray
     objects: list[np.ndarray] = field(default_factory=list)
-    instances: list[tuple[int, int, int, int]] = field(default_factory=list)
+    instances: list[np.ndarray] = field(default_factory=list)
+    """Chunks of ``(kind, object, curve, 0)`` rows (uint32)."""
+    instance_count: int = 0
     fill_meshes: list[FillMesh] = field(default_factory=list)
     fill_colors: list[np.ndarray] = field(default_factory=list)
     fill_color_count: int = 0
@@ -159,7 +161,8 @@ class _BatchBuilder:
         entry["flags"] = (0 if isinstance(shape, Shape2D) else FLAG_CAMERA_FACING) | (FLAG_FRONT_ONLY if front_only else 0)
         self.objects.append(entry)
 
-        center = item.world @ np.append(shape.points_3d().mean(axis=0), 1.0)
+        local_center = self.cache.get_or_create(shape.uid, "center", shape.version("points"), lambda: np.append(shape.points_3d().mean(axis=0), 1.0))
+        center = item.world @ local_center
         distance = float(np.linalg.norm(center[:3] - self.camera_position))
         clipped = item.clip != NO_CLIP
         for draw in (
@@ -211,21 +214,34 @@ class _BatchBuilder:
             return None
         first_point = self.stroke_point_count
         first_curve = self.stroke_curve_count
+        # Stroke records only change with the shape's points or stroke
+        # style, never with its transform: moving shapes reuse them. The
+        # topology (curve links, joint pairs) survives style changes such
+        # as fades, which only rebuild the per-point width and color.
+        topology = self.cache.get_or_create(
+            shape.uid, "stroke-topology", (shape.version("points"), stroke.joint, stroke.cap), lambda: _StrokeTopology.build(shape)
+        )
+        points = self.cache.get_or_create(
+            shape.uid, "stroke-points", (shape.version("points"), shape.version("stroke")), lambda: topology.points(shape)
+        )
+        curves = topology.curves.copy()
+        curves["first_point"] += first_point
+        for link in ("prev_point", "next_point"):
+            linked = curves[link] != NO_NEIGHBOR
+            curves[link][linked] += first_point
 
-        points = np.zeros(len(shape.points), STROKE_POINT_DTYPE)
-        points["position"] = shape.points_3d()
-        points["width"] = shape.stroke_widths() * STROKE_WIDTH_SCALE
-        points["color"] = shape.stroke_rgba()
-        curves = _link_curves(shape, first_point)
-        _match_joint_styles(points, curves, first_point)
-
-        first_instance = len(self.instances)
-        for curve in range(shape.num_curves):
-            self._add_instance(KIND_STROKE, object_index, first_curve + curve)
+        first_instance = self.instance_count
+        count = len(curves)
+        rows = np.zeros((count, 4), np.uint32)
+        rows[:, 0] = KIND_STROKE
+        rows[:, 1] = object_index
+        rows[:, 2] = first_curve + np.arange(count, dtype=np.uint32)
+        self.instances.append(rows)
+        self.instance_count += count
         self.stroke_points.append(points)
         self.stroke_curves.append(curves)
         self.stroke_point_count += len(points)
-        self.stroke_curve_count += len(curves)
+        self.stroke_curve_count += count
         return _Draw(
             args=(STROKE_VERTEX_COUNT, shape.num_curves, 0, first_instance),
             opaque=bool(np.all(stroke.opacity >= 1.0)),
@@ -234,8 +250,9 @@ class _BatchBuilder:
         )
 
     def _add_instance(self, kind: int, object_index: int, curve: int = 0) -> int:
-        self.instances.append((kind, object_index, curve, 0))
-        return len(self.instances) - 1
+        self.instances.append(np.array([[kind, object_index, curve, 0]], np.uint32))
+        self.instance_count += 1
+        return self.instance_count - 1
 
     # -- encoding -----------------------------------------------------------
 
@@ -255,7 +272,7 @@ class _BatchBuilder:
         ]
         return VectorBatch(
             objects=_concat(self.objects, OBJECT_DTYPE),
-            instances=np.array(self.instances, dtype=np.uint32).view(INSTANCE_DTYPE).reshape(-1)
+            instances=np.concatenate(self.instances).view(INSTANCE_DTYPE).reshape(-1)
             if self.instances
             else np.zeros(0, INSTANCE_DTYPE),
             fill_vertices=_fill_vertices(self.fill_meshes),
@@ -306,23 +323,41 @@ def _link_curves(shape: BezierPath, first_point: int) -> np.ndarray:
     return curves
 
 
-def _match_joint_styles(points: np.ndarray, curves: np.ndarray, first_point: int) -> None:
-    """Give both copies of a shared anchor the same width and color.
+@dataclass(frozen=True, slots=True)
+class _StrokeTopology:
+    """What a stroke's records need from its points alone: curve records
+    linked inside each subpath (local point indices), and the anchors
+    shared by consecutive curves."""
 
-    A resampled per-point style list assigns slightly different values to the
-    end anchor of one curve and the start anchor of the next (they are
-    separate entries in the point array). Averaging them avoids a visible
-    step at every joint.
-    """
-    for curve in curves:
-        if curve["next_point"] == NO_NEIGHBOR:
-            continue
-        end = curve["first_point"] + POINTS_PER_CURVE - 1 - first_point
-        start = curve["next_point"] - first_point
+    curves: np.ndarray
+    joint_ends: np.ndarray
+    """Local index of the end anchor of every curve that has a next curve."""
+    joint_starts: np.ndarray
+    """Local index of the start anchor of that next curve."""
+
+    @staticmethod
+    def build(shape: BezierPath) -> _StrokeTopology:
+        curves = _link_curves(shape, 0)
+        linked = curves["next_point"] != NO_NEIGHBOR
+        ends = (curves["first_point"][linked] + POINTS_PER_CURVE - 1).astype(np.intp)
+        return _StrokeTopology(curves, ends, curves["next_point"][linked].astype(np.intp))
+
+    def points(self, shape: BezierPath) -> np.ndarray:
+        """Per-point position, width and color, with shared anchors matched."""
+        points = np.zeros(len(shape.points), STROKE_POINT_DTYPE)
+        points["position"] = shape.points_3d()
+        points["width"] = shape.stroke_widths() * STROKE_WIDTH_SCALE
+        points["color"] = shape.stroke_rgba()
+        # A resampled per-point style list assigns slightly different values
+        # to the end anchor of one curve and the start anchor of the next
+        # (separate entries in the point array). Averaging them avoids a
+        # visible step at every joint. Every anchor is in at most one pair.
         for name in ("width", "color"):
-            mean = (points[name][end] + points[name][start]) / 2
-            points[name][end] = mean
-            points[name][start] = mean
+            values = points[name]
+            mean = (values[self.joint_ends] + values[self.joint_starts]) / 2
+            values[self.joint_ends] = mean
+            values[self.joint_starts] = mean
+        return points
 
 
 def _fill_vertices(meshes: list[FillMesh]) -> np.ndarray:
