@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "manimx project",
+  "type": "object",
+  "required": [
+    "format",
+    "name"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "format": {
+      "const": 1,
+      "description": "Version of this file format."
+    },
+    "name": {
+      "type": "string",
+      "description": "Project name; also the default video name."
+    },
+    "output": {
+      "type": "object",
+      "description": "What the rendered video looks like (``\"output\"`` in manimx.json).",
+      "properties": {
+        "width": {
+          "type": "integer",
+          "default": 1920,
+          "description": "Video width in pixels.",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "default": 1080,
+          "description": "Video height in pixels.",
+          "minimum": 1
+        },
+        "fps": {
+          "type": "integer",
+          "default": 60,
+          "description": "Frames per second.",
+          "minimum": 1
+        },
+        "background": {
+          "type": "string",
+          "default": "#0b1020",
+          "description": "Background color, e.g. #0b1020 or BLACK."
+        },
+        "motion_blur": {
+          "type": "integer",
+          "default": 8,
+          "description": "Sub-frames averaged per frame; 1 turns motion blur off.",
+          "minimum": 1
+        },
+        "audio": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include the scenes' sounds."
+        },
+        "sample_rate": {
+          "type": "integer",
+          "default": 48000,
+          "description": "Audio sample rate in Hz.",
+          "minimum": 8000
+        },
+        "directory": {
+          "type": "string",
+          "default": "renders",
+          "description": "Where renders go, relative to the project."
+        }
+      },
+      "additionalProperties": false
+    },
+    "camera": {
+      "type": "object",
+      "description": "The default camera (``\"camera\"``).",
+      "properties": {
+        "frame_height": {
+          "type": "number",
+          "default": 8.0,
+          "description": "World units shown vertically (Manim's default: 8).",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "performance": {
+      "type": "object",
+      "description": "How rendering uses the machine (``\"performance\"``); never changes the image.",
+      "properties": {
+        "workers": {
+          "type": "integer",
+          "default": 1,
+          "description": "Render processes; more use more CPU cores.",
+          "minimum": 1
+        },
+        "frames_in_flight": {
+          "type": "integer",
+          "default": 3,
+          "description": "Frames queued on the GPU per process.",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "scenes": {
+      "type": "object",
+      "description": "Scene registry: name -> module and class (manimx generate scene adds entries).",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "module"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "module": {
+            "type": "string",
+            "description": "Module inside the project, e.g. scenes.intro."
+          },
+          "class": {
+            "type": "string",
+            "description": "Scene class (default: the scene's name)."
+          }
+        }
+      }
+    },
+    "timeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "clips": {
+          "type": "array",
+          "description": "Clips in order; a clip without start begins when the previous one ends.",
+          "items": {
+            "type": "object",
+            "required": [
+              "scene"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "scene": {
+                "type": "string",
+                "description": "A name from scenes."
+              },
+              "start": {
+                "type": "number",
+                "description": "Start in seconds (default: after the previous clip)."
+              },
+              "name": {
+                "type": "string",
+                "description": "Clip name (default: the scene's name)."
+              },
+              "layer": {
+                "type": "integer",
+                "description": "Higher layers are drawn on top."
+              },
+              "cut": {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "minItems": 2,
+                "maxItems": 2,
+                "description": "In and out points in the scene's playing time."
+              }
+            }
+          }
+        },
+        "events": {
+          "type": "object",
+          "description": "Times (seconds) of events scenes wait for with wait_for().",
+          "additionalProperties": {
+            "type": "number"
+          }
+        }
+      }
+    }
+  }
+}

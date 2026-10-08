@@ -1,0 +1,12 @@
+[project]
+name = "example-project"
+version = "0.1.0"
+description = "A manimx project."
+requires-python = ">=3.11"
+dependencies = ["manimx"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+manimx = { path = "..", editable = true }

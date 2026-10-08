@@ -1,0 +1,50 @@
+{
+  "$schema": "./.manimx/project.schema.json",
+  "format": 1,
+  "name": "example-project",
+  "output": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 60,
+    "background": "#0b1020",
+    "motion_blur": 8,
+    "audio": true,
+    "sample_rate": 48000,
+    "directory": "renders"
+  },
+  "camera": {
+    "frame_height": 8.0
+  },
+  "performance": {
+    "workers": 1,
+    "frames_in_flight": 3
+  },
+  "scenes": {
+    "Intro": {
+      "module": "scenes.intro",
+      "class": "Intro"
+    },
+    "Bounce": {
+      "module": "scenes.bounce",
+      "class": "Bounce"
+    },
+    "Outro": {
+      "module": "scenes.outro",
+      "class": "Outro"
+    }
+  },
+  "timeline": {
+    "clips": [
+      {
+        "scene": "Intro"
+      },
+      {
+        "scene": "Bounce"
+      },
+      {
+        "scene": "Outro"
+      }
+    ],
+    "events": {}
+  }
+}
