@@ -36,9 +36,10 @@ from .mobjects import (
     VMobject,
     animatable,
 )
-from .scene import PreparedScene, Scene
+from .scene import SEGMENT_GAP, Emit, PreparedScene, Scene, Segment
 from .signals import DerivedSignal, RootSignal, Signal, TimeSignals, Vector3Signal, derive
 from .snapshot import version_token
+from .timing import NEVER, Clip, Timeline, UnresolvedEvents
 from .tracks import Change, Entry, Placement, Track
 
 __all__ = [
@@ -51,6 +52,7 @@ __all__ = [
     "FACTOR",
     "IN",
     "LEFT",
+    "NEVER",
     "ORIGIN",
     "OUT",
     "PATH",
@@ -58,6 +60,7 @@ __all__ = [
     "RIGHT",
     "ROTATION",
     "SCALAR",
+    "SEGMENT_GAP",
     "TAU",
     "UL",
     "UP",
@@ -67,9 +70,11 @@ __all__ = [
     "Change",
     "ChangeSignals",
     "Circle",
+    "Clip",
     "ClippingGroup",
     "DerivedSignal",
     "Dot",
+    "Emit",
     "Entry",
     "FadeIn",
     "FadeOut",
@@ -85,6 +90,7 @@ __all__ = [
     "RootSignal",
     "Rotate",
     "Scene",
+    "Segment",
     "SetValue",
     "ShrinkToCenter",
     "Signal",
@@ -93,8 +99,10 @@ __all__ = [
     "Square",
     "Target",
     "TimeSignals",
+    "Timeline",
     "Track",
     "Triangle",
+    "UnresolvedEvents",
     "VMobject",
     "Vector3Signal",
     "animatable",

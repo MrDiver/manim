@@ -17,12 +17,27 @@ the cursor; ``wait`` only moves the cursor. The result is a
 mobjects in the order they were added (later ones are drawn on top, as in
 Manim).
 
-Events (``wait_for``, ``emit``) and several scenes on one timeline come
-with the session layer; this module covers a single scene clip.
+Segments: ``wait_for("EVENT")`` ends the current segment; the scene holds
+there until the event fires on the global timeline (timing.py), then the
+next segment begins. ``emit("EVENT")`` fires an event at the current point
+of the scene, for other segments or scenes to wait for.
+
+Segments are laid out on the scene's compiled time axis one after another,
+separated by a gap of :data:`SEGMENT_GAP` in which nothing is ever placed:
+
+    compiled:  [seg 0: 0 - 4] gap [seg 1: 5 - 8] gap [seg 2: 9 - ...]
+
+Tracks and animations need no notion of segments at all; a segment only
+decides which compiled time to evaluate. A hold evaluates the exact end of
+the previous segment, which lies before the next segment's start, so
+nothing that happens at the very start of the next segment (an ``add``,
+an instantaneous change) leaks into the hold. Retiming a segment on the
+global timeline only changes the mapping to compiled time.
 """
 
 from __future__ import annotations
 
+import bisect
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -32,6 +47,35 @@ from .authoring import _active
 from .mobjects import Mobject
 from .signals import RootSignal, Signal, TimeSignals
 from .tracks import Change, Placement, RateFunction, Track
+
+SEGMENT_GAP = 1.0
+"""Compiled time between two segments; nothing is ever placed inside it."""
+
+
+@dataclass(frozen=True, slots=True)
+class Emit:
+    event: str
+    time: float
+    """Time within the segment."""
+
+
+@dataclass(frozen=True, slots=True)
+class Segment:
+    """The stretch of a scene between two ``wait_for`` calls."""
+
+    index: int
+    offset: float
+    """Where the segment starts on the scene's compiled time axis."""
+    duration: float
+    waits_for: str | None
+    """The event that starts it (None for the first segment)."""
+    emits: tuple[Emit, ...] = ()
+    play_offset: float = 0.0
+    """Playing time (compiled time without gaps) at the segment's start."""
+
+    @property
+    def end(self) -> float:
+        return self.offset + self.duration
 
 
 class Scene:
@@ -88,9 +132,17 @@ class Scene:
         """Let ``duration`` seconds pass."""
         self._authoring().wait(duration)
 
+    def wait_for(self, event: str) -> None:
+        """End the current segment: hold until ``event`` fires, then go on."""
+        self._authoring().wait_for(event)
+
+    def emit(self, event: str) -> None:
+        """Fire ``event`` at this point of the scene."""
+        self._authoring().emit(event)
+
     def _authoring(self) -> SceneCompiler:
         if self._compiler is None:
-            raise RuntimeError("add, remove, play and wait can only be used inside construct()")
+            raise RuntimeError("add, remove, play, wait, wait_for and emit can only be used inside construct()")
         return self._compiler
 
 
@@ -105,6 +157,10 @@ class SceneCompiler:
         self.present: set[int] = set()
         self.timeline_signals: set[int] = set()
         self.placements: list[Placement] = []
+        self.segments: list[Segment] = []
+        self.segment_start = 0.0
+        self.segment_event: str | None = None
+        self.segment_emits: list[Emit] = []
 
     # -- used by authoring.py -------------------------------------------------
 
@@ -166,6 +222,28 @@ class SceneCompiler:
             raise ValueError("cannot wait a negative time")
         self.cursor += duration
 
+    def wait_for(self, event: str) -> None:
+        self._close_segment()
+        self.cursor += SEGMENT_GAP
+        self.segment_start = self.cursor
+        self.segment_event = event
+
+    def emit(self, event: str) -> None:
+        self.segment_emits.append(Emit(event, self.cursor - self.segment_start))
+
+    def _close_segment(self) -> None:
+        # A segment lasts until its cursor and until its last animation ends.
+        end = max([self.cursor, *(p.end for p in self.placements if p.start >= self.segment_start)])
+        play_offset = sum(segment.duration for segment in self.segments)
+        self.segments.append(
+            Segment(
+                len(self.segments), self.segment_start, end - self.segment_start,
+                self.segment_event, tuple(self.segment_emits), play_offset,
+            )
+        )  # fmt: skip
+        self.cursor = end
+        self.segment_emits = []
+
     def place(self, animation: Animation, start: float, duration: float, rate: RateFunction | None = None) -> Placement:
         placement = Placement(animation, start, duration, self.order, rate or animation.rate)
         self.order += 1
@@ -180,8 +258,11 @@ class SceneCompiler:
         return placement
 
     def finish(self, time: TimeSignals) -> PreparedScene:
-        duration = max([self.cursor, *(track.end for track in self.tracks.values())])
-        return PreparedScene(duration, list(self.tracks.values()), list(self.roots), time, list(self.placements))
+        self._close_segment()
+        duration = self.segments[-1].end
+        return PreparedScene(
+            duration, list(self.tracks.values()), list(self.roots), time, list(self.placements), list(self.segments)
+        )
 
     def _is_inside_present(self, mobject: Mobject) -> bool:
         """Present itself, or part of a present group."""
@@ -192,22 +273,31 @@ class SceneCompiler:
 
 @dataclass(eq=False)
 class PreparedScene:
-    """A compiled scene: evaluate it at any local time with :meth:`state_at`."""
+    """A compiled scene: evaluate it at any compiled time with :meth:`state_at`."""
 
     duration: float
+    """End of the last segment on the compiled time axis."""
     tracks: list[Track]
     roots: list[Mobject]
     time: TimeSignals
     placements: list[Placement] = field(default_factory=list)
+    segments: list[Segment] = field(default_factory=list)
 
-    def state_at(self, t: float) -> RenderGroup:
-        """Render state at local time ``t`` (pure: no dependence on earlier calls).
+    @property
+    def playing_time(self) -> float:
+        """Total duration of all segments (compiled time without gaps)."""
+        return sum(segment.duration for segment in self.segments)
 
-        Every animated root signal is set to its value at ``t``; derived
-        signals follow by propagation; then the present mobjects are
-        snapshotted in the order they were added.
+    def state_at(self, t: float, global_time: float | None = None) -> RenderGroup:
+        """Render state at compiled time ``t`` (pure: no dependence on earlier calls).
+
+        ``scene_time`` becomes the playing time at ``t`` (frozen inside the
+        gaps between segments); ``global_time`` defaults to ``t``. Every
+        animated root signal is set to its value at ``t``; derived signals
+        follow by propagation; then the present mobjects are snapshotted in
+        the order they were added.
         """
-        self.time.set(scene_time=t, global_time=t)
+        self.time.set(scene_time=self.playing_time_at(t), global_time=t if global_time is None else global_time)
         for track in self.tracks:
             track.signal.set(track.value_at(t))
         children = [snapshot for mobject in self.roots if mobject.present.value and (snapshot := mobject.snapshot()) is not None]
@@ -217,3 +307,11 @@ class PreparedScene:
         """Recompute cached start values after placements were edited."""
         for track in self.tracks:
             track.refresh()
+
+    def playing_time_at(self, t: float) -> float:
+        """Compiled time ``t`` without the gaps before it."""
+        if not self.segments:
+            return t
+        index = max(0, bisect.bisect_right([s.offset for s in self.segments], t) - 1)
+        segment = self.segments[index]
+        return segment.play_offset + min(max(t - segment.offset, 0.0), segment.duration)
