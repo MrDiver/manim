@@ -40,7 +40,7 @@ from .scene import SEGMENT_GAP, Emit, PreparedScene, Scene, Segment
 from .signals import DerivedSignal, RootSignal, Signal, TimeSignals, Vector3Signal, derive
 from .snapshot import version_token
 from .timing import NEVER, Clip, Timeline, UnresolvedEvents
-from .tracks import Change, Entry, Placement, Track
+from .signal_tracks import Change, Entry, Placement, SignalTrack
 
 __all__ = [
     "COLOR",
@@ -100,7 +100,7 @@ __all__ = [
     "Target",
     "TimeSignals",
     "Timeline",
-    "Track",
+    "SignalTrack",
     "Triangle",
     "UnresolvedEvents",
     "VMobject",

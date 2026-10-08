@@ -46,7 +46,7 @@ from .animations import Animation, AnimationBuilder, SetValue, SignalChange, as_
 from .authoring import _active
 from .mobjects import Mobject
 from .signals import RootSignal, Signal, TimeSignals
-from .tracks import Change, Placement, RateFunction, Track
+from .signal_tracks import Change, Placement, RateFunction, SignalTrack
 
 SEGMENT_GAP = 1.0
 """Compiled time between two segments; nothing is ever placed inside it."""
@@ -152,7 +152,7 @@ class SceneCompiler:
     def __init__(self) -> None:
         self.cursor = 0.0
         self.order = 0
-        self.tracks: dict[int, Track] = {}
+        self.tracks: dict[int, SignalTrack] = {}
         self.roots: list[Mobject] = []
         self.present: set[int] = set()
         self.timeline_signals: set[int] = set()
@@ -252,7 +252,7 @@ class SceneCompiler:
                 raise TypeError(f"{target.signal.name} is derived from other signals and cannot be animated")
             track = self.tracks.get(target.signal.id)
             if track is None:
-                track = self.tracks[target.signal.id] = Track(target.signal)
+                track = self.tracks[target.signal.id] = SignalTrack(target.signal)
             track.add(placement, target.mode)
         self.placements.append(placement)
         return placement
@@ -277,7 +277,7 @@ class PreparedScene:
 
     duration: float
     """End of the last segment on the compiled time axis."""
-    tracks: list[Track]
+    tracks: list[SignalTrack]
     roots: list[Mobject]
     time: TimeSignals
     placements: list[Placement] = field(default_factory=list)

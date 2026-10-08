@@ -36,7 +36,7 @@ from .animations import AnimationBuilder
 from .kinds import COLOR, DISCRETE, FACTOR, PATH, ROTATION, SCALAR
 from .signals import RootSignal, Signal, Vector3Signal, derive
 from .snapshot import version_token
-from .tracks import Change
+from .signal_tracks import Change
 
 ChangeList = list[tuple[RootSignal, Change, Any]]
 

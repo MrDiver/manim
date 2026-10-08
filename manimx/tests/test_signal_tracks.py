@@ -9,7 +9,7 @@ import quaternion
 from manimx.animation import DISCRETE, FACTOR, ROTATION, RootSignal
 from manimx.animation.animations import SignalChange
 from manimx.animation.rate_functions import linear, there_and_back
-from manimx.animation.tracks import Change, Placement, Track
+from manimx.animation.signal_tracks import Change, Placement, SignalTrack
 
 REL, ABS = Change.RELATIVE, Change.ABSOLUTE
 
@@ -24,14 +24,14 @@ class Formula:
         return self.function(alpha, start_value)
 
 
-def place(track: Track, order: int, start: float, duration: float, mode: Change, value, rate=linear) -> Placement:
+def place(track: SignalTrack, order: int, start: float, duration: float, mode: Change, value, rate=linear) -> Placement:
     placement = Placement(SignalChange(track.signal, mode, value), start, duration, order, rate)
     track.add(placement, mode)
     return placement
 
 
-def track(base=0.0, kind=None, *changes: tuple) -> Track:
-    result = Track(RootSignal(base, kind) if kind else RootSignal(base))
+def track(base=0.0, kind=None, *changes: tuple) -> SignalTrack:
+    result = SignalTrack(RootSignal(base, kind) if kind else RootSignal(base))
     for order, (start, duration, mode, value) in enumerate(changes):
         place(result, order, start, duration, mode, value)
     return result
@@ -81,7 +81,7 @@ def test_random_query_order_gives_identical_results() -> None:
 
 
 def test_rate_functions_shape_progress() -> None:
-    signal = Track(RootSignal(0.0))
+    signal = SignalTrack(RootSignal(0.0))
     place(signal, 0, 0, 2, REL, 1.0, rate=there_and_back)
 
     assert signal.value_at(1.0) == pytest.approx(1.0)
@@ -105,7 +105,7 @@ def test_factor_changes_multiply_geometrically() -> None:
 
 
 def test_placements_must_arrive_in_authoring_order() -> None:
-    animated = Track(RootSignal(0.0))
+    animated = SignalTrack(RootSignal(0.0))
     place(animated, 5, 0, 1, REL, 1.0)
 
     with pytest.raises(ValueError, match="authoring order"):
@@ -113,16 +113,16 @@ def test_placements_must_arrive_in_authoring_order() -> None:
 
 
 def test_absolute_targets_are_validated_by_the_kind() -> None:
-    animated = Track(RootSignal(0.0))
+    animated = SignalTrack(RootSignal(0.0))
     placement = place(animated, 0, 0, 1, ABS, "3")
 
     assert animated.final_value() == 3.0 and placement.end == 1.0
-    assert animated.end == 1.0 and Track(RootSignal(0.0)).end == 0.0
+    assert animated.end == 1.0 and SignalTrack(RootSignal(0.0)).end == 0.0
 
 
 def test_animations_may_know_their_own_start() -> None:
     """Like FadeIn: an absolute animation that ignores V_e and starts at 0."""
-    opacity = Track(RootSignal(1.0))
+    opacity = SignalTrack(RootSignal(1.0))
     opacity.add(Placement(Formula(lambda alpha, _start: alpha), 2, 2, 0, linear), ABS)
 
     assert opacity.value_at(1.0) == 1.0  # before the fade: untouched
@@ -132,7 +132,7 @@ def test_animations_may_know_their_own_start() -> None:
 
 def test_animations_receive_the_start_value() -> None:
     seen = []
-    signal = Track(RootSignal(0.0))
+    signal = SignalTrack(RootSignal(0.0))
     place(signal, 0, 0, 4, REL, 8.0)
     signal.add(Placement(Formula(lambda alpha, start: seen.append(start) or start), 2, 1, 1, linear), ABS)
 
@@ -142,7 +142,7 @@ def test_animations_receive_the_start_value() -> None:
 
 def test_one_placement_on_several_tracks_moves_together() -> None:
     """What a timeline editor does: drag one animation bar."""
-    x, y = Track(RootSignal(0.0)), Track(RootSignal(0.0))
+    x, y = SignalTrack(RootSignal(0.0)), SignalTrack(RootSignal(0.0))
     shift = SignalChange(x.signal, REL, 2.0)
 
     class ShiftBoth:
@@ -161,7 +161,7 @@ def test_one_placement_on_several_tracks_moves_together() -> None:
 
 
 def test_refresh_recomputes_start_values_after_a_move() -> None:
-    moves = Track(RootSignal(0.0))
+    moves = SignalTrack(RootSignal(0.0))
     shift = place(moves, 0, 0, 10, REL, 10.0)
     place(moves, 1, 4, 2, ABS, 0.0)
     assert moves.value_at(4.0) == pytest.approx(4.0)

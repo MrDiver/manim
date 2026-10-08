@@ -1,4 +1,7 @@
-"""Tracks: how the animations touching one root signal combine over time.
+"""Signal tracks: how the animations touching one root signal combine over time.
+
+(Not to be confused with timeline rows in an editor, which are called
+lanes; see the glossary in docs/animation_engine_design.md.)
 
 Animations are the units on the timeline: objects that reference their
 mobject and are evaluated with a progress ``alpha``. Two small structures
@@ -12,7 +15,7 @@ connect them to signals:
   signal's value when the animation starts. One placement has one entry per
   signal it touches (``shift(UR)`` touches x and y).
 
-A :class:`Track` holds one root signal's base value and its entries. The
+A :class:`SignalTrack` holds one root signal's base value and its entries. The
 value at a local time ``t`` is a closed-form function of ``t``: the entries
 are folded in **authoring order** (section 4.2 of
 docs/animation_engine_design.md):
@@ -30,7 +33,7 @@ as ``move_to`` interpolate from it, so they start exactly where the signal
 is, even while an earlier animation is still running, and override it from
 then on. Animations that know their own start (``FadeIn`` goes from 0)
 simply ignore it. ``V_e`` depends on the placements of earlier entries, so
-it is cached and recomputed by :meth:`Track.refresh` after a placement
+it is cached and recomputed by :meth:`SignalTrack.refresh` after a placement
 changes.
 
 There is no replay from the start and no hidden state: evaluating a track
@@ -107,7 +110,7 @@ class Entry:
     """The signal's value when the animation starts (V_e, see module docs)."""
 
 
-class Track:
+class SignalTrack:
     """A root signal's base value and the entries of the animations on it."""
 
     __slots__ = ("signal", "base", "entries")
@@ -162,4 +165,4 @@ class Track:
         return value
 
 
-__all__ = ["Change", "Contributor", "Entry", "Placement", "RateFunction", "Track", "linear", "smooth"]
+__all__ = ["Change", "Contributor", "Entry", "Placement", "RateFunction", "SignalTrack", "linear", "smooth"]

@@ -22,7 +22,7 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from .signals import RootSignal, Signal
-from .tracks import Change
+from .signal_tracks import Change
 
 if TYPE_CHECKING:
     from .scene import SceneCompiler

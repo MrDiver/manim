@@ -27,7 +27,7 @@ from ..objects.transform import quaternion_from_axis_angle
 from .rate_functions import smooth
 from .signals import RootSignal, Signal
 from .authoring import current as authoring_current
-from .tracks import Change, RateFunction
+from .signal_tracks import Change, RateFunction
 
 if TYPE_CHECKING:
     from .mobjects import Mobject, VMobject
