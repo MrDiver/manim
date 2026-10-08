@@ -264,3 +264,28 @@ def test_portal_cube(renderer: WGPURenderer, update_references: bool, view: str)
     image = renderer.render(portal_cube(), views(480, 270)[view])
 
     check(image, f"portal_cube_{view}", update_references)
+
+
+@pytest.mark.parametrize("time", [0.6, 2.3, 3.6, 4.7])
+def test_animated_logo(renderer: WGPURenderer, update_references: bool, time: float) -> None:
+    from manimx.examples.animated_logo import AnimatedLogo
+    from manimx.examples.animated_logo import config as animated_config
+
+    prepared = AnimatedLogo().prepare()
+    image = renderer.render(prepared.state_at(time), animated_config(480, 270))
+
+    check(image, f"animated_logo_{time:.1f}s", update_references)
+
+
+def test_animated_logo_motion_blur(renderer: WGPURenderer, update_references: bool) -> None:
+    import dataclasses
+
+    from manimx.examples.animated_logo import AnimatedLogo
+    from manimx.examples.animated_logo import config as animated_config
+    from manimx.renderer import FrameComposer, MotionBlur
+
+    prepared = AnimatedLogo().prepare()
+    composer = FrameComposer(renderer, [MotionBlur(samples=16, shutter=0.25)])
+    image = composer.compose(prepared.state_at, dataclasses.replace(animated_config(480, 270), time=2.0))
+
+    check(image, "animated_logo_motion_blur", update_references)
