@@ -34,6 +34,7 @@ uv run python scripts/benchmark_project.py example-project --check-reference /tm
 | A. Cached stroke records | 87.5 | 11.43 | 452.2 | 2.09 | 1.97 | 7.29 | 4.06* |
 | B. No 3D stages without meshes | 119.6 | 8.36 | 556.3 | 2.02 | 1.88 | 4.32 | 1.72 |
 | C. Renderer as a service | 134.9 | 7.41 | 603.9 | 1.99 | 1.87 | 3.51 | 1.75 |
+| D. Snapshot fast paths | 149.2 | 6.70 | 644.9 | 1.20 | 1.88 | 3.55 | 1.72 |
 
 \* GPU time is sampled on 60 frames with a full sync per frame and varies by
 about ±10% between runs. Step A does not change any GPU work.
@@ -157,3 +158,29 @@ a fresh renderer, and cache sweeping. The test suite runs faster too (11.2 →
 
 Result: +13% (119.6 → 134.9 fps). The composite drops from 0.72 to 0.37 ms
 per frame, and `render_layers` from 4.3 to 3.5 ms.
+
+### D. Snapshot fast paths
+
+Snapshots rebuild every render object for every sub-frame, and the
+render objects validate their inputs as if they came from users. Three of
+those validations were most of `state_at`:
+
+- **Colors:** each `Fill` and `Stroke` sent the color signal's RGB float
+  triple through `ManimColor.parse`. For a float array of shape (3,) the
+  parser returns the values unchanged (checked on 20,000 random colors,
+  including values outside [0, 1]), so that case now skips it. Integer
+  arrays (0–255), lists and strings still go through the parser.
+- **Scalars:** opacity and width were validated with two numpy reductions
+  each, 21% of `state_at` after the color fix. Plain Python numbers are
+  now range-checked in Python, with the same error and NaN behaviour (only
+  values below or above the range are rejected). Bools and sequences take
+  the general path.
+- **Points:** every snapshot copied the path's points. A float64 array of
+  the right shape that owns its data and is read-only (what path signals
+  hold) is now shared, since nobody can change it.
+
+A new test pins down that the fast paths match the general parsers and keep
+their errors.
+
+Result: +11% (134.9 → 149.2 fps). `state_at` drops from 1.99 to 1.20 ms
+per frame (−40%).

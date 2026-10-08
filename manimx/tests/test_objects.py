@@ -244,3 +244,25 @@ def test_assert_image_matches_creates_compares_and_reports(tmp_path) -> None:
         assert_image_matches(np.zeros((2, 2, 4), np.uint8), reference)
     assert_image_matches(changed, reference, update=True)
     assert_image_matches(changed, reference)
+
+
+def test_style_and_point_fast_paths_match_the_general_parsers() -> None:
+    from manimx.objects.path import _validated_points
+    from manimx.objects.style import to_rgb_array, to_scalar_array
+
+    triple = np.array([0.25, 0.5, 1.5])  # floats pass through unchanged, even out of [0, 1]
+    assert np.array_equal(to_rgb_array(triple), [[0.25, 0.5, 1.5]]) and not to_rgb_array(triple).flags.writeable
+    assert np.allclose(to_rgb_array(np.array([255, 0, 0])), [[1.0, 0.0, 0.0]])  # integers still mean 0-255
+    assert to_scalar_array(0.5, "opacity", 0.0, 1.0).tolist() == [0.5]
+    assert to_scalar_array(2, "width", 0.0, np.inf).dtype == np.float64
+    with pytest.raises(ValueError, match="opacity must be in"):
+        to_scalar_array(1.5, "opacity", 0.0, 1.0)
+    assert to_scalar_array(True, "flag", 0.0, 1.0).tolist() == [1.0]  # bools take the general path
+
+    frozen = np.zeros((4, 2))
+    frozen.setflags(write=False)
+    assert _validated_points(frozen, 2) is frozen  # owned and read-only: shared
+    writable = np.zeros((4, 2))
+    assert _validated_points(writable, 2) is not writable and not _validated_points(writable, 2).flags.writeable
+    with pytest.raises(ValueError, match="four entries"):
+        _validated_points(np.zeros((3, 2)), 2)

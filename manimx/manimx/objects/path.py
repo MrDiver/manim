@@ -105,7 +105,23 @@ class BezierPath(RenderObject):
 
 
 def _validated_points(value: object, dimension: int) -> np.ndarray:
-    """A read-only float64 ``(N, dimension)`` copy, N a multiple of four."""
+    """A read-only float64 ``(N, dimension)`` array, N a multiple of four.
+
+    An array that already is all of that, and owns its read-only data
+    (e.g. a path signal's value), is shared instead of copied: nobody can
+    change it. Snapshots rebuild render objects every frame, and copying
+    unchanged points each time was measurable.
+    """
+    if (
+        isinstance(value, np.ndarray)
+        and value.dtype == np.float64
+        and value.ndim == 2
+        and value.shape[1] == dimension
+        and len(value) % POINTS_PER_CURVE == 0
+        and value.flags.owndata
+        and not value.flags.writeable
+    ):
+        return value
     points = np.array(value, dtype=np.float64)
     if points.size == 0:
         points = np.zeros((0, dimension))

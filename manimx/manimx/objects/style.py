@@ -26,6 +26,11 @@ def to_rgb_array(colors: ColorsLike) -> np.ndarray:
     Follows :meth:`ManimColor.parse`: a list or tuple is always a sequence of
     colors, so pass a single RGB triple as a ``ManimColor`` or numpy array.
     """
+    if isinstance(colors, np.ndarray) and colors.dtype.kind == "f" and colors.shape == (3,):
+        # One RGB float triple (what animated color signals hold): parsing
+        # returns it unchanged, so skip the parser, which is measurable
+        # when render objects are rebuilt every frame.
+        return _frozen(colors.astype(np.float64).reshape(1, 3))
     parsed = ManimColor.parse(colors)
     if isinstance(parsed, ManimColor):
         parsed = [parsed]
@@ -38,6 +43,12 @@ def to_scalar_array(
     values: ScalarsLike, name: str, low: float, high: float
 ) -> np.ndarray:
     """Parse one value or a sequence of values into a ``(K,)`` array."""
+    if isinstance(values, (int, float)) and not isinstance(values, bool):
+        # One plain number (the common case for every snapshot): the range
+        # check in Python is much cheaper than two numpy reductions.
+        if values < low or values > high:
+            raise ValueError(f"{name} must be in [{low}, {high}], got {values!r}")
+        return _frozen(np.array((values,), dtype=np.float64))
     array = np.array(values, dtype=np.float64).reshape(-1)
     if array.size == 0:
         raise ValueError(f"{name} needs at least one value")
