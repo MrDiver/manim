@@ -22,9 +22,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
-from manimx.animation import PointLight, Scene, Shape3D, Simulation
+from manimx.animation import Particles, PointLight, Scene, Simulation
 from manimx.examples.manim_logo import LOGO_BLUE, LOGO_GREEN, LOGO_RED
-from manimx.robjects.transform import rotation_towards
+from manimx.robjects.material import linear_rgb
 from manimx.userland import Box, FadeIn
 from manimx.userland.geometry import sphere_mesh
 
@@ -144,63 +144,55 @@ def finale_beat(t: float) -> float:
 
 
 def make_fireworks(glowing: Sequence[Box]) -> Simulation:
-    """The fireworks as a Simulation, with its rockets and sparks (all
-    hidden, scale 0, until the step function lights them) and two point
-    lights for the flashes. Every burst also lights up ``glowing`` (the
-    X), which settles back to its rest glow."""
+    """The fireworks as a Simulation: the sparks and the rockets are two
+    Particles nodes (one mesh each, a row per particle), hidden at scale 0
+    until the step function lights them, and two point lights flash at
+    the bursts. Every burst also lights up ``glowing`` (the X), which
+    settles back to its rest glow."""
     rng = np.random.default_rng(7)
-    mesh = sphere_mesh(1.0, 10, 6)  # one mesh for every spark
-
-    def particle(
-        name: str,
-    ) -> Shape3D:  # a sphere around z, stretched along z when it flies
-        node = Shape3D(
-            mesh,
-            name,
-            color="#000000",
-            emissive=WHITE,
-            emissive_strength=0.0,
-            cast_shadows=False,
-        )
-        return node.set_scale(0.0)
-
-    rockets = [particle(f"rocket-{i}") for i in range(len(SHELLS))]
-    sparks = [particle(f"spark-{i}") for i in range(len(SHELLS) * SPARKS_PER_SHELL)]
+    mesh = sphere_mesh(1.0, 10, 6)  # a sphere around z, stretched along z when it flies
+    look = dict(color="#000000", emissive=WHITE, emissive_strength=1.0, cast_shadows=False)
+    rockets = Particles(len(SHELLS), mesh, "rockets", **look)
+    sparks = Particles(len(SHELLS) * SPARKS_PER_SHELL, mesh, "sparks", **look)
+    for node in (rockets, sparks):
+        node.set_scales(np.zeros((node.count, 3)))
     flashes = [PointLight(f"flash-{i}", intensity=0.0, cast_shadows=False) for i in range(2)]
 
-    count = len(sparks)
+    count = sparks.count
     position = np.zeros((count, 3))
     velocity = np.zeros((count, 3))
     age = np.zeros(count)
-    life = np.zeros(count)
+    life = np.ones(count)
     alive = np.zeros(count, dtype=bool)
+    tint = np.ones((count, 3))
     flicker = rng.uniform(0.0, math.tau, count)
-    rocket_state: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+    rocket_position = np.zeros((len(SHELLS), 3))
+    rocket_velocity = np.zeros((len(SHELLS), 3))
+    rocket_tint = np.ones((len(SHELLS), 3))
+    rocket_flying = np.zeros(len(SHELLS), dtype=bool)
+    launched = np.zeros(len(SHELLS), dtype=bool)
     flash_state = [(0.0, -10.0) for _ in flashes]  # (peak intensity, burst time)
 
     def launch(index: int, shell: Shell) -> None:
-        speed = math.sqrt(2 * GRAVITY * (shell.height - 1.0))
-        rocket_state[index] = (
-            np.array([shell.x, LAUNCH_Y, 1.0]),
-            np.array([rng.normal(0, 0.3), 0.0, speed]),
-        )
-        rockets[index].set_emissive(shell.color, 8.0)
+        launched[index] = rocket_flying[index] = True
+        rocket_position[index] = (shell.x, LAUNCH_Y, 1.0)
+        rocket_velocity[index] = (rng.normal(0, 0.3), 0.0, math.sqrt(2 * GRAVITY * (shell.height - 1.0)))
+        rocket_tint[index] = linear_rgb(shell.color)
         simulation.play_wave(whoosh(index), volume=0.7)
 
-    def burst(index: int, shell: Shell, where: np.ndarray) -> None:
-        rockets[index].set_scale(0.0)
+    def burst(index: int, shell: Shell) -> None:
+        rocket_flying[index] = False
         group = slice(index * SPARKS_PER_SHELL, (index + 1) * SPARKS_PER_SHELL)
         directions = rng.normal(size=(SPARKS_PER_SHELL, 3))
         directions /= np.linalg.norm(directions, axis=1, keepdims=True)
-        position[group] = where
+        position[group] = rocket_position[index]
         velocity[group] = directions * shell.speed * rng.uniform(0.85, 1.0, (SPARKS_PER_SHELL, 1))
         age[group] = 0.0
         life[group] = rng.uniform(1.4, 2.3, SPARKS_PER_SHELL)
         alive[group] = True
-        for spark in sparks[group]:
-            spark.set_emissive(shell.color)
+        tint[group] = linear_rgb(shell.color)
         flash = flashes[index % 2]
-        flash.move_to(where).set_color(shell.color)
+        flash.move_to(rocket_position[index]).set_color(shell.color)
         flash_state[index % 2] = (2500.0 * shell.speed / 6.0, simulation.time)
         for node in glowing:
             node.set_emissive(strength=X_GLOW_REST + 6.0)
@@ -210,37 +202,31 @@ def make_fireworks(glowing: Sequence[Box]) -> Simulation:
     def step(dt: float) -> None:
         now = simulation.time
         for index, shell in enumerate(SHELLS):
-            if index not in rocket_state and now >= shell.launch:
+            if not launched[index] and now >= shell.launch:
                 launch(index, shell)
-        for index, (where, speed) in list(rocket_state.items()):
-            if speed[2] <= 0.0:
-                continue  # burst already
-            speed[2] -= GRAVITY * dt
-            where += speed * dt
-            if speed[2] <= 0.0:
-                burst(index, SHELLS[index], where.copy())
-            else:
-                rockets[index].move_to(where).set_scale(0.1)
+        rocket_velocity[rocket_flying, 2] -= GRAVITY * dt
+        rocket_position[rocket_flying] += rocket_velocity[rocket_flying] * dt
+        for index in np.flatnonzero(rocket_flying & (rocket_velocity[:, 2] <= 0.0)):
+            burst(index, SHELLS[index])
+        rockets.set_positions(rocket_position)
+        rockets.set_scales(np.where(rocket_flying[:, None], 0.1, 0.0) * np.ones((1, 3)))
+        rockets.set_colors(np.column_stack([rocket_tint, np.full(len(SHELLS), 8.0)]))
 
-        moving = np.flatnonzero(alive)
-        velocity[moving] *= math.exp(-1.4 * dt)  # air drag
-        velocity[moving, 2] -= 0.45 * GRAVITY * dt
-        position[moving] += velocity[moving] * dt
-        age[moving] += dt
-        for i in moving:
-            left = 1.0 - age[i] / life[i]
-            if left <= 0.0:
-                alive[i] = False
-                sparks[i].set_scale(0.0)
-                continue
-            twinkle = 0.75 + 0.25 * math.sin(40.0 * now + flicker[i]) if left < 0.5 else 1.0
-            # Stretched along its velocity: fast sparks streak, slow ones are dots.
-            size = 0.08 * (0.4 + 0.6 * left)
-            speed = float(np.linalg.norm(velocity[i]))
-            sparks[i].move_to(position[i]).set_scale((size, size, size + 0.07 * speed))
-            if speed > 1e-6:
-                sparks[i].rotation.set(rotation_towards(tuple(velocity[i])))
-            sparks[i].set_emissive(strength=14.0 * left**1.5 * twinkle)
+        velocity[alive] *= math.exp(-1.4 * dt)  # air drag
+        velocity[alive, 2] -= 0.45 * GRAVITY * dt
+        position[alive] += velocity[alive] * dt
+        age[alive] += dt
+        alive[age >= life] = False
+        left = np.clip(1.0 - age / life, 0.0, 1.0)
+        twinkle = np.where(left < 0.5, 0.75 + 0.25 * np.sin(40.0 * now + flicker), 1.0)
+        # Stretched along the velocity: fast sparks streak, slow ones are dots.
+        size = 0.08 * (0.4 + 0.6 * left)
+        speed = np.linalg.norm(velocity, axis=1)
+        scales = np.column_stack([size, size, size + 0.07 * speed]) * alive[:, None]
+        sparks.set_positions(position)
+        sparks.set_rotations(_z_towards(velocity))
+        sparks.set_scales(scales)
+        sparks.set_colors(np.column_stack([tint, 14.0 * left**1.5 * twinkle]))
 
         for node in glowing:
             if node.emissive_strength.value > X_GLOW_REST:
@@ -248,5 +234,19 @@ def make_fireworks(glowing: Sequence[Box]) -> Simulation:
         for flash, (peak, at) in zip(flashes, flash_state, strict=True):
             flash.set_intensity(peak * math.exp(-(now - at) / 0.25) if now >= at else 0.0)
 
-    simulation = Simulation(step, dt=1 / 60, duration=FIREWORKS_LENGTH, adds=[*rockets, *sparks, *flashes])
+    simulation = Simulation(step, dt=1 / 60, duration=FIREWORKS_LENGTH, adds=[rockets, sparks, *flashes])
     return simulation
+
+
+def _z_towards(directions: np.ndarray) -> np.ndarray:
+    """Quaternions (w, x, y, z) turning +z onto each direction (identity
+    for a direction of zero length)."""
+    length = np.linalg.norm(directions, axis=1)
+    unit = directions / np.maximum(length, 1e-12)[:, None]
+    # The half-way vector between +z and the direction: q = (1 + z.d, z x d), normalized.
+    w = 1.0 + unit[:, 2]
+    quaternions = np.column_stack([w, -unit[:, 1], unit[:, 0], np.zeros(len(unit))])
+    opposite = w < 1e-9  # pointing along -z: half a turn about x
+    quaternions[opposite] = (0.0, 1.0, 0.0, 0.0)
+    quaternions[length < 1e-12] = (1.0, 0.0, 0.0, 0.0)
+    return quaternions / np.linalg.norm(quaternions, axis=1, keepdims=True)
