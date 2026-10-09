@@ -107,10 +107,51 @@ class SettingsMenu:
         """Whether the row (or anything in its section) differs from manimx.json."""
         return get(self.settings, row.entry.path) != get(self.saved, row.entry.path)
 
-    def help_text(self) -> str:
+    def hints(self) -> list[list[tuple[str, str]]]:
+        """``(key, what it does)`` pairs for the bottom of the menu: the
+        first line for the selected row (or the edit line), the second for
+        the whole menu."""
         if self.editing is not None:
-            return "enter: set   esc: cancel"
-        return "↑↓ move   →← open/close   space switch   enter edit   r default   s save   q quit"
+            return [[("enter", "set"), ("esc", "cancel"), ("⌫", "delete")], [("", self._allowed())]]
+        row = self.current
+        path = row.entry.path
+        here: list[tuple[str, str]] = []
+        if row.is_section:
+            is_open = path in self.expanded
+            switch = self._switch(path)
+            if switch is not None:
+                here.append(("space", "switch off" if switch else "switch on"))
+            here.append(("←" if is_open else "→", "close" if is_open else "open"))
+        else:
+            value = get(self.settings, path)
+            choices = row.entry.field.metadata.get("choices")
+            if isinstance(value, bool):
+                here.append(("space", "switch to " + ("no" if value else "yes")))
+            elif choices is not None:
+                upcoming = choices[(choices.index(value) + 1) % len(choices)]
+                here.append(("space", f"next: {upcoming}{row.entry.field.metadata.get('unit', '')}"))
+            else:
+                here.append(("enter", "edit"))
+            default = row.entry.field.default
+            if value != default:
+                shown = f"{default:g}" if isinstance(default, float) else str(default).lower() if isinstance(default, bool) else str(default)
+                here.append(("r", f"default: {shown}{row.entry.field.metadata.get('unit', '')}"))
+            here.append(("←", "close section"))
+        general = [("↑↓", "move"), ("s", "save and quit"), ("q", "quit without saving")] if self.dirty else [("↑↓", "move"), ("q", "quit")]
+        return [here, general]
+
+    def _allowed(self) -> str:
+        """What the edit line accepts, from the setting's declaration."""
+        meta = self.current.entry.field.metadata
+        kind = {int: "a whole number", float: "a number", str: "text"}[type(self.current.entry.field.default)]
+        if meta.get("color"):
+            kind = "a color: #rrggbb or a name like BLUE"
+        limits = []
+        if meta.get("minimum") is not None:
+            limits.append(f"at least {meta['minimum']:g}")
+        if meta.get("maximum") is not None:
+            limits.append(f"at most {meta['maximum']:g}")
+        return kind + (f", {' and '.join(limits)}" if limits else "")
 
     # -- keys -----------------------------------------------------------------
 
@@ -267,7 +308,14 @@ def lines(menu: SettingsMenu) -> list[tuple[str, str]]:
     pieces.append(("class:description", f"  {selected.entry.description}\n"))
     if menu.message:
         pieces.append(("class:error" if menu.error else "class:note", f"  {menu.message}\n"))
-    pieces.append(("class:help", f"\n  {menu.help_text()}{'   (unsaved changes)' if menu.dirty else ''}\n"))
+    pieces.append(("", "\n"))
+    for line in menu.hints():
+        pieces.append(("", "  "))
+        for key, action in line:
+            if key:
+                pieces.append(("class:key", f" {key} "))
+            pieces.append(("class:help", f" {action}   "))
+        pieces.append(("", "\n"))
     return pieces
 
 
@@ -281,6 +329,7 @@ STYLE = {
     "description": "italic",
     "error": "#e07a5f",
     "help": "#888888",
+    "key": "bold reverse #5ea3d0",
 }
 
 _KEYS = {"up": "up", "down": "down", "left": "left", "right": "right", "enter": "enter", "c-m": "enter", "escape": "escape", "backspace": "backspace", "c-h": "backspace"}

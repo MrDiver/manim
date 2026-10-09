@@ -288,13 +288,16 @@ uv run manimx settings --print  # every setting with its value and docs, as text
   ▸ Performance                           Processes and GPU queueing.
 
   Exposure as a share of a frame: 360 is one frame, 180 half (film's default), 720 two frames.
+
+   enter  edit    r  default: 180°    ←  close section
+   ↑↓  move    s  save and quit    q  quit without saving
 ```
 
-↑/↓ move, →/← open and close sections, space switches an effect (or a
-yes/no value) on and off or steps through choices, enter edits a value, r
-puts it back to its default, s saves to `manimx.json`, q quits. The line
-below the tree describes the selected setting; values are checked as you
-enter them.
+Below the tree: the description of the selected setting, then the keys
+that work on it right now (while typing a value, what it accepts). In
+short: ↑/↓ move, →/← open and close sections, space switches an effect
+(or a yes/no value) on and off or steps through choices, enter edits a
+value, r puts it back to its default, s saves to `manimx.json`, q quits.
 
 ## 9. Render
 

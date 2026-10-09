@@ -170,3 +170,35 @@ def test_settings_command_saves_what_the_menu_changed(tmp_path, monkeypatch, cap
     assert said in capsys.readouterr().out
     data = json.loads((tmp_path / "manimx.json").read_text())
     assert data.get("effects", {}).get("bloom", {}).get("enabled", False) is saved
+
+
+def test_hints_say_what_the_keys_do_here() -> None:
+    menu = SettingsMenu(Settings(), expanded={("effects",), ("effects", "motion_blur"), ("effects", "shadows"), ("output",)})
+
+    go_to(menu, "effects.motion_blur")
+    assert menu.hints() == [[("space", "switch off"), ("←", "close")], [("↑↓", "move"), ("q", "quit")]]
+    go_to(menu, "lighting")
+    assert menu.hints()[0] == [("→", "open")]
+    go_to(menu, "effects.shadows.resolution")
+    assert menu.hints()[0][0] == ("space", "next: 4096px")
+    go_to(menu, "output.audio")
+    assert menu.hints()[0][0] == ("space", "switch to no")
+
+    go_to(menu, "effects.motion_blur.shutter_angle")
+    menu.settings.effects.motion_blur.shutter_angle = 720.0
+    assert menu.hints() == [
+        [("enter", "edit"), ("r", "default: 180°"), ("←", "close section")],
+        [("↑↓", "move"), ("s", "save and quit"), ("q", "quit without saving")],
+    ]
+    press(menu, "enter")
+    assert menu.hints() == [[("enter", "set"), ("esc", "cancel"), ("⌫", "delete")], [("", "a number, at least 0")]]
+    assert " enter  set" in text(menu)
+    press(menu, "escape")
+
+    go_to(menu, "effects.shadows.samples")
+    press(menu, "enter")
+    assert menu.hints()[1] == [("", "a whole number, at least 1 and at most 64")]
+    press(menu, "escape")
+    go_to(menu, "output.background")
+    press(menu, "enter")
+    assert "#rrggbb" in menu.hints()[1][0][1]
