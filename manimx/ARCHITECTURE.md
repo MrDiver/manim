@@ -75,6 +75,7 @@ flowchart LR
 | `manimx.animation` | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses (`Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D`, `Light` → `DirectionalLight`, `PointLight`, `SpotLight`; `animation.Camera`), `PositionMixin`, `RotationMixin`, `ScalableMixin`; `Animation` and its subclasses; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound` | robjects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
 | `manimx.renderer` | `flatten_scene()` → `FlatScene`; `tessellate_fill()`; `RNodeDataCache`; `RenderConfig`, `renderer.Camera`, `ViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `RemoveObjects`, `ClearScene` | robjects |
 | `manimx.renderer.webgpu` | `WGPURenderer`, `FrameComposer`, `RetainedVectors`, `VectorBatch`, `MeshBatch`, `VectorPass`, `MeshPass`, `LightingPass`, `ShadowPass`, `RenderTargets`, `RenderLayers`, `ResourceCache`, `GPUContext` | wgpu |
+| `manimx.io` | `load_gltf()`: a glTF file as a tree of `Group` and `Shape3D` nodes | animation, robjects |
 | `manimx.drivers` | `render()`, `FramePipeline`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation |
 | `manimx.project` | `Project`, `OutputSettings`, `CameraSettings`, `PerformanceSettings`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers |
 | `manimx.cli` | the Typer `app` (`manimx` command), `scaffold`, `ui` | project, drivers |
@@ -761,6 +762,9 @@ flowchart LR
   `PointLight`, `SpotLight`; `cast_shadows` as a `DISCRETE` signal on every
   leaf. Known gap: the deferred mesh pass ignores `PbrMaterial.opacity`,
   so fading a `Shape3D` (its `alpha` or `opacity`) does not show yet;
+- `load_gltf()` builds a node tree: one `Group` per glTF node, one
+  `Shape3D` per primitive, glTF names as node names, material names as
+  `material:<name>` tags;
 - performance: 74.5 → 169.8 fps on `example-project/`, 2.3× faster than the
   baseline.
 

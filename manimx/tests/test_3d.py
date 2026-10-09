@@ -5,14 +5,26 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from gltf_fixtures import GlbWriter
+from manimx.animation import Group, Rotate, Scene
+from manimx.animation.rate_functions import linear
+from manimx.io import load_gltf
+from manimx.renderer import RenderConfig, RNodeDataCache
+from manimx.renderer.scene_graph import flatten, flatten_scene
+from manimx.renderer.webgpu.mesh_batch import (
+    LIGHT_DIRECTIONAL,
+    LIGHT_POINT,
+    LIGHT_SPOT,
+    MeshBatch,
+)
+from manimx.renderer.webgpu.vector_batch import FLAG_CAMERA_FACING, VectorBatch
+
 from manimx import (
+    MeshData,
+    PbrMaterial,
     RCurve3D,
     RDirectionalLight,
     RGroup,
-    MeshData,
-    PbrMaterial,
     RPointLight,
     RShape2D,
     RShape3D,
@@ -24,11 +36,6 @@ from manimx import (
     sphere_mesh,
     torus_mesh,
 )
-from manimx.io import load_gltf
-from manimx.renderer import RNodeDataCache, RenderConfig
-from manimx.renderer.scene_graph import flatten, flatten_scene
-from manimx.renderer.webgpu.mesh_batch import LIGHT_DIRECTIONAL, LIGHT_POINT, LIGHT_SPOT, MeshBatch
-from manimx.renderer.webgpu.vector_batch import FLAG_CAMERA_FACING, VectorBatch
 
 # --- meshes ---------------------------------------------------------------------
 
@@ -188,14 +195,17 @@ def test_parametric_curve_passes_through_samples() -> None:
 
 def test_gltf_import_builds_hierarchy_and_converts_to_z_up(tmp_path: Path) -> None:
     writer = GlbWriter()
-    material = writer.material([1.0, 0.0, 0.0, 1.0], metallic=0.5, roughness=0.25)
-    mesh = writer.mesh(box_mesh(1.0, 2.0, 3.0), material)
+    material = writer.material([1.0, 0.0, 0.0, 1.0], metallic=0.5, roughness=0.25, name="Paint")
+    mesh = writer.mesh(box_mesh(1.0, 2.0, 3.0), material, name="Body")
     child = writer.node(root=False, mesh=mesh, translation=[0.0, 5.0, 0.0])
     writer.node(name="parent", children=[child], rotation=[0.0, 0.0, 0.0, 1.0], scale=[2.0, 2.0, 2.0])
 
     model = load_gltf(writer.save(tmp_path / "box.glb"))
 
-    [item] = flatten(model)
+    assert isinstance(model, Group) and model.name == "box"
+    assert model.find("parent").scale.value == (2.0, 2.0, 2.0)
+    assert model.find("node-0").find("Body-0") is model.find_all(tags="material:Paint")[0]
+    [item] = flatten(model.snapshot())
     shape = item.obj
     assert isinstance(shape, RShape3D) and shape.mesh.triangle_count == 12
     assert shape.material.metallic == 0.5 and shape.material.roughness == 0.25
@@ -208,7 +218,9 @@ def test_gltf_import_keeps_y_up_on_request(tmp_path: Path) -> None:
     writer = GlbWriter()
     writer.node(mesh=writer.mesh(box_mesh()), translation=[0.0, 1.0, 0.0])
 
-    [item] = flatten(load_gltf(writer.save(tmp_path / "box.glb"), z_up=False))
+    model = load_gltf(writer.save(tmp_path / "box.glb"), z_up=False, name="model")
+    [item] = flatten(model.snapshot())
+    assert model.name == "model" and isinstance(model.find("node-0"), Group)
 
     np.testing.assert_allclose(item.world[:3, 3], [0.0, 1.0, 0.0])
 
@@ -224,9 +236,28 @@ def test_gltf_import_decodes_shared_textures(tmp_path: Path) -> None:
     writer.node(mesh=mesh)
     writer.node(mesh=mesh, matrix=[1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 3, 0, 0, 1])
 
-    first, second = flatten(load_gltf(writer.save(tmp_path / "textured.glb"), z_up=False))
+    model = load_gltf(writer.save(tmp_path / "textured.glb"), z_up=False)
+    first, second = flatten(model.snapshot())
 
     texture_object = first.obj.material.base_color_texture
     assert texture_object is not None and texture_object is second.obj.material.base_color_texture
     np.testing.assert_array_equal(texture_object.image[0, 0], [0, 200, 0, 255])
     np.testing.assert_allclose(second.world[:3, 3], [3.0, 0.0, 0.0])  # from the node matrix
+    assert first.obj.mesh is second.obj.mesh  # instanced meshes share their data
+    assert first.obj.uid != second.obj.uid  # but are separate nodes
+
+
+def test_gltf_parts_animate_like_any_node(tmp_path: Path) -> None:
+    writer = GlbWriter()
+    writer.node(name="arm", mesh=writer.mesh(box_mesh()))
+    model = load_gltf(writer.save(tmp_path / "robot.glb"), z_up=False)
+
+    class Wave(Scene):
+        def construct(self) -> None:
+            self.add(model)
+            self.play(Rotate(model.find("arm"), math.pi / 2), model.animate.shift((1.0, 0.0, 0.0)), rate=linear)
+
+    prepared = Wave().prepare()
+    [item] = flatten(prepared.state_at(1.0))
+    np.testing.assert_allclose(item.world[:3, 3], [1.0, 0.0, 0.0], atol=1e-12)
+    np.testing.assert_allclose(item.world[:3, 0], [0.0, 1.0, 0.0], atol=1e-12)  # the arm turned a quarter

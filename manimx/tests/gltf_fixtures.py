@@ -7,9 +7,8 @@ from pathlib import Path
 
 import numpy as np
 import pygltflib
-from PIL import Image
-
 from manimx.robjects.mesh import MeshData
+from PIL import Image
 
 FLOAT, UINT32 = 5126, 5125
 
@@ -36,7 +35,7 @@ class GlbWriter:
         self.gltf.accessors.append(accessor)
         return len(self.gltf.accessors) - 1
 
-    def mesh(self, mesh: MeshData, material: int | None = None) -> int:
+    def mesh(self, mesh: MeshData, material: int | None = None, name: str | None = None) -> int:
         attributes = pygltflib.Attributes(
             POSITION=self._accessor(mesh.positions.astype(np.float32), "VEC3", FLOAT),
             NORMAL=self._accessor(mesh.normals.astype(np.float32), "VEC3", FLOAT),
@@ -45,7 +44,7 @@ class GlbWriter:
             attributes.TEXCOORD_0 = self._accessor(mesh.uvs.astype(np.float32), "VEC2", FLOAT)
         indices = self._accessor(mesh.indices.astype(np.uint32), "SCALAR", UINT32)
         primitive = pygltflib.Primitive(attributes=attributes, indices=indices, material=material)
-        self.gltf.meshes.append(pygltflib.Mesh(primitives=[primitive]))
+        self.gltf.meshes.append(pygltflib.Mesh(primitives=[primitive], name=name))
         return len(self.gltf.meshes) - 1
 
     def texture(self, image: np.ndarray) -> int:
@@ -56,11 +55,13 @@ class GlbWriter:
         self.gltf.textures.append(pygltflib.Texture(source=len(self.gltf.images) - 1))
         return len(self.gltf.textures) - 1
 
-    def material(self, base_color: list[float], metallic: float = 0.0, roughness: float = 1.0, texture: int | None = None) -> int:
+    def material(
+        self, base_color: list[float], metallic: float = 0.0, roughness: float = 1.0, texture: int | None = None, name: str | None = None
+    ) -> int:
         pbr = pygltflib.PbrMetallicRoughness(baseColorFactor=base_color, metallicFactor=metallic, roughnessFactor=roughness)
         if texture is not None:
             pbr.baseColorTexture = pygltflib.TextureInfo(index=texture)
-        self.gltf.materials.append(pygltflib.Material(pbrMetallicRoughness=pbr))
+        self.gltf.materials.append(pygltflib.Material(pbrMetallicRoughness=pbr, name=name))
         return len(self.gltf.materials) - 1
 
     def node(self, root: bool = True, **fields: object) -> int:

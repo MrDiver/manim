@@ -14,7 +14,8 @@ What it draws:
 - **RCurve3D**: stroke-only Bezier curves in 3D, always facing the camera,
   thinner with distance.
 - **RShape3D**: lit triangle meshes with glTF metallic-roughness materials
-  and textures. glTF/GLB files are imported with `manimx.io.load_gltf`.
+  and textures. glTF/GLB files are imported with `manimx.io.load_gltf`, which
+  builds scene nodes; their snapshots are `RShape3D`s.
 - **Lights**: directional, point and spot, with soft contact-hardening
   shadows.
 - **RClippingGroup**: soft alpha masks, optionally one-sided (portals), with
@@ -69,11 +70,8 @@ Without `field_of_view` the camera is orthographic and shows
 
 ```python
 from manimx import RDirectionalLight, PbrMaterial, RPointLight, RShape3D, RSpotLight, Transform, sphere_mesh
-from manimx.io import load_gltf
-
 ball = RShape3D(mesh=sphere_mesh(1.0), material=PbrMaterial("#FC6255", roughness=0.3),
                transform=Transform(position=(0, 0, 1)))
-helmet = load_gltf("DamagedHelmet.glb")  # an RGroup; converted from glTF's Y-up to Z-up
 sun = RDirectionalLight.aimed((-1, 1, -2), intensity=3.0, size=0.03)  # size: softness
 lamp = RPointLight(color="#58C4DD", intensity=15, transform=Transform(position=(-2, -2, 2)))
 spot = RSpotLight.aimed((0, -4, 6), (0, 0, 0), outer_cone_angle=0.4)

@@ -1,18 +1,25 @@
-"""Import glTF 2.0 files (.glb or .gltf) as manimx render objects.
+"""Import glTF 2.0 files (.glb or .gltf) as scene nodes.
 
-    model = load_gltf("helmet.glb")        # an RGroup, ready to add to a scene
+    model = load_gltf("helmet.glb")        # a Group, ready to add to a scene
+    self.play(Rotate(model.find("visor"), PI / 4))
 
-Mapping:
+The result is a tree of nodes like any other: every part can be animated,
+and its render objects come from ``snapshot()``. Mapping:
 
-* every glTF node becomes an :class:`RGroup` with the node's transform
-  (glTF stores rotations as quaternions, so they map one to one)
-* every triangle primitive of a node's mesh becomes an :class:`RShape3D`
-  child with a :class:`PbrMaterial`
-* embedded or external PNG/JPEG images become :class:`Texture` s, shared
-  between materials that use the same image
+* every glTF node becomes a :class:`Group` named after it, with the node's
+  transform in its position, rotation and scale signals (glTF stores
+  rotations as quaternions, so they map one to one)
+* every triangle primitive of a node's mesh becomes a :class:`Shape3D`
+  child named ``"<mesh name>-<number>"``, tagged ``"material:<name>"`` when
+  its material has a name (``model.find_all(tags="material:Steel")``)
+* the material's factors become the shape's material signals; its
+  textures, normal scale and occlusion strength stay constant
+* embedded or external PNG/JPEG images become :class:`Texture` s, and
+  meshes and textures are shared between nodes that use the same data
 
 glTF is Y-up, manimx's 3D convention is Z-up (as in Blender), so by default
-the whole model is wrapped in a group rotated +90 degrees about x.
+the model's root group is rotated +90 degrees about x. Rotations given
+later (``rotate``, ``Rotate``) apply on top of that.
 
 Not supported yet: animations, skins, morph targets, cameras, lights,
 sparse accessors, vertex colors, texture coordinate sets other than 0,
@@ -32,7 +39,9 @@ import pygltflib
 import quaternion
 from PIL import Image
 
-from ..robjects import RGroup, MeshData, PbrMaterial, RNode, RShape3D, Texture, Transform
+from ..animation import Group, Node, Shape3D
+from ..robjects import MeshData, PbrMaterial, Texture, Transform
+from ..robjects.transform import quaternion_from_axis_angle
 from ..utils.color import ManimColor
 
 _COMPONENT_TYPES = {
@@ -47,10 +56,11 @@ _COMPONENT_COUNTS = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT2": 4, "M
 _TRIANGLES = 4
 
 
-def load_gltf(path: str | Path, *, z_up: bool = True) -> RGroup:
-    """Load the default scene of a glTF file as an :class:`RGroup`."""
+def load_gltf(path: str | Path, *, z_up: bool = True, name: str | None = None) -> Group:
+    """Load the default scene of a glTF file as a :class:`Group` named
+    ``name`` (default: the file name without its suffix)."""
     path = Path(path)
-    return _Importer(pygltflib.GLTF2().load(str(path)), path.parent).scene(z_up)
+    return _Importer(pygltflib.GLTF2().load(str(path)), path.parent).scene(name or path.stem, z_up)
 
 
 class _Importer:
@@ -61,53 +71,69 @@ class _Importer:
         self._buffers: dict[int, bytes] = {}
         self._textures: dict[int, Texture] = {}
         self._materials: dict[int, PbrMaterial] = {}
+        self._meshes: dict[tuple[int, int], MeshData] = {}
 
-    def scene(self, z_up: bool) -> RGroup:
+    def scene(self, name: str, z_up: bool) -> Group:
         gltf = self.gltf
         if gltf.scenes:
             roots = gltf.scenes[gltf.scene or 0].nodes or []
         else:  # no scene: every node that is nobody's child is a root
             children = {c for node in gltf.nodes for c in (node.children or [])}
             roots = [i for i in range(len(gltf.nodes)) if i not in children]
-        model = RGroup(children=[self.node(i) for i in roots])
+        model = Group(*(self.node(i) for i in roots), name=name)
         if z_up:
             # glTF's +y (up) becomes +z, its +z (front) becomes -y.
-            return RGroup(children=[model], transform=Transform().rotated(math.pi / 2, (1, 0, 0)))
+            model.rotation.set(quaternion_from_axis_angle((1, 0, 0), math.pi / 2))
         return model
 
     # -- nodes and meshes ---------------------------------------------------
 
-    def node(self, index: int) -> RGroup:
+    def node(self, index: int) -> Group:
         node = self.gltf.nodes[index]
-        children: list[RNode] = []
+        name = node.name or f"node-{index}"
+        children: list[Node] = []
         if node.mesh is not None:
-            children += self.mesh(node.mesh)
+            children += self.mesh(node.mesh, name)
         children += [self.node(child) for child in node.children or []]
-        return RGroup(children=children, transform=_node_transform(node))
+        group = Group(*children, name=name)
+        transform = _node_transform(node)
+        group.position.set(transform.position)
+        group.rotation.set(transform.rotation)
+        group.scale.set(transform.scale)
+        return group
 
-    def mesh(self, index: int) -> list[RShape3D]:
+    def mesh(self, index: int, node_name: str) -> list[Shape3D]:
         mesh = self.gltf.meshes[index]
         shapes = []
-        for primitive in mesh.primitives:
+        for number, primitive in enumerate(mesh.primitives):
             mode = primitive.mode if primitive.mode is not None else _TRIANGLES
             if mode != _TRIANGLES:
                 continue  # points and lines have no surface to shade
-            attributes = primitive.attributes
-            positions = self.accessor(attributes.POSITION)
-            indices = (
-                self.accessor(primitive.indices).reshape(-1)
-                if primitive.indices is not None
-                else np.arange(len(positions))
-            )
-            data = MeshData(
-                positions=positions,
-                indices=indices,
-                normals=self.accessor(attributes.NORMAL) if attributes.NORMAL is not None else None,
-                uvs=self.accessor(attributes.TEXCOORD_0) if attributes.TEXCOORD_0 is not None else None,
-                tangents=self.accessor(attributes.TANGENT) if attributes.TANGENT is not None else None,
-            )
+            if (index, number) not in self._meshes:  # instanced meshes share their data
+                attributes = primitive.attributes
+                positions = self.accessor(attributes.POSITION)
+                indices = (
+                    self.accessor(primitive.indices).reshape(-1)
+                    if primitive.indices is not None
+                    else np.arange(len(positions))
+                )
+                self._meshes[index, number] = MeshData(
+                    positions=positions,
+                    indices=indices,
+                    normals=self.accessor(attributes.NORMAL) if attributes.NORMAL is not None else None,
+                    uvs=self.accessor(attributes.TEXCOORD_0) if attributes.TEXCOORD_0 is not None else None,
+                    tangents=self.accessor(attributes.TANGENT) if attributes.TANGENT is not None else None,
+                )
             material = self.material(primitive.material) if primitive.material is not None else PbrMaterial()
-            shapes.append(RShape3D(mesh=data, material=material))
+            material_name = self.gltf.materials[primitive.material].name if primitive.material is not None else None
+            shapes.append(
+                Shape3D(
+                    self._meshes[index, number],
+                    f"{mesh.name or node_name}-{number}",
+                    material=material,
+                    tags={f"material:{material_name}"} if material_name else (),
+                )
+            )
         return shapes
 
     # -- materials and textures ---------------------------------------------
