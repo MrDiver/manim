@@ -46,7 +46,7 @@ from .profiler import GpuProfiler
 from .shadow_pass import ShadowPass
 from .shadow_views import build_shadow_views
 from .targets import RenderLayers, RenderTargets
-from .vector_batch import VectorBatch
+from .retained import RetainedVectors
 from .vector_pass import VectorPass
 
 if TYPE_CHECKING:
@@ -96,6 +96,8 @@ class WGPURenderer(Renderer):
         self._mesh_pass = MeshPass(self.context, self._frame_uniform)
         self._lighting_pass = LightingPass(self.context, self._frame_uniform)
         self._shadow_pass = ShadowPass(self.context)
+        self._vectors = RetainedVectors()
+        """Vector records kept across renders and patched (retained.py)."""
         self._targets: RenderTargets | None = None
         self._empty_3d: RenderTargets | None = None
         """Targets whose G-buffer and lit layer are known to be empty."""
@@ -131,7 +133,7 @@ class WGPURenderer(Renderer):
         if self.cache.next_generation() % CACHE_MAX_AGE == 0:
             self.cache.sweep(CACHE_MAX_AGE)
         scene = flatten_scene(root)
-        vectors = VectorBatch.build(scene, self.cache, config.camera.position)
+        vectors = self._vectors.build(scene, self.cache, config.camera.position)
         targets = self._render_targets(config, mask_count=len(scene.clips))
         samples = config.msaa_samples
         # Lights, shadows and the deferred passes only affect meshes. A

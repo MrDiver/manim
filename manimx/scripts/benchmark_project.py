@@ -32,11 +32,11 @@ from manimx.drivers.pipeline import FramePipeline
 from manimx.project import Project
 from manimx.renderer import FrameComposer, WGPURenderer
 from manimx.renderer.webgpu import composer as composer_module
-from manimx.renderer.webgpu import mesh_batch, renderer, vector_batch
+from manimx.renderer.webgpu import mesh_batch, renderer, retained
 
 STAGES = [
     (timing.Timeline, "state_at", "state_at (evaluate + snapshot)"),
-    (vector_batch.VectorBatch, "build", "vector batch"),
+    (retained.RetainedVectors, "build", "vector batch (retained)"),
     (mesh_batch.MeshBatch, "build", "mesh batch"),
     (renderer, "build_shadow_views", "shadow views"),
     (renderer.WGPURenderer, "render_layers", "render_layers (all)"),

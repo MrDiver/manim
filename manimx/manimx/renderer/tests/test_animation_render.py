@@ -11,7 +11,7 @@ import pytest
 from manimx.examples.animated_logo import AnimatedLogo, config
 from manimx.examples.manim_logo import manim_logo
 from manimx.renderer import FrameComposer, MotionBlur, WGPURenderer
-from manimx.renderer.webgpu import vector_batch
+from manimx.renderer.webgpu import retained
 
 
 @pytest.fixture(scope="module")
@@ -39,8 +39,8 @@ def test_each_shape_is_triangulated_once_for_the_whole_animation(
     (colors and opacity are looked up per point on the GPU)."""
     prepared = AnimatedLogo().prepare()
     calls = []
-    original = vector_batch.tessellate_fill
-    monkeypatch.setattr(vector_batch, "tessellate_fill", lambda *args: calls.append(1) or original(*args))
+    original = retained.tessellate_fill
+    monkeypatch.setattr(retained, "tessellate_fill", lambda *args: calls.append(1) or original(*args))
 
     for t in np.linspace(0.0, prepared.duration, 40):
         renderer.render(prepared.state_at(t), config(160, 90))

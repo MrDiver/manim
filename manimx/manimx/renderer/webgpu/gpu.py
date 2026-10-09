@@ -113,6 +113,19 @@ class GrowableBuffer:
             self._device.queue.write_buffer(self.buffer, 0, np.ascontiguousarray(data))
         return grown
 
+    def write(self, data: np.ndarray, ranges: list[tuple[int, int]]) -> bool:
+        """Upload only the record ranges ``[start, stop)`` of ``data`` (whose
+        earlier contents the buffer already holds); falls back to a full
+        upload if the buffer is too small. Returns whether it grew."""
+        if data.nbytes > self.buffer.size:
+            return self.upload(data)
+        itemsize = data.itemsize * (data.shape[1] if data.ndim == 2 else 1)
+        for start, stop in ranges:
+            if stop > start:
+                chunk = np.ascontiguousarray(data[start:stop])
+                self._device.queue.write_buffer(self.buffer, start * itemsize, chunk)
+        return False
+
     def _allocate(self, size: int) -> wgpu.GPUBuffer:
         size = (size + 3) // 4 * 4  # buffer sizes must be multiples of 4
         return self._device.create_buffer(label=self._label, size=size, usage=self._usage)

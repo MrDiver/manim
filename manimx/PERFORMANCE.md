@@ -23,8 +23,14 @@ uv run python scripts/benchmark_project.py example-project --check-reference /tm
 - **Correctness:** `--check-reference` renders 48 frames across the timeline
   and compares them with frames saved before the first optimization. Every step
   below is bit-identical.
-- **Machine:** Linux, Vulkan; numbers are comparable within this table only.
-  Run-to-run noise is about ±0.5 fps.
+- **Machine:** Intel Core Ultra 9 285H (16 threads), NVIDIA GeForce RTX 5070
+  Laptop GPU (Vulkan), Linux, power profile `performance`. Numbers are
+  comparable within this table only. Run-to-run noise is about ±0.5 fps.
+- **Power:** from step E on, the power state is recorded: the USB-C adapter
+  was connected but the battery was discharging (about 5 W at idle), so the
+  adapter delivered less than the laptop drew. Earlier steps were measured in
+  the same session, but their power state was not checked. Absolute numbers on
+  the full-power charger may be higher.
 
 ## Results
 
@@ -35,6 +41,7 @@ uv run python scripts/benchmark_project.py example-project --check-reference /tm
 | B. No 3D stages without meshes | 119.6 | 8.36 | 556.3 | 2.02 | 1.88 | 4.32 | 1.72 |
 | C. Renderer as a service | 134.9 | 7.41 | 603.9 | 1.99 | 1.87 | 3.51 | 1.75 |
 | D. Snapshot fast paths | 149.2 | 6.70 | 644.9 | 1.20 | 1.88 | 3.55 | 1.72 |
+| E. Retained vector scene | 169.8 | 5.89 | 674.1 | 1.18 | 1.18 | 2.71 | 1.74 |
 
 \* GPU time is sampled on 60 frames with a full sync per frame and varies by
 about ±10% between runs. Step A does not change any GPU work.
@@ -184,3 +191,62 @@ their errors.
 
 Result: +11% (134.9 → 149.2 fps). `state_at` drops from 1.99 to 1.20 ms
 per frame (−40%).
+
+### Tried and dropped
+
+- **Reusing layers for identical sub-frames.** The rendered layers were
+  reused when a sub-frame's render tree, compared by fingerprint, equaled the
+  previous sub-frame's. Result: 148.6 against 149.2 fps, no gain. It was also
+  the wrong idea: a sub-frame is just another time, and it only helped when
+  nothing changed at all. The waste is rebuilding and re-uploading every
+  object although usually only a few transforms change, which E addresses.
+- **A snapshot cache on the animation side.** The evaluator remembered each
+  mobject's last render object (by version tokens), so `state_at` returned
+  the same instances, or copies sharing all content, when only the transform
+  changed. Alone it measured 148.9 fps (no change). Together with E it
+  measured 171.3 fps against 169.8 without it, about 1%, near the noise, for
+  110 lines of code. The renderer patches by uid, versions and world matrix,
+  not by instance identity, so it does not need the cache. Dropped.
+
+### E. The retained vector scene
+
+The renderer kept derived data per object (tessellations, stroke records), but
+every render still packed all objects' records into fresh arrays and uploaded
+all of them. `RetainedVectors` (retained.py) keeps the packed records in
+persistent arrays (*arenas*) mirroring the GPU buffers, with one slot per shape
+(its uid and whether it is drawn as a mask). Each render diffs the flat scene
+against the slots, using the identity and version tokens of the render
+contract:
+
+| Change | Work |
+|---|---|
+| none | nothing written |
+| world matrix, layer or clip | the shape's 80-byte object entry |
+| fill colors or stroke style (versions) | its color or point records, in place |
+| new points | its records, in place if the size fits, else in a new range; curves and instances that point at them are rewritten |
+| shape left the scene | its ranges become garbage, its object slot is reused |
+
+Only the written ranges are uploaded (`VectorBatch.dirty`,
+`GrowableBuffer.write`). The draw lists are still rebuilt every frame: they
+are small, and transparent draws must be re-sorted by camera distance anyway.
+When garbage outweighs the live records, everything is repacked from scratch.
+The records are the same as before, only at other positions in the buffers, so
+the pixels are identical.
+
+Tests: a sequence of frames covering every kind of patch (move, recolor,
+opacity, new points with a different count, a new stroke width, removal, an
+arrival that reuses a slot, a clipping mask, reordering), each compared with a
+fresh renderer; moving one shape rewrites exactly one object entry and nothing
+else; an unchanged frame writes nothing; garbage is repacked.
+
+Result: +14% (149.2 → 169.8 fps). The vector batch drops from 1.88 to
+1.18 ms per frame, and `render_layers` from 3.55 to 2.71 ms. What remains per
+shape and render is Python bookkeeping: the matrix comparison, the camera
+distance and the draw record.
+
+## Where the time goes now
+
+5.89 ms per frame against 13.43 at the start (2.3× faster): `render_layers`
+2.71 ms (1.18 of it the retained vector batch), `state_at` 1.18 ms, readback
+0.69 ms, compositing 0.37 ms. The GPU needs 1.74 ms and runs in parallel, so
+rendering is still CPU-bound.

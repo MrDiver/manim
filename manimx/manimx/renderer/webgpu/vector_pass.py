@@ -102,7 +102,9 @@ class VectorPass:
         changed = self._use_variant(multisampled)
         grown = False
         for name, buffer in self._buffers.items():
-            grown |= buffer.upload(getattr(batch, name))
+            ranges = None if batch.dirty is None else batch.dirty[name]
+            data = getattr(batch, name)
+            grown |= buffer.upload(data) if ranges is None else buffer.write(data, ranges)
 
         shadow_scopes = list(batch.shadow_draws)
         lists = [batch.opaque_draws, batch.transparent_draws, *batch.shadow_draws.values(), *batch.mask_draws]

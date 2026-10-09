@@ -117,6 +117,9 @@ class VectorBatch:
     shadow_draws: dict[int, np.ndarray]
     """Per clip scope (NO_CLIP: all), the draws of shapes and curves that
     cast shadows for lights of that scope. Masks never cast shadows."""
+    dirty: dict[str, list[tuple[int, int]] | None] | None = None
+    """Per buffer, the record ranges changed since the last upload (None:
+    upload all of it). None for a batch built from scratch."""
 
     @staticmethod
     def build(scene: FlatScene, cache: MobjectDataCache, camera_position: np.ndarray) -> VectorBatch:
