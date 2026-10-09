@@ -290,6 +290,28 @@ the fireworks), 60 renders between 38 and 44 s, no motion blur:
 `example-project` (one light): 245.5 → 255.2 fps without motion blur,
 frames bit-identical.
 
+### H. Simulation keyframes: one lookup per progress
+
+A baked `Simulation` answered every signal on its own: a `bisect` in the
+keyframe times and an interpolation, for each of its signals in every
+evaluation. The light-show fireworks record about 6800 signals (every
+spark's position, rotation, scale and glow), most of them unchanged at
+any moment (sparks not yet born or already gone).
+
+All signals of one simulation are asked for the same progress in turn,
+so the keyframe index and fraction are now kept for the last progress,
+and a signal whose two keyframes hold the same value object (it did not
+change between them) returns it without interpolating.
+
+| light-show, 38–44 s, no motion blur | ms/render | frame_at |
+|---|---|---|
+| lookup per signal | 36 | 19.7 ms |
+| one lookup per progress | 32 | 14.6 ms |
+
+`example-project` (one small simulation) is unchanged within noise
+(alternating runs: 246.9 / 257.1 fps before, 257.2 / 255.7 after), and
+its frames are bit-identical.
+
 ## Where the time goes now
 
 5.89 ms per frame against 13.43 at the start (2.3× faster): `render_layers`
