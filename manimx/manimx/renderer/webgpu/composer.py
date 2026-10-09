@@ -1,18 +1,19 @@
 """The frame composer: drives the renderer and turns its layers into frames.
 
-    composer = FrameComposer(renderer, [MotionBlur(samples=16), Bloom(), ToneMap(ACES)])
+    composer = FrameComposer(RenderService.shared(), [MotionBlur(samples=16), Bloom(), ToneMap(ACES)])
     image = composer.compose(lambda t: scene_at(t), RenderConfig(time=2.0))
 
-The composer sits *in front of* the renderer: temporal effects decide how
-often and at which times the renderer is asked for layers, image effects
-process those layers. Turning an effect off simply means the renderer is
+The composer is the last stage of the render chain (see packer.py) and
+drives the others: temporal effects decide how often and at which times
+the service's flattener, packer and renderer are asked for layers, image
+effects process those layers. Turning an effect off simply means the renderer is
 called less often or a pass is skipped.
 
 Per frame::
 
     for each sub-frame time t (one, or the MotionBlur samples):
         for each view of scene_at(t) (one per active clip, lowest first):
-            layers = renderer.render_layers(view's tree, config with view's camera)
+            layers = service.render_layers(view's tree, config with view's camera)
             lit = lit-stage effects (Bloom, custom shaders) applied to layers.lit
             image = composite(tone_map(lit), layers.vector) over image
                     (the first view goes over the background)
@@ -32,6 +33,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 import wgpu
@@ -41,7 +43,9 @@ from ..config import Camera, Frame, RenderConfig, ViewState
 from ..effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap
 from .gpu import COLOR_FORMAT, HDR_FORMAT, GPUContext, ResourceCache, expand_includes
 from .profiler import GpuProfiler
-from .renderer import WGPURenderer
+
+if TYPE_CHECKING:
+    from .service import RenderService
 
 SceneSource = Frame | Callable[[float], Frame]
 """A fixed frame, or a function returning the frame at a given time; a
@@ -69,8 +73,9 @@ BLOOM_PARAMS_DTYPE = np.dtype(
 
 
 class FrameComposer:
-    def __init__(self, renderer: WGPURenderer, effects: Sequence[Effect] = ()) -> None:
-        self.renderer = renderer
+    def __init__(self, service: RenderService, effects: Sequence[Effect] = ()) -> None:
+        self.service = service
+        renderer = service.renderer
         self.effects = tuple(effects)
         _validate(self.effects)
         self._context = renderer.context
@@ -130,7 +135,7 @@ class FrameComposer:
                 [self._params(config, weight, background=False), self._resources.view(stack)],
                 blend=_ADDITIVE,
                 clear=index == 0,
-                timing=self.renderer.profiler.pass_timing("composite"),
+                timing=self.service.renderer.profiler.pass_timing("composite"),
             )
             device.queue.submit([encoder.finish()])
 
@@ -141,7 +146,7 @@ class FrameComposer:
                 frame = self._shaders.apply(encoder, frame, effect, "frame")
         output = self._textures.get("output", size, COLOR_FORMAT, extra_usage=wgpu.TextureUsage.COPY_SRC)
         self._passes.run(
-            encoder, "finalize.wgsl", "fs_finalize", output, [self._resources.view(frame)], timing=self.renderer.profiler.pass_timing("finalize")
+            encoder, "finalize.wgsl", "fs_finalize", output, [self._resources.view(frame)], timing=self.service.renderer.profiler.pass_timing("finalize")
         )
         device.queue.submit([encoder.finish()])
         return output
@@ -161,7 +166,7 @@ class FrameComposer:
         root, camera = view
         if camera is not None:
             config = dataclasses.replace(config, camera=camera)
-        layers = self.renderer.render_layers(root, config, encoder)
+        layers = self.service.render_layers(root, config, encoder)
         lit = layers.lit
         for effect in self.effects:
             if isinstance(effect, Bloom):
@@ -202,7 +207,7 @@ class FrameComposer:
             [self._params(config, weight, background), self._resources.view(lit), self._resources.view(vector)],
             blend=blend,
             clear=first,  # the first sub-frame (or view) starts a new image
-            timing=self.renderer.profiler.pass_timing("composite"),
+            timing=self.service.renderer.profiler.pass_timing("composite"),
         )
 
 

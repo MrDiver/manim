@@ -11,7 +11,7 @@ from manimx.animation import Curve3D, DirectionalLight, Group, Light, PointLight
 from manimx.userland import OUT, RIGHT, UP, Box, Circle, FadeIn, Indicate, ParametricCurve3D, ParametricSurface, Rotate, Sphere, Torus
 from manimx.userland.geometry import box_mesh, sphere_mesh, surface_mesh
 from manimx.userland.rate_functions import linear
-from manimx.renderer import RenderConfig, WGPURenderer
+from manimx.renderer import RenderConfig, RenderService
 from manimx.renderer.scene_graph import flatten_scene
 from manimx.robjects import (
     MeshData,
@@ -226,14 +226,14 @@ def test_simulation_moves_a_shape3d() -> None:
 
 
 @pytest.fixture(scope="module")
-def renderer() -> WGPURenderer:
+def renderer() -> RenderService:
     try:
-        return WGPURenderer.shared()
+        return RenderService.shared()
     except Exception as error:  # pragma: no cover - depends on the machine
         pytest.skip(f"no usable GPU: {error}")
 
 
-def test_a_faded_light_darkens_the_mesh(renderer: WGPURenderer) -> None:
+def test_a_faded_light_darkens_the_mesh(renderer: RenderService) -> None:
     ball = Sphere(name="ball", color="#FFFFFF", roughness=1.0)
     sun = DirectionalLight("sun", direction=(0, 0, -1))
 
@@ -248,7 +248,7 @@ def test_a_faded_light_darkens_the_mesh(renderer: WGPURenderer) -> None:
     assert lit[18, 32, :3].mean() > 100 and dark[18, 32, :3].max() < lit[18, 32, :3].max() / 4
 
 
-def test_meshes_are_interleaved_once_while_shapes_move(renderer: WGPURenderer, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_meshes_are_interleaved_once_while_shapes_move(renderer: RenderService, monkeypatch: pytest.MonkeyPatch) -> None:
     from manimx.renderer.webgpu import mesh_batch
 
     calls = []
@@ -296,7 +296,7 @@ def test_particles_snapshot_to_one_rparticles_and_animate_their_arrays() -> None
         sparks.set_scales([[1.0, 1.0, 1.0]])
 
 
-def test_particles_draw_as_instances_with_their_color_and_hide_at_scale_zero(renderer: WGPURenderer) -> None:
+def test_particles_draw_as_instances_with_their_color_and_hide_at_scale_zero(renderer: RenderService) -> None:
     from manimx.animation import Particles
     from manimx.renderer.webgpu.mesh_batch import MeshBatch
 

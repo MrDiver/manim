@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 from manimx.userland.geometry import box_mesh, rectangle_points
-from manimx.renderer import RenderConfig, RNodeDataCache, WGPURenderer
+from manimx.renderer import RenderConfig, RNodeDataCache, RenderService
 from manimx.renderer.scene_graph import NO_CLIP, flatten_scene
 from manimx.renderer.webgpu.mesh_batch import MeshBatch
 from manimx.renderer.webgpu.shadow_views import build_shadow_views
@@ -64,19 +64,19 @@ def test_scoped_shadows_use_only_their_scope() -> None:
 
 
 @pytest.fixture(scope="module")
-def renderer() -> WGPURenderer:
+def renderer() -> RenderService:
     try:
-        return WGPURenderer()
+        return RenderService()
     except Exception as error:  # pragma: no cover - depends on the machine
         pytest.skip(f"no usable GPU: {error}")
 
 
-def _center(renderer: WGPURenderer, root: RGroup, **config: object) -> tuple[int, ...]:
+def _center(renderer: RenderService, root: RGroup, **config: object) -> tuple[int, ...]:
     image = renderer.render(root, RenderConfig(pixel_width=160, pixel_height=90, **config))
     return tuple(int(c) for c in image[45, 80, :3])
 
 
-def test_one_sided_mask_closes_from_behind(renderer: WGPURenderer) -> None:
+def test_one_sided_mask_closes_from_behind(renderer: RenderService) -> None:
     def world() -> RGroup:
         return _world(RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(0, 0, -1))))
 
@@ -85,7 +85,7 @@ def test_one_sided_mask_closes_from_behind(renderer: WGPURenderer) -> None:
     assert _center(renderer, _portal(world(), flip=True)) == tuple(RED.to_int_rgb())  # two-sided
 
 
-def test_scoped_light_only_lights_its_world(renderer: WGPURenderer) -> None:
+def test_scoped_light_only_lights_its_world(renderer: RenderService) -> None:
     def wall(x: float) -> RShape3D:
         return RShape3D(mesh=box_mesh(2, 2, 0.2), material=PbrMaterial("#FFFFFF", roughness=1.0), transform=Transform(position=(x, 0, 0)))
 

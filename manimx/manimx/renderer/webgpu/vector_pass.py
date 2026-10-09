@@ -91,18 +91,21 @@ class VectorPass:
         mask_layers: wgpu.GPUTextureView,
         mesh_depth: wgpu.GPUTextureView,
         multisampled: bool,
+        full_upload: bool = False,
     ) -> None:
         """Upload the frame's batch. Must be called before drawing.
 
         ``mask_layers`` is the 2D array texture holding one layer per clip
         scope; content draws sample it, mask draws write to a copy of it.
         ``mesh_depth`` is the meshes' depth buffer that hides shapes behind
-        meshes (see ``hidden_by_meshes`` in vector.wgsl).
+        meshes (see ``hidden_by_meshes`` in vector.wgsl). ``full_upload``
+        ignores the batch's dirty ranges, for buffers that hold another
+        packer's records.
         """
         changed = self._use_variant(multisampled)
         grown = False
         for name, buffer in self._buffers.items():
-            ranges = None if batch.dirty is None else batch.dirty[name]
+            ranges = None if full_upload or batch.dirty is None else batch.dirty[name]
             data = getattr(batch, name)
             grown |= buffer.upload(data) if ranges is None else buffer.write(data, ranges)
 

@@ -34,15 +34,15 @@ from PIL import Image
 
 from manimx import Fill, RGroup, RShape2D, Stroke, Transform
 from manimx.userland.geometry import arc_points, rectangle_points
-from manimx.renderer import RenderConfig, WGPURenderer
+from manimx.renderer import RenderConfig, RenderService
 
 scene = RGroup(children=[
     RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill("#525893", opacity=1.0), stroke=Stroke("#525893")),
     RShape2D(points=arc_points(1.0), fill=Fill("#87c2a5", opacity=1.0), transform=Transform(position=(1.5, 0.0, 0.0))),
 ])
 
-renderer = WGPURenderer()  # create once and reuse: it caches GPU resources
-image = renderer.render(scene, RenderConfig(pixel_width=1920, pixel_height=1080, background_color="#ece6e2"))
+service = RenderService.shared()  # one per process: it keeps GPU resources and caches
+image = service.render(scene, RenderConfig(pixel_width=1920, pixel_height=1080, background_color="#ece6e2"))
 Image.fromarray(image).save("frame.png")  # (H, W, 4) uint8 RGBA, straight alpha
 ```
 
@@ -108,7 +108,7 @@ Lights inside `content` only light that content. See
 ```python
 from manimx.renderer import Bloom, FrameComposer, MotionBlur, ShaderEffect, ToneMap, ToneMapOperator
 
-composer = FrameComposer(renderer, [
+composer = FrameComposer(service, [
     MotionBlur(samples=16, shutter=1 / 120),
     Bloom(threshold=1.0, intensity=0.1),
     ToneMap(ToneMapOperator.ACES),
@@ -116,10 +116,10 @@ composer = FrameComposer(renderer, [
 image = composer.compose(lambda t: scene_at(t), RenderConfig(time=2.0))
 ```
 
-The composer sits in front of the renderer. `MotionBlur` asks the renderer
-for one frame per sub-frame time inside the shutter and averages them.
-Without it, or when the scene is a fixed object instead of a function of
-time, the renderer is called once.
+The composer is the last stage of the render chain and drives the others.
+`MotionBlur` asks the chain for one frame per sub-frame time inside the
+shutter and averages them. Without it, or when the scene is a fixed object
+instead of a function of time, the chain runs once.
 
 `ShaderEffect` runs your own WGSL on the lit 3D layer (`stage="lit"`,
 linear HDR) or on the final frame (`stage="frame"`):
@@ -141,21 +141,52 @@ vertices). When objects are deleted, tell it with a command:
 ```python
 from manimx.renderer import ClearScene, RemoveObjects
 
-renderer.submit(RemoveObjects.subtree(old_group))
-renderer.submit(ClearScene())
+service.submit(RemoveObjects.subtree(old_group))
+service.submit(ClearScene())
 ```
 
 ### Profiling
 
 ```python
-renderer = WGPURenderer(profile=True)
-renderer.render(scene, config)
-print(renderer.profiler.read())  # {"shadows": 0.4, "geometry": 0.2, "lighting": 0.6, ...} ms on the GPU
+service = RenderService(profile=True)
+service.render(scene, config)
+print(service.renderer.profiler.read())  # {"shadows": 0.4, "geometry": 0.2, "lighting": 0.6, ...} ms on the GPU
 ```
 
 ---
 
 ## Architecture
+
+### The render chain
+
+A tree becomes a frame through four stages. Each is its own object with
+one input and one output:
+
+```mermaid
+flowchart LR
+    T["RNode tree"] -->|"SceneFlattener.flatten()"| F["FlatScene<br/>DrawItems, ClipScopes, LightItems"]
+    F -->|"FramePacker.pack()"| P["FramePacket<br/>GPU-ready numpy records"]
+    P -->|"WGPURenderer.render_layers()"| L["RenderLayers<br/>lit, vector (GPU textures)"]
+    L -->|"FrameComposer"| Out["frame"]
+```
+
+- **`SceneFlattener`** (`scene_graph.py`) resolves the hierarchy: world
+  matrices, painter's order, clip scopes, lights.
+- **`FramePacker`** (`webgpu/packer.py`) builds the records the shaders read
+  and owns every per-object cache (`RNodeDataCache`, `RetainedVectors`). It
+  never touches the GPU.
+- **`WGPURenderer`** (`webgpu/renderer.py`) only uploads, binds and encodes
+  passes. It never sees an `RNode`: what to draw and what changed are in
+  the packet.
+- **`FrameComposer`** (`webgpu/composer.py`) runs the chain once per
+  sub-frame and view, applies effects and composites.
+
+`RenderService` (`webgpu/service.py`) owns one of each stage, plus a
+composer per effect chain, and implements the `Renderer` interface.
+`RenderService.shared()` is the process's instance. A `WGPURenderer` can
+render packets from any packer: a packet's dirty ranges are relative to
+the previous packet of the same packer, and a packet from another packer
+is uploaded in full.
 
 ### Components
 
@@ -167,7 +198,7 @@ flowchart LR
 
     subgraph Backend["backend-independent (manimx.renderer)"]
         Interface["Renderer<br/>render(), submit()"]
-        Graph["scene_graph<br/>flatten_scene()"]
+        Graph["scene_graph<br/>SceneFlattener"]
         Tess["tessellation<br/>fills -> triangles"]
         Cache["RNodeDataCache<br/>(uid, kind) -> (version, data)"]
         Commands["commands<br/>RemoveObjects, ClearScene"]
@@ -176,9 +207,11 @@ flowchart LR
     end
 
     subgraph WebGPU["manimx.renderer.webgpu"]
+        Service["RenderService"]
+        Packer["FramePacker"]
         Renderer["WGPURenderer"]
         Composer["FrameComposer"]
-        Batches["VectorBatch, MeshBatch,<br/>shadow_views"]
+        Batches["RetainedVectors, MeshBatch,<br/>shadow_views"]
         Passes["VectorPass, MeshPass,<br/>LightingPass, ShadowPass"]
         Targets["RenderTargets"]
         Profiler["GpuProfiler"]
@@ -186,16 +219,16 @@ flowchart LR
     end
 
     Tree --> Graph
-    Interface -. implemented by .-> Renderer
+    Interface -. implemented by .-> Service
     Commands --> Cache
-    Renderer --> Graph --> Batches
+    Service --> Graph & Packer & Renderer & Composer
+    Packer --> Batches
     Batches --> Tess
-    Batches --> Cache
+    Packer --> Cache
     Renderer --> Passes --> Shaders
     Passes --> Targets
-    Composer --> Renderer
     Composer --> Effects
-    Config --> Renderer
+    Config --> Packer
     Profiler -.-> Passes
 ```
 
@@ -207,11 +240,12 @@ backend independent, so a path tracer or a Blender bridge could reuse them.
 
 ```mermaid
 flowchart TD
-    A["scene tree + RenderConfig"] --> B["flatten_scene():<br/>world matrices, painter's order,<br/>clip scopes, lights"]
-    B --> C["RetainedVectors.build():<br/>patch per-object slots<br/>(records from the cache)<br/>+ this frame's indirect draws"]
+    A["scene tree + RenderConfig"] --> B["SceneFlattener.flatten():<br/>world matrices, painter's order,<br/>clip scopes, lights"]
+    B --> C["FramePacker.pack(): RetainedVectors.build():<br/>patch per-object slots<br/>(records from the cache)<br/>+ this frame's indirect draws"]
     B --> D["MeshBatch.build():<br/>vertices, materials, lights<br/>(skipped without meshes)"]
     D --> E["build_shadow_views():<br/>one view per directional or spot light,<br/>six per point light"]
-    C & D & E --> F["upload changed ranges to<br/>persistent GPU buffers"]
+    C & D & E --> K["FramePacket"]
+    K --> F["WGPURenderer.render_layers():<br/>upload changed ranges to<br/>persistent GPU buffers"]
     F --> P1
 
     subgraph GPU["one command encoder (the composer's, per sub-frame)"]
@@ -225,8 +259,9 @@ flowchart TD
     P5 --> L["RenderLayers<br/>lit (rgba16float), vector (rgba8)"]
 ```
 
-`render_layers()` stops at the layers. `render()` adds a default composer
-(tone mapping only) and a read-back.
+`WGPURenderer.render_layers()` stops at the layers.
+`RenderService.render()` adds a default composer (tone mapping only) and a
+read-back.
 
 ### Data flow into the GPU
 
@@ -263,12 +298,15 @@ joint and cap triangles generated in the vertex shader.
 sequenceDiagram
     participant User
     participant Composer as FrameComposer
+    participant Service as RenderService
     participant Renderer as WGPURenderer
     participant GPU
 
     User->>Composer: compose(scene_at, config)
     loop each sub-frame (1, or MotionBlur.samples)
-        Composer->>Renderer: render_layers(scene_at(t), config at t)
+        Composer->>Service: render_layers(scene_at(t), config at t)
+        Service->>Service: flatten, pack
+        Service->>Renderer: render_layers(packet, encoder)
         Renderer->>GPU: masks, shadows, G-buffer, lighting, vectors
         Renderer-->>Composer: RenderLayers (lit, vector)
         Composer->>GPU: lit-stage effects (Bloom, ShaderEffect)
@@ -307,8 +345,8 @@ flowchart BT
 
 ### Caching and object lifecycle
 
-The renderer is a long-lived service: `WGPURenderer.shared()` is the
-process's instance, and everything it builds is kept across calls.
+The render chain is a long-lived service: `RenderService.shared()` is the
+process's instance, and everything its stages build is kept across calls.
 
 ```mermaid
 flowchart LR
@@ -320,17 +358,17 @@ flowchart LR
     Slot -->|"same versions, same matrix"| Nothing["nothing written"]
     Slot -->|"new matrix"| Patch["patch the 80-byte object entry"]
     Slot -->|"new versions"| Repack["rewrite its records, upload the range"]
-    Mgr["scene manager"] -->|"RemoveObjects / ClearScene"| R["renderer.submit()"] --> C["the cache drops the entries"]
+    Mgr["scene manager"] -->|"RemoveObjects / ClearScene"| R["service.submit()"] --> C["the cache drops the entries"]
     Gen["every 1024 renders"] --> Sweep["drop entries unused for 1024 renders"]
 ```
 
 | What | Kept by | Key | Dropped |
 |---|---|---|---|
-| derived data (tessellations, stroke topology and points, centers, mesh vertices) | `RNodeDataCache` | (uid, kind) + version | on a new version, after 1024 unused renders, or by command |
-| packed vector records on the GPU | `RetainedVectors` (`retained.py`) | (uid, mask role) | when the shape is absent from a render; arenas repacked when garbage outweighs live records |
+| derived data (tessellations, stroke topology and points, centers, mesh vertices) | `RNodeDataCache` (owned by `FramePacker`) | (uid, kind) + version | on a new version, after 1024 unused renders, or by command |
+| packed vector records on the GPU | `RetainedVectors` (`retained.py`, owned by `FramePacker`) | (uid, mask role) | when the shape is absent from a render; arenas repacked when garbage outweighs live records |
 | texture views, bind groups | `ResourceCache` (`gpu.py`) | texture (weak) / layout + resource identities | with their texture / LRU (512) |
 | render targets and attachments | `RenderTargets` | size, MSAA, mask capacity | on a size change |
-| composers (pipelines, texture pool) | `WGPURenderer.composer(effects)` | effect chain | with the renderer |
+| composers (pipelines, texture pool) | `RenderService.composer(effects)` | effect chain | with the service |
 
 Fields declared with `versioned()` count their assignments, unless the
 producer passes explicit tokens (the animation engine derives them from
@@ -345,11 +383,13 @@ than a stale cache.
 |---|---|
 | `base.py` | `Renderer` interface |
 | `config.py` | `RenderConfig`, `Camera` |
-| `scene_graph.py` | `flatten_scene`: transforms, painter's order, clip scopes, lights |
+| `scene_graph.py` | `SceneFlattener`: transforms, painter's order, clip scopes, lights |
 | `tessellation.py` | fill triangulation with exact curves |
 | `cache.py`, `commands.py` | per-object data cache and lifecycle commands |
 | `effects.py` | effect settings for the composer |
-| `webgpu/renderer.py` | `WGPURenderer`: builds batches, encodes the passes |
+| `webgpu/service.py` | `RenderService`: the render chain of a process |
+| `webgpu/packer.py` | `FramePacker`, `FramePacket`: flat scene to GPU-ready records |
+| `webgpu/renderer.py` | `WGPURenderer`: uploads a packet, encodes the passes |
 | `webgpu/composer.py` | `FrameComposer`: sub-frames, effects, compositing |
 | `webgpu/vector_batch.py`, `vector_pass.py` | 2D shapes and curves: record layout, draw lists, the pass |
 | `webgpu/retained.py` | `RetainedVectors`: per-object slots in persistent arenas, patched per render |

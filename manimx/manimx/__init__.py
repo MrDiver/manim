@@ -8,7 +8,7 @@ __version__ = "0.1.0"
 # manimx.robjects.
 from .animation import *  # noqa: F403
 from .animation import __all__ as _animation_all
-from .renderer import RenderConfig, Renderer, WGPURenderer
+from .renderer import RenderConfig, Renderer, RenderService
 from .robjects import CapStyle, JointType, MeshData, PbrMaterial, Texture
 from .testing import assert_snapshot, visual_test
 from .userland import *  # noqa: F403
@@ -29,7 +29,7 @@ __all__ = [
     "RenderConfig",
     "Renderer",
     "Texture",
-    "WGPURenderer",
+    "RenderService",
     "__version__",
     "assert_snapshot",
     "package_name",

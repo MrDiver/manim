@@ -11,7 +11,7 @@ from manimx.renderer import (
     ShaderEffect,
     ToneMap,
     ToneMapOperator,
-    WGPURenderer,
+    RenderService,
 )
 from manimx.robjects import RShape2D
 from manimx.utils.color import RED
@@ -23,9 +23,9 @@ SIZE = {"pixel_width": 160, "pixel_height": 90}  # 11.25 pixels per world unit
 
 
 @pytest.fixture(scope="module")
-def renderer() -> WGPURenderer:
+def renderer() -> RenderService:
     try:
-        return WGPURenderer()
+        return RenderService()
     except Exception as error:  # pragma: no cover - depends on the machine
         pytest.skip(f"no usable GPU: {error}")
 
@@ -44,7 +44,7 @@ def test_motion_blur_sample_times_are_centered() -> None:
         MotionBlur(samples=0)
 
 
-def test_composer_validates_effects(renderer: WGPURenderer) -> None:
+def test_composer_validates_effects(renderer: RenderService) -> None:
     with pytest.raises(ValueError, match="at most one ToneMap"):
         FrameComposer(renderer, [ToneMap(), ToneMap()])
     with pytest.raises(TypeError, match="not an effect"):
@@ -53,7 +53,7 @@ def test_composer_validates_effects(renderer: WGPURenderer) -> None:
         ShaderEffect("", stage="later")
 
 
-def test_motion_blur_averages_sub_frames(renderer: WGPURenderer) -> None:
+def test_motion_blur_averages_sub_frames(renderer: RenderService) -> None:
     def scene_at(time: float) -> RGroup:
         # A white bar that is only visible during the second half of the shutter.
         bar = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill("#FFFFFF", opacity=1.0), stroke=Stroke(width=0.0))
@@ -69,7 +69,7 @@ def test_motion_blur_averages_sub_frames(renderer: WGPURenderer) -> None:
     assert column(still, 0.0)[0] == 0  # without blur, only t = 0 is rendered
 
 
-def test_motion_blur_skips_static_scenes(renderer: WGPURenderer) -> None:
+def test_motion_blur_skips_static_scenes(renderer: RenderService) -> None:
     calls = []
     original = renderer.render_layers
 
@@ -90,7 +90,7 @@ def _glowing_sphere() -> RGroup:
     return RGroup(children=[sphere])
 
 
-def test_bloom_spreads_bright_light(renderer: WGPURenderer) -> None:
+def test_bloom_spreads_bright_light(renderer: RenderService) -> None:
     config = RenderConfig(**SIZE, ambient_intensity=0.0, default_lights=False)
     plain = FrameComposer(renderer).compose(_glowing_sphere(), config)
     glowing = FrameComposer(renderer, [Bloom(intensity=0.5)]).compose(_glowing_sphere(), config)
@@ -99,7 +99,7 @@ def test_bloom_spreads_bright_light(renderer: WGPURenderer) -> None:
     assert column(glowing, 2.0).sum() > 30  # the glow reaches beyond it
 
 
-def test_tone_map_affects_lit_layer_but_not_2d_colors(renderer: WGPURenderer) -> None:
+def test_tone_map_affects_lit_layer_but_not_2d_colors(renderer: RenderService) -> None:
     config = RenderConfig(**SIZE, ambient_intensity=0.0, default_lights=False)
     flat = RShape2D(points=rectangle_points(1.0, 1.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0), transform=Transform(position=(-4.0, 0.0, 0.0)))
     scene = RGroup(children=[flat, *_glowing_sphere().children])
@@ -115,7 +115,7 @@ def test_tone_map_affects_lit_layer_but_not_2d_colors(renderer: WGPURenderer) ->
         assert column(image, 0.0).min() > 150  # every curve keeps it bright
 
 
-def test_shader_effects_on_both_stages(renderer: WGPURenderer) -> None:
+def test_shader_effects_on_both_stages(renderer: RenderService) -> None:
     invert = ShaderEffect(
         """
         fn effect(uv: vec2<f32>, pixel: vec2<i32>) -> vec4<f32> {

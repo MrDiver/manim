@@ -53,7 +53,7 @@ class FramePipeline:
         self.composer = composer
         self.config = config
         self.in_flight = in_flight
-        self._device = composer.renderer.context.device
+        self._device = composer.service.renderer.context.device
         width = config.pixel_width
         self._row_bytes = (4 * width + _ROW_ALIGNMENT - 1) // _ROW_ALIGNMENT * _ROW_ALIGNMENT
         size = self._row_bytes * config.pixel_height

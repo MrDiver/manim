@@ -6,7 +6,7 @@ logo pulses once. It exercises lagged fades with shifts, overlapping
 moves on independent axes, rotation, an absolute move_to, and Indicate.
 
     prepared = AnimatedLogo().prepare()
-    image = WGPURenderer().render(prepared.state_at(2.0), config())
+    image = RenderService().render(prepared.state_at(2.0), config())
 """
 
 from __future__ import annotations

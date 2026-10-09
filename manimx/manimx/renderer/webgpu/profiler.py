@@ -1,8 +1,8 @@
 """Optional GPU timing per render pass, using WebGPU timestamp queries.
 
-    renderer = WGPURenderer(profile=True)
-    renderer.render(scene, config)
-    renderer.profiler.read()   # {"shadows": 0.41, "geometry": 0.22, ...} ms
+    service = RenderService(profile=True)
+    service.render(scene, config)
+    service.renderer.profiler.read()   # {"shadows": 0.41, "geometry": 0.22, ...} ms
 
 Every profiled pass gets a timestamp pair; passes with the same name (for
 example one per shadow view) are summed. Reading waits for the GPU, so the

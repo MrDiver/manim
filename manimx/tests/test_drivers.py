@@ -22,15 +22,15 @@ from manimx.drivers import (
     render,
 )
 from manimx.examples.navigation import Navigation, config
-from manimx.renderer import FrameComposer, WGPURenderer
+from manimx.renderer import FrameComposer, RenderService
 
 SOURCE = "manimx.examples.navigation:Navigation"
 
 
 @pytest.fixture(scope="module")
-def renderer() -> WGPURenderer:
+def renderer() -> RenderService:
     try:
-        return WGPURenderer()
+        return RenderService()
     except Exception as error:  # pragma: no cover - depends on the machine
         pytest.skip(f"no usable GPU: {error}")
 
@@ -39,7 +39,7 @@ def settings(**options) -> RenderSettings:
     return RenderSettings(config(64, 36), fps=10, start=1.5, end=2.5, **options)
 
 
-def expected_frames(renderer: WGPURenderer) -> list[np.ndarray]:
+def expected_frames(renderer: RenderService) -> list[np.ndarray]:
     prepared = Navigation().prepare()
     composer = FrameComposer(renderer)
     return [composer.compose(prepared.frame_at(t), config(64, 36)) for t in settings().frame_times(prepared.duration)]
@@ -67,7 +67,7 @@ def test_sources_load_from_names_classes_factories_and_objects() -> None:
         load_source(lambda: 42)
 
 
-def test_pipelined_frames_match_synchronous_renders(renderer: WGPURenderer) -> None:
+def test_pipelined_frames_match_synchronous_renders(renderer: RenderService) -> None:
     sink = FrameList()
     stats = render(SOURCE, sink, settings())
 
@@ -78,7 +78,7 @@ def test_pipelined_frames_match_synchronous_renders(renderer: WGPURenderer) -> N
         FramePipeline(FrameComposer(renderer), config(64, 36), in_flight=0)
 
 
-def test_worker_processes_give_the_same_frames_in_order(renderer: WGPURenderer) -> None:
+def test_worker_processes_give_the_same_frames_in_order(renderer: RenderService) -> None:
     sink = FrameList()
     progress = []
     render(SOURCE, sink, settings(chunk=3, in_flight=2), workers=2, progress=lambda done, total: progress.append((done, total)))
@@ -90,7 +90,7 @@ def test_worker_processes_give_the_same_frames_in_order(renderer: WGPURenderer) 
         render(lambda: Navigation(), FrameList(), settings(), workers=2)
 
 
-def test_image_sequences_are_written_unordered(renderer: WGPURenderer, tmp_path) -> None:
+def test_image_sequences_are_written_unordered(renderer: RenderService, tmp_path) -> None:
     sink = ImageSequence(tmp_path / "frames", threads=2)
     assert not sink.ordered
     render(SOURCE, sink, settings())

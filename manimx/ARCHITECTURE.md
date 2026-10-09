@@ -23,7 +23,7 @@ Contents:
 5. [Timing: `Timeline`, `Clip`, `Segment`, `MonotoneMap`](#5-timing-timeline-clip-segment-monotonemap)
 6. [`World2D`, `World3D`, `animation.Camera`, `View`](#6-world2d-world3d-animationcamera-view)
 7. [`RNode`: the contract between both sides](#7-rnode-the-contract-between-both-sides)
-8. [`WGPURenderer` as a service](#8-wgpurenderer-as-a-service)
+8. [The render chain and `RenderService`](#8-the-render-chain-and-renderservice)
 9. [Drivers: `FramePipeline`, processes, `FrameSink`, audio](#9-drivers-framepipeline-processes-framesink-audio)
 10. [`Project` and the CLI](#10-project-and-the-cli)
 11. [Lifetimes at a glance](#11-lifetimes-at-a-glance)
@@ -47,10 +47,11 @@ manimx has two passes:
 2. **Evaluate anywhere.** `PreparedScene.state_at(t)` and
    `Timeline.state_at(t)` return a tree of `RNode`s for any time, in
    any order and in any process, without replaying anything.
-   `WGPURenderer` turns such a tree into pixels.
+   The render chain (`SceneFlattener`, `FramePacker`, `WGPURenderer`,
+   `FrameComposer`) turns such a tree into pixels.
 
 Everything else follows from this split: random access makes scrubbing,
-retiming, cutting and parallel rendering possible. `WGPURenderer` is a
+retiming, cutting and parallel rendering possible. `RenderService` is a
 long-lived service that keeps GPU data per `RNode.uid` across all
 calls and only patches what changed.
 
@@ -60,7 +61,7 @@ flowchart LR
     PS --> TL["Timeline<br/>Clip, World2D/World3D, events"]
     Proj["manimx.json"] -->|"Project.build_timeline()"| TL
     TL -->|"Timeline.state_at(t) — any t, any order"| RO["RNode tree<br/>(RGroup, RShape2D, RShape3D, ...)"]
-    RO --> R["WGPURenderer.shared()"]
+    RO --> R["RenderService.shared()<br/>SceneFlattener, FramePacker,<br/>WGPURenderer"]
     R --> C["FrameComposer<br/>MotionBlur, Bloom, ToneMap"]
     C --> D["drivers.render()<br/>FramePipeline, worker processes"]
     D --> Out["VideoFile / ImageSequence"]
@@ -74,8 +75,8 @@ flowchart LR
 | `manimx.robjects` | `RNode` and its subclasses `RGroup`, `RClippingGroup`, `RBezierPath` (→ `RShape2D`, `RCurve3D`), `RShape3D` (→ `RParticles`), `RLight` (→ `RDirectionalLight`, `RPointLight`, `RSpotLight`); `Transform`, `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`; `new_uid()`, `versioned()` | numpy |
 | `manimx.animation` (core) | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses (`Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D` (→ `Particles`), `Light` → `DirectionalLight`, `PointLight`, `SpotLight`; `animation.Camera`), `PositionMixin`, `RotationMixin`, `ScalableMixin`; the `Animation` contract (`Animation`, `SetValue`, `ChangeSignals`/`AnimationBuilder`) and the default rates `linear`, `smooth`; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound` | robjects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
 | `manimx.userland` | everything a project could write on top of the core: shapes (`Circle`, `Dot`, `Square`, `Rectangle`, `RegularPolygon`, `Triangle`, `Polyline`, `ParametricCurve3D`, `Box`, `Sphere`, `Torus`, `ParametricSurface`), animations (`FadeIn`, `FadeOut`, `Rotate`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter`), `rate_functions`, `constants` (`UP`, `PI`, ...), `geometry` (every point and mesh generator), `load_gltf()` | animation, robjects |
-| `manimx.renderer` | `flatten_scene()` → `FlatScene`; `tessellate_fill()`; `RNodeDataCache`; `RenderConfig`, `renderer.Camera`, `ViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `RemoveObjects`, `ClearScene` | robjects |
-| `manimx.renderer.webgpu` | `WGPURenderer`, `FrameComposer`, `RetainedVectors`, `VectorBatch`, `MeshBatch`, `VectorPass`, `MeshPass`, `LightingPass`, `ShadowPass`, `RenderTargets`, `RenderLayers`, `ResourceCache`, `GPUContext` | wgpu |
+| `manimx.renderer` | `SceneFlattener` → `FlatScene`; `tessellate_fill()`; `RNodeDataCache`; `RenderConfig`, `renderer.Camera`, `ViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `RemoveObjects`, `ClearScene` | robjects |
+| `manimx.renderer.webgpu` | `RenderService`, `FramePacker` → `FramePacket`, `WGPURenderer`, `FrameComposer`, `RetainedVectors`, `VectorBatch`, `MeshBatch`, `VectorPass`, `MeshPass`, `LightingPass`, `ShadowPass`, `RenderTargets`, `RenderLayers`, `ResourceCache`, `GPUContext` | wgpu |
 | `manimx.drivers` | `render()`, `FramePipeline`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation |
 | `manimx.project` | `Project`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers, settings |
 | `manimx.settings` | `Settings` and its sections (`OutputSettings`, `EffectsSettings`, `LightingSettings`, `PerformanceSettings`), `setting()` | renderer (config, effects) |
@@ -97,7 +98,7 @@ sequenceDiagram
     participant D as drivers.render
     participant FP as FramePipeline
     participant FC as FrameComposer
-    participant R as WGPURenderer.shared()
+    participant R as RenderService.shared()
     participant W as _Writer thread
     participant FF as ffmpeg (VideoFile)
 
@@ -113,7 +114,7 @@ sequenceDiagram
         FP->>FC: FrameComposer.compose_texture(state_at, RenderConfig at t)
         loop every time s of MotionBlur.sample_times(t)
             FC->>TL: Timeline.state_at(s) returns an RNode tree
-            FC->>R: render_layers(tree, RenderConfig, encoder) returns RenderLayers
+            FC->>R: render_layers(tree, RenderConfig, encoder): flatten, pack, render; returns RenderLayers
             FC->>FC: composite RenderLayers into the HDR accumulator
         end
         FC-->>FP: output texture
@@ -488,42 +489,58 @@ cache correct:
    objects gone for good. Otherwise `RNodeDataCache.sweep()` ages entries
    out (section 8).
 
-## 8. `WGPURenderer` as a service
+## 8. The render chain and `RenderService`
+
+A tree becomes a frame through four stages, each its own object with one
+input and one output:
+
+```mermaid
+flowchart LR
+    T["RNode tree"] -->|"SceneFlattener.flatten()"| F["FlatScene"]
+    F -->|"FramePacker.pack()"| P["FramePacket"]
+    P -->|"WGPURenderer.render_layers()"| L["RenderLayers"]
+    L -->|"FrameComposer"| Out["frame"]
+```
 
 ```mermaid
 classDiagram
     direction TB
-    class WGPURenderer {
-        shared()$ WGPURenderer
-        context: GPUContext
+    class RenderService {
+        shared()$ RenderService
         cache: RNodeDataCache
-        resources: ResourceCache
-        profiler: GpuProfiler
+        flattener: SceneFlattener
+        packer: FramePacker
+        renderer: WGPURenderer
         composer(effects) FrameComposer
-        render(root, config) image
+        render(frame, config) image
         render_layers(root, config, encoder) RenderLayers
+        submit(command)
     }
-    class GPUContext {
-        device
+    class SceneFlattener {
+        flatten(root) FlatScene
     }
-    class RNodeDataCache {
-        entries: uid and kind to version and data
-        generation
-        next_generation()
-        sweep(max_age)
+    class FramePacker {
+        cache: RNodeDataCache
+        pack(FlatScene, config) FramePacket
     }
-    class ResourceCache {
-        view(texture)
-        bind_group(layout, resources)
+    class FramePacket {
+        config
+        vectors: VectorBatch
+        meshes: MeshBatch or None
+        shadows: ShadowViews or None
+        frame, scope_parents, mask_count
+        source
     }
     class RetainedVectors {
         arenas: _Arena per buffer
         slots: _Slot per uid and mask scope
         build(FlatScene) VectorBatch
     }
-    class RenderTargets {
-        gbuffer, depth, lit, vector, mask layers
-        attachments
+    class WGPURenderer {
+        context: GPUContext
+        resources: ResourceCache
+        profiler: GpuProfiler
+        render_layers(packet, encoder) RenderLayers
     }
     class FrameComposer {
         effects
@@ -531,55 +548,77 @@ classDiagram
         _Fullscreen
         compose_texture(scene, config)
     }
-    class VectorPass {
-        GrowableBuffer per VectorBatch array
-        pipelines
-        bind group
-    }
+    RenderService *-- SceneFlattener
+    RenderService *-- FramePacker
+    RenderService *-- WGPURenderer
+    RenderService "1" *-- "*" FrameComposer : one per effect tuple
+    FramePacker *-- RNodeDataCache
+    FramePacker *-- RetainedVectors
+    FramePacker ..> FramePacket : builds
+    WGPURenderer ..> FramePacket : reads
     WGPURenderer *-- GPUContext
-    WGPURenderer *-- RNodeDataCache
     WGPURenderer *-- ResourceCache
-    WGPURenderer *-- RetainedVectors
     WGPURenderer *-- RenderTargets : per size
     WGPURenderer *-- VectorPass
     WGPURenderer *-- MeshPass
     WGPURenderer *-- LightingPass
     WGPURenderer *-- ShadowPass
-    WGPURenderer "1" *-- "*" FrameComposer : one per effect tuple
-    FrameComposer --> ResourceCache : shares
+    FrameComposer --> RenderService : runs the chain
 ```
 
-**One `WGPURenderer` per process:** `WGPURenderer.shared()` creates the
-`GPUContext`, the pipelines and the caches once. `drivers.render()`, the CLI
-and the tests use it. One thread renders at a time.
+- **`SceneFlattener`** resolves the hierarchy into a `FlatScene`:
+  `DrawItem`s with world matrices and painter's order, `ClipScope`s,
+  `LightItem`s.
+- **`FramePacker`** turns a `FlatScene` into a `FramePacket`: the numpy
+  records the shaders read (`VectorBatch` from `RetainedVectors`,
+  `MeshBatch`, `ShadowViews`, the camera's frame record). It owns every
+  per-object cache and never touches the GPU.
+- **`WGPURenderer`** uploads a packet and encodes the passes into the
+  encoder it is given (a `wgpu.GPUCommandEncoder`: commands are recorded,
+  and the caller submits them in one go). It never sees an `RNode` and
+  decides nothing about the scene.
+- **`FrameComposer`** runs the chain once per sub-frame and view, applies
+  the effects and composites.
 
-**What `WGPURenderer.render_layers()` does:**
+**One `RenderService` per process:** `RenderService.shared()` creates the
+stages once. `drivers.render()`, the CLI and the tests use it. One thread
+renders at a time. It implements the `Renderer` interface: `render()`,
+`submit()` for `RemoveObjects` and `ClearScene`, and `cache` (the
+packer's `RNodeDataCache`).
+
+**Each stage is usable alone.** A `WGPURenderer` renders packets from any
+`FramePacker`: a packet's dirty ranges are relative to the previous packet
+of the same packer (`FramePacket.source`), and a packet from another packer
+is uploaded in full.
+
+**What one pass through the chain does:**
 
 | Step | `RNode` unchanged | `RNode` changed |
 |---|---|---|
-| `flatten_scene()` → `FlatScene` (`DrawItem`s with world matrices and painter's order, `ClipScope`s, `LightItem`s) | every call | every call |
+| `SceneFlattener.flatten()` → `FlatScene` | every call | every call |
 | `RetainedVectors.build()` for `RShape2D` and `RCurve3D` | nothing written to its `_Slot` | new world matrix: the 80-byte object entry; new `fill`/`stroke` version: its records in place; new `points` version: records moved, curves and instances rewritten |
 | `RNodeDataCache` (`tessellate_fill()` result, stroke records, center, `RShape3D` vertices) | hit | rebuilt for the new version |
-| `GrowableBuffer.write()` | nothing uploaded | only the written record ranges |
-| `MeshBatch.build()`, `build_shadow_views()`, geometry and lighting passes | skipped while the `FlatScene` contains no `RShape3D` (G-buffer and lit target cleared once) | run when an `RShape3D` is present |
-| Mask, shadow and vector passes | recorded into the `FrameComposer`'s command encoder | same |
+| `MeshBatch.build()`, `build_shadow_views()` | skipped while the `FlatScene` contains no `RShape3D` | run when an `RShape3D` is present |
+| `GrowableBuffer.write()` in `WGPURenderer` | nothing uploaded | only the written record ranges |
+| geometry and lighting passes | skipped without `RShape3D` (G-buffer and lit target cleared once) | run when an `RShape3D` is present |
+| mask, shadow and vector passes | recorded into the `FrameComposer`'s command encoder | same |
 
 **Caches and their lifetimes:**
 
-| Cache | Key | Lives until |
-|---|---|---|
-| `RNodeDataCache` | (uid, kind) with a version | replaced on a new version; dropped after 1024 renders unused (`sweep()`), or by `RemoveObjects` / `ClearScene` |
-| `RetainedVectors._Slot` | (uid, mask scope) | freed when its `RNode` is missing from a render; `_Arena`s repacked when garbage outweighs live records |
-| `ResourceCache.view()` | the texture (weak key) | its texture |
-| `ResourceCache.bind_group()` | the layout plus the identities of the bound resources | LRU, 512 entries |
-| `RenderTargets` | size, MSAA samples, mask capacity | the next size change |
-| `FrameComposer` | the tuple of effects | the `WGPURenderer` |
-| pipelines and shader modules | variant | the `WGPURenderer` |
+| Cache | Owner | Key | Lives until |
+|---|---|---|---|
+| `RNodeDataCache` | `FramePacker` | (uid, kind) with a version | replaced on a new version; dropped after 1024 packs unused (`sweep()`), or by `RemoveObjects` / `ClearScene` |
+| `RetainedVectors._Slot` | `FramePacker` | (uid, mask scope) | freed when its `RNode` is missing from a pack; `_Arena`s repacked when garbage outweighs live records |
+| `ResourceCache.view()` | `WGPURenderer` | the texture (weak key) | its texture |
+| `ResourceCache.bind_group()` | `WGPURenderer` | the layout plus the identities of the bound resources | LRU, 512 entries |
+| `RenderTargets` | `WGPURenderer` | size, MSAA samples, mask capacity | the next size change |
+| pipelines and shader modules | `WGPURenderer`, `FrameComposer` | variant | their owner |
+| `FrameComposer` | `RenderService` | the tuple of effects | the `RenderService` |
 
 **`FrameComposer.compose_texture()`**, for every time of
 `MotionBlur.sample_times(t)` (or just `t`):
 - calls the scene function;
-- calls `WGPURenderer.render_layers()`;
+- calls `RenderService.render_layers()` (flatten, pack, render);
 - applies `Bloom` and `ShaderEffect(stage="lit")` to `RenderLayers.lit`;
 - composites `RenderLayers.lit` and `RenderLayers.vector` over the background
   into the HDR accumulator, weighted by the sample (`ToneMap` for the lit
@@ -601,7 +640,7 @@ flowchart LR
     Sink -->|"VideoFile: stdin pipe"| FF["ffmpeg process"]
     Sink -->|"ImageSequence: PNG threads"| Files["frame_00000.png …"]
     subgraph Workers["_worker_main processes (workers > 1, spawn)"]
-        W1["load_source(spec)<br/>WGPURenderer.shared()<br/>FramePipeline<br/>chunks of frame indices"]
+        W1["load_source(spec)<br/>RenderService.shared()<br/>FramePipeline<br/>chunks of frame indices"]
     end
     W1 -->|"SharedMemory slots per worker"| Loop
     Loop -->|"free slot ids"| W1
@@ -678,8 +717,9 @@ flowchart LR
 | `SegmentTiming`, `MonotoneMap` | `Timeline._resolve()` | the `Clip` | the next resolution | no |
 | `RNode` tree | `state_at()` | the caller of `state_at()` | that render | no |
 | `Project` | `Project.load()` / `Project.find()` | the CLI command | the command | yes; `Project.save()` |
-| `WGPURenderer` | `WGPURenderer.shared()` | the process | the process | its caches |
-| `FrameComposer` | `WGPURenderer.composer(effects)` | the `WGPURenderer` | the `WGPURenderer` | its `_TexturePool` |
+| `RenderService` (`SceneFlattener`, `FramePacker`, `WGPURenderer`) | `RenderService.shared()` | the process | the process | its caches |
+| `FramePacket` | `FramePacker.pack()` | the `RenderService` | one render | no |
+| `FrameComposer` | `RenderService.composer(effects)` | the `RenderService` | the `RenderService` | its `_TexturePool` |
 | `FramePipeline` | `drivers.render()` | the render call | the call | yes |
 | `_Writer` thread, `_worker_main` processes, ffmpeg | `drivers.render()` | the render call | the call | |
 
@@ -727,9 +767,16 @@ flowchart LR
   never compares data deeply. `RNodeDataCache` and `RetainedVectors` use
   the same keys.
 
-**`WGPURenderer`**
+**Render chain**
 
-- **`WGPURenderer.shared()` is one service per process.** `GPUContext`,
+- **Four stages with one input and one output each.** `SceneFlattener`,
+  `FramePacker`, `WGPURenderer` and `FrameComposer` can be used, tested and
+  measured alone. All scene logic and every per-object cache sit before the
+  `FramePacket`; the `WGPURenderer` only renders, so it could be replaced
+  (or ported) without touching what decides what to draw.
+- **A chain, not a wrapper.** `RenderService` holds the stages side by side
+  and runs them in order; none of them wraps another.
+- **`RenderService.shared()` is one service per process.** `GPUContext`,
   pipelines, `GrowableBuffer`s, `RenderTargets`, `ResourceCache` and
   per-object data survive across calls, which keeps a long-lived web UI
   cheap.
@@ -801,7 +848,7 @@ flowchart LR
 4. **Morphing** (a `Morph` animation, path alignment), and Whisper
    transcripts calling `Clip.bind_cue()`.
 5. **Usability and performance, full time.** The remaining cost is CPU:
-   `flatten_scene()`, `RetainedVectors.build()` bookkeeping and `state_at()`.
+   `SceneFlattener.flatten()`, `RetainedVectors.build()` bookkeeping and `state_at()`.
    The GPU needs about 1.7 ms of 5.9 ms per frame.
 6. **miette-style diagnostics** for `ProjectError` and `SceneError`, once
    the common errors are known.

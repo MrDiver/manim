@@ -382,6 +382,29 @@ The benchmark project has no particles; its frames are bit-identical,
 and `MeshBatch` there measured 2.68 ms before and 1.98 ms after in the
 same power state.
 
+### L. The render chain (structure, no speedup)
+
+The renderer is split into stages with one input and one output each:
+`SceneFlattener` (tree to `FlatScene`), `FramePacker` (`FlatScene` to
+`FramePacket`, owning every per-object cache), `WGPURenderer` (packet to
+layers, GPU work only) and `FrameComposer`. `RenderService` holds them.
+The benchmark now times the stages of the chain, with the packer's parts
+indented.
+
+Measured on the benchmark project (with `PortalOrbit`), power profile
+`performance`, charging:
+
+| | fps (blur 8) | fps (no blur) |
+|---|---|---|
+| before | 48.6 | 287.6 |
+| after | 49.0 | 287.0 |
+
+Frames are bit-identical. Where the time goes, per frame with motion
+blur: pack 9.25 ms (shadow views 5.03, vector records 2.28, mesh batch
+1.54), `frame_at` 3.09 ms, render (GPU encoding) 2.92 ms, flatten 1.74
+ms. The GPU needs 8.15 ms. The next steps cache inside the packer and
+the flattener.
+
 ## Where the time goes now
 
 5.89 ms per frame against 13.43 at the start (2.3× faster): `render_layers`

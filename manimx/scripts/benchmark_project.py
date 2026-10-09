@@ -30,16 +30,19 @@ import numpy as np
 from manimx.animation import timing
 from manimx.drivers.pipeline import FramePipeline
 from manimx.project import Project
-from manimx.renderer import FrameComposer, WGPURenderer
+from manimx.renderer import FrameComposer, RenderService, SceneFlattener
 from manimx.renderer.webgpu import composer as composer_module
-from manimx.renderer.webgpu import mesh_batch, renderer, retained
+from manimx.renderer.webgpu import mesh_batch, packer, renderer, retained
 
+# Stages of the render chain and their parts (indented).
 STAGES = [
     (timing.Timeline, "frame_at", "frame_at (evaluate + snapshot)"),
-    (retained.RetainedVectors, "build", "vector batch (retained)"),
-    (mesh_batch.MeshBatch, "build", "mesh batch"),
-    (renderer, "build_shadow_views", "shadow views"),
-    (renderer.WGPURenderer, "render_layers", "render_layers (all)"),
+    (SceneFlattener, "flatten", "flatten"),
+    (packer.FramePacker, "pack", "pack (all)"),
+    (retained.RetainedVectors, "build", "  vector records (retained)"),
+    (mesh_batch.MeshBatch, "build", "  mesh batch"),
+    (packer, "build_shadow_views", "  shadow views"),
+    (renderer.WGPURenderer, "render_layers", "render (GPU encoding)"),
     (composer_module.FrameComposer, "_composite", "composite"),
     (FramePipeline, "_finish_oldest", "wait + readback"),
 ]
@@ -60,9 +63,9 @@ def wrap_stages(spent: dict[str, float]) -> None:
         setattr(owner, name, timed)
 
 
-def render_all(timeline, settings, times, profile: bool = False) -> tuple[float, WGPURenderer]:
-    renderer_ = WGPURenderer(profile=profile)
-    pipeline = FramePipeline(FrameComposer(renderer_, settings.effects), settings.config, settings.in_flight)
+def render_all(timeline, settings, times, profile: bool = False) -> tuple[float, RenderService]:
+    service = RenderService(profile=profile)
+    pipeline = FramePipeline(FrameComposer(service, settings.effects), settings.config, settings.in_flight)
     for t in times[:5]:  # warm up: shaders, caches, buffers
         pipeline.submit(0, t, timeline.frame_at)
     pipeline.flush()
@@ -70,7 +73,7 @@ def render_all(timeline, settings, times, profile: bool = False) -> tuple[float,
     for index, t in enumerate(times):
         pipeline.submit(index, t, timeline.frame_at)
     pipeline.flush()
-    return time.perf_counter() - start, renderer_
+    return time.perf_counter() - start, service
 
 
 def reference_frames(project: Project, timeline) -> np.ndarray:
@@ -78,10 +81,10 @@ def reference_frames(project: Project, timeline) -> np.ndarray:
     small.output.width, small.output.height = 320, 180
     settings = project.render_settings(small)
     times = np.linspace(0, timeline.duration, 48)
-    renderer_ = WGPURenderer()
-    composer = FrameComposer(renderer_, settings.effects)
+    service = RenderService()
+    composer = FrameComposer(service, settings.effects)
     frames = np.stack([composer.compose(timeline.frame_at, dataclasses.replace(settings.config, time=float(t))) for t in times])
-    renderer_.context.device.destroy()  # the adapter refuses a fourth device while this one is alive
+    service.renderer.context.device.destroy()  # the adapter refuses a fourth device while this one is alive
     return frames
 
 
@@ -123,18 +126,18 @@ def main() -> None:
     out = project.output
     print(f"{out.width}x{out.height}, {count} frames, motion blur {project.settings.motion_blur_samples}: {count / wall:6.1f} fps  {wall / count * 1e3:6.2f} ms/frame")
     print(f"{out.width}x{out.height}, {count} frames, no motion blur: {count / sharp_wall:6.1f} fps  {sharp_wall / count * 1e3:6.2f} ms/frame")
-    for label, seconds in sorted(spent.items(), key=lambda item: -item[1]):
+    for label, seconds in ((label, spent[label]) for _, _, label in STAGES if label in spent):
         print(f"  {label:<32} {seconds / count * 1e3:6.2f} ms/frame  {seconds / wall * 100:5.1f}%")
 
     _, profiled = render_all(timeline, settings, times[:: max(1, count // 60)], profile=True)
-    profiled.profiler.read()
+    profiled.renderer.profiler.read()
     gpu: dict[str, float] = defaultdict(float)
     sample = times[:: max(1, count // 60)]
     pipeline = FramePipeline(FrameComposer(profiled, settings.effects), settings.config, 1)
     for t in sample:
         pipeline.submit(0, t, timeline.frame_at)
         pipeline.flush()
-        for name, ms in profiled.profiler.read().items():
+        for name, ms in profiled.renderer.profiler.read().items():
             gpu[name] += ms
     if gpu:
         total = sum(gpu.values()) / len(sample)

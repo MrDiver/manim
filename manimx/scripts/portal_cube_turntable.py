@@ -16,7 +16,7 @@ import time
 
 from manimx.examples.portal_cube import BACKGROUND, orbit_camera, portal_cube
 from manimx.robjects.transform import quaternion_from_axis_angle
-from manimx.renderer import FrameComposer, MotionBlur, RenderConfig, WGPURenderer
+from manimx.renderer import FrameComposer, MotionBlur, RenderConfig, RenderService
 
 
 def main() -> None:
@@ -29,7 +29,7 @@ def main() -> None:
     parser.add_argument("--blur-samples", type=int, default=8, help="1 disables motion blur")
     args = parser.parse_args()
 
-    renderer = WGPURenderer()
+    renderer = RenderService()
     cube = portal_cube()
     composer = FrameComposer(renderer, [MotionBlur(samples=args.blur_samples, shutter=0.5 / args.fps)])
     base = RenderConfig(pixel_width=args.width, pixel_height=args.height, background_color=BACKGROUND)

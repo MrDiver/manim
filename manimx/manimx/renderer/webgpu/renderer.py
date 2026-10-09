@@ -1,12 +1,8 @@
-"""WebGPU renderer: scene tree + config in, image layers out.
+"""WebGPU renderer: a frame packet in, image layers out.
 
-    renderer = WGPURenderer()
-    image = renderer.render(scene, RenderConfig())   # (H, W, 4) uint8
-
-The renderer has no scene state of its own. Each call flattens the given
-tree, reuses cached per-object data (fill meshes, packed vertices) where
-the object's versioned fields are unchanged, uploads everything into shared
-buffers and encodes these passes:
+The renderer is the GPU stage of the render chain (see packer.py): it
+takes a :class:`~.packer.FramePacket`, uploads its records into
+persistent buffers and encodes these passes:
 
     mask passes    one per clip scope (parents first): mask shapes into a
                    scratch target, copied into the scope's mask layer
@@ -17,70 +13,38 @@ buffers and encodes these passes:
                    against the meshes; opaque draws, then sorted
                    transparent draws
 
-:meth:`WGPURenderer.render_layers` stops there and returns both layers as
-GPU textures. A :class:`~.composer.FrameComposer` turns layers into a frame
-(bloom, tone mapping, compositing, motion blur); :meth:`WGPURenderer.render`
-is a composer with default settings plus a read-back.
+It never sees a render node and decides nothing about the scene: what to
+draw, and what changed, is in the packet. :meth:`WGPURenderer.render_layers`
+returns both layers as GPU textures; a :class:`~.composer.FrameComposer`
+turns them into a frame. :class:`~.service.RenderService` runs the whole
+chain.
 """
 
 from __future__ import annotations
 
-import threading
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
-
-import numpy as np
 import wgpu
 
-from ...robjects import RNode, RShape3D
-from ..base import Renderer
-from ..config import Frame, RenderConfig
-from ..effects import Effect
-from ..scene_graph import flatten_scene
-from .frame import FRAME_DTYPE, camera_frame
+from ..config import RenderConfig
+from .frame import FRAME_DTYPE
 from .gpu import GPUContext, ResourceCache
 from .lighting_pass import LightingPass
-from .mesh_batch import MeshBatch
 from .mesh_pass import MeshPass
+from .packer import FramePacket
 from .profiler import GpuProfiler
-from .retained import RetainedVectors
 from .shadow_pass import ShadowPass
-from .shadow_views import build_shadow_views
 from .targets import RenderLayers, RenderTargets
 from .vector_pass import VectorPass
 
-if TYPE_CHECKING:
-    from .composer import FrameComposer
 
-CACHE_MAX_AGE = 1024
-"""Renders after which unused per-object cache entries are dropped."""
-
-_shared: WGPURenderer | None = None
-_shared_lock = threading.Lock()
-
-
-class WGPURenderer(Renderer):
-    """The WebGPU renderer, meant to be used as a long-lived service.
+class WGPURenderer:
+    """The GPU stage: packets in, layers out (see the module docs).
 
     Everything it builds is kept across calls: the device, pipelines,
-    buffers, render targets, views and bind groups, per-object data
-    (tessellations, stroke records) and composers per effect chain. A
-    process should therefore render through one instance,
-    :meth:`shared`, instead of creating renderers per call. Rendering is
-    not thread-safe; one thread renders at a time.
+    buffers, render targets, views and bind groups. Rendering is not
+    thread-safe; one thread renders at a time.
     """
 
-    @classmethod
-    def shared(cls) -> WGPURenderer:
-        """The process's renderer service, created on first use."""
-        global _shared
-        with _shared_lock:
-            if _shared is None:
-                _shared = cls()
-            return _shared
-
     def __init__(self, context: GPUContext | None = None, profile: bool = False) -> None:
-        super().__init__()
         self.context = context or GPUContext.create()
         self.profiler = GpuProfiler(self.context.device)
         self.resources = ResourceCache(self.context.device)
@@ -96,72 +60,51 @@ class WGPURenderer(Renderer):
         self._mesh_pass = MeshPass(self.context, self._frame_uniform)
         self._lighting_pass = LightingPass(self.context, self._frame_uniform)
         self._shadow_pass = ShadowPass(self.context)
-        self._vectors = RetainedVectors()
-        """Vector records kept across renders and patched (retained.py)."""
+        self._source: object = None
+        """The packer of the previous packet: the vector buffers hold its
+        records, so its next packet only uploads what changed."""
         self._targets: RenderTargets | None = None
         self._empty_3d: RenderTargets | None = None
         """Targets whose G-buffer and lit layer are known to be empty."""
-        self._composers: dict[tuple, Any] = {}
 
     @property
     def frame_uniform(self) -> wgpu.GPUBuffer:
         """Camera, viewport and time of the latest render (frame.wgsl)."""
         return self._frame_uniform
 
-    def render(self, frame: Frame, config: RenderConfig) -> np.ndarray:
-        """Render ``frame`` (a tree, or views from ``frame_at``) to
-        ``(H, W, 4)`` uint8 RGBA with default compositing.
-        """
-        return self.composer().compose(frame, config)
-
-    def composer(self, effects: Sequence[Effect] = ()) -> FrameComposer:
-        """The composer for an effect chain, kept like everything else (its
-        pipelines and textures survive across calls)."""
-        key = tuple(effects)
-        composer = self._composers.get(key)
-        if composer is None:
-            from .composer import FrameComposer  # the composer imports this module
-
-            composer = self._composers[key] = FrameComposer(self, key)
-        return composer
-
-    def render_layers(self, root: RNode, config: RenderConfig, encoder: wgpu.GPUCommandEncoder | None = None) -> RenderLayers:
-        """Render ``root`` into the lit and vector layers (GPU textures).
+    def render_layers(self, packet: FramePacket, encoder: wgpu.GPUCommandEncoder | None = None) -> RenderLayers:
+        """Render ``packet`` into the lit and vector layers (GPU textures).
 
         With ``encoder`` the passes are recorded into it and the caller
         submits (the composer adds its passes to the same submission);
         without, they are submitted right away.
         """
-        if self.cache.next_generation() % CACHE_MAX_AGE == 0:
-            self.cache.sweep(CACHE_MAX_AGE)
-        scene = flatten_scene(root)
-        vectors = self._vectors.build(scene, self.cache, config.camera.position)
-        targets = self._render_targets(config, mask_count=len(scene.clips))
+        config = packet.config
+        meshes = packet.meshes
+        targets = self._render_targets(config, mask_count=packet.mask_count)
         samples = config.msaa_samples
-        # Lights, shadows and the deferred passes only affect meshes. A
-        # frame without meshes skips them; its G-buffer (whose depth the
-        # vector pass tests against) and lit layer only need to be empty,
-        # and stay empty as long as the next frames have no meshes either.
-        has_meshes = any(isinstance(item.obj, RShape3D) for item in scene.items)
-        clear_3d = not has_meshes and self._empty_3d is not targets
-        meshes = MeshBatch.build(scene, self.cache, config) if has_meshes else None
+        # A frame without meshes skips the 3D passes; its G-buffer (whose
+        # depth the vector pass tests against) and lit layer only need to
+        # be empty, and stay empty as long as the next frames have no
+        # meshes either.
+        clear_3d = meshes is None and self._empty_3d is not targets
 
         device = self.context.device
-        device.queue.write_buffer(self._frame_uniform, 0, camera_frame(config, len(meshes.lights) if meshes else 0))
-        self._vector_pass.prepare(vectors, targets.mask_layers_view, targets.gbuffer_views[-1], samples > 1)
+        device.queue.write_buffer(self._frame_uniform, 0, packet.frame)
+        full_upload = packet.source is not self._source
+        self._source = packet.source
+        self._vector_pass.prepare(packet.vectors, targets.mask_layers_view, targets.gbuffer_views[-1], samples > 1, full_upload)
         if meshes is not None:
             self._mesh_pass.prepare(meshes, targets.mask_layers_view)
-            shadows = build_shadow_views(scene, meshes.light_items, meshes.lights, self.cache, config)
-            shadows_changed = self._shadow_pass.prepare(shadows, config.shadow_resolution)
-            scope_parents = np.array([scope.parent for scope in scene.clips], dtype=np.int32)
-            self._lighting_pass.prepare(meshes.lights, scope_parents, targets.gbuffer_views, samples, self._shadow_pass, shadows_changed)
+            shadows_changed = self._shadow_pass.prepare(packet.shadows, config.shadow_resolution)
+            self._lighting_pass.prepare(meshes.lights, packet.scope_parents, targets.gbuffer_views, samples, self._shadow_pass, shadows_changed)
 
         own_encoder = encoder is None
         if encoder is None:
             encoder = device.create_command_encoder(label="frame")
         if meshes is not None:
             self._shadow_pass.draw(encoder, self._mesh_pass, self._vector_pass, self.profiler)
-        for scope in range(len(scene.clips)):
+        for scope in range(packet.mask_count):
             mask_pass = encoder.begin_render_pass(
                 color_attachments=[targets.mask_attachment()], timestamp_writes=self.profiler.pass_timing("masks")
             )

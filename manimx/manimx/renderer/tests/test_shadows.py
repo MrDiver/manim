@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 from manimx.userland.geometry import box_mesh
-from manimx.renderer import Camera, RenderConfig, RNodeDataCache, WGPURenderer
+from manimx.renderer import Camera, RenderConfig, RNodeDataCache, RenderService
 from manimx.renderer.scene_graph import flatten_scene
 from manimx.renderer.webgpu.mesh_batch import MeshBatch
 from manimx.renderer.webgpu.shadow_views import NO_SHADOW, build_shadow_views
@@ -63,9 +63,9 @@ def test_directional_view_covers_the_scene() -> None:
 
 
 @pytest.fixture(scope="module")
-def renderer() -> WGPURenderer:
+def renderer() -> RenderService:
     try:
-        return WGPURenderer()
+        return RenderService()
     except Exception as error:  # pragma: no cover - depends on the machine
         pytest.skip(f"no usable GPU: {error}")
 
@@ -80,7 +80,7 @@ def _scene(**options: object) -> RGroup:
 CAMERA = Camera.look_at((0, -0.01, 12), (0, 0, 0), up=(0, 1, 0), field_of_view=math.radians(60))
 
 
-def _brightness(renderer: WGPURenderer, root: RGroup, x: float, **config: object) -> float:
+def _brightness(renderer: RenderService, root: RGroup, x: float, **config: object) -> float:
     settings = RenderConfig(pixel_width=160, pixel_height=90, camera=CAMERA, ambient_intensity=0.0, **config)
     image = renderer.render(root, settings)
     # The camera looks straight down; world x maps to image columns.
@@ -88,7 +88,7 @@ def _brightness(renderer: WGPURenderer, root: RGroup, x: float, **config: object
     return float(image[45, int(80 + x * scale), :3].astype(int).mean())
 
 
-def test_blocker_shadows_the_floor(renderer: WGPURenderer) -> None:
+def test_blocker_shadows_the_floor(renderer: RenderService) -> None:
     lit_floor = _brightness(renderer, _scene(), 4.0)
 
     assert lit_floor > 100
@@ -103,7 +103,7 @@ def test_blocker_shadows_the_floor(renderer: WGPURenderer) -> None:
     assert _brightness(renderer, no_caster, 2.5) > lit_floor / 2
 
 
-def test_softness_widens_the_penumbra(renderer: WGPURenderer) -> None:
+def test_softness_widens_the_penumbra(renderer: RenderService) -> None:
     def edge_profile(size: float) -> np.ndarray:
         root = _scene()
         root.children[2] = RDirectionalLight(transform=Transform(rotation=rotation_towards((1, 0, -1))), intensity=3.0, size=size)

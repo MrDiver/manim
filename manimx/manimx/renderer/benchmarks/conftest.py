@@ -16,30 +16,30 @@ from collections.abc import Callable
 
 import pytest
 
-from manimx.renderer import WGPURenderer
+from manimx.renderer import RenderService
 
 _GPU_TIMINGS: dict[str, dict[str, float]] = {}
 
 
 @pytest.fixture(scope="session")
-def renderer() -> WGPURenderer:
+def renderer() -> RenderService:
     try:
-        return WGPURenderer(profile=True)
+        return RenderService(profile=True)
     except Exception as error:  # pragma: no cover - depends on the machine
         pytest.skip(f"no usable GPU: {error}")
 
 
 @pytest.fixture
-def measure(benchmark, renderer: WGPURenderer, request: pytest.FixtureRequest) -> Callable:
+def measure(benchmark, renderer: RenderService, request: pytest.FixtureRequest) -> Callable:
     """``measure(frame)``: benchmark ``frame()``, then record its GPU pass times."""
 
     def run(frame: Callable[[], object], rounds: int = 20) -> None:
         frame()  # warm up: pipelines, caches, buffers
-        renderer.profiler.read()  # drop warm-up timings
+        renderer.renderer.profiler.read()  # drop warm-up timings
         benchmark.pedantic(frame, rounds=rounds, warmup_rounds=2)
-        renderer.profiler.read()
+        renderer.renderer.profiler.read()
         frame()
-        timings = {name: round(ms, 3) for name, ms in renderer.profiler.read().items()}
+        timings = {name: round(ms, 3) for name, ms in renderer.renderer.profiler.read().items()}
         benchmark.extra_info["gpu_ms"] = timings
         _GPU_TIMINGS[request.node.name] = timings
 

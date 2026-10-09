@@ -17,7 +17,7 @@ import pytest
 from manimx.userland.geometry import arc_points, corner_points, parametric_points, rectangle_points, regular_polygon_points
 from manimx.examples.manim_logo import config as logo_config
 from manimx.examples.manim_logo import manim_logo
-from manimx.renderer import RenderConfig, WGPURenderer
+from manimx.renderer import RenderConfig, RenderService
 from manimx.robjects.transform import rotation_towards
 from manimx.testing import ImageTolerance, assert_image_matches
 from manimx.utils.color import BLUE, GREEN, ORANGE, PURPLE, RED, WHITE, YELLOW
@@ -31,9 +31,9 @@ pytestmark = pytest.mark.visual
 
 
 @pytest.fixture(scope="module")
-def renderer() -> WGPURenderer:
+def renderer() -> RenderService:
     try:
-        return WGPURenderer()
+        return RenderService()
     except Exception as error:  # pragma: no cover - depends on the machine
         pytest.skip(f"no usable GPU: {error}")
 
@@ -46,7 +46,7 @@ def check(image: np.ndarray, name: str, update: bool, tolerance: ImageTolerance 
     assert_image_matches(image, REFERENCES / f"{name}.png", tolerance=tolerance, update=update)
 
 
-def test_manim_logo(renderer: WGPURenderer, update_references: bool) -> None:
+def test_manim_logo(renderer: RenderService, update_references: bool) -> None:
     image = renderer.render(manim_logo().snapshot(), logo_config(480, 270))
 
     # Looser outlier bound while the reference still comes from Manim, whose
@@ -54,7 +54,7 @@ def test_manim_logo(renderer: WGPURenderer, update_references: bool) -> None:
     check(image, "manim_logo", update_references, ImageTolerance(outlier_fraction=0.01))
 
 
-def test_joints_and_caps(renderer: WGPURenderer, update_references: bool) -> None:
+def test_joints_and_caps(renderer: RenderService, update_references: bool) -> None:
     zigzag = [(-1.0, -0.5), (-0.5, 0.5), (0.0, -0.5), (0.5, 0.5), (1.0, -0.5)]
     styles = [
         (JointType.MITER, CapStyle.BUTT),
@@ -71,7 +71,7 @@ def test_joints_and_caps(renderer: WGPURenderer, update_references: bool) -> Non
     check(image, "joints_and_caps", update_references)
 
 
-def test_per_point_stroke_styles(renderer: WGPURenderer, update_references: bool) -> None:
+def test_per_point_stroke_styles(renderer: RenderService, update_references: bool) -> None:
     rainbow = RShape2D(points=arc_points(1.5), stroke=Stroke([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED], width=25), transform=Transform(position=(-3.0, 0.0, 0.0)))
     taper = RShape2D(points=corner_points([(-1.5, -1.0), (0.0, 1.0), (1.5, -1.0)]), stroke=Stroke([BLUE, GREEN], width=[2, 60], joint=JointType.ROUND, cap=CapStyle.ROUND), transform=Transform(position=(2.5, 0.0, 0.0)))
     image = renderer.render(RGroup(children=[rainbow, taper]), config())
@@ -79,7 +79,7 @@ def test_per_point_stroke_styles(renderer: WGPURenderer, update_references: bool
     check(image, "per_point_stroke_styles", update_references)
 
 
-def test_transparency_and_gradients(renderer: WGPURenderer, update_references: bool) -> None:
+def test_transparency_and_gradients(renderer: RenderService, update_references: bool) -> None:
     shapes = [
         RShape2D(points=regular_polygon_points(5, 1.5), fill=Fill([RED, BLUE], opacity=0.7), stroke=Stroke(YELLOW, width=12, opacity=0.5), transform=Transform(position=(-3.0, 0.0, 0.0))),
         RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=0.5), stroke=Stroke(WHITE, width=8), transform=Transform(position=(1.5, 0.5, 0.0))),
@@ -90,7 +90,7 @@ def test_transparency_and_gradients(renderer: WGPURenderer, update_references: b
     check(image, "transparency_and_gradients", update_references)
 
 
-def test_shapes_in_3d(renderer: WGPURenderer, update_references: bool) -> None:
+def test_shapes_in_3d(renderer: RenderService, update_references: bool) -> None:
     flipped = RGroup(
         children=[
             RShape2D(points=arc_points(), fill=Fill(GREEN, opacity=1.0), stroke=Stroke(WHITE, width=8)),
@@ -107,7 +107,7 @@ def test_shapes_in_3d(renderer: WGPURenderer, update_references: bool) -> None:
     check(image, "shapes_in_3d", update_references)
 
 
-def test_clipping(renderer: WGPURenderer, update_references: bool) -> None:
+def test_clipping(renderer: RenderService, update_references: bool) -> None:
     stripes = RGroup(
         children=[
             RShape2D(points=rectangle_points(0.5, 0.5), fill=Fill(color, opacity=1.0), stroke=Stroke(WHITE, width=4), transform=Transform(position=(-2.0 + 0.5 * i, 0.0, 0.0), scale=(1.0, 8.0, 1.0)))
@@ -128,7 +128,7 @@ def test_clipping(renderer: WGPURenderer, update_references: bool) -> None:
 
 
 @pytest.mark.parametrize("view", ["default", "front", "side", "top", "below", "isometric"])
-def test_blender_scene(renderer: WGPURenderer, update_references: bool, view: str) -> None:
+def test_blender_scene(renderer: RenderService, update_references: bool, view: str) -> None:
     from manimx.examples.blender_scene import blender_scene, views
 
     image = renderer.render(blender_scene().snapshot(), views(480, 270)[view])
@@ -142,7 +142,7 @@ def _perspective(eye: tuple, target: tuple) -> object:
     return Camera.look_at(eye, target, field_of_view=math.radians(45), near=0.5, far=200.0)
 
 
-def test_meshes_and_lights(renderer: WGPURenderer, update_references: bool) -> None:
+def test_meshes_and_lights(renderer: RenderService, update_references: bool) -> None:
     from manimx.examples.blender_scene import _ground
 
     from manimx import PbrMaterial, Texture
@@ -168,7 +168,7 @@ def test_meshes_and_lights(renderer: WGPURenderer, update_references: bool) -> N
     check(image, "meshes_and_lights", update_references)
 
 
-def test_curves_3d(renderer: WGPURenderer, update_references: bool) -> None:
+def test_curves_3d(renderer: RenderService, update_references: bool) -> None:
     from manimx.examples.blender_scene import _ground
 
     from manimx.robjects import RCurve3D
@@ -186,7 +186,7 @@ def test_curves_3d(renderer: WGPURenderer, update_references: bool) -> None:
     check(image, "curves_3d", update_references)
 
 
-def test_motion_blur_bloom_and_aces(renderer: WGPURenderer, update_references: bool) -> None:
+def test_motion_blur_bloom_and_aces(renderer: RenderService, update_references: bool) -> None:
     from manimx.renderer import (
         Bloom,
         FrameComposer,
@@ -215,7 +215,7 @@ def test_motion_blur_bloom_and_aces(renderer: WGPURenderer, update_references: b
     check(image, "motion_blur_bloom_aces", update_references)
 
 
-def test_shadows(renderer: WGPURenderer, update_references: bool) -> None:
+def test_shadows(renderer: RenderService, update_references: bool) -> None:
     from manimx.examples.manim_logo import manim_logo
 
     from manimx import PbrMaterial
@@ -242,7 +242,7 @@ def test_shadows(renderer: WGPURenderer, update_references: bool) -> None:
 
 
 @pytest.mark.parametrize("view", ["front", "right", "back", "left", "front-right", "back-left"])
-def test_portal_cube(renderer: WGPURenderer, update_references: bool, view: str) -> None:
+def test_portal_cube(renderer: RenderService, update_references: bool, view: str) -> None:
     from manimx.examples.portal_cube import portal_cube, views
 
     image = renderer.render(portal_cube().snapshot(), views(480, 270)[view])
@@ -251,7 +251,7 @@ def test_portal_cube(renderer: WGPURenderer, update_references: bool, view: str)
 
 
 @pytest.mark.parametrize("time", [0.6, 2.3, 3.6, 4.7])
-def test_animated_logo(renderer: WGPURenderer, update_references: bool, time: float) -> None:
+def test_animated_logo(renderer: RenderService, update_references: bool, time: float) -> None:
     from manimx.examples.animated_logo import AnimatedLogo
     from manimx.examples.animated_logo import config as animated_config
 
@@ -261,7 +261,7 @@ def test_animated_logo(renderer: WGPURenderer, update_references: bool, time: fl
     check(image, f"animated_logo_{time:.1f}s", update_references)
 
 
-def test_animated_logo_motion_blur(renderer: WGPURenderer, update_references: bool) -> None:
+def test_animated_logo_motion_blur(renderer: RenderService, update_references: bool) -> None:
     import dataclasses
 
     from manimx.examples.animated_logo import AnimatedLogo
@@ -276,7 +276,7 @@ def test_animated_logo_motion_blur(renderer: WGPURenderer, update_references: bo
 
 
 @pytest.mark.parametrize("time", [0.9, 2.0, 3.2, 4.1, 5.6])
-def test_navigation_badge(renderer: WGPURenderer, update_references: bool, time: float) -> None:
+def test_navigation_badge(renderer: RenderService, update_references: bool, time: float) -> None:
     from manimx.examples.navigation import Navigation
     from manimx.examples.navigation import config as navigation_config
 

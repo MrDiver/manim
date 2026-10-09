@@ -235,12 +235,12 @@ def _release(release: Callable[[], None] | None) -> None:
 
 
 def _render_here(source: FrameSource, sink: FrameSink, settings: RenderSettings, progress: Progress | None) -> int:
-    from ..renderer.webgpu import WGPURenderer
+    from ..renderer.webgpu import RenderService
     from .pipeline import FramePipeline
 
     times = settings.frame_times(source.duration)
     config = settings.config
-    pipeline = FramePipeline(WGPURenderer.shared().composer(settings.effects), config, settings.in_flight)
+    pipeline = FramePipeline(RenderService.shared().composer(settings.effects), config, settings.in_flight)
     sink.open(_format(source, settings, times))
     try:
         writer = _Writer(sink, len(times), progress, capacity=2 * settings.in_flight + 4)
@@ -343,12 +343,12 @@ def _worker_main(
 ) -> None:  # pragma: no cover - runs in a child process
     memory = SharedMemory(name=memory_name)
     try:
-        from ..renderer.webgpu import WGPURenderer
+        from ..renderer.webgpu import RenderService
         from .pipeline import FramePipeline
 
         source = load_source(spec)
         times = settings.frame_times(source.duration)
-        pipeline = FramePipeline(WGPURenderer.shared().composer(settings.effects), settings.config, settings.in_flight)
+        pipeline = FramePipeline(RenderService.shared().composer(settings.effects), settings.config, settings.in_flight)
 
         def deliver(index: int, image: np.ndarray) -> None:
             slot = free.get()  # waits while all of this worker's slots are queued

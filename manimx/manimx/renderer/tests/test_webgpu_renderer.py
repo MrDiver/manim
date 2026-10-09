@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 from manimx.userland.geometry import arc_points, rectangle_points
-from manimx.renderer import Camera, RemoveObjects, RenderConfig, Renderer, WGPURenderer
+from manimx.renderer import Camera, RemoveObjects, RenderConfig, Renderer, RenderService
 from manimx.robjects import RShape2D
 from manimx.robjects.transform import rotation_towards
 from manimx.utils.color import BLUE, RED
@@ -17,14 +17,14 @@ BACKGROUND = (0, 0, 0, 255)
 
 
 @pytest.fixture(scope="module")
-def renderer() -> WGPURenderer:
+def renderer() -> RenderService:
     try:
-        return WGPURenderer()
+        return RenderService()
     except Exception as error:  # pragma: no cover - depends on the machine
         pytest.skip(f"no usable GPU: {error}")
 
 
-def render(renderer: WGPURenderer, *children, **config) -> np.ndarray:
+def render(renderer: RenderService, *children, **config) -> np.ndarray:
     return renderer.render(
         RGroup(children=list(children)),
         RenderConfig(pixel_width=WIDTH, pixel_height=HEIGHT, **config),
@@ -37,11 +37,11 @@ def pixel(image: np.ndarray, x: float, y: float) -> tuple[int, ...]:
     return tuple(image[int(HEIGHT / 2 - y * scale), int(WIDTH / 2 + x * scale)])
 
 
-def test_renderer_implements_interface(renderer: WGPURenderer) -> None:
+def test_renderer_implements_interface(renderer: RenderService) -> None:
     assert isinstance(renderer, Renderer)
 
 
-def test_renders_background_and_fill(renderer: WGPURenderer) -> None:
+def test_renders_background_and_fill(renderer: RenderService) -> None:
     image = render(renderer, RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0)))
 
     assert image.shape == (HEIGHT, WIDTH, 4) and image.dtype == np.uint8
@@ -49,7 +49,7 @@ def test_renders_background_and_fill(renderer: WGPURenderer) -> None:
     assert pixel(image, 3, 3) == BACKGROUND
 
 
-def test_group_transform_moves_children(renderer: WGPURenderer) -> None:
+def test_group_transform_moves_children(renderer: RenderService) -> None:
     shape = RShape2D(points=rectangle_points(1.0, 1.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0))
     image = render(renderer, RGroup(children=[shape], transform=Transform(position=(3.0, 0.0, 0.0))))
 
@@ -57,7 +57,7 @@ def test_group_transform_moves_children(renderer: WGPURenderer) -> None:
     assert pixel(image, 0, 0) == BACKGROUND
 
 
-def test_later_objects_paint_over_earlier_ones(renderer: WGPURenderer) -> None:
+def test_later_objects_paint_over_earlier_ones(renderer: RenderService) -> None:
     below = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0))
     above = RShape2D(points=arc_points(0.5), fill=Fill(BLUE, opacity=1.0), stroke=Stroke(width=0.0))
 
@@ -65,7 +65,7 @@ def test_later_objects_paint_over_earlier_ones(renderer: WGPURenderer) -> None:
     assert pixel(render(renderer, above, below), 0, 0) == (*RED.to_int_rgb(), 255)
 
 
-def test_late_layers_stay_ordered_far_away_in_perspective(renderer: WGPURenderer) -> None:
+def test_late_layers_stay_ordered_far_away_in_perspective(renderer: RenderService) -> None:
     # Two overlapping shapes in an upright plane 20 units away, after 200
     # other objects, so their layers are in the hundreds. Far away the depth
     # is close to 1, where fwidth(depth) is too coarse for the layer bias:
@@ -90,20 +90,20 @@ def test_late_layers_stay_ordered_far_away_in_perspective(renderer: WGPURenderer
     assert blue == disc.shape[0] * disc.shape[1] and red == 0
 
 
-def test_stroke_is_drawn_over_its_fill(renderer: WGPURenderer) -> None:
+def test_stroke_is_drawn_over_its_fill(renderer: RenderService) -> None:
     shape = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(BLUE, width=20.0))
 
     assert pixel(render(renderer, shape), 1.0, 0.0) == (*BLUE.to_int_rgb(), 255)
 
 
-def test_transparent_fill_blends_over_background(renderer: WGPURenderer) -> None:
+def test_transparent_fill_blends_over_background(renderer: RenderService) -> None:
     shape = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill("#FFFFFF", opacity=0.5), stroke=Stroke(width=0.0))
 
     r, g, b, _ = pixel(render(renderer, shape), 0, 0)
     assert 120 <= r <= 135 and r == g == b
 
 
-def test_back_side_renders_like_front(renderer: WGPURenderer) -> None:
+def test_back_side_renders_like_front(renderer: RenderService) -> None:
     def scene(flip: float) -> np.ndarray:
         shape = RShape2D(points=arc_points(), fill=Fill(RED, opacity=1.0), transform=Transform().rotated(flip, (0, 1, 0)))
         return render(renderer, shape)
@@ -111,7 +111,7 @@ def test_back_side_renders_like_front(renderer: WGPURenderer) -> None:
     np.testing.assert_array_equal(scene(0.0), scene(math.pi))
 
 
-def test_remove_command_clears_renderer_cache(renderer: WGPURenderer) -> None:
+def test_remove_command_clears_renderer_cache(renderer: RenderService) -> None:
     shape = RShape2D(points=arc_points(), fill=Fill(RED, opacity=1.0))
     render(renderer, shape)
     assert renderer.cache.get(shape.uid, "fill-mesh", shape.version("points")) is not None
@@ -121,13 +121,13 @@ def test_remove_command_clears_renderer_cache(renderer: WGPURenderer) -> None:
     assert renderer.cache.get(shape.uid, "fill-mesh", shape.version("points")) is None
 
 
-def test_without_msaa(renderer: WGPURenderer) -> None:
+def test_without_msaa(renderer: RenderService) -> None:
     image = render(renderer, RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0)), msaa_samples=1)
 
     assert pixel(image, 0, 0) == (*RED.to_int_rgb(), 255)
 
 
-def test_clipping_shows_content_only_inside_mask(renderer: WGPURenderer) -> None:
+def test_clipping_shows_content_only_inside_mask(renderer: RenderService) -> None:
     clip = RClippingGroup(
         mask=RShape2D(points=arc_points(1.0), fill=Fill(opacity=1.0), stroke=Stroke(width=0.0)),
         content=RShape2D(points=rectangle_points(4.0, 4.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0)),
@@ -139,7 +139,7 @@ def test_clipping_shows_content_only_inside_mask(renderer: WGPURenderer) -> None
     assert pixel(image, 1.6, 1.6) == BACKGROUND  # inside the square, outside the circle
 
 
-def test_soft_mask_multiplies_alpha(renderer: WGPURenderer) -> None:
+def test_soft_mask_multiplies_alpha(renderer: RenderService) -> None:
     clip = RClippingGroup(
         mask=RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(opacity=0.5), stroke=Stroke(width=0.0)),
         content=RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill("#FFFFFF", opacity=1.0), stroke=Stroke(width=0.0)),
@@ -149,7 +149,7 @@ def test_soft_mask_multiplies_alpha(renderer: WGPURenderer) -> None:
     assert 120 <= r <= 135 and r == g == b
 
 
-def test_nested_masks_intersect(renderer: WGPURenderer) -> None:
+def test_nested_masks_intersect(renderer: RenderService) -> None:
     def band(x: float) -> object:
         return RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(opacity=1.0), stroke=Stroke(width=0.0), transform=Transform(position=(x, 0.0, 0.0)))
 
@@ -171,7 +171,7 @@ def _brightness(image: np.ndarray, x: float, y: float) -> int:
     return sum(int(channel) for channel in pixel(image, x, y)[:3])
 
 
-def test_mesh_is_lit_from_the_light_side(renderer: WGPURenderer) -> None:
+def test_mesh_is_lit_from_the_light_side(renderer: RenderService) -> None:
     from manimx import PbrMaterial
     from manimx.robjects import RDirectionalLight, RShape3D
     from manimx.userland.geometry import sphere_mesh
@@ -185,7 +185,7 @@ def test_mesh_is_lit_from_the_light_side(renderer: WGPURenderer) -> None:
     assert _brightness(image, 1.5, 0.0) == 0  # faces away, no ambient
 
 
-def test_spot_light_cone(renderer: WGPURenderer) -> None:
+def test_spot_light_cone(renderer: RenderService) -> None:
     from manimx import PbrMaterial
     from manimx.robjects import RShape3D, RSpotLight
     from manimx.userland.geometry import box_mesh
@@ -199,7 +199,7 @@ def test_spot_light_cone(renderer: WGPURenderer) -> None:
     assert _brightness(image, 3.0, 0.0) == 0  # outside the cone
 
 
-def test_meshes_and_vectors_share_depth(renderer: WGPURenderer) -> None:
+def test_meshes_and_vectors_share_depth(renderer: RenderService) -> None:
     from manimx import PbrMaterial
     from manimx.robjects import RShape3D
     from manimx.userland.geometry import box_mesh
@@ -223,13 +223,13 @@ def test_frames_without_meshes_after_meshes_start_from_empty_3d_layers() -> None
     from manimx.userland.geometry import sphere_mesh
 
     try:
-        reused = WGPURenderer()
+        reused = RenderService()
     except Exception as error:  # pragma: no cover - depends on the machine
         pytest.skip(f"no usable GPU: {error}")
     flat = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0), transform=Transform(position=(0.0, 0.0, -2.0)))
     sphere = RShape3D(mesh=sphere_mesh(2.0), material=PbrMaterial("#FFFFFF", emissive="#FFFFFF"))
 
-    expected = render(WGPURenderer(), flat)
+    expected = render(RenderService(), flat)
     first = render(reused, flat)
     with_mesh = render(reused, flat, sphere)
     after = render(reused, flat)

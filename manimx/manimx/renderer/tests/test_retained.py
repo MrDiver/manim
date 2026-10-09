@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from manimx.userland.geometry import arc_points, rectangle_points, regular_polygon_points
 from manimx.robjects import new_uid
-from manimx.renderer import RenderConfig, WGPURenderer
+from manimx.renderer import RenderConfig, RenderService
 from manimx.renderer.cache import RNodeDataCache
 from manimx.renderer.scene_graph import flatten_scene
 from manimx.renderer.webgpu.retained import RetainedVectors
@@ -21,9 +21,9 @@ A, B, C, D = (new_uid() for _ in range(4))
 
 
 @pytest.fixture(scope="module")
-def renderer() -> WGPURenderer:
+def renderer() -> RenderService:
     try:
-        return WGPURenderer()
+        return RenderService()
     except Exception as error:  # pragma: no cover - depends on the machine
         pytest.skip(f"no usable GPU: {error}")
 
@@ -59,10 +59,10 @@ def frames():
     yield [shape(circle, C, 1), shape(square, B, -1)]  # order and placement swap
 
 
-def test_patched_renders_equal_fresh_renders(renderer: WGPURenderer) -> None:
+def test_patched_renders_equal_fresh_renders(renderer: RenderService) -> None:
     for index, children in enumerate(frames()):
         patched = renderer.render(RGroup(children=children), CONFIG)
-        fresh = WGPURenderer().render(RGroup(children=children), CONFIG)
+        fresh = RenderService().render(RGroup(children=children), CONFIG)
         np.testing.assert_array_equal(patched, fresh, err_msg=f"frame {index}")
 
 

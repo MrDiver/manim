@@ -80,10 +80,20 @@ class FlatScene:
             clip = self.clips[clip].parent
 
 
+class SceneFlattener:
+    """The first stage of the render chain: an RNode tree in, a
+    :class:`FlatScene` out (see webgpu/packer.py for the whole chain).
+    """
+
+    def flatten(self, root: RNode) -> FlatScene:
+        scene = FlatScene()
+        _walk(root, np.eye(4), NO_CLIP, scene, mask_of=None)
+        return scene
+
+
 def flatten_scene(root: RNode) -> FlatScene:
-    scene = FlatScene()
-    _walk(root, np.eye(4), NO_CLIP, scene, mask_of=None)
-    return scene
+    """Flatten ``root`` once, without keeping anything for later calls."""
+    return SceneFlattener().flatten(root)
 
 
 def flatten(root: RNode) -> list[DrawItem]:

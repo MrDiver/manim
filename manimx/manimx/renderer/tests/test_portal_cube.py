@@ -24,7 +24,7 @@ import numpy as np
 import pytest
 from manimx.animation import ClippingGroup, Group, Light, Shape3D
 from manimx.examples.portal_cube import portal_cube, views
-from manimx.renderer import WGPURenderer
+from manimx.renderer import RenderService
 from manimx.renderer.scene_graph import flatten_scene
 
 from manimx.robjects import RGroup, RLight
@@ -34,9 +34,9 @@ WIDTH, HEIGHT = 320, 180
 
 
 @pytest.fixture(scope="module")
-def renderer() -> WGPURenderer:
+def renderer() -> RenderService:
     try:
-        return WGPURenderer()
+        return RenderService()
     except Exception as error:  # pragma: no cover - depends on the machine
         pytest.skip(f"no usable GPU: {error}")
 
@@ -46,7 +46,7 @@ def _send_away(node) -> None:
     node.move_to((0.0, 0.0, -1000.0))
 
 
-def _render(renderer: WGPURenderer, cube: Group, view: str) -> np.ndarray:
+def _render(renderer: RenderService, cube: Group, view: str) -> np.ndarray:
     return renderer.render(cube.snapshot(), views(WIDTH, HEIGHT)[view]).astype(int)
 
 
@@ -81,7 +81,7 @@ def test_rooms_do_not_cast_shadows() -> None:
 
 
 @pytest.mark.parametrize("side", SIDES)
-def test_each_face_shows_only_its_own_world(renderer: WGPURenderer, side: str) -> None:
+def test_each_face_shows_only_its_own_world(renderer: RenderService, side: str) -> None:
     full = _render(renderer, portal_cube(), side)
 
     others_hidden = portal_cube()
@@ -95,7 +95,7 @@ def test_each_face_shows_only_its_own_world(renderer: WGPURenderer, side: str) -
     assert _changed(full, _render(renderer, own_hidden, side)).mean() > 0.05  # the face empties
 
 
-def test_two_worlds_meet_at_a_corner_without_overlap(renderer: WGPURenderer) -> None:
+def test_two_worlds_meet_at_a_corner_without_overlap(renderer: RenderService) -> None:
     full = _render(renderer, portal_cube(), "front-right")
     regions = {}
     for side in ("front", "right"):
@@ -114,7 +114,7 @@ def test_two_worlds_meet_at_a_corner_without_overlap(renderer: WGPURenderer) -> 
 
 
 @pytest.mark.parametrize("own_side", ["front", "right"])  # the logo and the mesh world
-def test_lights_stay_in_their_world(renderer: WGPURenderer, own_side: str) -> None:
+def test_lights_stay_in_their_world(renderer: RenderService, own_side: str) -> None:
     full = _render(renderer, portal_cube(), "front-right")
     dark = portal_cube()
     for light in dark.find(f"{own_side}-world").find_all(tags="light"):
@@ -131,7 +131,7 @@ def test_lights_stay_in_their_world(renderer: WGPURenderer, own_side: str) -> No
 
 
 @pytest.mark.parametrize("view", ["front", "right", "back", "left", "front-right", "back-left"])
-def test_base_never_shows_through_the_floors(renderer: WGPURenderer, view: str) -> None:
+def test_base_never_shows_through_the_floors(renderer: RenderService, view: str) -> None:
     """The base plane lies 4 cm under the room floors. It may only be seen
     along the cube's bottom edge (the floors are inset by 2 cm), never
     through a floor."""

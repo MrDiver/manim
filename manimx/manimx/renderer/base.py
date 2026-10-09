@@ -5,7 +5,7 @@ A backend turns a render-object tree into an image. Everything else
 WebGPU rasterizer, an offline path tracer or a Blender bridge are
 interchangeable:
 
-    renderer: Renderer = WGPURenderer()      # or BlenderRenderer(), ...
+    renderer: Renderer = RenderService()      # or BlenderRenderer(), ...
     image = renderer.render(scene, config)
     renderer.submit(RemoveObjects.subtree(old_group))
 

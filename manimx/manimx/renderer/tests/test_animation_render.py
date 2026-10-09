@@ -10,19 +10,19 @@ import pytest
 
 from manimx.examples.animated_logo import AnimatedLogo, config
 from manimx.examples.manim_logo import manim_logo
-from manimx.renderer import FrameComposer, MotionBlur, WGPURenderer
+from manimx.renderer import FrameComposer, MotionBlur, RenderService
 from manimx.renderer.webgpu import retained
 
 
 @pytest.fixture(scope="module")
-def renderer() -> WGPURenderer:
+def renderer() -> RenderService:
     try:
-        return WGPURenderer()
+        return RenderService()
     except Exception as error:  # pragma: no cover - depends on the machine
         pytest.skip(f"no usable GPU: {error}")
 
 
-def test_the_animation_ends_exactly_as_the_static_logo(renderer: WGPURenderer) -> None:
+def test_the_animation_ends_exactly_as_the_static_logo(renderer: RenderService) -> None:
     prepared = AnimatedLogo().prepare()
 
     animated = renderer.render(prepared.state_at(prepared.duration), config(480, 270))
@@ -32,7 +32,7 @@ def test_the_animation_ends_exactly_as_the_static_logo(renderer: WGPURenderer) -
 
 
 def test_each_shape_is_triangulated_once_for_the_whole_animation(
-    renderer: WGPURenderer, monkeypatch: pytest.MonkeyPatch
+    renderer: RenderService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Fades, moves, turns and pulses never re-triangulate: snapshots keep
     uid and version tokens, and fill meshes depend on the points alone
@@ -48,7 +48,7 @@ def test_each_shape_is_triangulated_once_for_the_whole_animation(
     assert len(calls) == 4  # circle, square, triangle and the M
 
 
-def test_motion_blur_through_prepared_scene(renderer: WGPURenderer) -> None:
+def test_motion_blur_through_prepared_scene(renderer: RenderService) -> None:
     prepared = AnimatedLogo().prepare()
     composer = FrameComposer(renderer, [MotionBlur(samples=8, shutter=0.2)])
 
@@ -64,7 +64,7 @@ def _at(settings, time: float):
     return dataclasses.replace(settings, time=time)
 
 
-def test_navigation_badge_properties(renderer: WGPURenderer) -> None:
+def test_navigation_badge_properties(renderer: RenderService) -> None:
     from manimx.examples.navigation import Navigation
     from manimx.examples.navigation import config as navigation_config
 
@@ -88,7 +88,7 @@ def test_navigation_badge_properties(renderer: WGPURenderer) -> None:
     assert np.all(outside == background[90, 20:60])
 
 
-def test_clips_render_through_their_camera_and_blur_camera_moves(renderer: WGPURenderer) -> None:
+def test_clips_render_through_their_camera_and_blur_camera_moves(renderer: RenderService) -> None:
     from manimx.animation import Scene, Timeline
     from manimx.userland import RIGHT, Dot
     from manimx.userland.rate_functions import linear
@@ -118,7 +118,7 @@ def test_clips_render_through_their_camera_and_blur_camera_moves(renderer: WGPUR
     assert partial.sum() > 4  # the dot smears along the camera move
 
 
-def test_overlapping_clips_are_drawn_over_each_other(renderer: WGPURenderer) -> None:
+def test_overlapping_clips_are_drawn_over_each_other(renderer: RenderService) -> None:
     from manimx.animation import Scene, Timeline
     from manimx.userland import LEFT, RIGHT, Dot
     from manimx.renderer import RenderConfig
