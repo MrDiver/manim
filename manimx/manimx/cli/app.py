@@ -215,6 +215,10 @@ def render(
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file (or folder with --png).", show_default=False)] = None,
     preview: Annotated[bool, typer.Option("--preview", "-p", help="Fast: 960×540, 30 fps, no motion blur.")] = False,
     png: Annotated[bool, typer.Option("--png", help="Write a PNG sequence instead of a video.")] = False,
+    window: Annotated[bool, typer.Option("--window", help="Show the frames in a window as they render.")] = False,
+    write: Annotated[
+        bool | None, typer.Option("--write/--no-write", help="Write the video or PNGs (default: unless --window).", show_default=False)
+    ] = None,
     width: Annotated[int | None, typer.Option(show_default=False)] = None,
     height: Annotated[int | None, typer.Option(show_default=False)] = None,
     fps: Annotated[int | None, typer.Option(show_default=False)] = None,
@@ -223,11 +227,18 @@ def render(
     start: Annotated[float, typer.Option(help="First second to render.")] = 0.0,
     end: Annotated[float | None, typer.Option(help="Last second to render.", show_default=False)] = None,
     audio: Annotated[bool | None, typer.Option("--audio/--no-audio", help="Include sounds (default: output.audio).", show_default=False)] = None,
+    open_: Annotated[bool, typer.Option("--open", "-O", help="Open the result when done.")] = False,
 ) -> None:
-    """Render the timeline (or one scene) to a video or PNG sequence."""
-    from ..drivers import ImageSequence, VideoFile
+    """Render the timeline (or one scene) to a video or PNG sequence, a
+    window, or both."""
+    from ..drivers import ImageSequence, Tee, VideoFile, Window
     from ..drivers import render as render_frames
 
+    write = not window if write is None else write
+    if not write and not window:
+        raise ProjectError("--no-write without --window renders nothing", hint="add --window")
+    if not write and (png or output is not None or open_):
+        raise ProjectError("--png, --output and --open need a written file", hint="add --write")
     project = Project.find()
     overrides: dict[str, Any] = {"width": 960, "height": 540, "fps": 30, "motion_blur": 1} if preview else {}
     explicit = {"width": width, "height": height, "fps": fps, "motion_blur": motion_blur, "audio": audio}
@@ -250,10 +261,15 @@ def render(
     if workers > 1:
         source = project.source(scene)  # workers load the project themselves
 
-    folder = project.root / options.directory
-    target = output or folder / (f"{scene or project.name}" + ("" if png else ".mp4"))
-    target.parent.mkdir(parents=True, exist_ok=True)
-    sink = ImageSequence(target) if png else VideoFile(target)
+    sinks: list[Any] = []
+    if write:
+        folder = project.root / options.directory
+        target = output or folder / (f"{scene or project.name}" + ("" if png else ".mp4"))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        sinks.append(ImageSequence(target) if png else VideoFile(target))
+    if window:
+        sinks.append(Window(title=f"{project.name} · {what}"))
+    sink = sinks[0] if len(sinks) == 1 else Tee(tuple(sinks))
 
     columns = (SpinnerColumn(), TextColumn("Rendering"), BarColumn(), MofNCompleteColumn(), _RateColumn(), TimeRemainingColumn())
     began = time.perf_counter()
@@ -263,11 +279,18 @@ def render(
             source, sink, settings, workers=workers, progress=lambda done, total: progress.update(task, completed=done, total=total)
         )
     elapsed = time.perf_counter() - began
+    seconds = stats.frames / options.fps
+    if not write:
+        pace = "real time" if elapsed <= seconds * 1.05 else f"{seconds / elapsed:.2f}× real time"
+        ui.success(f"[bold]{stats.frames} frames[/]  [dim]{seconds:.1f} s shown in {elapsed:.1f} s ({pace})[/]")
+        return
     size = target.stat().st_size if target.is_file() else sum(p.stat().st_size for p in target.iterdir())
     ui.success(
-        f"[bold]{_shown(target)}[/]  [dim]{stats.frames} frames · {stats.frames / options.fps:.1f} s · "
+        f"[bold]{_shown(target)}[/]  [dim]{stats.frames} frames · {seconds:.1f} s · "
         f"{size / 1e6:.1f} MB · {elapsed:.1f} s ({stats.frames / elapsed:.0f} fps)[/]"
     )
+    if open_:
+        _open(target)
 
 
 @app.command()
@@ -277,6 +300,7 @@ def still(
     output: Annotated[Path | None, typer.Option("--output", "-o", show_default=False)] = None,
     width: Annotated[int | None, typer.Option(show_default=False)] = None,
     height: Annotated[int | None, typer.Option(show_default=False)] = None,
+    open_: Annotated[bool, typer.Option("--open", "-O", help="Open the result when done.")] = False,
 ) -> None:
     """Render a single frame as a PNG."""
     from PIL import Image
@@ -300,6 +324,14 @@ def still(
     target.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(frames.frames[0], "RGBA").save(target)
     ui.success(f"[bold]{_shown(target)}[/]  [dim]{scene or 'timeline'} at {at:g} s[/]")
+    if open_:
+        _open(target)
+
+
+def _open(path: Path) -> None:
+    """Open a file (or a PNG sequence's folder) with the system's default app."""
+    if typer.launch(str(path)) != 0:
+        ui.console.print(f"[dim]could not open {_shown(path)}[/]")
 
 
 __all__ = ["app", "templates"]

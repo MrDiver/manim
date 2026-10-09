@@ -118,6 +118,78 @@ class VideoFile(FrameSink):
 
 
 @dataclass(eq=False)
+class Window(FrameSink):
+    """Shows frames in a window as they arrive, with ffplay (from ``PATH``).
+
+    ffplay plays the stream at the format's frame rate, so rendering
+    faster than real time is held back to real time (the pipe fills up);
+    slower rendering plays as fast as frames come. Sounds are not played.
+    Closing the window stops the render.
+    """
+
+    title: str = "manimx"
+    ffplay: str = "ffplay"
+    _process: subprocess.Popen | None = field(default=None, init=False, repr=False)
+
+    def open(self, format: FrameFormat) -> None:
+        command = [
+            self.ffplay, "-loglevel", "error", "-autoexit", "-window_title", self.title,
+            "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", f"{format.width}x{format.height}",
+            "-framerate", str(format.fps), "-i", "-",
+        ]  # fmt: skip
+        self._process = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def write(self, index: int, image: np.ndarray) -> None:
+        assert self._process is not None and self._process.stdin is not None
+        try:
+            self._process.stdin.write(memoryview(np.ascontiguousarray(image)).cast("B"))
+        except BrokenPipeError:
+            raise RuntimeError("the window was closed") from None
+
+    def close(self) -> None:
+        if self._process is None:
+            return
+        assert self._process.stdin is not None
+        try:
+            self._process.stdin.close()
+        except BrokenPipeError:
+            pass  # closed by the user
+        self._process.wait()
+        self._process = None
+
+
+@dataclass(eq=False)
+class Tee(FrameSink):
+    """Passes every frame to several sinks, e.g. a video file and a window.
+
+    Frames arrive in order if any of the sinks needs them in order.
+    """
+
+    sinks: tuple[FrameSink, ...]
+
+    def __post_init__(self) -> None:
+        self.ordered = any(sink.ordered for sink in self.sinks)
+
+    def open(self, format: FrameFormat) -> None:
+        for sink in self.sinks:
+            sink.open(format)
+
+    def write(self, index: int, image: np.ndarray) -> None:
+        for sink in self.sinks:
+            sink.write(index, image)
+
+    def close(self) -> None:
+        errors = []
+        for sink in self.sinks:  # close every sink, even after an error
+            try:
+                sink.close()
+            except Exception as error:  # noqa: BLE001 - the first one is raised below
+                errors.append(error)
+        if errors:
+            raise errors[0]
+
+
+@dataclass(eq=False)
 class ImageSequence(FrameSink):
     """Writes one image file per frame, ``pattern.format(index)`` inside
     ``directory``; PNG encoding runs on ``threads`` threads (zlib releases

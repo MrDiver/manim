@@ -3,6 +3,7 @@
     manimx new my-video          create a project (asks for what is missing)
     manimx g scene title-card    add a scene: module, import, timeline entry
     manimx render --preview      render the timeline quickly
+    manimx render --window       watch it render, no file (add --write for both)
     manimx still Intro -t 2      one frame as a PNG
 
 Commands are Typer commands (cli/app.py), the file work lives in

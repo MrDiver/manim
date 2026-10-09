@@ -1,6 +1,7 @@
 """The manimx CLI end to end: new project, generate scenes, list, render."""
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -114,18 +115,39 @@ def test_list_shows_scenes_and_resolved_clip_times(project, capsys) -> None:
 
 
 @needs_ffmpeg
-def test_render_the_timeline_a_scene_and_stills(project, capsys) -> None:
-    assert main(["render", *TINY, "--end", "1"]) == 0
+def test_render_the_timeline_a_scene_and_stills(project, capsys, monkeypatch) -> None:
+    opened = []
+    monkeypatch.setattr("typer.launch", lambda path: opened.append(path) or 0)
+    assert main(["render", *TINY, "--end", "1", "--open"]) == 0
     assert (project / "renders" / "demo.mp4").stat().st_size > 0
+    assert opened == [str(project / "renders" / "demo.mp4")]
     assert main(["render", "Bounce", *TINY, "--end", "1", "--png", "-o", "frames"]) == 0
     assert len(list((project / "frames").glob("*.png"))) == 6
     assert main(["render", "--preview", "--end", "0.2", "-o", "preview.mp4"]) == 0
     assert (project / "preview.mp4").exists()
 
-    assert main(["still", "Intro", "-t", "1.5", "--width", "64", "--height", "36"]) == 0
+    assert main(["still", "Intro", "-t", "1.5", "--width", "64", "--height", "36", "-O"]) == 0
+    assert opened[-1] == str(project / "renders" / "Intro-1.5s.png")
     assert Image.open(project / "renders" / "Intro-1.5s.png").size == (64, 36)
     assert main(["still", "-t", "999"]) == 1
     assert "nothing to show" in capsys.readouterr().err
+
+
+@needs_ffmpeg
+def test_render_into_a_window(project, tmp_path, monkeypatch, capsys) -> None:
+    ffplay = tmp_path / "bin" / "ffplay"
+    ffplay.parent.mkdir()
+    ffplay.write_text("#!/bin/sh\ncat > /dev/null\n")
+    ffplay.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{ffplay.parent}:{os.environ['PATH']}")
+
+    assert main(["render", "Intro", *TINY, "--end", "1", "--window"]) == 0  # the window only
+    assert "shown in" in capsys.readouterr().out
+    assert not (project / "renders").exists() or not any((project / "renders").iterdir())
+    assert main(["render", "Intro", *TINY, "--end", "1", "--window", "--write", "-o", "both.mp4"]) == 0
+    assert (project / "both.mp4").stat().st_size > 0
+    assert main(["render", *TINY, "--window", "--png"]) == 1  # PNGs need --write
+    assert main(["render", *TINY, "--no-write"]) == 1  # nothing to do
 
 
 @needs_ffmpeg

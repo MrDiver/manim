@@ -8,7 +8,7 @@ optionally across worker processes.
 
 from .offline import FrameSource, RenderSettings, RenderStats, load_source, render
 from .pipeline import FramePipeline
-from .sinks import FrameFormat, FrameList, FrameSink, ImageSequence, VideoFile
+from .sinks import FrameFormat, FrameList, FrameSink, ImageSequence, Tee, VideoFile, Window
 
 __all__ = [
     "FrameFormat",
@@ -19,7 +19,9 @@ __all__ = [
     "ImageSequence",
     "RenderSettings",
     "RenderStats",
+    "Tee",
     "VideoFile",
+    "Window",
     "load_source",
     "render",
 ]

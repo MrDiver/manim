@@ -15,7 +15,9 @@ from manimx.drivers import (
     FrameSource,
     ImageSequence,
     RenderSettings,
+    Tee,
     VideoFile,
+    Window,
     load_source,
     render,
 )
@@ -145,3 +147,46 @@ def test_sounds_are_muxed_into_videos_and_written_next_to_images(tmp_path) -> No
     assert streams("silent.mp4") == ["video"] and streams("muted.mp4") == ["video"]
     sound = Sound.load(tmp_path / "frames" / "audio.wav")
     assert sound.duration == pytest.approx(2.1) and np.abs(sound.samples).max() > 0.05
+
+
+def fake_ffplay(tmp_path, body: str) -> str:
+    """An executable standing in for ffplay (no display needed)."""
+    path = tmp_path / "ffplay"
+    path.write_text(f"#!/bin/sh\n{body}\n")
+    path.chmod(0o755)
+    return str(path)
+
+
+def test_windows_take_frames_until_they_are_closed(tmp_path) -> None:
+    received = tmp_path / "received"
+    window = Window(ffplay=fake_ffplay(tmp_path, f"cat > {received}"))
+    stats = render(SOURCE, window, settings())
+
+    assert stats.frames == 11
+    assert received.stat().st_size == 11 * 64 * 36 * 4  # raw RGBA, frame after frame
+
+    closed = Window(ffplay=fake_ffplay(tmp_path, "exit 0"))
+    with pytest.raises(RuntimeError, match="writing frames failed") as error:
+        render(SOURCE, closed, settings())
+    assert "window was closed" in str(error.value.__cause__)
+
+
+def test_tees_feed_every_sink_and_close_them_all() -> None:
+    class Failing(FrameSink):
+        ordered = False
+
+        def write(self, index, image) -> None:
+            pass
+
+        def close(self) -> None:
+            raise OSError("disk full")
+
+    first, second = FrameList(), FrameList()
+    render(SOURCE, Tee((first, second)), settings())
+    assert len(first.frames) == len(second.frames) == 11
+    assert not Tee((Failing(),)).ordered and Tee((Failing(), FrameList())).ordered
+
+    kept = FrameList()
+    with pytest.raises(OSError, match="disk full"):
+        render(SOURCE, Tee((Failing(), kept)), settings())
+    assert len(kept.frames) == 11  # closed although the first sink failed
