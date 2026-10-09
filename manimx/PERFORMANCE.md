@@ -476,9 +476,42 @@ materials and draws are small and still rebuilt.
 
 +5%, frames bit-identical.
 
+### Tried and dropped after step O
+
+Each measured on the benchmark project, frames bit-identical, and dropped
+because the fps change stayed within noise:
+
+- **Scope bounds in one pass.** `scene_bounds()` ran once per clip scope
+  with shadow-casting lights, each time looping over every drawn object.
+  Transforming every box once and selecting per scope measured 74.6 fps
+  against 74.2, and shadow views 0.91 against 0.92 ms per frame.
+- **Light colors cached.** `light_array()` parses every light's color on
+  every pack. Caching the linear color per light (keyed by the color
+  object's identity and the intensity) cut the mesh batch from 1.16 to
+  1.00 ms per frame, but measured 73.5 / 74.8 fps against 74.4 / 73.9.
+- **Fewer wgpu calls.** After steps M to O the remaining binding overhead
+  is spread thin. The largest part, `finish()` and `submit()` once per
+  sub-frame, is required: buffer writes of a sub-frame must land after
+  the previous sub-frame's commands ran, and the buffers are shared.
+  Rendering masks straight into their layer instead of a scratch target
+  plus a copy is not possible while the mask pass samples the same array
+  texture. Shadow passes only run for changed layers now (0.47 ms GPU per
+  frame in `PortalOrbit`). Nothing left promised more than 1 to 2%.
+
 ## Where the time goes now
 
-5.89 ms per frame against 13.43 at the start (2.3× faster): `render_layers`
-2.71 ms (1.18 of it the retained vector batch), `state_at` 1.18 ms, readback
-0.69 ms, compositing 0.37 ms. The GPU needs 1.74 ms and runs in parallel, so
-rendering is still CPU-bound.
+Benchmark project with `PortalOrbit`, after steps L to O: 48.6 to about
+74 fps with motion blur (+53%), 287.6 to about 385 without. Per part,
+milliseconds per frame with motion blur 8:
+
+| part | before L | now | GPU now |
+|---|---|---|---|
+| `PortalOrbit` (`RShape3D`, six lights) | 38.8 | 22.1 | 14.5 |
+| `Intro`, `Bounce`, `Outro` (`RShape2D`) | 6.0 | 6.1 | 1.6 |
+
+`PortalOrbit` is now within 1.5 times its GPU time; the lighting pass
+alone needs 9.7 ms of GPU per frame (every MSAA sample, every light, eight
+sub-frames). The 2D scenes did not change: their cost is the animation
+side (`frame_at`, about 20%), the wgpu-py bindings (about 27%) and the
+per-shape Python bookkeeping in `RetainedVectors.build()` (about 18%),
+so they stay CPU-bound at nearly four times their GPU time.
