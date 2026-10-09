@@ -19,7 +19,7 @@ import math
 
 import numpy as np
 
-from ..objects import CapStyle, ClippingGroup, Fill, Group, JointType, Shape2D, Stroke, Transform
+from ..objects import CapStyle, RClippingGroup, Fill, RGroup, JointType, RShape2D, Stroke, Transform
 from ..objects.geometry import circle, regular_polygon, square
 from ..renderer.config import Camera, RenderConfig
 from ..renderer.scene_graph import bounding_box
@@ -37,8 +37,8 @@ TO_UPRIGHT = (1.0, 0.0, 0.0)
 """Rotating a shape by 90 degrees about x stands its XY plane up (local y -> world z)."""
 
 
-def blender_scene() -> Group:
-    return Group(children=[_ground(), _upright_logo(), _stress_ring()])
+def blender_scene() -> RGroup:
+    return RGroup(children=[_ground(), _upright_logo(), _stress_ring()])
 
 
 def views(pixel_width: int = 1920, pixel_height: int = 1080) -> dict[str, RenderConfig]:
@@ -59,45 +59,45 @@ def views(pixel_width: int = 1920, pixel_height: int = 1080) -> dict[str, Render
     }
 
 
-def _ground() -> Group:
+def _ground() -> RGroup:
     """Grid lines and axes on the XY plane, plus the vertical Z axis."""
     coordinates = [c for c in range(-GRID_EXTENT, GRID_EXTENT + 1) if c != 0]
     lines = [((c, -GRID_EXTENT), (c, GRID_EXTENT)) for c in coordinates]
     lines += [((-GRID_EXTENT, c), (GRID_EXTENT, c)) for c in coordinates]
     # One shape, one open subpath per grid line.
-    grid = Shape2D(
-        points=np.vstack([Shape2D.from_corners(line).points for line in lines]),
+    grid = RShape2D(
+        points=np.vstack([RShape2D.from_corners(line).points for line in lines]),
         stroke=Stroke(GRID_COLOR, width=2.0),
     )
     extent = (-GRID_EXTENT, GRID_EXTENT)
-    x_axis = Shape2D.from_corners([(extent[0], 0), (extent[1], 0)], stroke=Stroke(AXIS_X, width=3.0))
-    y_axis = Shape2D.from_corners([(0, extent[0]), (0, extent[1])], stroke=Stroke(AXIS_Y, width=3.0))
-    z_axis = Shape2D.from_corners(
+    x_axis = RShape2D.from_corners([(extent[0], 0), (extent[1], 0)], stroke=Stroke(AXIS_X, width=3.0))
+    y_axis = RShape2D.from_corners([(0, extent[0]), (0, extent[1])], stroke=Stroke(AXIS_Y, width=3.0))
+    z_axis = RShape2D.from_corners(
         [(0, 0), (0, 8)],
         stroke=Stroke(AXIS_Z, width=3.0),
         transform=Transform().rotated(math.pi / 2, TO_UPRIGHT),
     )
-    return Group(children=[grid, x_axis, y_axis, z_axis])
+    return RGroup(children=[grid, x_axis, y_axis, z_axis])
 
 
-def _upright_logo() -> Group:
+def _upright_logo() -> RGroup:
     """The logo standing on the ground at the origin, turned towards the default camera."""
     logo = manim_logo()
     low, high = bounding_box(logo)
     height = high[1] - low[1]
     scale = 1.6
     placement = Transform(position=(0.0, 0.0, scale * height / 2 + 0.2), scale=(scale, scale, scale))
-    return Group(
+    return RGroup(
         children=[logo],
         transform=placement.rotated(math.pi / 2, TO_UPRIGHT).rotated(math.radians(30.0), (0, 0, 1)),
     )
 
 
-def _stress_ring() -> Group:
+def _stress_ring() -> RGroup:
     """Stress-test shapes on a circle around the logo, each oriented differently."""
-    zigzag = Group(
+    zigzag = RGroup(
         children=[
-            Shape2D.from_corners(
+            RShape2D.from_corners(
                 [(-1.0, -0.5), (-0.5, 0.5), (0.0, -0.5), (0.5, 0.5), (1.0, -0.5)],
                 stroke=Stroke(WHITE, width=20, joint=joint, cap=cap),
                 transform=Transform(position=(0.0, 1.5 - 1.5 * i, 0.0)),
@@ -109,22 +109,22 @@ def _stress_ring() -> Group:
     )
     rainbow = circle(radius=1.4, stroke=Stroke([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED], width=[6, 30, 6, 30, 6]))
     pentagon = regular_polygon(5, radius=1.5, fill=Fill([RED, BLUE], opacity=0.7), stroke=Stroke(YELLOW, width=10, opacity=0.6))
-    squares = Group(
+    squares = RGroup(
         children=[
             square(fill=Fill(RED, opacity=0.5), stroke=Stroke(WHITE, width=6), transform=Transform(position=(-0.5, 0.5, 0.0))),
             square(fill=Fill(BLUE, opacity=0.5), stroke=Stroke(WHITE, width=6), transform=Transform(position=(0.5, -0.5, 0.0))),
         ],
     )
-    clipped = ClippingGroup(
+    clipped = RClippingGroup(
         mask=regular_polygon(6, radius=1.5, fill=Fill(opacity=1.0), stroke=Stroke(width=0)),
-        content=Group(
+        content=RGroup(
             children=[
                 square(side_length=0.5, fill=Fill(color, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(-1.75 + 0.5 * i, 0.0, 0.0), scale=(1.0, 7.0, 1.0)))
                 for i, color in enumerate([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED, ORANGE])
             ],
         ),
     )
-    mirrored = Group(
+    mirrored = RGroup(
         children=[
             circle(fill=Fill(GREEN, opacity=1.0), stroke=Stroke(WHITE, width=8)),
             square(side_length=0.8, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0)),
@@ -151,4 +151,4 @@ def _stress_ring() -> Group:
             scale=orientation.scale,
         )
         children.append(shape)
-    return Group(children=children)
+    return RGroup(children=children)

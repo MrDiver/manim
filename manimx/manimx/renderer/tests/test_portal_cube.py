@@ -23,7 +23,7 @@ import dataclasses
 import numpy as np
 import pytest
 
-from manimx import ClippingGroup, Fill, Group, Light, Shape2D, Shape3D, Stroke, Transform
+from manimx import RClippingGroup, Fill, RGroup, RLight, RShape2D, RShape3D, Stroke, Transform
 from manimx.examples.portal_cube import portal_cube, views
 from manimx.renderer import WGPURenderer
 from manimx.renderer.scene_graph import flatten_scene
@@ -40,13 +40,13 @@ def renderer() -> WGPURenderer:
         pytest.skip(f"no usable GPU: {error}")
 
 
-def _world(cube: Group, side: str) -> Group:
+def _world(cube: RGroup, side: str) -> RGroup:
     """The world shown through ``side``'s portal."""
-    portals = [child for child in cube.children if isinstance(child, ClippingGroup)]
+    portals = [child for child in cube.children if isinstance(child, RClippingGroup)]
     return portals[SIDES.index(side)].content
 
 
-def _base(cube: Group) -> Shape2D:
+def _base(cube: RGroup) -> RShape2D:
     """The frame's base plane (the frame comes last, the base last in it)."""
     return cube.children[-1].children[-1]
 
@@ -56,7 +56,7 @@ def _send_away(node) -> None:
     node.transform = Transform(position=(0.0, 0.0, -1000.0))
 
 
-def _render(renderer: WGPURenderer, scene: Group, view: str) -> np.ndarray:
+def _render(renderer: WGPURenderer, scene: RGroup, view: str) -> np.ndarray:
     return renderer.render(scene, views(WIDTH, HEIGHT)[view]).astype(int)
 
 
@@ -70,13 +70,13 @@ def _changed(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 def test_cube_has_four_one_sided_portals_with_their_own_lights() -> None:
     cube = portal_cube()
-    portals = [child for child in cube.children if isinstance(child, ClippingGroup)]
+    portals = [child for child in cube.children if isinstance(child, RClippingGroup)]
 
-    assert len(portals) == len(SIDES) and all(isinstance(p.content, Group) for p in portals)
+    assert len(portals) == len(SIDES) and all(isinstance(p.content, RGroup) for p in portals)
     assert all(p.one_sided for p in portals)
     scene = flatten_scene(cube)
     assert sorted({light.clip for light in scene.lights}) == [0, 1, 2, 3]  # every world lit, only by its own lights
-    assert all(isinstance(item.light, Light) for item in scene.lights)
+    assert all(isinstance(item.light, RLight) for item in scene.lights)
 
 
 def test_rooms_do_not_cast_shadows() -> None:
@@ -84,7 +84,7 @@ def test_rooms_do_not_cast_shadows() -> None:
     rooms = [_world(cube, side).children[0] for side in SIDES]  # every world starts with its room
 
     for room in rooms:
-        assert room.children and all(isinstance(wall, Shape3D) and not wall.cast_shadows for wall in room.children)
+        assert room.children and all(isinstance(wall, RShape3D) and not wall.cast_shadows for wall in room.children)
 
 
 # --- rendering ------------------------------------------------------------------
@@ -127,7 +127,7 @@ def test_two_worlds_meet_at_a_corner_without_overlap(renderer: WGPURenderer) -> 
 def test_lights_stay_in_their_world(renderer: WGPURenderer, own_side: str) -> None:
     full = _render(renderer, portal_cube(), "front-right")
     dark = portal_cube()
-    for light in [node for node in _world(dark, own_side).children if isinstance(node, Light)]:
+    for light in [node for node in _world(dark, own_side).children if isinstance(node, RLight)]:
         light.intensity = 0.0
     changed = _changed(full, _render(renderer, dark, "front-right"))
 
@@ -146,7 +146,7 @@ def test_base_never_shows_through_the_floors(renderer: WGPURenderer, view: str) 
     through a floor."""
     config = views(WIDTH, HEIGHT)[view]
 
-    def scene(base_fill: float) -> Group:
+    def scene(base_fill: float) -> RGroup:
         cube = portal_cube()
         base = _base(cube)
         base.stroke = Stroke(width=0)  # compare the fill alone
@@ -159,5 +159,5 @@ def test_base_never_shows_through_the_floors(renderer: WGPURenderer, view: str) 
     outline = _base(portal_cube())
     outline.fill = Fill(opacity=0.0)
     outline.stroke = Stroke("#FFFFFF", width=40)
-    band = renderer.render(Group(children=[outline]), dataclasses.replace(config, background_color="#000000"))[..., 0] > 0
+    band = renderer.render(RGroup(children=[outline]), dataclasses.replace(config, background_color="#000000"))[..., 0] > 0
     assert not (changed & ~band).any()

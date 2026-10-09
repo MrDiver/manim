@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import wgpu
 
-from manimx import Fill, Group
+from manimx import Fill, RGroup
 from manimx.objects import new_uid
 from manimx.objects.geometry import circle
 from manimx.renderer import MobjectDataCache, MotionBlur, RenderConfig, WGPURenderer
@@ -22,8 +22,8 @@ def renderer() -> WGPURenderer:
         pytest.skip(f"no usable GPU: {error}")
 
 
-def scene() -> Group:
-    return Group(children=[circle(fill=Fill("#e07a5f", opacity=1.0))])
+def scene() -> RGroup:
+    return RGroup(children=[circle(fill=Fill("#e07a5f", opacity=1.0))])
 
 
 def test_one_shared_renderer_with_composers_per_effect_chain(renderer: WGPURenderer) -> None:

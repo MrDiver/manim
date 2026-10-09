@@ -19,7 +19,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from ..objects import RenderObject
+from ..objects import RNode
 from .cache import MobjectDataCache
 from .commands import CacheCommand
 from .config import RenderConfig
@@ -30,7 +30,7 @@ class Renderer(ABC):
         self.cache = MobjectDataCache()
 
     @abstractmethod
-    def render(self, root: RenderObject, config: RenderConfig) -> np.ndarray:
+    def render(self, root: RNode, config: RenderConfig) -> np.ndarray:
         """Render ``root`` as seen by ``config.camera``.
 
         Returns straight-alpha RGBA pixels, shape ``(pixel_height,

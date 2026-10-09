@@ -1,7 +1,7 @@
 """Light sources. They are leaves of the scene tree like shapes, so they move
 with their groups (and can be animated later), but they draw nothing.
 
-Only :class:`Shape3D` meshes are lit. Shape2D and Curve3D keep their flat
+Only :class:`RShape3D` meshes are lit. RShape2D and RCurve3D keep their flat
 Manim colors.
 
 The three kinds follow glTF's KHR_lights_punctual. Lights that have a
@@ -20,12 +20,12 @@ import numpy as np
 import quaternion
 
 from ..utils.color import WHITE, ParsableManimColor
-from .render_object import RenderObject
+from .render_object import RNode
 from .transform import Quaternion, Transform
 
 
 @dataclass(slots=True, eq=False)
-class Light(RenderObject):
+class RLight(RNode):
     """``intensity`` scales the radiance directly: a white diffuse surface
     lit head-on by a directional light of intensity pi appears pure white.
 
@@ -36,7 +36,7 @@ class Light(RenderObject):
     angular diameter in radians for directional lights. Zero gives hard
     shadows.
 
-    A light inside a :class:`ClippingGroup`'s content is scoped to that
+    A light inside an :class:`RClippingGroup`'s content is scoped to that
     group: it only lights, and only gets shadows from, objects in the same
     group (including nested groups). Lights outside any clipping group
     light everything.
@@ -49,7 +49,7 @@ class Light(RenderObject):
 
 
 @dataclass(slots=True, eq=False)
-class DirectionalLight(Light):
+class RDirectionalLight(RLight):
     """Parallel light (like the sun). Its position does not matter."""
 
     intensity: float = 3.0
@@ -62,7 +62,7 @@ class DirectionalLight(Light):
 
 
 @dataclass(slots=True, eq=False)
-class PointLight(Light):
+class RPointLight(RLight):
     """Light emitted in all directions from the light's position.
 
     Falls off with the inverse square of the distance; ``range`` (if set)
@@ -74,7 +74,7 @@ class PointLight(Light):
 
 
 @dataclass(slots=True, eq=False)
-class SpotLight(Light):
+class RSpotLight(RLight):
     """A point light restricted to a cone around its local ``-z`` axis.
 
     Full intensity inside ``inner_cone_angle``, fading smoothly to zero at
@@ -87,7 +87,7 @@ class SpotLight(Light):
     outer_cone_angle: float = math.pi / 4
 
     def __post_init__(self, versions: Mapping[str, Hashable] | None = None) -> None:
-        Light.__post_init__(self, versions)
+        RLight.__post_init__(self, versions)
         if not 0.0 <= self.inner_cone_angle < self.outer_cone_angle <= math.pi / 2:
             raise ValueError("cone angles need 0 <= inner < outer <= pi / 2")
 

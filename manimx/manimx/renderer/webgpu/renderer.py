@@ -11,9 +11,9 @@ buffers and encodes these passes:
     mask passes    one per clip scope (parents first): mask shapes into a
                    scratch target, copied into the scope's mask layer
     shadow passes  one per shadow view: casters' depth seen from a light
-    geometry pass  Shape3D meshes -> multisampled G-buffer + depth
+    geometry pass  RShape3D meshes -> multisampled G-buffer + depth
     lighting pass  every G-buffer sample x every light -> "lit" HDR layer
-    vector pass    Shape2D and Curve3D -> "vector" layer, depth-tested
+    vector pass    RShape2D and RCurve3D -> "vector" layer, depth-tested
                    against the meshes; opaque draws, then sorted
                    transparent draws
 
@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import wgpu
 
-from ...objects import RenderObject, Shape3D
+from ...objects import RNode, RShape3D
 from ..base import Renderer
 from ..config import RenderConfig
 from ..effects import Effect
@@ -108,7 +108,7 @@ class WGPURenderer(Renderer):
         """Camera, viewport and time of the latest render (frame.wgsl)."""
         return self._frame_uniform
 
-    def render(self, root: RenderObject, config: RenderConfig) -> np.ndarray:
+    def render(self, root: RNode, config: RenderConfig) -> np.ndarray:
         """Render ``root`` to ``(H, W, 4)`` uint8 RGBA with default compositing."""
         return self.composer().compose(root, config)
 
@@ -123,7 +123,7 @@ class WGPURenderer(Renderer):
             composer = self._composers[key] = FrameComposer(self, key)
         return composer
 
-    def render_layers(self, root: RenderObject, config: RenderConfig, encoder: wgpu.GPUCommandEncoder | None = None) -> RenderLayers:
+    def render_layers(self, root: RNode, config: RenderConfig, encoder: wgpu.GPUCommandEncoder | None = None) -> RenderLayers:
         """Render ``root`` into the lit and vector layers (GPU textures).
 
         With ``encoder`` the passes are recorded into it and the caller
@@ -140,7 +140,7 @@ class WGPURenderer(Renderer):
         # frame without meshes skips them; its G-buffer (whose depth the
         # vector pass tests against) and lit layer only need to be empty,
         # and stay empty as long as the next frames have no meshes either.
-        has_meshes = any(isinstance(item.obj, Shape3D) for item in scene.items)
+        has_meshes = any(isinstance(item.obj, RShape3D) for item in scene.items)
         clear_3d = not has_meshes and self._empty_3d is not targets
         meshes = MeshBatch.build(scene, self.cache, config) if has_meshes else None
 

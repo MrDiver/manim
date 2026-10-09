@@ -4,7 +4,9 @@ How manimx works as a whole: which classes exist, who creates and owns their
 instances, how long they live, how data flows from `Scene.construct()` to
 pixels and sound, and why it is built this way. Everything is named as in
 the Python code. Where two classes share a name, the module comes first
-(`animation.Group` is a `Mobject`, `objects.Group` a `RenderObject`).
+(`animation.Group` is a `Mobject`). Render classes carry an R prefix
+(`RGroup`, `RShape2D`, ...): an `RGroup` is the snapshot of an
+`animation.Group`.
 
 More detail: the renderer's internals (passes, shaders, buffers) in
 [manimx/renderer/README.md](manimx/renderer/README.md), the animation
@@ -20,7 +22,7 @@ Contents:
 4. [The animation package](#4-the-animation-package)
 5. [Timing: `Timeline`, `Clip`, `Segment`, `MonotoneMap`](#5-timing-timeline-clip-segment-monotonemap)
 6. [`World2D`, `World3D`, `animation.Camera`, `View`](#6-world2d-world3d-animationcamera-view)
-7. [`RenderObject`: the contract between both sides](#7-renderobject-the-contract-between-both-sides)
+7. [`RNode`: the contract between both sides](#7-rnode-the-contract-between-both-sides)
 8. [`WGPURenderer` as a service](#8-wgpurenderer-as-a-service)
 9. [Drivers: `FramePipeline`, processes, `FrameSink`, audio](#9-drivers-framepipeline-processes-framesink-audio)
 10. [`Project` and the CLI](#10-project-and-the-cli)
@@ -43,13 +45,13 @@ manimx has two passes:
 
    The result is a `PreparedScene`.
 2. **Evaluate anywhere.** `PreparedScene.state_at(t)` and
-   `Timeline.state_at(t)` return a tree of `RenderObject`s for any time, in
+   `Timeline.state_at(t)` return a tree of `RNode`s for any time, in
    any order and in any process, without replaying anything.
    `WGPURenderer` turns such a tree into pixels.
 
 Everything else follows from this split: random access makes scrubbing,
 retiming, cutting and parallel rendering possible. `WGPURenderer` is a
-long-lived service that keeps GPU data per `RenderObject.uid` across all
+long-lived service that keeps GPU data per `RNode.uid` across all
 calls and only patches what changed.
 
 ```mermaid
@@ -57,7 +59,7 @@ flowchart LR
     Code["Scene.construct()"] -->|"Scene.prepare() — once"| PS["PreparedScene<br/>SignalTrack, Segment"]
     PS --> TL["Timeline<br/>Clip, World2D/World3D, events"]
     Proj["manimx.json"] -->|"Project.build_timeline()"| TL
-    TL -->|"Timeline.state_at(t) — any t, any order"| RO["RenderObject tree<br/>(objects.Group, Shape2D, Shape3D, ...)"]
+    TL -->|"Timeline.state_at(t) — any t, any order"| RO["RNode tree<br/>(RGroup, RShape2D, RShape3D, ...)"]
     RO --> R["WGPURenderer.shared()"]
     R --> C["FrameComposer<br/>MotionBlur, Bloom, ToneMap"]
     C --> D["drivers.render()<br/>FramePipeline, worker processes"]
@@ -69,7 +71,7 @@ flowchart LR
 
 | Package | Contents | Depends on |
 |---|---|---|
-| `manimx.objects` | `RenderObject` and its subclasses `objects.Group`, `objects.ClippingGroup`, `BezierPath` (→ `Shape2D`, `Curve3D`), `Shape3D`, `Light` (→ `DirectionalLight`, `PointLight`, `SpotLight`); `Transform`, `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`; `new_uid()`, `versioned()` | numpy |
+| `manimx.objects` | `RNode` and its subclasses `RGroup`, `RClippingGroup`, `RBezierPath` (→ `RShape2D`, `RCurve3D`), `RShape3D`, `RLight` (→ `RDirectionalLight`, `RPointLight`, `RSpotLight`); `Transform`, `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`; `new_uid()`, `versioned()` | numpy |
 | `manimx.animation` | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Mobject` and its subclasses; `Animation` and its subclasses; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound` | objects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
 | `manimx.renderer` | `flatten_scene()` → `FlatScene`; `tessellate_fill()`; `MobjectDataCache`; `RenderConfig`, `renderer.Camera`, `ViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `RemoveObjects`, `ClearScene` | objects |
 | `manimx.renderer.webgpu` | `WGPURenderer`, `FrameComposer`, `RetainedVectors`, `VectorBatch`, `MeshBatch`, `VectorPass`, `MeshPass`, `LightingPass`, `ShadowPass`, `RenderTargets`, `RenderLayers`, `ResourceCache`, `GPUContext` | wgpu |
@@ -78,7 +80,7 @@ flowchart LR
 | `manimx.cli` | the Typer `app` (`manimx` command), `scaffold`, `ui` | project, drivers |
 
 `manimx.animation` never touches the GPU, and `manimx.renderer` never sees a
-`RootSignal` or a time: `RenderObject` trees are the only interface between
+`RootSignal` or a time: `RNode` trees are the only interface between
 them.
 
 ## 3. From `Scene.construct()` to a video
@@ -108,7 +110,7 @@ sequenceDiagram
         D->>FP: FramePipeline.submit(index, t, timeline.state_at)
         FP->>FC: FrameComposer.compose_texture(state_at, RenderConfig at t)
         loop every time s of MotionBlur.sample_times(t)
-            FC->>TL: Timeline.state_at(s) returns a RenderObject tree
+            FC->>TL: Timeline.state_at(s) returns an RNode tree
             FC->>R: render_layers(tree, RenderConfig, encoder) returns RenderLayers
             FC->>FC: composite RenderLayers into the HDR accumulator
         end
@@ -158,7 +160,7 @@ classDiagram
         alpha: RootSignal
         present: RootSignal
         children
-        snapshot() RenderObject
+        snapshot() RNode
     }
     class VMobject {
         points: RootSignal
@@ -250,7 +252,7 @@ flowchart TD
         E1 --> E2["every SignalTrack: signal.set(value_at(t))"]
         E2 --> E3["DerivedSignals recompute when read"]
         E3 --> E4["Mobject.snapshot() for every present root"]
-        E4 --> RO["objects.Group('scene') of RenderObjects"]
+        E4 --> RO["RGroup of RNodes"]
     end
 ```
 
@@ -258,9 +260,9 @@ flowchart TD
   `PreparedScene`'s `Mobject`s are its evaluation state. That is why one
   `PreparedScene` backs only one `Clip`.
 - **Purity:** the result of `state_at(t)` depends only on `t`.
-- **`Mobject.snapshot()`** builds new `RenderObject`s on every call
-  (`VMobject` → `Shape2D`, `animation.Group` → `objects.Group`,
-  `animation.ClippingGroup` → `objects.ClippingGroup`, `animation.Camera` →
+- **`Mobject.snapshot()`** builds new `RNode`s on every call
+  (`VMobject` → `RShape2D`, `animation.Group` → `RGroup`,
+  `animation.ClippingGroup` → `RClippingGroup`, `animation.Camera` →
   nothing). Each keeps the `Mobject.uid` and carries version tokens from
   `version_token()` (section 7).
 
@@ -365,7 +367,7 @@ classDiagram
 
 - **`World2D` and `World3D`:** every `Clip` has one `Clip.world`.
   `World2D.check_transform()` keeps its clips in the z = 0 plane.
-  `Timeline.state_at(t, world)` returns one world's `objects.Group`.
+  `Timeline.state_at(t, world)` returns one world's `RGroup`.
 - **`animation.Camera`:** a `Mobject` whose `RootSignal`s are `position`,
   `rotation`, `frame_height`, `field_of_view` and `perspective`; it is
   animated like any other `Mobject`. `snapshot()` returns `None`.
@@ -377,21 +379,21 @@ classDiagram
   `ViewState.camera` for every motion-blur sample.
 - **Showing a `View` inside a `World2D`** (compositions) is not built yet.
 
-## 7. `RenderObject`: the contract between both sides
+## 7. `RNode`: the contract between both sides
 
-`RenderObject` (`manimx.objects`) is the only thing that crosses from
+`RNode` (`manimx.objects`) is the only thing that crosses from
 `manimx.animation` to `manimx.renderer`. These rules make every renderer
 cache correct:
 
-1. **`RenderObject.uid`:** every snapshot of one `Mobject` has the
+1. **`RNode.uid`:** every snapshot of one `Mobject` has the
    `Mobject.uid`. `new_uid()` never repeats within a process.
-2. **Versions:** fields declared with `versioned()` (`BezierPath.points`,
-   `BezierPath.stroke`, `Shape2D.fill`, `Shape3D.mesh`) have a token,
-   `RenderObject.version(name)`. `VMobject.snapshot()` passes tokens from
+2. **Versions:** fields declared with `versioned()` (`RBezierPath.points`,
+   `RBezierPath.stroke`, `RShape2D.fill`, `RShape3D.mesh`) have a token,
+   `RNode.version(name)`. `VMobject.snapshot()` passes tokens from
    `version_token()` of the `RootSignal`s, so equal tokens mean equal
-   values. `RenderObject.transform` is not versioned; it is compared
+   values. `RNode.transform` is not versioned; it is compared
    directly.
-3. **Immutability:** a `RenderObject` is never changed after `state_at`
+3. **Immutability:** an `RNode` is never changed after `state_at`
    returns it, and versioned arrays are read-only.
 4. **Purity:** `state_at` has no side effects on its result.
 5. **Lifecycle:** `renderer.submit(RemoveObjects(...))` drops the data of
@@ -465,13 +467,13 @@ and the tests use it. One thread renders at a time.
 
 **What `WGPURenderer.render_layers()` does:**
 
-| Step | `RenderObject` unchanged | `RenderObject` changed |
+| Step | `RNode` unchanged | `RNode` changed |
 |---|---|---|
 | `flatten_scene()` → `FlatScene` (`DrawItem`s with world matrices and painter's order, `ClipScope`s, `LightItem`s) | every call | every call |
-| `RetainedVectors.build()` for `Shape2D` and `Curve3D` | nothing written to its `_Slot` | new world matrix: the 80-byte object entry; new `fill`/`stroke` version: its records in place; new `points` version: records moved, curves and instances rewritten |
-| `MobjectDataCache` (`tessellate_fill()` result, stroke records, center, `Shape3D` vertices) | hit | rebuilt for the new version |
+| `RetainedVectors.build()` for `RShape2D` and `RCurve3D` | nothing written to its `_Slot` | new world matrix: the 80-byte object entry; new `fill`/`stroke` version: its records in place; new `points` version: records moved, curves and instances rewritten |
+| `MobjectDataCache` (`tessellate_fill()` result, stroke records, center, `RShape3D` vertices) | hit | rebuilt for the new version |
 | `GrowableBuffer.write()` | nothing uploaded | only the written record ranges |
-| `MeshBatch.build()`, `build_shadow_views()`, geometry and lighting passes | skipped while the `FlatScene` contains no `Shape3D` (G-buffer and lit target cleared once) | run when a `Shape3D` is present |
+| `MeshBatch.build()`, `build_shadow_views()`, geometry and lighting passes | skipped while the `FlatScene` contains no `RShape3D` (G-buffer and lit target cleared once) | run when an `RShape3D` is present |
 | Mask, shadow and vector passes | recorded into the `FrameComposer`'s command encoder | same |
 
 **Caches and their lifetimes:**
@@ -479,7 +481,7 @@ and the tests use it. One thread renders at a time.
 | Cache | Key | Lives until |
 |---|---|---|
 | `MobjectDataCache` | (uid, kind) with a version | replaced on a new version; dropped after 1024 renders unused (`sweep()`), or by `RemoveObjects` / `ClearScene` |
-| `RetainedVectors._Slot` | (uid, mask scope) | freed when its `RenderObject` is missing from a render; `_Arena`s repacked when garbage outweighs live records |
+| `RetainedVectors._Slot` | (uid, mask scope) | freed when its `RNode` is missing from a render; `_Arena`s repacked when garbage outweighs live records |
 | `ResourceCache.view()` | the texture (weak key) | its texture |
 | `ResourceCache.bind_group()` | the layout plus the identities of the bound resources | LRU, 512 entries |
 | `RenderTargets` | size, MSAA samples, mask capacity | the next size change |
@@ -580,7 +582,7 @@ flowchart LR
 | `Segment`, `Emit`, `Cue`, `SoundEvent` | `wait_for`, `emit`, `cue`, `play_sound`/`play_wave` | the `PreparedScene` | the `PreparedScene` | no (frozen) |
 | `Timeline`, `Clip`, `World2D`/`World3D` | user code or `Project.build_timeline()` | the caller | the caller | yes; edits mark the `Timeline` dirty |
 | `SegmentTiming`, `MonotoneMap` | `Timeline._resolve()` | the `Clip` | the next resolution | no |
-| `RenderObject` tree | `state_at()` | the caller of `state_at()` | that render | no |
+| `RNode` tree | `state_at()` | the caller of `state_at()` | that render | no |
 | `Project` | `Project.load()` / `Project.find()` | the CLI command | the command | yes; `Project.save()` |
 | `WGPURenderer` | `WGPURenderer.shared()` | the process | the process | its caches |
 | `FrameComposer` | `WGPURenderer.composer(effects)` | the `WGPURenderer` | the `WGPURenderer` | its `_TexturePool` |
@@ -625,7 +627,7 @@ flowchart LR
   engine dependency. Animated `RootSignal`s are inputs; `DerivedSignal`,
   `Emit` and `SoundEvent` carry reactions.
 
-**`RenderObject` contract**
+**`RNode` contract**
 
 - **`uid` plus version tokens are the only change detection.** The renderer
   never compares data deeply. `MobjectDataCache` and `RetainedVectors` use
@@ -640,8 +642,8 @@ flowchart LR
 - **`RetainedVectors`** keeps records per `_Slot` in `_Arena`s that mirror
   the GPU buffers, patches them, and uploads only changed ranges. The cost
   follows what changed, not the size of the `FlatScene`.
-- **No `Shape3D` in a frame, no 3D passes.** Most Manim content is
-  `Shape2D`.
+- **No `RShape3D` in a frame, no 3D passes.** Most Manim content is
+  `RShape2D`.
 - **`MotionBlur` renders real sub-frames.** Any change blurs correctly,
   including `animation.Camera` moves and appearing `Mobject`s.
 
@@ -684,7 +686,7 @@ flowchart LR
 1. **Web UI:** scrubbing preview, editing the `Project`, live presentation
    with clicks calling `Timeline.fire()`.
 2. **Compositions:** a `View` shown as an image inside a `World2D`, nesting.
-3. **HDR colors for `Shape2D`:** a float vector target and `Bloom` on
+3. **HDR colors for `RShape2D`:** a float vector target and `Bloom` on
    `RenderLayers.vector`, while colors ≤ 1 stay exactly Manim's.
 4. **Morphing** (a `Transform` animation, path alignment), and Whisper
    transcripts calling `Clip.bind_cue()`.

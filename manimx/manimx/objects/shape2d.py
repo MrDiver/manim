@@ -5,23 +5,23 @@ from typing import ClassVar
 
 import numpy as np
 
-from .path import POINTS_PER_CURVE, TOLERANCE_FOR_POINT_EQUALITY, BezierPath, is_closed
+from .path import POINTS_PER_CURVE, TOLERANCE_FOR_POINT_EQUALITY, RBezierPath, is_closed
 from .style import Fill
 from .versioning import versioned
 
-__all__ = ["POINTS_PER_CURVE", "TOLERANCE_FOR_POINT_EQUALITY", "Shape2D", "is_closed"]
+__all__ = ["POINTS_PER_CURVE", "TOLERANCE_FOR_POINT_EQUALITY", "RShape2D", "is_closed"]
 
 
 @dataclass(slots=True, eq=False)
-class Shape2D(BezierPath):
+class RShape2D(RBezierPath):
     """Drawable vector shape, the counterpart of Manim's ``VMobject``.
 
     Unlike ``VMobject`` a shape never has submobjects: hierarchy is expressed
-    with :class:`Group` and :class:`ClippingGroup`, which draw nothing. Holes
+    with :class:`RGroup` and :class:`RClippingGroup`, which draw nothing. Holes
     and disjoint pieces (e.g. a glyph) are subpaths of a single shape.
 
     ``points`` is ``(N, 2)`` in the ``VMobject`` layout (see
-    :class:`BezierPath`). Points live in the local XY plane; :attr:`transform`
+    :class:`RBezierPath`). Points live in the local XY plane; :attr:`transform`
     places the plane in 3D, and the stroke is a flat ribbon in that plane.
 
     ``points``, ``fill`` and ``stroke`` are versioned: replace them instead of

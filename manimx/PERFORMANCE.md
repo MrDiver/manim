@@ -96,7 +96,7 @@ frame's buffers.
 ### B. No 3D stages without meshes
 
 Lights, shadows and the deferred passes (geometry, lighting) only affect
-meshes (Shape3D). The example project has none, yet every sub-frame built
+meshes (RShape3D). The example project has none, yet every sub-frame built
 a mesh batch with the default key light, built shadow views for 2D shapes
 that cast shadows onto nothing, and ran a full-screen lighting pass over
 an empty G-buffer: 1.6 ms of CPU and 1.9 ms of GPU per frame.

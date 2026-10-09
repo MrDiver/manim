@@ -1,4 +1,4 @@
-"""Triangle meshes for :class:`Shape3D`, and generators for basic solids."""
+"""Triangle meshes for :class:`RShape3D`, and generators for basic solids."""
 
 from __future__ import annotations
 

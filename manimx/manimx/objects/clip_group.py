@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .render_object import RenderObject
+from .render_object import RNode
 
 
 @dataclass(slots=True, eq=False)
-class ClippingGroup(RenderObject):
+class RClippingGroup(RNode):
     """Invisible container that shows ``content`` only inside ``mask``.
 
     The mask is never drawn itself; its alpha (fill and stroke as they would
@@ -18,13 +18,13 @@ class ClippingGroup(RenderObject):
     so each face can show its own world.
 
     Lights inside ``content`` only light objects inside this group (see
-    :class:`Light`), so every clipped world can have its own lighting.
+    :class:`RLight`), so every clipped world can have its own lighting.
     """
 
-    mask: RenderObject | None = None
-    content: RenderObject | None = None
+    mask: RNode | None = None
+    content: RNode | None = None
     one_sided: bool = False
 
     @property
-    def children(self) -> list[RenderObject]:
+    def children(self) -> list[RNode]:
         return [child for child in (self.mask, self.content) if child is not None]

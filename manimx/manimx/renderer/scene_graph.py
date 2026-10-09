@@ -5,7 +5,7 @@ contribute their transform and visibility to their subtree and then
 disappear. Backends only ever see :class:`DrawItem` s and
 :class:`ClipScope` s.
 
-Clipping: every visible :class:`ClippingGroup` with a mask opens a
+Clipping: every visible :class:`RClippingGroup` with a mask opens a
 :class:`ClipScope`. The leaves of its mask subtree are collected in the
 scope (they form the mask and are not drawn themselves); the leaves of its
 content subtree carry the index of the scope. Scopes nest: a mask inside
@@ -23,8 +23,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..objects import ClippingGroup, Group, Light, RenderObject, Shape2D, Shape3D
-from ..objects.path import BezierPath
+from ..objects import RClippingGroup, RGroup, RLight, RNode, RShape2D, RShape3D
+from ..objects.path import RBezierPath
 
 NO_CLIP = -1
 
@@ -33,7 +33,7 @@ NO_CLIP = -1
 class DrawItem:
     """One drawable leaf with everything resolved from its ancestors."""
 
-    obj: BezierPath | Shape3D
+    obj: RBezierPath | RShape3D
     world: np.ndarray
     """Local-to-world 4x4 matrix: product of all ancestor transforms."""
     order: int
@@ -44,9 +44,9 @@ class DrawItem:
 
 @dataclass(slots=True, eq=False)
 class ClipScope:
-    """The mask of one :class:`ClippingGroup`."""
+    """The mask of one :class:`RClippingGroup`."""
 
-    group: ClippingGroup
+    group: RClippingGroup
     parent: int
     """Index of the enclosing scope (which also clips this mask), or ``NO_CLIP``."""
     mask: list[DrawItem] = field(default_factory=list)
@@ -55,7 +55,7 @@ class ClipScope:
 
 @dataclass(frozen=True, slots=True, eq=False)
 class LightItem:
-    light: Light
+    light: RLight
     world: np.ndarray
     clip: int = NO_CLIP
     """The clip scope the light is limited to, or NO_CLIP for everything."""
@@ -80,18 +80,18 @@ class FlatScene:
             clip = self.clips[clip].parent
 
 
-def flatten_scene(root: RenderObject) -> FlatScene:
+def flatten_scene(root: RNode) -> FlatScene:
     scene = FlatScene()
     _walk(root, np.eye(4), NO_CLIP, scene, mask_of=None)
     return scene
 
 
-def flatten(root: RenderObject) -> list[DrawItem]:
+def flatten(root: RNode) -> list[DrawItem]:
     """Depth-first list of visible leaves in painter's order (masks excluded)."""
     return flatten_scene(root).items
 
 
-def bounding_box(root: RenderObject) -> tuple[np.ndarray, np.ndarray]:
+def bounding_box(root: RNode) -> tuple[np.ndarray, np.ndarray]:
     """World-space ``(min, max)`` corners over all anchors of all 2D leaves.
 
     Like Manim, only anchors count (not handles). Useful to center a group,
@@ -100,7 +100,7 @@ def bounding_box(root: RenderObject) -> tuple[np.ndarray, np.ndarray]:
     anchors = [
         (item.world @ np.column_stack([anchors, np.zeros(len(anchors)), np.ones(len(anchors))]).T).T[:, :3]
         for item in flatten(root)
-        if isinstance(item.obj, Shape2D)
+        if isinstance(item.obj, RShape2D)
         and len(anchors := item.obj.curves[:, [0, 3]].reshape(-1, 2))
     ]
     if not anchors:
@@ -110,7 +110,7 @@ def bounding_box(root: RenderObject) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _walk(
-    obj: RenderObject,
+    obj: RNode,
     parent_world: np.ndarray,
     clip: int,
     scene: FlatScene,
@@ -127,20 +127,20 @@ def _walk(
     # Child transforms compose with the parent: world = parent @ local.
     world = parent_world @ obj.transform.matrix()
 
-    if isinstance(obj, Light):
+    if isinstance(obj, RLight):
         if mask_of is None:
             scene.lights.append(LightItem(obj, world, clip))
-    elif isinstance(obj, Shape3D) and mask_of is not None:
+    elif isinstance(obj, RShape3D) and mask_of is not None:
         raise NotImplementedError("3D meshes cannot be part of a mask")
-    elif isinstance(obj, (BezierPath, Shape3D)):
+    elif isinstance(obj, (RBezierPath, RShape3D)):
         target = scene.items if mask_of is None else mask_of.mask
         target.append(DrawItem(obj, world, order=len(target), clip=clip))
-    elif isinstance(obj, Group):
+    elif isinstance(obj, RGroup):
         for child in obj.children:
             _walk(child, world, clip, scene, mask_of)
-    elif isinstance(obj, ClippingGroup):
+    elif isinstance(obj, RClippingGroup):
         if mask_of is not None:
-            raise NotImplementedError("a ClippingGroup inside a mask is not supported")
+            raise NotImplementedError("an RClippingGroup inside a mask is not supported")
         content_clip = clip
         if obj.mask is not None:
             scope = ClipScope(obj, parent=clip)

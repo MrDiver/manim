@@ -8,16 +8,16 @@ processes.
 
 What it draws:
 
-- **Shape2D**: Manim's vector shapes (VMobject layout). Exact curved fills,
+- **RShape2D**: Manim's vector shapes (VMobject layout). Exact curved fills,
   strokes with per-point color, opacity and width, all joint and cap
   styles, painter's order.
-- **Curve3D**: stroke-only Bezier curves in 3D, always facing the camera,
+- **RCurve3D**: stroke-only Bezier curves in 3D, always facing the camera,
   thinner with distance.
-- **Shape3D**: lit triangle meshes with glTF metallic-roughness materials
+- **RShape3D**: lit triangle meshes with glTF metallic-roughness materials
   and textures. glTF/GLB files are imported with `manimx.io.load_gltf`.
 - **Lights**: directional, point and spot, with soft contact-hardening
   shadows.
-- **ClippingGroup**: soft alpha masks, optionally one-sided (portals), with
+- **RClippingGroup**: soft alpha masks, optionally one-sided (portals), with
   lights scoped to the group.
 - **Effects**: motion blur, bloom, tone mapping and custom WGSL shaders,
   chained by a `FrameComposer`.
@@ -31,11 +31,11 @@ What it draws:
 ```python
 from PIL import Image
 
-from manimx import Fill, Group, Stroke, Transform
+from manimx import Fill, RGroup, Stroke, Transform
 from manimx.objects.geometry import circle, square
 from manimx.renderer import RenderConfig, WGPURenderer
 
-scene = Group(children=[
+scene = RGroup(children=[
     square(fill=Fill("#525893", opacity=1.0), stroke=Stroke("#525893")),
     circle(fill=Fill("#87c2a5", opacity=1.0), transform=Transform(position=(1.5, 0.0, 0.0))),
 ])
@@ -68,18 +68,18 @@ Without `field_of_view` the camera is orthographic and shows
 ### 3D: meshes, lights, glTF
 
 ```python
-from manimx import DirectionalLight, PbrMaterial, PointLight, Shape3D, SpotLight, Transform, sphere_mesh
+from manimx import RDirectionalLight, PbrMaterial, RPointLight, RShape3D, RSpotLight, Transform, sphere_mesh
 from manimx.io import load_gltf
 
-ball = Shape3D(mesh=sphere_mesh(1.0), material=PbrMaterial("#FC6255", roughness=0.3),
+ball = RShape3D(mesh=sphere_mesh(1.0), material=PbrMaterial("#FC6255", roughness=0.3),
                transform=Transform(position=(0, 0, 1)))
-helmet = load_gltf("DamagedHelmet.glb")  # a Group; converted from glTF's Y-up to Z-up
-sun = DirectionalLight.aimed((-1, 1, -2), intensity=3.0, size=0.03)  # size: softness
-lamp = PointLight(color="#58C4DD", intensity=15, transform=Transform(position=(-2, -2, 2)))
-spot = SpotLight.aimed((0, -4, 6), (0, 0, 0), outer_cone_angle=0.4)
+helmet = load_gltf("DamagedHelmet.glb")  # an RGroup; converted from glTF's Y-up to Z-up
+sun = RDirectionalLight.aimed((-1, 1, -2), intensity=3.0, size=0.03)  # size: softness
+lamp = RPointLight(color="#58C4DD", intensity=15, transform=Transform(position=(-2, -2, 2)))
+spot = RSpotLight.aimed((0, -4, 6), (0, 0, 0), outer_cone_angle=0.4)
 ```
 
-Only `Shape3D` meshes are lit. 2D shapes and curves keep their exact Manim
+Only `RShape3D` meshes are lit. 2D shapes and curves keep their exact Manim
 colors, but they still cast shadows onto meshes. Shadows can be turned off
 globally (`RenderConfig.shadows`), per light (`cast_shadows`) and per
 object (`cast_shadows` on any shape). If a scene has no lights at all, a
@@ -88,9 +88,9 @@ default key light is used.
 ### Clipping and portals
 
 ```python
-from manimx import ClippingGroup
+from manimx import RClippingGroup
 
-portal = ClippingGroup(mask=square_face, content=world, one_sided=True)
+portal = RClippingGroup(mask=square_face, content=world, one_sided=True)
 ```
 
 The content is shown multiplied by the mask's alpha. The mask counts its
@@ -158,7 +158,7 @@ print(renderer.profiler.read())  # {"shadows": 0.4, "geometry": 0.2, "lighting":
 ```mermaid
 flowchart LR
     subgraph Scene["scene (manimx.objects)"]
-        Tree["render object tree<br/>Group, ClippingGroup,<br/>Shape2D, Curve3D, Shape3D, Light"]
+        Tree["render object tree<br/>RGroup, RClippingGroup,<br/>RShape2D, RCurve3D, RShape3D, RLight"]
     end
 
     subgraph Backend["backend-independent (manimx.renderer)"]
@@ -229,9 +229,9 @@ flowchart TD
 ```mermaid
 flowchart LR
     subgraph CPU
-        S["Shape2D / Curve3D"] -->|"points, styles"| VB["VectorBatch"]
+        S["RShape2D / RCurve3D"] -->|"points, styles"| VB["VectorBatch"]
         S -->|"fill, cached per (uid, version)"| T["tessellate_fill()"] --> VB
-        M["Shape3D"] -->|"mesh, cached per version"| MB["MeshBatch"]
+        M["RShape3D"] -->|"mesh, cached per version"| MB["MeshBatch"]
         Li["Lights"] --> MB
     end
     subgraph Buffers["shared storage buffers (vertex pulling)"]
@@ -308,7 +308,7 @@ process's instance, and everything it builds is kept across calls.
 
 ```mermaid
 flowchart LR
-    Obj["RenderObject<br/>uid (never reused)<br/>versioned fields"] -->|"assigning points, fill, stroke, mesh..."| V["version +1"]
+    Obj["RNode<br/>uid (never reused)<br/>versioned fields"] -->|"assigning points, fill, stroke, mesh..."| V["version +1"]
     V --> Key["cache key (uid, kind, version)"]
     Key -->|hit| Reuse["reuse triangulation, stroke records,<br/>packed vertices"]
     Key -->|miss| Build["rebuild and replace the entry"]
@@ -373,8 +373,8 @@ needs two passes per object and batches poorly.
 **Strokes expanded on the GPU.** One instance per cubic curve, sampled in
 24 segments, with miter, bevel and round joints and butt, square and round
 caps. Widths are in world units (Manim's width 4 is 0.04 units) and ignore
-the object's scale, like Manim. Shape2D ribbons lie in the shape's plane;
-Curve3D ribbons face the camera. Both are the same code with a different
+the object's scale, like Manim. RShape2D ribbons lie in the shape's plane;
+RCurve3D ribbons face the camera. Both are the same code with a different
 "ribbon normal".
 
 **Painter's order with real depth.** Instead of drawing strictly in tree
@@ -403,13 +403,13 @@ layer, then blends the vector layer over it in sRGB values, which is how
 Manim blends. A `#FC6255` square comes out as `#FC6255` under any tone
 mapping operator.
 
-**Alpha masks, not stencil clipping.** A ClippingGroup multiplies its
+**Alpha masks, not stencil clipping.** A RClippingGroup multiplies its
 content by the mask's rendered alpha, so masks can be soft or gradients.
 Each scope's mask is a texture layer; nested masks are clipped by their
 parent, so one lookup covers all enclosing groups. Clipped content goes
 into the transparent list and keeps correct depth.
 
-**Lights scoped to clipping groups.** A light inside a ClippingGroup only
+**Lights scoped to clipping groups.** A light inside an RClippingGroup only
 lights, and only gets shadows from, objects in that group. The G-buffer
 stores each pixel's scope, and shadow casters and bounds are built per
 scope. This is what lets each portal world have its own lighting.

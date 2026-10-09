@@ -29,14 +29,14 @@ from collections.abc import Callable, Sequence
 import numpy as np
 import wgpu
 
-from ...objects import RenderObject
+from ...objects import RNode
 from ..config import RenderConfig, ViewState
 from ..effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap
 from .gpu import COLOR_FORMAT, HDR_FORMAT, GPUContext, ResourceCache, expand_includes
 from .profiler import GpuProfiler
 from .renderer import WGPURenderer
 
-SceneSource = RenderObject | ViewState | Callable[[float], RenderObject | ViewState]
+SceneSource = RNode | ViewState | Callable[[float], RNode | ViewState]
 """A fixed scene, or a function returning the scene at a given time; with a
 :class:`ViewState`, its camera replaces the config's."""
 

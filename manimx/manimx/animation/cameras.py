@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import quaternion
 
-from ..objects import RenderObject, Transform
+from ..objects import RNode, Transform
 from ..renderer.config import DEFAULT_FRAME_HEIGHT
 from ..renderer.config import Camera as RenderCamera
 from . import authoring
@@ -95,7 +95,7 @@ class Camera(Mobject):
 
     # -- render state -------------------------------------------------------
 
-    def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RenderObject | None:
+    def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RNode | None:
         return None  # cameras are never drawn
 
     def render_camera(self, parent: Transform | None = None) -> RenderCamera:

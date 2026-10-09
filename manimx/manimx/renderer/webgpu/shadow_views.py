@@ -21,8 +21,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...objects import DirectionalLight, PointLight, Shape3D, SpotLight
-from ...objects.path import BezierPath
+from ...objects import RDirectionalLight, RPointLight, RShape3D, RSpotLight
+from ...objects.path import RBezierPath
 from ..cache import MobjectDataCache
 from ..config import RenderConfig
 from ..scene_graph import NO_CLIP, FlatScene, LightItem
@@ -100,16 +100,16 @@ def build_shadow_views(
         row["shadow_view"] = len(frames)
         position = item.world[:3, 3]
         direction = -item.world[:3, 2] / np.linalg.norm(item.world[:3, 2])
-        if isinstance(light, DirectionalLight):
+        if isinstance(light, RDirectionalLight):
             # Look at the scene's bounding sphere from outside it.
             eye = center - direction * 2 * radius
             near, far = radius * 0.5, radius * 3.5
             add(_look(eye, direction), _orthographic(radius, near, far), eye, (near, far, 2 * radius, 0.0))
-        elif isinstance(light, SpotLight):
+        elif isinstance(light, RSpotLight):
             far = light.range or float(np.linalg.norm(position - center) + radius)
             fov = min(2 * light.outer_cone_angle + 0.05, math.radians(170))
             add(_look(position, direction), _perspective(fov, _NEAR, far), position, (_NEAR, far, 2 * math.tan(fov / 2), 1.0))
-        elif isinstance(light, PointLight):
+        elif isinstance(light, RPointLight):
             far = light.range or float(np.linalg.norm(position - center) + radius)
             for forward, up in _CUBE_FACES:
                 add(_look(position, np.array(forward, float), np.array(up, float)), _perspective(math.pi / 2, _NEAR, far), position, (_NEAR, far, 2.0, 1.0))
@@ -124,9 +124,9 @@ def scene_bounds(scene: FlatScene, cache: MobjectDataCache, scope: int = NO_CLIP
         obj = item.obj
         if not scene.in_scope(item.clip, scope):
             continue
-        if isinstance(obj, Shape3D):
+        if isinstance(obj, RShape3D):
             local = cache.get_or_create(obj.uid, "bounds", obj.version("mesh"), lambda: _box(obj.mesh.positions))
-        elif isinstance(obj, BezierPath) and obj.num_curves:
+        elif isinstance(obj, RBezierPath) and obj.num_curves:
             local = cache.get_or_create(obj.uid, "bounds", obj.version("points"), lambda: _box(obj.points_3d()))
         else:
             continue

@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from manimx import ClippingGroup, Fill, Group, JointType, RenderObject, Shape2D, Stroke, Transform
+from manimx import RClippingGroup, Fill, RGroup, JointType, RNode, RShape2D, Stroke, Transform
 from manimx.objects import new_uid
 from manimx.objects.geometry import arc_points, circle, square
 from manimx.renderer import ClearScene, MobjectDataCache, RemoveObjects
@@ -18,10 +18,10 @@ from manimx.renderer.webgpu.vector_batch import NO_NEIGHBOR, STROKE_WIDTH_SCALE,
 
 
 def test_flatten_composes_transforms_and_keeps_painter_order() -> None:
-    a = Shape2D(transform=Transform(position=(1.0, 0.0, 0.0)))
-    b = Shape2D()
-    hidden = Shape2D(visible=False)
-    root = Group(children=[a, Group(children=[hidden, b])], transform=Transform(position=(0.0, 2.0, 0.0)))
+    a = RShape2D(transform=Transform(position=(1.0, 0.0, 0.0)))
+    b = RShape2D()
+    hidden = RShape2D(visible=False)
+    root = RGroup(children=[a, RGroup(children=[hidden, b])], transform=Transform(position=(0.0, 2.0, 0.0)))
 
     items = flatten(root)
 
@@ -32,24 +32,24 @@ def test_flatten_composes_transforms_and_keeps_painter_order() -> None:
 
 
 def test_flatten_rejects_unsupported_objects() -> None:
-    with pytest.raises(TypeError, match="RenderObject"):
-        flatten(RenderObject())
-    nested_in_mask = ClippingGroup(mask=ClippingGroup(), content=Shape2D())
+    with pytest.raises(TypeError, match="RNode"):
+        flatten(RNode())
+    nested_in_mask = RClippingGroup(mask=RClippingGroup(), content=RShape2D())
     with pytest.raises(NotImplementedError, match="inside a mask"):
         flatten(nested_in_mask)
 
 
 def test_clipping_groups_open_nested_scopes() -> None:
-    outer_mask, inner_mask = Shape2D(), Shape2D()
-    free, outer_content, inner_content = Shape2D(), Shape2D(), Shape2D()
-    inner = ClippingGroup(mask=inner_mask, content=inner_content)
-    outer = ClippingGroup(
+    outer_mask, inner_mask = RShape2D(), RShape2D()
+    free, outer_content, inner_content = RShape2D(), RShape2D(), RShape2D()
+    inner = RClippingGroup(mask=inner_mask, content=inner_content)
+    outer = RClippingGroup(
         mask=outer_mask,
-        content=Group(children=[outer_content, inner]),
+        content=RGroup(children=[outer_content, inner]),
         transform=Transform(position=(1.0, 0.0, 0.0)),
     )
 
-    scene = flatten_scene(Group(children=[free, outer]))
+    scene = flatten_scene(RGroup(children=[free, outer]))
 
     assert [item.obj for item in scene.items] == [free, outer_content, inner_content]
     assert [item.clip for item in scene.items] == [NO_CLIP, 0, 1]
@@ -61,21 +61,21 @@ def test_clipping_groups_open_nested_scopes() -> None:
 
 
 def test_clipping_group_without_mask_does_not_clip() -> None:
-    content = Shape2D()
+    content = RShape2D()
 
-    scene = flatten_scene(ClippingGroup(content=content))
+    scene = flatten_scene(RClippingGroup(content=content))
 
     assert scene.clips == [] and scene.items[0].clip == NO_CLIP
 
 
 def test_bounding_box_uses_world_anchors() -> None:
-    root = Group(children=[square(transform=Transform(position=(1.0, 0.0, 0.0)))])
+    root = RGroup(children=[square(transform=Transform(position=(1.0, 0.0, 0.0)))])
 
     low, high = bounding_box(root)
 
     np.testing.assert_allclose(low, [0.0, -1.0, 0.0])
     np.testing.assert_allclose(high, [2.0, 1.0, 0.0])
-    np.testing.assert_allclose(bounding_box(Group())[0], [0.0, 0.0, 0.0])
+    np.testing.assert_allclose(bounding_box(RGroup())[0], [0.0, 0.0, 0.0])
 
 
 # --- cache and commands -----------------------------------------------------------
@@ -105,8 +105,8 @@ def test_cache_retain_and_clear() -> None:
 
 
 def test_remove_objects_command_drops_whole_subtree() -> None:
-    a, b, keep = Shape2D(), Shape2D(), Shape2D()
-    group = Group(children=[a, ClippingGroup(content=b)])
+    a, b, keep = RShape2D(), RShape2D(), RShape2D()
+    group = RGroup(children=[a, RClippingGroup(content=b)])
     cache = MobjectDataCache()
     for obj in (a, b, keep):
         cache.put(obj.uid, "mesh", 0, obj.uid)
@@ -156,13 +156,13 @@ def test_tessellation_cuts_holes_by_nesting() -> None:
 
 
 def test_tessellation_closes_open_paths() -> None:
-    open_triangle = Shape2D.from_corners([(0, 0), (2, 0), (0, 2)]).points
+    open_triangle = RShape2D.from_corners([(0, 0), (2, 0), (0, 2)]).points
 
     assert _filled_area(open_triangle) == pytest.approx(2.0)
 
 
 def test_tessellation_skips_degenerate_paths() -> None:
-    line = Shape2D.from_corners([(0, 0), (1, 0)]).points
+    line = RShape2D.from_corners([(0, 0), (1, 0)]).points
 
     assert len(tessellate_fill(line)) == 0
     assert len(tessellate_fill(np.zeros((0, 2)))) == 0
@@ -191,8 +191,8 @@ def test_tessellation_records_where_every_vertex_comes_from() -> None:
 # --- vector batch -----------------------------------------------------------------
 
 
-def _batch(*shapes: Shape2D, cache: MobjectDataCache | None = None) -> VectorBatch:
-    root = Group(children=list(shapes))
+def _batch(*shapes: RShape2D, cache: MobjectDataCache | None = None) -> VectorBatch:
+    root = RGroup(children=list(shapes))
     if cache is None:  # not `or`: an empty cache is falsy
         cache = MobjectDataCache()
     return VectorBatch.build(flatten_scene(root), cache, np.array([0.0, 0.0, 11.0]))
@@ -209,14 +209,14 @@ def test_batch_links_closed_subpaths_into_a_loop() -> None:
 
 
 def test_batch_leaves_open_path_ends_unlinked() -> None:
-    curves = _batch(Shape2D.from_corners([(0, 0), (1, 0), (2, 1)])).stroke_curves
+    curves = _batch(RShape2D.from_corners([(0, 0), (1, 0), (2, 1)])).stroke_curves
 
     assert list(curves["prev_point"]) == [NO_NEIGHBOR, 0]
     assert list(curves["next_point"]) == [4, NO_NEIGHBOR]
 
 
 def test_batch_matches_shared_anchor_styles() -> None:
-    batch = _batch(Shape2D.from_corners([(0, 0), (1, 0), (2, 0)], stroke=Stroke(width=[0.0, 7.0])))
+    batch = _batch(RShape2D.from_corners([(0, 0), (1, 0), (2, 0)], stroke=Stroke(width=[0.0, 7.0])))
     widths = batch.stroke_points["width"]
 
     assert widths[3] == pytest.approx(widths[4])
@@ -254,7 +254,7 @@ def test_batch_reuses_cached_fill_mesh_until_points_change() -> None:
 def test_batch_draws_masks_separately_and_clipped_content_transparent() -> None:
     mask = circle(fill=Fill(opacity=1.0), stroke=Stroke(width=0.0))
     content = square(fill=Fill(opacity=1.0), stroke=Stroke(width=0.0))
-    clip = ClippingGroup(mask=mask, content=content)
+    clip = RClippingGroup(mask=mask, content=content)
 
     batch = VectorBatch.build(flatten_scene(clip), MobjectDataCache(), np.zeros(3))
 
@@ -265,7 +265,7 @@ def test_batch_draws_masks_separately_and_clipped_content_transparent() -> None:
 
 
 def test_batch_skips_empty_and_invisible_styles() -> None:
-    batch = _batch(Shape2D(), square(fill=Fill(opacity=0.0), stroke=Stroke(width=0.0)))
+    batch = _batch(RShape2D(), square(fill=Fill(opacity=0.0), stroke=Stroke(width=0.0)))
 
     assert len(batch.opaque_draws) == len(batch.transparent_draws) == 0
     assert len(batch.instances) == 0

@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from manimx import ClippingGroup, Fill, Group, Stroke, Transform
+from manimx import RClippingGroup, Fill, RGroup, Stroke, Transform
 from manimx.objects.geometry import circle, square
 from manimx.renderer import RemoveObjects, RenderConfig, Renderer, WGPURenderer
 from manimx.utils.color import BLUE, RED
@@ -24,7 +24,7 @@ def renderer() -> WGPURenderer:
 
 def render(renderer: WGPURenderer, *children, **config) -> np.ndarray:
     return renderer.render(
-        Group(children=list(children)),
+        RGroup(children=list(children)),
         RenderConfig(pixel_width=WIDTH, pixel_height=HEIGHT, **config),
     )
 
@@ -49,7 +49,7 @@ def test_renders_background_and_fill(renderer: WGPURenderer) -> None:
 
 def test_group_transform_moves_children(renderer: WGPURenderer) -> None:
     shape = square(side_length=1.0, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0))
-    image = render(renderer, Group(children=[shape], transform=Transform(position=(3.0, 0.0, 0.0))))
+    image = render(renderer, RGroup(children=[shape], transform=Transform(position=(3.0, 0.0, 0.0))))
 
     assert pixel(image, 3, 0) == (*RED.to_int_rgb(), 255)
     assert pixel(image, 0, 0) == BACKGROUND
@@ -101,7 +101,7 @@ def test_without_msaa(renderer: WGPURenderer) -> None:
 
 
 def test_clipping_shows_content_only_inside_mask(renderer: WGPURenderer) -> None:
-    clip = ClippingGroup(
+    clip = RClippingGroup(
         mask=circle(radius=1.0, fill=Fill(opacity=1.0), stroke=Stroke(width=0.0)),
         content=square(side_length=4.0, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0)),
     )
@@ -113,7 +113,7 @@ def test_clipping_shows_content_only_inside_mask(renderer: WGPURenderer) -> None
 
 
 def test_soft_mask_multiplies_alpha(renderer: WGPURenderer) -> None:
-    clip = ClippingGroup(
+    clip = RClippingGroup(
         mask=square(fill=Fill(opacity=0.5), stroke=Stroke(width=0.0)),
         content=square(fill=Fill("#FFFFFF", opacity=1.0), stroke=Stroke(width=0.0)),
     )
@@ -127,8 +127,8 @@ def test_nested_masks_intersect(renderer: WGPURenderer) -> None:
         return square(side_length=2.0, fill=Fill(opacity=1.0), stroke=Stroke(width=0.0), transform=Transform(position=(x, 0.0, 0.0)))
 
     content = square(side_length=6.0, fill=Fill(BLUE, opacity=1.0), stroke=Stroke(width=0.0))
-    inner = ClippingGroup(mask=band(0.5), content=content)
-    outer = ClippingGroup(mask=band(-0.5), content=inner)
+    inner = RClippingGroup(mask=band(0.5), content=content)
+    outer = RClippingGroup(mask=band(-0.5), content=inner)
 
     image = render(renderer, outer)
 
@@ -145,10 +145,10 @@ def _brightness(image: np.ndarray, x: float, y: float) -> int:
 
 
 def test_mesh_is_lit_from_the_light_side(renderer: WGPURenderer) -> None:
-    from manimx import DirectionalLight, PbrMaterial, Shape3D, sphere_mesh
+    from manimx import RDirectionalLight, PbrMaterial, RShape3D, sphere_mesh
 
-    sphere = Shape3D(mesh=sphere_mesh(2.0), material=PbrMaterial("#FFFFFF", roughness=1.0))
-    light = DirectionalLight.aimed((1.0, 0.0, 0.0))  # shines towards +x
+    sphere = RShape3D(mesh=sphere_mesh(2.0), material=PbrMaterial("#FFFFFF", roughness=1.0))
+    light = RDirectionalLight.aimed((1.0, 0.0, 0.0))  # shines towards +x
 
     image = render(renderer, sphere, light, ambient_intensity=0.0)
 
@@ -157,10 +157,10 @@ def test_mesh_is_lit_from_the_light_side(renderer: WGPURenderer) -> None:
 
 
 def test_spot_light_cone(renderer: WGPURenderer) -> None:
-    from manimx import PbrMaterial, Shape3D, SpotLight, box_mesh
+    from manimx import PbrMaterial, RShape3D, RSpotLight, box_mesh
 
-    floor = Shape3D(mesh=box_mesh(8.0, 8.0, 0.1), material=PbrMaterial("#FFFFFF", roughness=1.0))
-    spot = SpotLight.aimed((0.0, 0.0, 4.0), (0.0, 0.0, 0.0), intensity=40.0, outer_cone_angle=0.3)
+    floor = RShape3D(mesh=box_mesh(8.0, 8.0, 0.1), material=PbrMaterial("#FFFFFF", roughness=1.0))
+    spot = RSpotLight.aimed((0.0, 0.0, 4.0), (0.0, 0.0, 0.0), intensity=40.0, outer_cone_angle=0.3)
 
     image = render(renderer, floor, spot, ambient_intensity=0.0)
 
@@ -169,9 +169,9 @@ def test_spot_light_cone(renderer: WGPURenderer) -> None:
 
 
 def test_meshes_and_vectors_share_depth(renderer: WGPURenderer) -> None:
-    from manimx import PbrMaterial, Shape3D, box_mesh
+    from manimx import PbrMaterial, RShape3D, box_mesh
 
-    wall = Shape3D(mesh=box_mesh(4.0, 4.0, 0.2), material=PbrMaterial("#000000", roughness=1.0))
+    wall = RShape3D(mesh=box_mesh(4.0, 4.0, 0.2), material=PbrMaterial("#000000", roughness=1.0))
     behind = square(fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(0.0, 0.0, -1.0)))
     front = circle(radius=0.5, fill=Fill(BLUE, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(1.0, 0.0, 1.0)))
 
@@ -185,14 +185,14 @@ def test_frames_without_meshes_after_meshes_start_from_empty_3d_layers() -> None
     """Mesh-free frames skip the deferred passes and rely on an empty
     G-buffer and lit layer: a mesh frame in between must not leave its
     depth (hiding shapes) or light behind."""
-    from manimx import PbrMaterial, Shape3D, sphere_mesh
+    from manimx import PbrMaterial, RShape3D, sphere_mesh
 
     try:
         reused = WGPURenderer()
     except Exception as error:  # pragma: no cover - depends on the machine
         pytest.skip(f"no usable GPU: {error}")
     flat = square(fill=Fill(RED, opacity=1.0), transform=Transform(position=(0.0, 0.0, -2.0)))
-    sphere = Shape3D(mesh=sphere_mesh(2.0), material=PbrMaterial("#FFFFFF", emissive="#FFFFFF"))
+    sphere = RShape3D(mesh=sphere_mesh(2.0), material=PbrMaterial("#FFFFFF", emissive="#FFFFFF"))
 
     expected = render(WGPURenderer(), flat)
     first = render(reused, flat)

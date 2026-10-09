@@ -29,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..objects import Fill, Group, Shape2D, Stroke, Transform
+from ..objects import Fill, RGroup, RShape2D, Stroke, Transform
 from ..objects.geometry import circle, square, triangle
 from ..renderer.config import RenderConfig
 from ..renderer.scene_graph import bounding_box
@@ -48,8 +48,8 @@ def _colored(color: str) -> dict:
     return {"fill": Fill(color, opacity=1.0), "stroke": Stroke(color)}
 
 
-def manim_logo() -> Group:
-    ds_m = Shape2D(
+def manim_logo() -> RGroup:
+    ds_m = RShape2D(
         points=np.load(M_GLYPH_POINTS),
         fill=Fill(LOGO_BLACK, opacity=1.0),
         stroke=Stroke(LOGO_BLACK, width=0.0),  # MathTex has no stroke
@@ -62,7 +62,7 @@ def manim_logo() -> Group:
         ds_m,
     ]  # order matters: later shapes are drawn on top
 
-    logo = Group(children=shapes)
+    logo = RGroup(children=shapes)
     # move_to(ORIGIN): shift the group so its bounding box is centered.
     low, high = bounding_box(logo)
     logo.transform = logo.transform.translated(-(low + high) / 2)

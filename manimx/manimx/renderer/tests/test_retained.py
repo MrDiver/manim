@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from manimx import ClippingGroup, Fill, Group, Stroke, Transform
+from manimx import RClippingGroup, Fill, RGroup, Stroke, Transform
 from manimx.objects import new_uid
 from manimx.objects.geometry import circle, square, triangle
 from manimx.renderer import RenderConfig, WGPURenderer
@@ -43,30 +43,30 @@ def frames():
     yield [shape(triangle, A, -1.5), shape(square, B, 2, width=8)]  # new points (fewer), new stroke
     yield [shape(square, B, 2)]  # one leaves
     yield [shape(square, B, 2), shape(circle, C, 0)]  # one arrives (reuses the slot)
-    yield [ClippingGroup(mask=shape(circle, D, 0), content=Group(children=[shape(square, B, 0.5)]))]
+    yield [RClippingGroup(mask=shape(circle, D, 0), content=RGroup(children=[shape(square, B, 0.5)]))]
     yield [shape(circle, C, 1), shape(square, B, -1)]  # order and placement swap
 
 
 def test_patched_renders_equal_fresh_renders(renderer: WGPURenderer) -> None:
     for index, children in enumerate(frames()):
-        patched = renderer.render(Group(children=children), CONFIG)
-        fresh = WGPURenderer().render(Group(children=children), CONFIG)
+        patched = renderer.render(RGroup(children=children), CONFIG)
+        fresh = WGPURenderer().render(RGroup(children=children), CONFIG)
         np.testing.assert_array_equal(patched, fresh, err_msg=f"frame {index}")
 
 
 def test_a_moving_shape_only_rewrites_its_object_entry() -> None:
     retained, cache = RetainedVectors(), MobjectDataCache()
-    retained.build(flatten_scene(Group(children=[shape(circle, A, 0), shape(square, B, 2)])), cache, np.zeros(3))
-    batch = retained.build(flatten_scene(Group(children=[shape(circle, A, 1), shape(square, B, 2)])), cache, np.zeros(3))
+    retained.build(flatten_scene(RGroup(children=[shape(circle, A, 0), shape(square, B, 2)])), cache, np.zeros(3))
+    batch = retained.build(flatten_scene(RGroup(children=[shape(circle, A, 1), shape(square, B, 2)])), cache, np.zeros(3))
 
     assert batch.dirty["objects"] == [(0, 1)]
     assert all(batch.dirty[name] == [] for name in ("instances", "fill_vertices", "fill_colors", "stroke_points", "stroke_curves"))
-    unchanged = retained.build(flatten_scene(Group(children=[shape(circle, A, 1), shape(square, B, 2)])), cache, np.zeros(3))
+    unchanged = retained.build(flatten_scene(RGroup(children=[shape(circle, A, 1), shape(square, B, 2)])), cache, np.zeros(3))
     assert all(ranges == [] for ranges in unchanged.dirty.values())
 
 
 def test_garbage_is_repacked() -> None:
     retained, cache = RetainedVectors(), MobjectDataCache()
     for _ in range(1, 400):  # every frame a new shape replaces the last: its ranges become garbage
-        retained.build(flatten_scene(Group(children=[shape(circle, new_uid())])), cache, np.zeros(3))
+        retained.build(flatten_scene(RGroup(children=[shape(circle, new_uid())])), cache, np.zeros(3))
     assert retained.arenas["stroke_points"].used < 4096 + 400 and len(retained.slots) == 1

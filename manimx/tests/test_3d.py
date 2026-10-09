@@ -1,4 +1,4 @@
-"""3D objects: meshes, materials, lights, Curve3D, glTF import, mesh batching."""
+"""3D objects: meshes, materials, lights, RCurve3D, glTF import, mesh batching."""
 
 import math
 from pathlib import Path
@@ -8,15 +8,15 @@ import pytest
 
 from gltf_fixtures import GlbWriter
 from manimx import (
-    Curve3D,
-    DirectionalLight,
-    Group,
+    RCurve3D,
+    RDirectionalLight,
+    RGroup,
     MeshData,
     PbrMaterial,
-    PointLight,
-    Shape2D,
-    Shape3D,
-    SpotLight,
+    RPointLight,
+    RShape2D,
+    RShape3D,
+    RSpotLight,
     Stroke,
     Texture,
     Transform,
@@ -80,9 +80,9 @@ def test_material_converts_colors_to_linear() -> None:
 
 
 def test_lights_point_along_their_local_minus_z() -> None:
-    sun = DirectionalLight.aimed((1.0, 0.0, 0.0))
-    spot = SpotLight.aimed((0.0, 0.0, 5.0), (0.0, 0.0, 0.0))
-    down = DirectionalLight.aimed((0.0, 0.0, 1.0))  # opposite of -z
+    sun = RDirectionalLight.aimed((1.0, 0.0, 0.0))
+    spot = RSpotLight.aimed((0.0, 0.0, 5.0), (0.0, 0.0, 0.0))
+    down = RDirectionalLight.aimed((0.0, 0.0, 1.0))  # opposite of -z
 
     def direction(light: object) -> np.ndarray:
         return light.transform.matrix()[:3, :3] @ [0.0, 0.0, -1.0]
@@ -91,14 +91,14 @@ def test_lights_point_along_their_local_minus_z() -> None:
     np.testing.assert_allclose(direction(spot), [0, 0, -1], atol=1e-12)
     np.testing.assert_allclose(direction(down), [0, 0, 1], atol=1e-12)
     with pytest.raises(ValueError, match="cone"):
-        SpotLight(inner_cone_angle=0.5, outer_cone_angle=0.4)
+        RSpotLight(inner_cone_angle=0.5, outer_cone_angle=0.4)
     with pytest.raises(ValueError, match="zero"):
-        DirectionalLight.aimed((0.0, 0.0, 0.0))
+        RDirectionalLight.aimed((0.0, 0.0, 0.0))
 
 
 def test_scene_collects_lights_in_world_space() -> None:
-    lamp = PointLight(transform=Transform(position=(1.0, 0.0, 0.0)))
-    root = Group(children=[lamp], transform=Transform(position=(0.0, 2.0, 0.0)))
+    lamp = RPointLight(transform=Transform(position=(1.0, 0.0, 0.0)))
+    root = RGroup(children=[lamp], transform=Transform(position=(0.0, 2.0, 0.0)))
 
     scene = flatten_scene(root)
 
@@ -107,11 +107,11 @@ def test_scene_collects_lights_in_world_space() -> None:
 
 
 def test_light_records() -> None:
-    root = Group(
+    root = RGroup(
         children=[
-            DirectionalLight.aimed((0, 0, -1), intensity=2.0),
-            PointLight(color="#FF0000", intensity=3.0, range=5.0),
-            SpotLight.aimed((0, 0, 2), (0, 0, 0), inner_cone_angle=0.1, outer_cone_angle=0.2),
+            RDirectionalLight.aimed((0, 0, -1), intensity=2.0),
+            RPointLight(color="#FF0000", intensity=3.0, range=5.0),
+            RSpotLight.aimed((0, 0, 2), (0, 0, 0), inner_cone_angle=0.1, outer_cone_angle=0.2),
         ],
     )
 
@@ -125,7 +125,7 @@ def test_light_records() -> None:
 
 
 def test_default_light_only_without_scene_lights() -> None:
-    empty = flatten_scene(Group())
+    empty = flatten_scene(RGroup())
 
     assert len(MeshBatch.build(empty, MobjectDataCache(), RenderConfig()).lights) == 1
     assert len(MeshBatch.build(empty, MobjectDataCache(), RenderConfig(default_lights=False)).lights) == 0
@@ -138,12 +138,12 @@ def test_mesh_batch_groups_draws_by_texture_set() -> None:
     texture = Texture(np.zeros((2, 2, 4), np.uint8))
     plain, textured = PbrMaterial(), PbrMaterial(base_color_texture=texture)
     shapes = [
-        Shape3D(mesh=box_mesh(), material=plain),
-        Shape3D(mesh=sphere_mesh(), material=textured),
-        Shape3D(mesh=box_mesh(), material=plain),
+        RShape3D(mesh=box_mesh(), material=plain),
+        RShape3D(mesh=sphere_mesh(), material=textured),
+        RShape3D(mesh=box_mesh(), material=plain),
     ]
 
-    batch = MeshBatch.build(flatten_scene(Group(children=shapes)), MobjectDataCache(), RenderConfig())
+    batch = MeshBatch.build(flatten_scene(RGroup(children=shapes)), MobjectDataCache(), RenderConfig())
 
     assert len(batch.materials) == 2
     assert [len(group.draws) for group in batch.groups] == [2, 1]
@@ -154,17 +154,17 @@ def test_mesh_batch_groups_draws_by_texture_set() -> None:
 
 
 def test_meshes_cannot_be_masks() -> None:
-    from manimx import ClippingGroup
+    from manimx import RClippingGroup
 
     with pytest.raises(NotImplementedError, match="mask"):
-        flatten(ClippingGroup(mask=Shape3D(), content=Shape2D()))
+        flatten(RClippingGroup(mask=RShape3D(), content=RShape2D()))
 
 
-# --- Curve3D ----------------------------------------------------------------------
+# --- RCurve3D ----------------------------------------------------------------------
 
 
 def test_curve3d_is_a_camera_facing_stroke() -> None:
-    curve = Curve3D.from_corners([(0, 0, 0), (1, 0, 1), (2, 0, 0)], stroke=Stroke(width=10))
+    curve = RCurve3D.from_corners([(0, 0, 0), (1, 0, 1), (2, 0, 0)], stroke=Stroke(width=10))
 
     batch = VectorBatch.build(flatten_scene(curve), MobjectDataCache(), np.zeros(3))
 
@@ -174,13 +174,13 @@ def test_curve3d_is_a_camera_facing_stroke() -> None:
 
 
 def test_parametric_curve_passes_through_samples() -> None:
-    helix = Curve3D.parametric(lambda t: (math.cos(t), math.sin(t), t), (0.0, math.tau), samples=16)
+    helix = RCurve3D.parametric(lambda t: (math.cos(t), math.sin(t), t), (0.0, math.tau), samples=16)
 
     assert helix.num_curves == 16
     np.testing.assert_allclose(helix.points[0], [1, 0, 0])
     np.testing.assert_allclose(helix.points[-1], [1, 0, math.tau], atol=1e-12)
     with pytest.raises(ValueError, match=r"\(N, 3\)"):
-        Curve3D(points=np.zeros((4, 2)))
+        RCurve3D(points=np.zeros((4, 2)))
 
 
 # --- glTF import ------------------------------------------------------------------
@@ -197,7 +197,7 @@ def test_gltf_import_builds_hierarchy_and_converts_to_z_up(tmp_path: Path) -> No
 
     [item] = flatten(model)
     shape = item.obj
-    assert isinstance(shape, Shape3D) and shape.mesh.triangle_count == 12
+    assert isinstance(shape, RShape3D) and shape.mesh.triangle_count == 12
     assert shape.material.metallic == 0.5 and shape.material.roughness == 0.25
     assert shape.material.base_color_linear == pytest.approx((1.0, 0.0, 0.0, 1.0), abs=1e-6)
     # glTF +y (scaled by 2) becomes +z.

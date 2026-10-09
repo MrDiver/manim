@@ -32,8 +32,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ...objects import Shape2D
-from ...objects.path import BezierPath
+from ...objects import RShape2D
+from ...objects.path import RBezierPath
 from ..cache import MobjectDataCache
 from ..scene_graph import NO_CLIP, DrawItem, FlatScene
 from ..tessellation import tessellate_fill
@@ -176,7 +176,7 @@ class RetainedVectors:
         front_only: bool = False,
     ) -> None:
         shape = item.obj
-        if not isinstance(shape, BezierPath) or shape.num_curves == 0:
+        if not isinstance(shape, RBezierPath) or shape.num_curves == 0:
             return
         key = (shape.uid, mask_of)
         seen.add(key)
@@ -190,7 +190,7 @@ class RetainedVectors:
             slot.points_key = points_key
 
         layer = 2 * item.order
-        flags = (0 if isinstance(shape, Shape2D) else FLAG_CAMERA_FACING) | (FLAG_FRONT_ONLY if front_only else 0)
+        flags = (0 if isinstance(shape, RShape2D) else FLAG_CAMERA_FACING) | (FLAG_FRONT_ONLY if front_only else 0)
         entry = self.arenas["objects"].data[slot.object : slot.object + 1]
         if slot.world is None or not np.array_equal(slot.world, item.world) or (slot.layer, slot.clip, slot.flags) != (layer, item.clip, flags):
             entry["model"] = item.world.T  # WGSL matrices are column-major
@@ -210,8 +210,8 @@ class RetainedVectors:
             draw.clip = item.clip
             draws.append(draw)
 
-    def _fill(self, shape: BezierPath, slot: _Slot, cache: MobjectDataCache, distance: float, layer: int) -> _Draw | None:
-        if not isinstance(shape, Shape2D):
+    def _fill(self, shape: RBezierPath, slot: _Slot, cache: MobjectDataCache, distance: float, layer: int) -> _Draw | None:
+        if not isinstance(shape, RShape2D):
             return None
         opacity = shape.fill.opacity
         if not np.any(opacity > 0.0):
@@ -243,7 +243,7 @@ class RetainedVectors:
             layer=layer,
         )
 
-    def _stroke(self, shape: BezierPath, slot: _Slot, cache: MobjectDataCache, distance: float, layer: int) -> _Draw | None:
+    def _stroke(self, shape: RBezierPath, slot: _Slot, cache: MobjectDataCache, distance: float, layer: int) -> _Draw | None:
         stroke = shape.stroke
         if not (np.any(stroke.width > 0.0) and np.any(stroke.opacity > 0.0)):
             return None

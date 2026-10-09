@@ -1,4 +1,4 @@
-"""Pack all vector draws (Shape2D, Curve3D) of a frame into shared GPU arrays.
+"""Pack all vector draws (RShape2D, RCurve3D) of a frame into shared GPU arrays.
 
 This module is pure numpy: it builds the "super buffers" that ``vector.wgsl``
 reads and the indirect draw commands that index into them. Keeping it free of
@@ -27,8 +27,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ...objects import Shape2D
-from ...objects.path import POINTS_PER_CURVE, TOLERANCE_FOR_POINT_EQUALITY, BezierPath
+from ...objects import RShape2D
+from ...objects.path import POINTS_PER_CURVE, TOLERANCE_FOR_POINT_EQUALITY, RBezierPath
 from ..cache import MobjectDataCache
 from ..scene_graph import NO_CLIP, DrawItem, FlatScene
 from ..tessellation import FillMesh, tessellate_fill
@@ -41,7 +41,7 @@ KIND_STROKE = 1
 NO_NEIGHBOR = -1
 
 FLAG_CAMERA_FACING = 1
-"""Object flag: the stroke ribbon faces the camera (all paths except Shape2D)."""
+"""Object flag: the stroke ribbon faces the camera (all paths except RShape2D)."""
 FLAG_FRONT_ONLY = 2
 """Object flag: drawn only while its local +z axis faces the camera
 (masks of one-sided clipping groups)."""
@@ -152,7 +152,7 @@ class _BatchBuilder:
 
     def add(self, item: DrawItem, mask_of: int = NO_CLIP, front_only: bool = False) -> None:
         shape = item.obj
-        if not isinstance(shape, BezierPath) or shape.num_curves == 0:
+        if not isinstance(shape, RBezierPath) or shape.num_curves == 0:
             return
         object_index = len(self.objects)
         # Two layers per object: the fill at 2 * order, its stroke one above.
@@ -161,7 +161,7 @@ class _BatchBuilder:
         entry["model"] = item.world.T  # WGSL matrices are column-major
         entry["layer"] = layer
         entry["clip"] = item.clip
-        entry["flags"] = (0 if isinstance(shape, Shape2D) else FLAG_CAMERA_FACING) | (FLAG_FRONT_ONLY if front_only else 0)
+        entry["flags"] = (0 if isinstance(shape, RShape2D) else FLAG_CAMERA_FACING) | (FLAG_FRONT_ONLY if front_only else 0)
         self.objects.append(entry)
 
         local_center = self.cache.get_or_create(shape.uid, "center", shape.version("points"), lambda: np.append(shape.points_3d().mean(axis=0), 1.0))
@@ -182,8 +182,8 @@ class _BatchBuilder:
 
     # -- fill ---------------------------------------------------------------
 
-    def _add_fill(self, shape: BezierPath, object_index: int, distance: float, layer: int) -> _Draw | None:
-        if not isinstance(shape, Shape2D):
+    def _add_fill(self, shape: RBezierPath, object_index: int, distance: float, layer: int) -> _Draw | None:
+        if not isinstance(shape, RShape2D):
             return None  # only 2D shapes have a fill
         opacity = shape.fill.opacity
         if not np.any(opacity > 0.0):
@@ -211,7 +211,7 @@ class _BatchBuilder:
 
     # -- stroke -------------------------------------------------------------
 
-    def _add_stroke(self, shape: BezierPath, object_index: int, distance: float, layer: int) -> _Draw | None:
+    def _add_stroke(self, shape: RBezierPath, object_index: int, distance: float, layer: int) -> _Draw | None:
         stroke = shape.stroke
         if not (np.any(stroke.width > 0.0) and np.any(stroke.opacity > 0.0)):
             return None
@@ -292,7 +292,7 @@ class _BatchBuilder:
         )
 
 
-def _link_curves(shape: BezierPath, first_point: int) -> np.ndarray:
+def _link_curves(shape: RBezierPath, first_point: int) -> np.ndarray:
     """Stroke curve records with previous/next links inside each subpath.
 
     Closed subpaths link their last curve back to the first one so the
@@ -339,13 +339,13 @@ class _StrokeTopology:
     """Local index of the start anchor of that next curve."""
 
     @staticmethod
-    def build(shape: BezierPath) -> _StrokeTopology:
+    def build(shape: RBezierPath) -> _StrokeTopology:
         curves = _link_curves(shape, 0)
         linked = curves["next_point"] != NO_NEIGHBOR
         ends = (curves["first_point"][linked] + POINTS_PER_CURVE - 1).astype(np.intp)
         return _StrokeTopology(curves, ends, curves["next_point"][linked].astype(np.intp))
 
-    def points(self, shape: BezierPath) -> np.ndarray:
+    def points(self, shape: RBezierPath) -> np.ndarray:
         """Per-point position, width and color, with shared anchors matched."""
         points = np.zeros(len(shape.points), STROKE_POINT_DTYPE)
         points["position"] = shape.points_3d()

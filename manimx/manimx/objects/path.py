@@ -8,7 +8,7 @@ from typing import Any, ClassVar, Self
 
 import numpy as np
 
-from .render_object import RenderObject
+from .render_object import RNode
 from .style import JointType, Stroke
 from .versioning import versioned
 
@@ -21,7 +21,7 @@ def _no_points() -> np.ndarray:
 
 
 @dataclass(slots=True, eq=False)
-class BezierPath(RenderObject):
+class RBezierPath(RNode):
     """Points in Manim's ``VMobject`` layout plus a stroke.
 
     ``points`` is ``(N, DIMENSION)`` with four points per cubic Bezier curve
@@ -43,7 +43,7 @@ class BezierPath(RenderObject):
         # Validate on every assignment, including the one in __init__.
         if name == "points":
             value = _validated_points(value, self.DIMENSION)
-        RenderObject.__setattr__(self, name, value)
+        RNode.__setattr__(self, name, value)
 
     @classmethod
     def from_corners(

@@ -6,16 +6,16 @@ from typing import Any, ClassVar
 
 import numpy as np
 
-from .path import BezierPath
+from .path import RBezierPath
 
 
 @dataclass(slots=True, eq=False)
-class Curve3D(BezierPath):
+class RCurve3D(RBezierPath):
     """A stroke-only path of cubic Bezier curves in 3D space.
 
     ``points`` is ``(N, 3)`` in the ``VMobject`` layout (see
-    :class:`BezierPath`), so the outline of a :class:`Shape2D` lifts to a
-    curve exactly. The stroke supports everything a ``Shape2D`` stroke does
+    :class:`RBezierPath`), so the outline of an :class:`RShape2D` lifts to a
+    curve exactly. The stroke supports everything an ``RShape2D`` stroke does
     (per-point color, opacity and width, joints, caps), but its ribbon always
     faces the camera. Its width is in world units, so under a perspective
     camera it gets thinner with distance.
@@ -30,7 +30,7 @@ class Curve3D(BezierPath):
         t_range: tuple[float, float],
         samples: int = 64,
         **kwargs: Any,
-    ) -> Curve3D:
+    ) -> RCurve3D:
         """Smooth curve through ``function(t)`` at ``samples`` evenly spaced ``t``.
 
         Handles come from the derivative estimated by central differences,

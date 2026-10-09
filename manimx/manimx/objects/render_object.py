@@ -7,7 +7,7 @@ from dataclasses import KW_ONLY, InitVar, dataclass, field
 from .transform import Quaternion, Transform
 from .versioning import versioned_fields
 
-__all__ = ["Quaternion", "RenderObject", "new_uid"]
+__all__ = ["Quaternion", "RNode", "new_uid"]
 
 # Runtime ids are never reused within a process, so renderer caches can key
 # on them without ever confusing a new object with a deleted one.
@@ -26,11 +26,11 @@ def new_uid() -> int:
 
 
 @dataclass(slots=True, eq=False)
-class RenderObject:
+class RNode:
     """Scene-graph node: identity, local 3D transform and visibility.
 
     Nodes compare by identity. Geometry and style live only on leaf objects
-    such as :class:`Shape2D`; groups only arrange their children. Render
+    such as :class:`RShape2D`; groups only arrange their children. Render
     objects carry no names: names and searching belong to the scene
     objects they are snapshots of (manimx.animation).
 

@@ -19,7 +19,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..objects import ClippingGroup, Group, RenderObject
+from ..objects import RClippingGroup, RGroup, RNode
 
 if TYPE_CHECKING:
     from .cache import MobjectDataCache
@@ -39,7 +39,7 @@ class RemoveObjects(CacheCommand):
     uids: tuple[int, ...]
 
     @classmethod
-    def subtree(cls, root: RenderObject) -> RemoveObjects:
+    def subtree(cls, root: RNode) -> RemoveObjects:
         """Command removing ``root`` and all of its descendants."""
         return cls(tuple(obj.uid for obj in _descendants(root)))
 
@@ -56,8 +56,8 @@ class ClearScene(CacheCommand):
         cache.clear()
 
 
-def _descendants(obj: RenderObject) -> Iterator[RenderObject]:
+def _descendants(obj: RNode) -> Iterator[RNode]:
     yield obj
-    if isinstance(obj, (Group, ClippingGroup)):
+    if isinstance(obj, (RGroup, RClippingGroup)):
         for child in obj.children:
             yield from _descendants(child)

@@ -4,12 +4,12 @@ from dataclasses import dataclass
 
 from .material import PbrMaterial
 from .mesh import MeshData, box_mesh
-from .render_object import RenderObject
+from .render_object import RNode
 from .versioning import versioned
 
 
 @dataclass(slots=True, eq=False)
-class Shape3D(RenderObject):
+class RShape3D(RNode):
     """A lit triangle mesh with a physically based material.
 
     ``mesh`` is in local coordinates; :attr:`transform` places it in the

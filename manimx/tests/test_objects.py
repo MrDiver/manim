@@ -5,14 +5,14 @@ import pytest
 
 from manimx import (
     CapStyle,
-    ClippingGroup,
+    RClippingGroup,
     Fill,
-    Group,
+    RGroup,
     JointType,
     Quaternion,
-    RenderObject,
-    Shape2D,
-    Shape3D,
+    RNode,
+    RShape2D,
+    RShape3D,
     Stroke,
     Transform,
     quaternion_from_axis_angle,
@@ -22,22 +22,22 @@ from manimx.objects.shape2d import is_closed
 from manimx.objects.style import resample, to_rgb_array
 from manimx.utils.color import BLUE, RED
 
-# --- RenderObject: identity and versioning ------------------------------------
+# --- RNode: identity and versioning ------------------------------------
 
 
 def test_render_object_defaults_to_identity_transform() -> None:
-    obj = RenderObject()
+    obj = RNode()
 
     assert obj.transform.rotation == Quaternion(1.0, 0.0, 0.0, 0.0)
     assert obj.visible is True
 
 
 def test_uids_are_unique() -> None:
-    assert len({RenderObject().uid for _ in range(100)}) == 100
+    assert len({RNode().uid for _ in range(100)}) == 100
 
 
 def test_only_versioned_fields_bump_versions() -> None:
-    shape = Shape2D.from_corners([(0, 0), (1, 0)])
+    shape = RShape2D.from_corners([(0, 0), (1, 0)])
     before = shape.version("points", "fill", "stroke")
 
     shape.transform = shape.transform.translated((1.0, 0.0, 0.0))
@@ -49,11 +49,11 @@ def test_only_versioned_fields_bump_versions() -> None:
 
 def test_version_rejects_unversioned_field() -> None:
     with pytest.raises(ValueError, match="transform is not versioned"):
-        Shape2D().version("transform")
+        RShape2D().version("transform")
 
 
 def test_shape_points_are_read_only() -> None:
-    shape = Shape2D.from_corners([(0, 0), (1, 0)])
+    shape = RShape2D.from_corners([(0, 0), (1, 0)])
 
     with pytest.raises(ValueError, match="read-only"):
         shape.points[0, 0] = 5.0
@@ -68,8 +68,8 @@ def test_shape_points_are_read_only() -> None:
 
 
 def test_group_children_are_mutable() -> None:
-    group = Group()
-    child = Shape2D()
+    group = RGroup()
+    child = RShape2D()
 
     group.children.append(child)
 
@@ -77,10 +77,10 @@ def test_group_children_are_mutable() -> None:
 
 
 def test_clipping_group_children_are_mask_and_content() -> None:
-    mask, content = Shape2D(), Shape2D()
+    mask, content = RShape2D(), RShape2D()
 
-    assert ClippingGroup(mask=mask, content=content).children == [mask, content]
-    assert ClippingGroup(content=content).children == [content]
+    assert RClippingGroup(mask=mask, content=content).children == [mask, content]
+    assert RClippingGroup(content=content).children == [content]
 
 
 # --- Transform -----------------------------------------------------------------
@@ -139,7 +139,7 @@ def test_style_lists_resample_over_points() -> None:
 
 
 def test_stroke_per_point_values() -> None:
-    shape = Shape2D.from_corners(
+    shape = RShape2D.from_corners(
         [(0, 0), (1, 0), (2, 0)],
         stroke=Stroke([RED, BLUE], width=[0.0, 8.0], opacity=0.5, joint=[JointType.ROUND, JointType.BEVEL]),
     )
@@ -172,32 +172,32 @@ def test_styles_compare_by_value() -> None:
     assert Stroke(cap=CapStyle.ROUND) != Stroke(cap=CapStyle.BUTT)
 
 
-# --- Shape2D geometry ----------------------------------------------------------
+# --- RShape2D geometry ----------------------------------------------------------
 
 
 def test_shape2d_validates_points() -> None:
     with pytest.raises(ValueError, match="shape \\(N, 2\\)"):
-        Shape2D(points=np.zeros((4, 3)))
+        RShape2D(points=np.zeros((4, 3)))
     with pytest.raises(ValueError, match="four entries"):
-        Shape2D(points=np.zeros((3, 2)))
+        RShape2D(points=np.zeros((3, 2)))
 
 
 def test_from_corners_builds_straight_cubics() -> None:
-    shape = Shape2D.from_corners([(0, 0), (3, 0)])
+    shape = RShape2D.from_corners([(0, 0), (3, 0)])
 
     np.testing.assert_allclose(shape.points, [[0, 0], [1, 0], [2, 0], [3, 0]])
 
 
 def test_subpaths_split_at_gaps() -> None:
-    first = Shape2D.from_corners([(0, 0), (1, 0), (1, 1)], closed=True).points
-    second = Shape2D.from_corners([(5, 5), (6, 5)]).points
-    shape = Shape2D(points=np.vstack([first, second]))
+    first = RShape2D.from_corners([(0, 0), (1, 0), (1, 1)], closed=True).points
+    second = RShape2D.from_corners([(5, 5), (6, 5)]).points
+    shape = RShape2D(points=np.vstack([first, second]))
 
     subpaths = shape.subpaths()
 
     assert [len(p) for p in subpaths] == [12, 4]
     assert is_closed(subpaths[0]) and not is_closed(subpaths[1])
-    assert Shape2D().subpaths() == []
+    assert RShape2D().subpaths() == []
 
 
 def test_geometry_matches_manim() -> None:
@@ -212,7 +212,7 @@ def test_geometry_matches_manim() -> None:
 def test_shape3d_versions_mesh_and_material() -> None:
     from manimx import PbrMaterial, sphere_mesh
 
-    shape = Shape3D()
+    shape = RShape3D()
     before = shape.version("mesh", "material")
     shape.material = PbrMaterial(roughness=0.1)
     shape.mesh = sphere_mesh()

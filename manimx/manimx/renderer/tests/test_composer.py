@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from manimx import Fill, Group, PbrMaterial, Shape3D, Stroke, Transform, sphere_mesh
+from manimx import Fill, RGroup, PbrMaterial, RShape3D, Stroke, Transform, sphere_mesh
 from manimx.objects.geometry import square
 from manimx.renderer import (
     Bloom,
@@ -52,11 +52,11 @@ def test_composer_validates_effects(renderer: WGPURenderer) -> None:
 
 
 def test_motion_blur_averages_sub_frames(renderer: WGPURenderer) -> None:
-    def scene_at(time: float) -> Group:
+    def scene_at(time: float) -> RGroup:
         # A white bar that is only visible during the second half of the shutter.
         bar = square(side_length=2.0, fill=Fill("#FFFFFF", opacity=1.0), stroke=Stroke(width=0.0))
         bar.visible = time > 0.0
-        return Group(children=[bar])
+        return RGroup(children=[bar])
 
     composer = FrameComposer(renderer, [MotionBlur(samples=8, shutter=1.0)])
     image = composer.compose(scene_at, RenderConfig(**SIZE))
@@ -77,15 +77,15 @@ def test_motion_blur_skips_static_scenes(renderer: WGPURenderer) -> None:
 
     renderer.render_layers = counting
     try:
-        FrameComposer(renderer, [MotionBlur(samples=8)]).compose(Group(), RenderConfig(**SIZE))
+        FrameComposer(renderer, [MotionBlur(samples=8)]).compose(RGroup(), RenderConfig(**SIZE))
     finally:
         del renderer.render_layers
     assert len(calls) == 1
 
 
-def _glowing_sphere() -> Group:
-    sphere = Shape3D(mesh=sphere_mesh(1.0), material=PbrMaterial("#000000", emissive="#FFFFFF", emissive_strength=8.0))
-    return Group(children=[sphere])
+def _glowing_sphere() -> RGroup:
+    sphere = RShape3D(mesh=sphere_mesh(1.0), material=PbrMaterial("#000000", emissive="#FFFFFF", emissive_strength=8.0))
+    return RGroup(children=[sphere])
 
 
 def test_bloom_spreads_bright_light(renderer: WGPURenderer) -> None:
@@ -100,7 +100,7 @@ def test_bloom_spreads_bright_light(renderer: WGPURenderer) -> None:
 def test_tone_map_affects_lit_layer_but_not_2d_colors(renderer: WGPURenderer) -> None:
     config = RenderConfig(**SIZE, ambient_intensity=0.0, default_lights=False)
     flat = square(side_length=1.0, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0), transform=Transform(position=(-4.0, 0.0, 0.0)))
-    scene = Group(children=[flat, *_glowing_sphere().children])
+    scene = RGroup(children=[flat, *_glowing_sphere().children])
 
     neutral = FrameComposer(renderer, [ToneMap(ToneMapOperator.PBR_NEUTRAL)]).compose(scene, config)
     aces = FrameComposer(renderer, [ToneMap(ToneMapOperator.ACES)]).compose(scene, config)
@@ -129,7 +129,7 @@ def test_shader_effects_on_both_stages(renderer: WGPURenderer) -> None:
     )
     config = RenderConfig(**SIZE, background_color="#000000")
 
-    inverted = FrameComposer(renderer, [invert]).compose(Group(), config)
+    inverted = FrameComposer(renderer, [invert]).compose(RGroup(), config)
     assert tuple(column(inverted, 0.0)) == (255, 255, 255)
     dark = FrameComposer(renderer, [darken_lit]).compose(_glowing_sphere(), RenderConfig(**SIZE))
     assert column(dark, 0.0).sum() == 0

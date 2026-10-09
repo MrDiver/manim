@@ -1,32 +1,32 @@
-from .clip_group import ClippingGroup
-from .curve3d import Curve3D
-from .group import Group
-from .light import DirectionalLight, Light, PointLight, SpotLight
+from .clip_group import RClippingGroup
+from .curve3d import RCurve3D
+from .group import RGroup
+from .light import RDirectionalLight, RLight, RPointLight, RSpotLight
 from .material import PbrMaterial, Texture
 from .mesh import MeshData, box_mesh, sphere_mesh, torus_mesh
-from .render_object import RenderObject, new_uid
-from .shape2d import Shape2D
-from .shape3d import Shape3D
+from .render_object import RNode, new_uid
+from .shape2d import RShape2D
+from .shape3d import RShape3D
 from .style import CapStyle, Fill, JointType, Stroke
 from .transform import Quaternion, Transform, quaternion_from_axis_angle
 
 __all__ = [
     "CapStyle",
-    "ClippingGroup",
-    "Curve3D",
-    "DirectionalLight",
+    "RClippingGroup",
+    "RCurve3D",
+    "RDirectionalLight",
     "Fill",
-    "Group",
+    "RGroup",
     "JointType",
-    "Light",
+    "RLight",
     "MeshData",
     "PbrMaterial",
-    "PointLight",
+    "RPointLight",
     "Quaternion",
-    "RenderObject",
-    "Shape2D",
-    "Shape3D",
-    "SpotLight",
+    "RNode",
+    "RShape2D",
+    "RShape3D",
+    "RSpotLight",
     "Stroke",
     "Texture",
     "Transform",

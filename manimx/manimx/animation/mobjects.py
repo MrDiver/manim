@@ -24,10 +24,10 @@ from typing import Any
 import numpy as np
 import quaternion
 
-from ..objects import ClippingGroup as RenderClippingGroup
-from ..objects import Fill, Shape2D, Stroke, Transform
-from ..objects import Group as RenderGroup
-from ..objects import RenderObject, new_uid
+from ..objects import RClippingGroup
+from ..objects import Fill, RShape2D, Stroke, Transform
+from ..objects import RGroup
+from ..objects import RNode, new_uid
 from ..objects.geometry import arc_points, regular_polygon, rectangle
 from ..objects.transform import quaternion_from_axis_angle
 from ..utils.color import WHITE, ManimColor, ParsableManimColor
@@ -157,13 +157,13 @@ class Mobject:
 
     # -- render state -------------------------------------------------------
 
-    def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RenderObject | None:
+    def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RNode | None:
         """Render state for the current signal values (None if invisible)."""
         if self._collapsed():
             return None
         alphas = (*alphas, self.alpha)
         children = [snapshot for child in self.children if (snapshot := child.snapshot(alphas)) is not None]
-        return RenderGroup(children=children, transform=self._transform(), uid=self.uid)
+        return RGroup(children=children, transform=self._transform(), uid=self.uid)
 
     def _collapsed(self) -> bool:
         """Scaled to nothing: invisible, and a zero scale would leave the
@@ -230,12 +230,12 @@ class VMobject(Mobject):
     def set_color(self, color: ParsableManimColor) -> ChangeList:
         return [(self.fill_color, ABS, _rgb(color)), (self.stroke_color, ABS, _rgb(color))]
 
-    def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RenderObject | None:
+    def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RNode | None:
         if self._collapsed():
             return None
         alphas = (*alphas, self.alpha)
         alpha = math.prod(signal.value for signal in alphas)
-        shape = Shape2D(
+        shape = RShape2D(
             uid=self.uid,
             points=self.points.value,
             fill=Fill(np.array(self.fill_color.value), opacity=min(1.0, max(0.0, self.fill_opacity.value * alpha))),
@@ -254,7 +254,7 @@ class VMobject(Mobject):
         if not self.children:
             return shape
         children = [snapshot for child in self.children if (snapshot := child.snapshot(alphas)) is not None]
-        return RenderGroup(children=[shape, *children], uid=new_uid())
+        return RGroup(children=[shape, *children], uid=new_uid())
 
 
 class Group(Mobject):
@@ -282,14 +282,14 @@ class ClippingGroup(Mobject):
         self.one_sided = one_sided
         self.children = [mask, content]
 
-    def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RenderObject | None:
+    def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RNode | None:
         if self._collapsed():
             return None
         alphas = (*alphas, self.alpha)
         mask, content = self.mask.snapshot(alphas), self.content.snapshot(alphas)
         if mask is None or content is None:
             return None  # nothing to show through
-        return RenderClippingGroup(
+        return RClippingGroup(
             mask=mask, content=content, one_sided=self.one_sided, transform=self._transform(), uid=self.uid
         )
 
@@ -330,7 +330,7 @@ class Polyline(VMobject):
     """Straight segments through ``corners`` (closed into a polygon if asked)."""
 
     def __init__(self, corners: Sequence[Sequence[float]], closed: bool = False, name: str | None = None, **style: Any) -> None:
-        super().__init__(Shape2D.from_corners(corners, closed=closed).points, name, **style)
+        super().__init__(RShape2D.from_corners(corners, closed=closed).points, name, **style)
 
 
 class Triangle(RegularPolygon):

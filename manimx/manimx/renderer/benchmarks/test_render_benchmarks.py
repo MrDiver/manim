@@ -13,15 +13,15 @@ import numpy as np
 import pytest
 
 from manimx import (
-    Curve3D,
-    DirectionalLight,
+    RCurve3D,
+    RDirectionalLight,
     Fill,
-    Group,
+    RGroup,
     PbrMaterial,
-    PointLight,
-    Shape2D,
-    Shape3D,
-    SpotLight,
+    RPointLight,
+    RShape2D,
+    RShape3D,
+    RSpotLight,
     Stroke,
     Transform,
     box_mesh,
@@ -38,9 +38,9 @@ FULL_HD = {"pixel_width": 1920, "pixel_height": 1080}
 PERSPECTIVE = Camera.look_at((12, -16, 10), (0, 0, 1), field_of_view=math.radians(45), near=0.5, far=200)
 
 
-def many_circles(count: int) -> Group:
+def many_circles(count: int) -> RGroup:
     rng = np.random.default_rng(1)
-    return Group(
+    return RGroup(
         children=[
             circle(
                 radius=0.15,
@@ -53,21 +53,21 @@ def many_circles(count: int) -> Group:
     )
 
 
-def glyph_grid(columns: int, rows: int) -> Group:
+def glyph_grid(columns: int, rows: int) -> RGroup:
     points = np.load(M_GLYPH_POINTS)
-    return Group(
+    return RGroup(
         children=[
-            Shape2D(points=points, fill=Fill("#FFFFFF", opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(-6.5 + c * 0.7, 3.5 - r * 0.8, 0.0), scale=(1.2, 1.2, 1.0)))
+            RShape2D(points=points, fill=Fill("#FFFFFF", opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(-6.5 + c * 0.7, 3.5 - r * 0.8, 0.0), scale=(1.2, 1.2, 1.0)))
             for c in range(columns)
             for r in range(rows)
         ],
     )
 
 
-def helices(count: int) -> Group:
-    return Group(
+def helices(count: int) -> RGroup:
+    return RGroup(
         children=[
-            Curve3D.parametric(
+            RCurve3D.parametric(
                 lambda t, i=i: (math.cos(t) + (i % 10 - 4.5) * 2.2, math.sin(t) + (i // 10 - 2) * 2.2, 0.1 * t),
                 (0.0, 8 * math.pi),
                 128,
@@ -78,20 +78,20 @@ def helices(count: int) -> Group:
     )
 
 
-def lit_scene(spheres: int, shadows: bool = True) -> Group:
+def lit_scene(spheres: int, shadows: bool = True) -> RGroup:
     rng = np.random.default_rng(2)
     material = PbrMaterial("#b0b0b0", roughness=0.5)
     balls = [
-        Shape3D(mesh=sphere_mesh(0.4), material=material, transform=Transform(position=(rng.uniform(-6, 6), rng.uniform(-6, 6), rng.uniform(0.4, 3))))
+        RShape3D(mesh=sphere_mesh(0.4), material=material, transform=Transform(position=(rng.uniform(-6, 6), rng.uniform(-6, 6), rng.uniform(0.4, 3))))
         for i in range(spheres)
     ]
-    floor = Shape3D(mesh=box_mesh(16, 16, 0.2), material=PbrMaterial("#d0d0d0", roughness=0.9), transform=Transform(position=(0, 0, -0.1)))
+    floor = RShape3D(mesh=box_mesh(16, 16, 0.2), material=PbrMaterial("#d0d0d0", roughness=0.9), transform=Transform(position=(0, 0, -0.1)))
     lights = [
-        DirectionalLight.aimed((0.6, 1.0, -1.2), cast_shadows=shadows),
-        SpotLight.aimed((-6, -4, 8), (0, 0, 0), intensity=80, outer_cone_angle=0.6, size=0.3, cast_shadows=shadows),
-        PointLight(intensity=8, transform=Transform(position=(2, -2, 2)), cast_shadows=shadows),
+        RDirectionalLight.aimed((0.6, 1.0, -1.2), cast_shadows=shadows),
+        RSpotLight.aimed((-6, -4, 8), (0, 0, 0), intensity=80, outer_cone_angle=0.6, size=0.3, cast_shadows=shadows),
+        RPointLight(intensity=8, transform=Transform(position=(2, -2, 2)), cast_shadows=shadows),
     ]
-    return Group(children=[floor, *balls, *lights])
+    return RGroup(children=[floor, *balls, *lights])
 
 
 # --- 2D ---------------------------------------------------------------------------
@@ -148,7 +148,7 @@ def test_shadow_resolution_1080p(measure, renderer, resolution: int) -> None:
 def test_motion_blur_16_samples_1080p(measure, renderer) -> None:
     scene = many_circles(1000)
 
-    def scene_at(t: float) -> Group:
+    def scene_at(t: float) -> RGroup:
         scene.transform = Transform(position=(t * 2.0, 0.0, 0.0))
         return scene
 

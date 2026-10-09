@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..objects import Group as RenderGroup
+from ..objects import RGroup
 from .animations import Animation, AnimationBuilder, SetValue, SignalChange, as_animation
 from .authoring import _active
 from .mobjects import Mobject
@@ -362,7 +362,7 @@ class PreparedScene:
         """Total duration of all segments (compiled time without gaps)."""
         return sum(segment.duration for segment in self.segments)
 
-    def state_at(self, t: float, global_time: float | None = None) -> RenderGroup:
+    def state_at(self, t: float, global_time: float | None = None) -> RGroup:
         """Render state at compiled time ``t`` (pure: no dependence on earlier calls).
 
         ``scene_time`` becomes the playing time at ``t`` (frozen inside the
@@ -373,7 +373,7 @@ class PreparedScene:
         """
         self.evaluate(t, global_time)
         children = [snapshot for mobject in self.roots if mobject.present.value and (snapshot := mobject.snapshot()) is not None]
-        return RenderGroup(children=children)
+        return RGroup(children=children)
 
     def sounds(self) -> list[tuple[float, Sound, float]]:
         """``(compiled time, sound, volume)`` of every sound in the scene."""

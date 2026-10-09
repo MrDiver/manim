@@ -6,7 +6,7 @@ import math
 import numpy as np
 import pytest
 
-from manimx import Shape2D
+from manimx import RShape2D
 from manimx.animation import (
     DOWN,
     LEFT,
@@ -269,7 +269,7 @@ def test_snapshots_keep_identity_and_cache_versions() -> None:
     prepared = prepare(construct)
     first, second = objects(prepared, 0.2)["square"], objects(prepared, 0.7)["square"]
 
-    assert isinstance(first, Shape2D) and first.uid == second.uid
+    assert isinstance(first, RShape2D) and first.uid == second.uid
     assert first.version("points", "fill") == second.version("points", "fill")  # only moved
     assert first.transform.position != second.transform.position
 
@@ -331,7 +331,7 @@ def test_grow_from_center_and_shrink_to_center() -> None:
 
 
 def test_clipping_groups_snapshot_to_render_clipping_groups() -> None:
-    from manimx import ClippingGroup as RenderClippingGroup
+    from manimx import RClippingGroup
     from manimx.animation import ClippingGroup, Polyline
 
     def construct(scene):
@@ -345,7 +345,7 @@ def test_clipping_groups_snapshot_to_render_clipping_groups() -> None:
     prepared = prepare(construct)
     clip = objects(prepared, 1.0)["clip"]
 
-    assert isinstance(clip, RenderClippingGroup) and clip.one_sided
+    assert isinstance(clip, RClippingGroup) and clip.one_sided
     assert list(by_name([clip.mask, clip.content], prepared.roots)) == ["mask", "line"]
     assert clip.transform.position == (0.0, 1.0, 0.0)
     assert prepared.state_at(2.0).children[0].mask.fill.opacity[0] == 0.0  # mask faded: content hidden by the renderer

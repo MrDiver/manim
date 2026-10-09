@@ -6,7 +6,7 @@ live objects:
 
     (uid, kind) -> (version, data)
 
-* ``uid`` is the runtime-unique :attr:`RenderObject.uid`.
+* ``uid`` is the runtime-unique :attr:`RNode.uid`.
 * ``kind`` names what was derived, e.g. ``"fill-mesh"``. One object can own
   many kinds of data.
 * ``version`` is whatever the producer derived the data from, usually

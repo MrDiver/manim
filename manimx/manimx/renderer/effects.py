@@ -12,7 +12,7 @@ are two kinds:
   shaders) or on the final linear frame (``stage="frame"``: custom shaders).
 
 :class:`ToneMap` selects how the lit layer's HDR radiance is mapped to
-displayable colors. Manim's flat 2D colors (Shape2D, Curve3D) are never
+displayable colors. Manim's flat 2D colors (RShape2D, RCurve3D) are never
 tone mapped, so their hex colors come out exactly.
 """
 

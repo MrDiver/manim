@@ -8,7 +8,7 @@ signals, so renderer caches survive any number of snapshots.
 import numpy as np
 import pytest
 
-from manimx import Fill, Group, Shape2D, SpotLight, Stroke
+from manimx import Fill, RGroup, RShape2D, RSpotLight, Stroke
 from manimx.animation import PATH, RootSignal, Vector3Signal, derive, version_token
 from manimx.objects import new_uid
 from manimx.objects.geometry import arc_points
@@ -19,24 +19,24 @@ from manimx.renderer.webgpu.vector_batch import VectorBatch
 
 def test_uid_can_be_given_and_is_unique_otherwise() -> None:
     uid = new_uid()
-    first, second = Shape2D(uid=uid), Shape2D(uid=uid)
+    first, second = RShape2D(uid=uid), RShape2D(uid=uid)
 
     assert first.uid == second.uid == uid
-    assert Shape2D().uid != Shape2D().uid
-    assert Shape2D().uid > uid  # same counter: no collisions
+    assert RShape2D().uid != RShape2D().uid
+    assert RShape2D().uid > uid  # same counter: no collisions
 
 
 def test_explicit_versions_replace_assignment_counts() -> None:
-    shape = Shape2D(points=arc_points(), versions={"points": ("p", 7)})
+    shape = RShape2D(points=arc_points(), versions={"points": ("p", 7)})
 
     assert shape.version("points") == (("p", 7),)
-    assert Shape2D(points=arc_points(), versions={"points": ("p", 7)}).version("points") == shape.version("points")
+    assert RShape2D(points=arc_points(), versions={"points": ("p", 7)}).version("points") == shape.version("points")
     with pytest.raises(ValueError, match=r"no versioned fields \['transform'\]"):
-        Shape2D(versions={"transform": 1})
+        RShape2D(versions={"transform": 1})
 
 
 def test_assigning_after_explicit_versions_gives_new_tokens() -> None:
-    shape = Shape2D(versions={"points": ("p", 7)})
+    shape = RShape2D(versions={"points": ("p", 7)})
     seen = {shape.version("points")}
 
     for _ in range(3):
@@ -47,11 +47,11 @@ def test_assigning_after_explicit_versions_gives_new_tokens() -> None:
 
 def test_subclasses_with_their_own_checks_accept_versions() -> None:
     uid = new_uid()
-    light = SpotLight(uid=uid, inner_cone_angle=0.1, outer_cone_angle=0.2)
+    light = RSpotLight(uid=uid, inner_cone_angle=0.1, outer_cone_angle=0.2)
 
     assert light.uid == uid
     with pytest.raises(ValueError, match="cone"):
-        SpotLight(inner_cone_angle=0.3, outer_cone_angle=0.2)
+        RSpotLight(inner_cone_angle=0.3, outer_cone_angle=0.2)
 
 
 def test_version_token_follows_signal_changes() -> None:
@@ -75,10 +75,10 @@ def test_snapshots_from_unchanged_signals_share_cached_triangulations() -> None:
     points = derive(lambda r: arc_points(r), radius, kind=PATH)
     cache = MobjectDataCache()
 
-    def snapshot() -> Group:
+    def snapshot() -> RGroup:
         from manimx import Transform
 
-        shape = Shape2D(
+        shape = RShape2D(
             uid=uid,
             points=points.value,
             fill=Fill(opacity=1.0),
@@ -86,7 +86,7 @@ def test_snapshots_from_unchanged_signals_share_cached_triangulations() -> None:
             transform=Transform(position=(x.value, 0.0, 0.0)),
             versions={"points": version_token(points), "fill": "fill-0", "stroke": "stroke-0"},
         )
-        VectorBatch.build(flatten_scene(Group(children=[shape])), cache, np.zeros(3))
+        VectorBatch.build(flatten_scene(RGroup(children=[shape])), cache, np.zeros(3))
         return shape
 
     first = snapshot()

@@ -1,4 +1,4 @@
-"""Pack all Shape3D meshes and lights of a frame into shared GPU arrays.
+"""Pack all RShape3D meshes and lights of a frame into shared GPU arrays.
 
 Pure numpy, like vector_batch.py. Buffers (dtypes mirror mesh.wgsl,
 surface.wgsl and lighting.wgsl):
@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ...objects import DirectionalLight, PbrMaterial, PointLight, Shape3D, SpotLight, Texture
+from ...objects import RDirectionalLight, PbrMaterial, RPointLight, RShape3D, RSpotLight, Texture
 from ...objects.material import linear_rgb
 from ...objects.mesh import MeshData
 from ..cache import MobjectDataCache
@@ -123,7 +123,7 @@ class MeshBatch:
         light_items = scene.lights or (default_lights(config) if config.default_lights else [])
         for item in scene.items:
             shape = item.obj
-            if not isinstance(shape, Shape3D) or shape.mesh.triangle_count == 0:
+            if not isinstance(shape, RShape3D) or shape.mesh.triangle_count == 0:
                 continue
             mesh_vertices = cache.get_or_create(
                 shape.uid, "mesh-vertices", shape.version("mesh"), lambda: _interleave(shape.mesh)
@@ -216,14 +216,14 @@ def light_array(lights: list[LightItem], config: RenderConfig) -> np.ndarray:
         row["size"] = light.size
         row["shadow_view"] = -1
         row["scope"] = item.clip
-        if isinstance(light, DirectionalLight):
+        if isinstance(light, RDirectionalLight):
             row["kind"] = LIGHT_DIRECTIONAL
-        elif isinstance(light, SpotLight):
+        elif isinstance(light, RSpotLight):
             row["kind"] = LIGHT_SPOT
             row["range"] = light.range or 0.0
             row["inner_cone_cos"] = math.cos(light.inner_cone_angle)
             row["outer_cone_cos"] = math.cos(light.outer_cone_angle)
-        elif isinstance(light, PointLight):
+        elif isinstance(light, RPointLight):
             row["kind"] = LIGHT_POINT
             row["range"] = light.range or 0.0
         else:  # pragma: no cover - guarded by the class hierarchy
@@ -237,5 +237,5 @@ def default_lights(config: RenderConfig) -> list[LightItem]:
     camera = config.camera.transform.matrix()
     right, up, backwards = camera[:3, 0], camera[:3, 1], camera[:3, 2]
     direction = -(1.0 * up - 0.6 * right + 0.8 * backwards)
-    light = DirectionalLight.aimed(tuple(direction), intensity=3.0)
+    light = RDirectionalLight.aimed(tuple(direction), intensity=3.0)
     return [LightItem(light, light.transform.matrix())]

@@ -1,4 +1,4 @@
-"""CPU tessellation of :class:`Shape2D` fills into triangles with exact curves.
+"""CPU tessellation of :class:`RShape2D` fills into triangles with exact curves.
 
 The approach is the one ManimGL uses (Loop & Blinn, "Resolution Independent
 Curve Rendering using Programmable Graphics Hardware", 2005):
@@ -105,7 +105,7 @@ class _Quadratic:
 
 
 def tessellate_fill(points: np.ndarray, tolerance: float = DEFAULT_TOLERANCE) -> FillMesh:
-    """Triangulate a ``VMobject``-layout point array (see :class:`Shape2D`).
+    """Triangulate a ``VMobject``-layout point array (see :class:`RShape2D`).
 
     Open subpaths are closed with a straight line, like Cairo does when
     filling.

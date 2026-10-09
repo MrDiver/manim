@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..objects import Group as RenderGroup
+from ..objects import RGroup
 from ..objects import Quaternion, Transform, new_uid
 from ..renderer.config import Camera as RenderCamera
 from ..renderer.config import ViewState
@@ -193,7 +193,7 @@ class Clip:
 
     # -- queries ------------------------------------------------------------
 
-    def still(self, at: float, global_time: float | None = None) -> RenderGroup:
+    def still(self, at: float, global_time: float | None = None) -> RGroup:
         """The clip's render state at playing time ``at``, placed by its
         transform: a still frame, independent of the clip's start, cut and
         time map. ``global_time`` (for idle motion) defaults to ``at``."""
@@ -201,8 +201,8 @@ class Clip:
         state = self.scene.state_at(compiled, global_time=at if global_time is None else global_time)
         return self._group(state.children)
 
-    def _group(self, children: list) -> RenderGroup:
-        return RenderGroup(transform=self.transform, children=children, uid=self.uid)
+    def _group(self, children: list) -> RGroup:
+        return RGroup(transform=self.transform, children=children, uid=self.uid)
 
     def event_of(self, cue: str) -> str:
         return self.cue_events.get(cue, cue)
@@ -362,7 +362,7 @@ class Timeline:
         ends = [clip.end for clip in self.clips if clip.end != NEVER]
         return max(ends, default=0.0)
 
-    def state_at(self, t: float, world: World | None = None) -> RenderGroup:
+    def state_at(self, t: float, world: World | None = None) -> RGroup:
         """Render state of ``world`` (default: the first world) at global
         time ``t``: one group per active clip, placed by the clip's
         transform, in layer order (higher layers on top; equal layers in
@@ -377,7 +377,7 @@ class Timeline:
             if compiled is not None:
                 state = clip.scene.state_at(compiled, global_time=t)
                 children.append(clip._group(state.children))
-        return RenderGroup(children=children, uid=world.uid)
+        return RGroup(children=children, uid=world.uid)
 
     def audio(self, start: float = 0.0, end: float | None = None, sample_rate: int = DEFAULT_SAMPLE_RATE) -> np.ndarray:
         """Every clip's sounds mixed on the global timeline, stereo float32

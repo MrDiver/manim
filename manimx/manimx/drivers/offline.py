@@ -51,7 +51,7 @@ from typing import Any
 
 import numpy as np
 
-from ..objects import RenderObject
+from ..objects import RNode
 from ..renderer.config import RenderConfig, ViewState
 from ..renderer.effects import Effect
 from .sinks import FrameFormat, FrameSink
@@ -64,7 +64,7 @@ Progress = Callable[[int, int], None]
 class FrameSource:
     """Something to render: a function of time and how long it lasts."""
 
-    state_at: Callable[[float], RenderObject | ViewState]
+    state_at: Callable[[float], RNode | ViewState]
     duration: float
     audio: Callable[[float, float, int], np.ndarray] | None = None
     """``audio(start, end, sample_rate)``: stereo float32 samples, if any."""
