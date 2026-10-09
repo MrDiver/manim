@@ -73,7 +73,7 @@ class Simulation(Animation):
     It ends after ``duration`` seconds, or at the first step after which
     ``until()`` returns True (then within ``max_time``, or an error). The
     last step is shortened so the simulation ends exactly at
-    ``duration``. ``objects`` are nodes the step function changes that
+    ``duration``. ``adds`` are nodes the step function changes that
     are not in the scene yet (they are added); every node in the scene
     is watched anyway.
     """
@@ -86,7 +86,7 @@ class Simulation(Animation):
         until: Callable[[], bool] | None = None,
         max_time: float = 60.0,
         keyframe_rate: float = DEFAULT_KEYFRAME_RATE,
-        objects: Sequence[Node] = (),
+        adds: Sequence[Node] = (),
     ) -> None:
         if dt <= 0.0 or keyframe_rate <= 0.0:
             raise ValueError("a simulation needs a positive step and keyframe rate")
@@ -98,7 +98,7 @@ class Simulation(Animation):
         self.until = until
         self.max_time = max_time
         self.keyframe_rate = keyframe_rate
-        self.objects = tuple(objects)
+        self.adds = tuple(adds)
         self.run_time = duration if duration is not None else max_time
         self.rate = linear
         self.time = 0.0
@@ -137,7 +137,7 @@ class Simulation(Animation):
     # -- the animation contract -----------------------------------------------
 
     def nodes(self) -> Sequence[Node]:
-        return self.objects
+        return self.adds
 
     def targets(self) -> Sequence[Target]:
         if not self._baked:
@@ -162,7 +162,7 @@ class Simulation(Animation):
         simulated duration. Called by ``play``."""
         if self._baked:
             raise RuntimeError("a simulation can only be played once")
-        watched = _watched_signals([*compiler.roots, *self.objects])
+        watched = _watched_signals([*compiler.roots, *self.adds])
         initial = {key: signal.value for key, signal in watched.items()}
         inputs = {key: track for key, track in compiler.tracks.items() if key in watched}
         owned: set[int] = set()
