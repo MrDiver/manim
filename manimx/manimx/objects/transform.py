@@ -82,23 +82,6 @@ class Transform:
         factors = np.broadcast_to(np.asarray(factor, dtype=np.float64), (3,))
         return replace(self, scale=tuple(np.asarray(self.scale) * factors))
 
-    def interpolate(self, other: Transform, alpha: float) -> Transform:
-        """Blend towards ``other``: lerp position and scale, slerp rotation."""
-        target = other.rotation
-        # q and -q are the same rotation; flip to take the shortest arc.
-        if np.dot(self.rotation.components, target.components) < 0.0:
-            target = -target
-        return Transform(
-            position=tuple(
-                (1.0 - alpha) * np.asarray(self.position)
-                + alpha * np.asarray(other.position)
-            ),
-            rotation=quaternion.slerp_evaluate(self.rotation, target, alpha),
-            scale=tuple(
-                (1.0 - alpha) * np.asarray(self.scale) + alpha * np.asarray(other.scale)
-            ),
-        )
-
 
 def apply_matrix(matrix: np.ndarray, points: np.ndarray) -> np.ndarray:
     """Apply a homogeneous 4x4 matrix to an ``(N, 3)`` array of points."""

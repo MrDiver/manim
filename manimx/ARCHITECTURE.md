@@ -718,7 +718,7 @@ flowchart LR
 2. **Compositions:** a `View` shown as an image inside a `World2D`, nesting.
 3. **HDR colors for `RShape2D`:** a float vector target and `Bloom` on
    `RenderLayers.vector`, while colors ≤ 1 stay exactly Manim's.
-4. **Morphing** (a `Transform` animation, path alignment), and Whisper
+4. **Morphing** (a `Morph` animation, path alignment), and Whisper
    transcripts calling `Clip.bind_cue()`.
 5. **Usability and performance, full time.** The remaining cost is CPU:
    `flatten_scene()`, `RetainedVectors.build()` bookkeeping and `state_at()`.

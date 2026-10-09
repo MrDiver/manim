@@ -105,25 +105,6 @@ def test_transform_rejects_bad_input() -> None:
         quaternion_from_axis_angle((0.0, 0.0, 0.0), 1.0)
 
 
-def test_transform_interpolates_rotation_with_slerp() -> None:
-    start = Transform()
-    end = Transform(position=(2.0, 0.0, 0.0), scale=(3.0, 1.0, 1.0)).rotated(math.pi / 2)
-
-    middle = start.interpolate(end, 0.5)
-
-    assert middle.position == (1.0, 0.0, 0.0)
-    assert middle.scale == (2.0, 1.0, 1.0)
-    np.testing.assert_allclose(middle.apply([(1.0, 0.0, 0.0)]), [[1 + 2 * math.cos(math.pi / 4), 2 * math.sin(math.pi / 4), 0.0]])
-
-
-def test_transform_interpolation_takes_shortest_arc() -> None:
-    end = Transform(rotation=-quaternion_from_axis_angle((0, 0, 1), math.pi / 2))
-
-    middle = Transform().interpolate(end, 0.5)
-
-    np.testing.assert_allclose(middle.apply([(1.0, 0.0, 0.0)]), [[math.sqrt(0.5), math.sqrt(0.5), 0.0]], atol=1e-12)
-
-
 def test_transform_scaled_broadcasts_scalar() -> None:
     assert Transform().scaled(2.0).scale == (2.0, 2.0, 2.0)
 
