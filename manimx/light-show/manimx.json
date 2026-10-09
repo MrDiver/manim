@@ -1,0 +1,71 @@
+{
+  "$schema": "./.manimx/project.schema.json",
+  "format": 2,
+  "name": "light-show",
+  "output": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 60,
+    "background": "#020308",
+    "background_opacity": 1.0,
+    "antialiasing": 4,
+    "audio": true,
+    "sample_rate": 48000,
+    "directory": "renders"
+  },
+  "effects": {
+    "motion_blur": {
+      "enabled": true,
+      "samples": 8,
+      "shutter_angle": 180.0
+    },
+    "bloom": {
+      "enabled": true,
+      "intensity": 0.06,
+      "threshold": 1.0,
+      "knee": 0.5,
+      "radius": 1.0,
+      "levels": 6
+    },
+    "shadows": {
+      "enabled": true,
+      "softness": 1.0,
+      "samples": 16,
+      "resolution": 1024
+    },
+    "tone_map": {
+      "operator": "pbr_neutral",
+      "exposure": 1.0
+    }
+  },
+  "lighting": {
+    "ambient_color": "#5d6cff",
+    "ambient_intensity": 0.08,
+    "default_lights": false
+  },
+  "performance": {
+    "workers": 1,
+    "frames_in_flight": 3
+  },
+  "scenes": {
+    "LightShow": {
+      "module": "scenes.light_show",
+      "class": "LightShow"
+    },
+    "Finale": {
+      "module": "scenes.finale",
+      "class": "Finale"
+    }
+  },
+  "timeline": {
+    "clips": [
+      {
+        "scene": "LightShow"
+      },
+      {
+        "scene": "Finale"
+      }
+    ],
+    "events": {}
+  }
+}
