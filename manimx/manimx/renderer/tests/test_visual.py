@@ -281,6 +281,6 @@ def test_navigation_badge(renderer: WGPURenderer, update_references: bool, time:
     from manimx.examples.navigation import config as navigation_config
 
     prepared = Navigation().prepare()
-    image = renderer.render(prepared.state_at(time), navigation_config(480, 270))
+    image = renderer.render(prepared.frame_at(time), navigation_config(480, 270))
 
     check(image, f"navigation_{time:.1f}s", update_references)

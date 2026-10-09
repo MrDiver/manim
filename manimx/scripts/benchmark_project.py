@@ -26,7 +26,6 @@ import time
 from collections import defaultdict
 
 import numpy as np
-
 from manimx.animation import timing
 from manimx.drivers.pipeline import FramePipeline
 from manimx.project import Project
@@ -35,7 +34,7 @@ from manimx.renderer.webgpu import composer as composer_module
 from manimx.renderer.webgpu import mesh_batch, renderer, retained
 
 STAGES = [
-    (timing.Timeline, "state_at", "state_at (evaluate + snapshot)"),
+    (timing.Timeline, "frame_at", "frame_at (evaluate + snapshot)"),
     (retained.RetainedVectors, "build", "vector batch (retained)"),
     (mesh_batch.MeshBatch, "build", "mesh batch"),
     (renderer, "build_shadow_views", "shadow views"),
@@ -64,11 +63,11 @@ def render_all(timeline, settings, times, profile: bool = False) -> tuple[float,
     renderer_ = WGPURenderer(profile=profile)
     pipeline = FramePipeline(FrameComposer(renderer_, settings.effects), settings.config, settings.in_flight)
     for t in times[:5]:  # warm up: shaders, caches, buffers
-        pipeline.submit(0, t, timeline.state_at)
+        pipeline.submit(0, t, timeline.frame_at)
     pipeline.flush()
     start = time.perf_counter()
     for index, t in enumerate(times):
-        pipeline.submit(index, t, timeline.state_at)
+        pipeline.submit(index, t, timeline.frame_at)
     pipeline.flush()
     return time.perf_counter() - start, renderer_
 
@@ -79,7 +78,7 @@ def reference_frames(project: Project, timeline) -> np.ndarray:
     times = np.linspace(0, timeline.duration, 48)
     renderer_ = WGPURenderer()
     composer = FrameComposer(renderer_, settings.effects)
-    return np.stack([composer.compose(timeline.state_at, dataclasses.replace(settings.config, time=float(t))) for t in times])
+    return np.stack([composer.compose(timeline.frame_at, dataclasses.replace(settings.config, time=float(t))) for t in times])
 
 
 def main() -> None:
@@ -127,7 +126,7 @@ def main() -> None:
     sample = times[:: max(1, count // 60)]
     pipeline = FramePipeline(FrameComposer(profiled, settings.effects), settings.config, 1)
     for t in sample:
-        pipeline.submit(0, t, timeline.state_at)
+        pipeline.submit(0, t, timeline.frame_at)
         pipeline.flush()
         for name, ms in profiled.profiler.read().items():
             gpu[name] += ms

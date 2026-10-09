@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -151,3 +152,9 @@ class ViewState:
 
     root: RNode
     camera: Camera
+
+
+Frame = RNode | ViewState | Sequence[ViewState]
+"""What a frame shows: a tree (seen through ``RenderConfig.camera``), a tree
+with its camera, or several of those drawn over each other in order (the
+active clips of a timeline, lowest layer first)."""

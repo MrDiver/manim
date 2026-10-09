@@ -1,32 +1,26 @@
-"""Cameras: nodes that say where a view looks from (section 8.1).
+"""Cameras: the node a scene is seen through.
 
-A :class:`Camera` is a node like any other: its placement and lens are
-signals, so camera movement is animated with the same ``play`` calls,
-rate functions, events and time maps as any content. A scene that only
-moves a camera is a *camera scene*; a camera can also live in a content
-scene and move with it.
+Every scene has exactly one :class:`Camera`, ``Scene.camera``. Its
+placement and lens are signals, so camera movement is animated with the
+same ``play`` calls, rate functions, events and derived signals as any
+content, and a clip's time map (start, cut, slow motion) moves the
+camera together with everything else in the clip.
 
-A camera is never drawn. A :class:`View` pairs a world with a camera, and
-the timeline turns it into a :class:`~manimx.renderer.ViewState` (the
-world's render state plus the renderer camera) at any time.
-
-Every signal belongs to the one scene that animates it, so a camera is
-moved by exactly one scene. To cut between camera moves of different
-scenes, use one camera per scene and switch views.
+A camera is never drawn. For every active clip the timeline pairs the
+clip's render state with its camera in a
+:class:`~manimx.renderer.ViewState` (see ``Timeline.frame_at``).
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Sequence
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import numpy as np
 import quaternion
 
-from ..robjects import RNode, Transform
 from ..renderer.config import DEFAULT_FRAME_HEIGHT
 from ..renderer.config import Camera as RenderCamera
+from ..robjects import RNode, Transform
 from . import authoring
 from .kinds import DISCRETE, FACTOR, SCALAR
 from .node import (
@@ -40,9 +34,6 @@ from .node import (
     animatable,
 )
 from .signals import RootSignal, Signal
-
-if TYPE_CHECKING:
-    from .worlds import World
 
 DEFAULT_DISTANCE = 11.0
 """Manim's default camera distance from the z = 0 plane."""
@@ -108,28 +99,15 @@ class Camera(PositionMixin, RotationMixin, Node):
     def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RNode | None:
         return None  # cameras are never drawn
 
-    def render_camera(self, parent: Transform | None = None) -> RenderCamera:
-        """The renderer camera for the current signal values, placed inside
-        ``parent`` (the transform of the clip the camera plays in)."""
-        transform = Transform(position=self.position.value, rotation=self.rotation.value)
-        if parent is not None:
-            transform = _compose(parent, transform)
+    def render_camera(self) -> RenderCamera:
+        """The renderer camera for the current signal values."""
         return RenderCamera(
-            transform=transform,
-            frame_height=self.frame_height.value * (1.0 if parent is None else parent.scale[1]),
+            transform=Transform(position=self.position.value, rotation=self.rotation.value),
+            frame_height=self.frame_height.value,
             field_of_view=self.field_of_view.value if self.perspective.value else None,
             near=self.near,
             far=self.far,
         )
-
-
-@dataclass(eq=False)
-class View:
-    """A world seen through a camera (the image a composition shows)."""
-
-    world: World
-    camera: Camera
-    name: str = "view"
 
 
 def _look_rotation(eye: np.ndarray, target: np.ndarray, up: np.ndarray) -> quaternion.quaternion:
@@ -142,8 +120,3 @@ def _look_rotation(eye: np.ndarray, target: np.ndarray, up: np.ndarray) -> quate
         up = np.array([0.0, 1.0, 0.0])  # looking along up: e.g. down onto the z = 0 plane
     return RenderCamera.look_at(tuple(eye), tuple(target), tuple(up)).transform.rotation
 
-
-def _compose(parent: Transform, child: Transform) -> Transform:
-    """``parent`` applied after ``child``, for rigid children (no scale)."""
-    position = parent.apply([child.position])[0]
-    return Transform(position=tuple(position), rotation=parent.rotation * child.rotation)

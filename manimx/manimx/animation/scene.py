@@ -38,20 +38,28 @@ global timeline only changes the mapping to compiled time.
 from __future__ import annotations
 
 import bisect
-from pathlib import Path
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
+from ..renderer.config import ViewState
 from ..robjects import RGroup
-from .animations import Animation, AnimationBuilder, SetValue, SignalChange, as_animation
-from .authoring import _active
-from .node import Node
-from .signals import RootSignal, Signal, TimeSignals
-from .signal_tracks import Change, Placement, RateFunction, SignalTrack, linear
-from .simulation import Simulation
+from .animations import (
+    Animation,
+    AnimationBuilder,
+    SetValue,
+    SignalChange,
+    as_animation,
+)
 from .audio import DEFAULT_SAMPLE_RATE, Sound, SoundEvent, mix
+from .authoring import _active
+from .camera import Camera
+from .node import Node
+from .signal_tracks import Change, Placement, RateFunction, SignalTrack, linear
+from .signals import RootSignal, Signal, TimeSignals
+from .simulation import Simulation
 
 SEGMENT_GAP = 1.0
 """Compiled time between two segments; nothing is ever placed inside it."""
@@ -100,8 +108,17 @@ class Scene:
 
     def __init__(self) -> None:
         self.time = TimeSignals()
+        self._camera = Camera("camera")
         self._compiler: SceneCompiler | None = None
         self._prepared: PreparedScene | None = None
+
+    @property
+    def camera(self) -> Camera:
+        """The scene's one camera: move it like any node, e.g.
+        ``self.play(self.camera.animate.shift(RIGHT))``. It is never drawn
+        and needs no ``add``.
+        """
+        return self._camera
 
     def construct(self) -> None:
         """Describe the scene with ``add``, ``remove``, ``play`` and ``wait``."""
@@ -110,6 +127,9 @@ class Scene:
         """Run :meth:`construct` once and return the evaluable scene."""
         if self._prepared is None:
             compiler = SceneCompiler(self.time)
+            # Camera changes are recorded at their time, like changes of
+            # nodes in the scene, without the camera being added.
+            compiler.timeline_signals.update(signal.id for signal in self._camera.signals())
             self._compiler = compiler
             token = _active.set(compiler)
             try:
@@ -117,7 +137,7 @@ class Scene:
             finally:
                 _active.reset(token)
                 self._compiler = None
-            self._prepared = compiler.finish(self.time)
+            self._prepared = compiler.finish(self.time, self._camera)
         return self._prepared
 
     # -- authoring API (only inside construct) --------------------------------
@@ -324,11 +344,11 @@ class SceneCompiler:
         self.placements.append(placement)
         return placement
 
-    def finish(self, time: TimeSignals) -> PreparedScene:
+    def finish(self, time: TimeSignals, camera: Camera) -> PreparedScene:
         self._close_segment()
         duration = self.segments[-1].end
         return PreparedScene(
-            duration, list(self.tracks.values()), list(self.roots), time, list(self.placements), list(self.segments)
+            duration, list(self.tracks.values()), list(self.roots), time, camera, list(self.placements), list(self.segments)
         )
 
     def set_time(self, t: float) -> None:
@@ -354,6 +374,8 @@ class PreparedScene:
     tracks: list[SignalTrack]
     roots: list[Node]
     time: TimeSignals
+    camera: Camera
+    """The scene's camera; its signals are set by :meth:`evaluate` like all others."""
     placements: list[Placement] = field(default_factory=list)
     segments: list[Segment] = field(default_factory=list)
 
@@ -374,6 +396,13 @@ class PreparedScene:
         self.evaluate(t, global_time)
         children = [snapshot for node in self.roots if node.present.value and (snapshot := node.snapshot()) is not None]
         return RGroup(children=children)
+
+    def frame_at(self, t: float) -> tuple[ViewState, ...]:
+        """The render state at compiled time ``t`` seen through the scene's
+        camera (the same shape as ``Timeline.frame_at``).
+        """
+        root = self.state_at(t)
+        return (ViewState(root, self.camera.render_camera()),)
 
     def sounds(self) -> list[tuple[float, Sound, float]]:
         """``(compiled time, sound, volume)`` of every sound in the scene."""

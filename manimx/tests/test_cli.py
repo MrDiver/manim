@@ -38,7 +38,7 @@ def test_help_and_version(capsys) -> None:
 def test_new_creates_a_project_with_example_scenes(capsys, project) -> None:
     data = config(project)
     assert data["format"] == 1 and data["$schema"] == "./.manimx/project.schema.json"
-    assert data["output"]["width"] == 1280 and data["output"]["fps"] == 30 and data["camera"]["frame_height"] == 8.0
+    assert data["output"]["width"] == 1280 and data["output"]["fps"] == 30 and "camera" not in data
     assert data["performance"] == {"workers": 1, "frames_in_flight": 3}
     assert list(data["scenes"]) == ["Intro", "Bounce"] and [c["scene"] for c in data["timeline"]["clips"]] == ["Intro", "Bounce"]
     schema = json.loads((project / ".manimx" / "project.schema.json").read_text())
@@ -172,8 +172,8 @@ def test_errors_point_at_the_problem(project, tmp_path, monkeypatch, capsys) -> 
         ({"format": 1, "name": "x", "output": {"fps": "60"}}, '"output.fps" must be integer, got "60"', None),
         ({"format": 1, "name": "x", "output": {"audio": 1}}, '"output.audio" must be boolean', None),
         ({"format": 1, "name": "x", "output": {"width": True}}, '"output.width" must be integer', None),
-        ({"format": 1, "name": "x", "camera": {"frame_height": -1}}, "must be at least 0", None),
-        ({"format": 1, "name": "x", "camera": 5}, '"camera" must be an object', None),
+        ({"format": 1, "name": "x", "output": {"width": 0}}, "must be at least 1", None),
+        ({"format": 1, "name": "x", "output": 5}, '"output" must be an object', None),
         ({"format": 1, "name": "x", "scenes": {"A": {"modul": "a"}}}, 'unknown setting "scenes.A.modul"', None),
         ({"format": 1, "name": "x", "scenes": {"A": {}}}, "invalid", None),
         ({"format": 1, "name": "x", "timeline": {"clips": [{"sceen": "A"}]}}, 'unknown setting "timeline.clips[0].sceen"', None),

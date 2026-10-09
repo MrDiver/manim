@@ -12,9 +12,6 @@
     "sample_rate": 48000,
     "directory": "renders"
   },
-  "camera": {
-    "frame_height": 8.0
-  },
   "performance": {
     "workers": 1,
     "frames_in_flight": 3
@@ -31,6 +28,10 @@
     "Outro": {
       "module": "scenes.outro",
       "class": "Outro"
+    },
+    "PortalOrbit": {
+      "module": "scenes.portal_orbit",
+      "class": "PortalOrbit"
     }
   },
   "timeline": {
@@ -43,6 +44,9 @@
       },
       {
         "scene": "Outro"
+      },
+      {
+        "scene": "PortalOrbit"
       }
     ],
     "events": {}

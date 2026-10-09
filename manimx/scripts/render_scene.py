@@ -13,7 +13,7 @@ import argparse
 import sys
 
 from manimx.drivers import ImageSequence, RenderSettings, VideoFile, render
-from manimx.renderer import Camera, MotionBlur, RenderConfig
+from manimx.renderer import MotionBlur, RenderConfig
 
 
 def main() -> None:
@@ -25,7 +25,6 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
     parser.add_argument("--background", default="#ece6e2")
-    parser.add_argument("--frame-height", type=float, default=8.0, help="world units shown vertically")
     parser.add_argument("--blur-samples", type=int, default=8, help="1 disables motion blur")
     parser.add_argument("--workers", type=int, default=1, help="render processes")
     parser.add_argument("--in-flight", type=int, default=3, help="frames on the GPU at once per process")
@@ -36,7 +35,6 @@ def main() -> None:
             pixel_width=args.width,
             pixel_height=args.height,
             background_color=args.background,
-            camera=Camera(frame_height=args.frame_height),
         ),
         fps=args.fps,
         effects=(MotionBlur(samples=args.blur_samples, shutter=0.5 / args.fps),),

@@ -25,10 +25,20 @@ from typing import Any
 
 import numpy as np
 
-from ..animation import Animation, Change, ClippingGroup, Group, Node, RootSignal, Scene, Target, derive
+from ..animation import (
+    Animation,
+    Change,
+    ClippingGroup,
+    Group,
+    Node,
+    RootSignal,
+    Scene,
+    Target,
+    derive,
+)
+from ..renderer.config import RenderConfig
 from ..userland import Circle, GrowFromCenter, Polyline, ShrinkToCenter
 from ..userland.rate_functions import ease_out_cubic, linear
-from ..renderer.config import Camera, RenderConfig
 
 BACKGROUND = "#070b1a"
 MAP_GROUND = "#0f1c38"
@@ -95,6 +105,9 @@ def navigation_arrow() -> Polyline:
 
 class Navigation(Scene):
     def construct(self) -> None:
+        # A close-up: 4.2 units vertically, room for the rings at 1.8x the
+        # badge's radius.
+        self.camera.set_frame_height(4.2)
         ground = Circle(1.0, name="ground", fill_color=MAP_GROUND, fill_opacity=1.0, stroke_width=0)
         streets = street_map()
         # The streets pass by on their own: a derived signal of scene time,
@@ -118,14 +131,7 @@ class Navigation(Scene):
 
 
 def config(pixel_width: int = 1920, pixel_height: int = 1080) -> RenderConfig:
-    """A close-up: 4.2 units vertically, room for the rings at 1.8x the
-    badge's radius."""
-    return RenderConfig(
-        pixel_width=pixel_width,
-        pixel_height=pixel_height,
-        background_color=BACKGROUND,
-        camera=Camera(frame_height=4.2),
-    )
+    return RenderConfig(pixel_width=pixel_width, pixel_height=pixel_height, background_color=BACKGROUND)
 
 
 __all__ = ["Navigation", "PulseOut", "config"]

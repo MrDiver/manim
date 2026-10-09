@@ -11,11 +11,18 @@ called less often or a pass is skipped.
 Per frame::
 
     for each sub-frame time t (one, or the MotionBlur samples):
-        layers = renderer.render_layers(scene_at(t), config at time t)
-        lit = lit-stage effects (Bloom, custom shaders) applied to layers.lit
-        accumulator += weight * composite(tone_map(lit), layers.vector, background)
+        for each view of scene_at(t) (one per active clip, lowest first):
+            layers = renderer.render_layers(view's tree, config with view's camera)
+            lit = lit-stage effects (Bloom, custom shaders) applied to layers.lit
+            image = composite(tone_map(lit), layers.vector) over image
+                    (the first view goes over the background)
+        accumulator += weight * image
     frame = frame-stage effects applied to the accumulator
     output = encode to sRGB
+
+With one view (the usual case) the image goes straight into the
+accumulator; several views are stacked in a texture first, so that motion
+blur averages whole images.
 
 All intermediate images are linear and premultiplied; see composite.wgsl
 for how 3D and 2D content are combined so that 2D colors stay exact.
@@ -29,16 +36,16 @@ from collections.abc import Callable, Sequence
 import numpy as np
 import wgpu
 
-from ...robjects import RNode
-from ..config import RenderConfig, ViewState
+from ...robjects import RGroup, RNode
+from ..config import Camera, Frame, RenderConfig, ViewState
 from ..effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap
 from .gpu import COLOR_FORMAT, HDR_FORMAT, GPUContext, ResourceCache, expand_includes
 from .profiler import GpuProfiler
 from .renderer import WGPURenderer
 
-SceneSource = RNode | ViewState | Callable[[float], RNode | ViewState]
-"""A fixed scene, or a function returning the scene at a given time; with a
-:class:`ViewState`, its camera replaces the config's."""
+SceneSource = Frame | Callable[[float], Frame]
+"""A fixed frame, or a function returning the frame at a given time; a
+:class:`ViewState`'s camera replaces the config's."""
 
 _SAMPLED = wgpu.TextureUsage.TEXTURE_BINDING
 _ATTACHMENT = wgpu.TextureUsage.RENDER_ATTACHMENT
@@ -47,6 +54,10 @@ _UNIFORM_STRIDE = 256  # minimum uniform buffer offset alignment
 _ADDITIVE = {
     "color": {"src_factor": wgpu.BlendFactor.one, "dst_factor": wgpu.BlendFactor.one, "operation": wgpu.BlendOperation.add},
     "alpha": {"src_factor": wgpu.BlendFactor.one, "dst_factor": wgpu.BlendFactor.one, "operation": wgpu.BlendOperation.add},
+}
+_OVER = {  # premultiplied source over destination
+    "color": {"src_factor": wgpu.BlendFactor.one, "dst_factor": wgpu.BlendFactor.one_minus_src_alpha, "operation": wgpu.BlendOperation.add},
+    "alpha": {"src_factor": wgpu.BlendFactor.one, "dst_factor": wgpu.BlendFactor.one_minus_src_alpha, "operation": wgpu.BlendOperation.add},
 }
 
 COMPOSITE_PARAMS_DTYPE = np.dtype(
@@ -71,6 +82,7 @@ class FrameComposer:
         self._composite_params = self._context.device.create_buffer(
             size=_UNIFORM_STRIDE * 64, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST
         )
+        self._slot = 0
 
     def compose(self, scene: SceneSource, config: RenderConfig) -> np.ndarray:
         """The frame at ``config.time`` as ``(H, W, 4)`` uint8 straight-alpha RGBA."""
@@ -89,22 +101,37 @@ class FrameComposer:
         accumulator = self._textures.get("accumulator", size, HDR_FORMAT)
 
         for index, (time, weight) in enumerate(self._sub_frames(scene, config.time)):
-            scene_now = scene(time) if callable(scene) else scene
+            views = _views(scene(time) if callable(scene) else scene)
             sub_config = dataclasses.replace(config, time=time)
-            if isinstance(scene_now, ViewState):
-                scene_now, sub_config = scene_now.root, dataclasses.replace(sub_config, camera=scene_now.camera)
-            # One submission per sub-frame: the renderer's passes and the
-            # composite share an encoder. Buffer writes for this sub-frame
-            # land before it; the previous one is already submitted.
-            encoder = device.create_command_encoder(label="sub-frame")
-            layers = self.renderer.render_layers(scene_now, sub_config, encoder)
-            lit = layers.lit
-            for effect in self.effects:
-                if isinstance(effect, Bloom):
-                    lit = self._bloom.apply(encoder, lit, effect)
-                elif isinstance(effect, ShaderEffect) and effect.stage == "lit":
-                    lit = self._shaders.apply(encoder, lit, effect, "lit")
-            self._composite(encoder, lit, layers.vector, accumulator, config, weight, first=index == 0, slot=index % 64)
+            if len(views) == 1:
+                # One submission per sub-frame: the renderer's passes and the
+                # composite share an encoder. Buffer writes for this sub-frame
+                # land before it; the previous one is already submitted.
+                encoder = device.create_command_encoder(label="sub-frame")
+                lit, vector = self._render_view(encoder, views[0], sub_config)
+                self._composite(encoder, lit, vector, accumulator, config, weight, first=index == 0)
+                device.queue.submit([encoder.finish()])
+                continue
+            # Several views: each is rendered and submitted on its own (the
+            # renderer's buffers hold one view at a time) and put over the
+            # stack, which is then added to the accumulator.
+            stack = self._textures.get("view stack", size, HDR_FORMAT)
+            for position, view in enumerate(views):
+                encoder = device.create_command_encoder(label="view")
+                lit, vector = self._render_view(encoder, view, sub_config)
+                self._composite(encoder, lit, vector, stack, config, 1.0, first=position == 0, background=position == 0, blend=_OVER)
+                device.queue.submit([encoder.finish()])
+            encoder = device.create_command_encoder(label="accumulate views")
+            self._passes.run(
+                encoder,
+                "composite.wgsl",
+                "fs_accumulate",
+                accumulator,
+                [self._params(config, weight, background=False), self._resources.view(stack)],
+                blend=_ADDITIVE,
+                clear=index == 0,
+                timing=self.renderer.profiler.pass_timing("composite"),
+            )
             device.queue.submit([encoder.finish()])
 
         encoder = device.create_command_encoder(label="finish frame")
@@ -125,38 +152,70 @@ class FrameComposer:
             return [(time, 1.0)]  # a fixed scene looks the same at every time
         return blur.sample_times(time)
 
+    def _render_view(
+        self, encoder: wgpu.GPUCommandEncoder, view: tuple[RNode, Camera | None], config: RenderConfig
+    ) -> tuple[wgpu.GPUTexture, wgpu.GPUTexture]:
+        """Render one view into the renderer's layers; returns the lit layer
+        after the lit-stage effects, and the vector layer.
+        """
+        root, camera = view
+        if camera is not None:
+            config = dataclasses.replace(config, camera=camera)
+        layers = self.renderer.render_layers(root, config, encoder)
+        lit = layers.lit
+        for effect in self.effects:
+            if isinstance(effect, Bloom):
+                lit = self._bloom.apply(encoder, lit, effect)
+            elif isinstance(effect, ShaderEffect) and effect.stage == "lit":
+                lit = self._shaders.apply(encoder, lit, effect, "lit")
+        return lit, layers.vector
+
+    def _params(self, config: RenderConfig, weight: float, background: bool) -> dict:
+        """Composite parameters in the next uniform slot, as a binding."""
+        tone_map = next((e for e in self.effects if isinstance(e, ToneMap)), ToneMap())
+        params = np.zeros((), COMPOSITE_PARAMS_DTYPE)
+        params["background"] = config.background_rgba if background else (0.0, 0.0, 0.0, 0.0)
+        params["tone_map"] = tone_map.operator.value
+        params["weight"] = weight
+        self._slot = (self._slot + 1) % 64
+        offset = self._slot * _UNIFORM_STRIDE
+        self._context.device.queue.write_buffer(self._composite_params, offset, params)
+        return {"buffer": self._composite_params, "offset": offset, "size": COMPOSITE_PARAMS_DTYPE.itemsize}
+
     def _composite(
         self,
         encoder: wgpu.GPUCommandEncoder,
         lit: wgpu.GPUTexture,
         vector: wgpu.GPUTexture,
-        accumulator: wgpu.GPUTexture,
+        target: wgpu.GPUTexture,
         config: RenderConfig,
         weight: float,
         first: bool,
-        slot: int,
+        background: bool = True,
+        blend: dict = _ADDITIVE,
     ) -> None:
-        tone_map = next((e for e in self.effects if isinstance(e, ToneMap)), ToneMap())
-        params = np.zeros((), COMPOSITE_PARAMS_DTYPE)
-        params["background"] = config.background_rgba
-        params["tone_map"] = tone_map.operator.value
-        params["weight"] = weight
-        offset = slot * _UNIFORM_STRIDE
-        self._context.device.queue.write_buffer(self._composite_params, offset, params)
         self._passes.run(
             encoder,
             "composite.wgsl",
             "fs_composite",
-            accumulator,
-            [
-                {"buffer": self._composite_params, "offset": offset, "size": COMPOSITE_PARAMS_DTYPE.itemsize},
-                self._resources.view(lit),
-                self._resources.view(vector),
-            ],
-            blend=_ADDITIVE,
-            clear=first,  # the first sub-frame starts a new frame
+            target,
+            [self._params(config, weight, background), self._resources.view(lit), self._resources.view(vector)],
+            blend=blend,
+            clear=first,  # the first sub-frame (or view) starts a new image
             timing=self.renderer.profiler.pass_timing("composite"),
         )
+
+
+def _views(frame: Frame) -> list[tuple[RNode, Camera | None]]:
+    """``(tree, camera)`` per view of a frame, lowest first; a camera of
+    None means ``RenderConfig.camera``. An empty frame shows the background.
+    """
+    if isinstance(frame, RNode):
+        return [(frame, None)]
+    if isinstance(frame, ViewState):
+        return [(frame.root, frame.camera)]
+    views = [(view.root, view.camera) for view in frame]
+    return views or [(RGroup(), None)]
 
 
 def _validate(effects: tuple[Effect, ...]) -> None:
@@ -215,7 +274,7 @@ class _Fullscreen:
     def pipeline(self, shader: str, entry_point: str, format: str, blend: dict | None = None) -> tuple[wgpu.GPURenderPipeline, wgpu.GPUBindGroupLayout]:
         """The pipeline and its bind group layout (kept: each
         ``get_bind_group_layout`` call returns a new object)."""
-        key = (shader, entry_point, format, blend is not None)
+        key = (shader, entry_point, format, None if blend is None else str(blend))
         if key not in self._pipelines:
             module = self._context.shader(shader)
             target = {"format": format}

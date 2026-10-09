@@ -33,20 +33,16 @@ hold until they fire.
 from __future__ import annotations
 
 import bisect
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..robjects import RGroup
-from ..robjects import Quaternion, Transform, new_uid
-from ..renderer.config import Camera as RenderCamera
 from ..renderer.config import ViewState
+from ..robjects import RGroup, new_uid
 from .audio import DEFAULT_SAMPLE_RATE, Sound, mix
-from .camera import Camera, View
 from .scene import PreparedScene, Segment
 from .time_map import MonotoneMap
-from .worlds import World, World3D
 
 NEVER = float("inf")
 """Start time of a segment whose event has not fired (yet)."""
@@ -105,11 +101,12 @@ class SegmentTiming:
 
 @dataclass(eq=False)
 class Clip:
-    """A prepared scene placed in a world and on the global timeline.
+    """A prepared scene placed on the global timeline.
 
-    Where: the clip's ``world``, its ``transform`` in that world, and its
-    ``layer`` (higher layers are drawn on top; equal layers in the order
-    the clips were added). When: its ``start``, its cut and its time map.
+    When: its ``start``, its cut and its time map. Its ``layer`` orders
+    clips that play at the same time: each clip is rendered through its
+    scene's camera, and higher layers are drawn over lower ones (equal
+    layers in the order the clips were added).
 
     Changing a clip's timing (``cut``, ``slow_motion``, ``bind_cue``,
     ``set_scale``) marks its timeline for re-resolution. Editing methods
@@ -119,8 +116,6 @@ class Clip:
     scene: PreparedScene
     start: float = 0.0
     name: str = ""
-    world: World | None = None
-    transform: Transform = field(default_factory=Transform)
     layer: int = 0
     uid: int = field(default_factory=new_uid, init=False, repr=False)
     """Render identity of the clip's group, the same in every snapshot."""
@@ -161,31 +156,6 @@ class Clip:
         self.scales[segment] = scale
         return self._changed()
 
-    def place(
-        self,
-        position: object = None,
-        rotation: Quaternion | None = None,
-        scale: object = None,
-        layer: int | None = None,
-    ) -> Clip:
-        """Place the clip in its world; arguments left out stay unchanged.
-
-        The transform applies to the whole scene, so one scene can appear
-        in several places through several clips (each with its own
-        prepared scene).
-        """
-        transform = Transform(
-            position=self.transform.position if position is None else _vector3(position),
-            rotation=self.transform.rotation if rotation is None else rotation,
-            scale=self.transform.scale if scale is None else _vector3(scale),
-        )
-        if self.world is not None:
-            self.world.check_transform(transform)
-        self.transform = transform
-        if layer is not None:
-            self.layer = layer
-        return self
-
     def _changed(self) -> Clip:
         if self.timeline is not None:
             self.timeline._dirty = True
@@ -194,15 +164,15 @@ class Clip:
     # -- queries ------------------------------------------------------------
 
     def still(self, at: float, global_time: float | None = None) -> RGroup:
-        """The clip's render state at playing time ``at``, placed by its
-        transform: a still frame, independent of the clip's start, cut and
-        time map. ``global_time`` (for idle motion) defaults to ``at``."""
+        """The clip's render state at playing time ``at``: a still frame,
+        independent of the clip's start, cut and time map. ``global_time`` (for idle motion) defaults to ``at``.
+        """
         compiled = self.scene.compiled_time_at(at)
         state = self.scene.state_at(compiled, global_time=at if global_time is None else global_time)
         return self._group(state.children)
 
     def _group(self, children: list) -> RGroup:
-        return RGroup(transform=self.transform, children=children, uid=self.uid)
+        return RGroup(children=children, uid=self.uid)
 
     def event_of(self, cue: str) -> str:
         return self.cue_events.get(cue, cue)
@@ -238,18 +208,6 @@ class Clip:
         if t >= timing.end:
             return timing.compiled_end  # holding until the next segment
         return timing.compiled_at(t)
-
-    def held_time(self, t: float) -> float:
-        """Like :meth:`compiled_time`, but holding the first state before
-        the clip starts and the last one after it ends (a camera keeps its
-        placement when its camera scene is not playing)."""
-        compiled = self.compiled_time(t)
-        if compiled is not None:
-            return compiled
-        included = [timing for timing in self.timings if timing is not None]
-        if not included:
-            return 0.0
-        return included[0].compiled_start if t < included[0].start else included[-1].compiled_end
 
     def placed_sounds(self) -> list[tuple[float, float, Sound, float]]:
         """``(global time, skip, sound, volume)`` of the clip's sounds.
@@ -292,15 +250,15 @@ class Clip:
 
 @dataclass(eq=False)
 class Timeline:
-    """Clips on one global timeline, with their worlds and events."""
+    """Clips on one global timeline, with their events."""
 
     clips: list[Clip] = field(default_factory=list)
     events: dict[str, float] = field(default_factory=dict)
     """Events with a time set directly (fixed, or fired by a presenter)."""
     live: bool = False
     """Live mode: unfired events hold instead of being an error."""
-    worlds: list[World] = field(default_factory=lambda: [World3D("world")])
-    """The worlds clips play in; the first one is the default."""
+    uid: int = field(default_factory=new_uid, init=False, repr=False)
+    """Render identity of the root group of :meth:`state_at`."""
     _dirty: bool = field(default=True, repr=False)
 
     def add(
@@ -309,36 +267,20 @@ class Timeline:
         start: float = 0.0,
         name: str = "",
         scales: dict[int, float] | None = None,
-        world: World | None = None,
-        transform: Transform | None = None,
         layer: int = 0,
     ) -> Clip:
-        """Place ``scene`` in ``world`` (default: the first world) at global
-        time ``start``.
+        """Place ``scene`` at global time ``start``.
 
         A prepared scene evaluates by setting its signals, so it can only
         back one clip; to show a scene twice, prepare it twice.
         """
         if any(clip.scene is scene for clip in self.clips):
             raise ValueError("this prepared scene already backs a clip; prepare the scene again to reuse it")
-        world = world or self.worlds[0]
-        if world not in self.worlds:
-            self.worlds.append(world)
-        if transform is not None:
-            world.check_transform(transform)
-        clip = Clip(scene, start, name or f"clip-{len(self.clips)}", world=world, layer=layer, scales=dict(scales or {}))
-        if transform is not None:
-            clip.transform = transform
+        clip = Clip(scene, start, name or f"clip-{len(self.clips)}", layer=layer, scales=dict(scales or {}))
         clip.timeline = self
         self.clips.append(clip)
         self._dirty = True
         return clip
-
-    def world(self, name: str) -> World:
-        for world in self.worlds:
-            if world.name == name:
-                return world
-        raise KeyError(f"no world named {name!r}")
 
     def fire(self, event: str, time: float) -> None:
         """Set the time of ``event`` (a presenter's click, or a fixed time)."""
@@ -362,61 +304,32 @@ class Timeline:
         ends = [clip.end for clip in self.clips if clip.end != NEVER]
         return max(ends, default=0.0)
 
-    def state_at(self, t: float, world: World | None = None) -> RGroup:
-        """Render state of ``world`` (default: the first world) at global
-        time ``t``: one group per active clip, placed by the clip's
-        transform, in layer order (higher layers on top; equal layers in
-        the order the clips were added)."""
+    def frame_at(self, t: float) -> tuple[ViewState, ...]:
+        """What the frame at global time ``t`` shows: one view per active
+        clip, its render state with its scene's camera, in layer order
+        (lowest first; equal layers in the order the clips were added).
+        The renderer draws each view over the ones before it.
+        """
         self._ensure_resolved()
-        world = world or self.worlds[0]
-        children = []
+        views = []
         for clip in sorted(self.clips, key=lambda clip: clip.layer):  # stable
-            if clip.world is not world:
-                continue
             compiled = clip.compiled_time(t)
             if compiled is not None:
                 state = clip.scene.state_at(compiled, global_time=t)
-                children.append(clip._group(state.children))
-        return RGroup(children=children, uid=world.uid)
+                views.append(ViewState(clip._group(state.children), clip.scene.camera.render_camera()))
+        return tuple(views)
+
+    def state_at(self, t: float) -> RGroup:
+        """The render states of :meth:`frame_at` in one group, one child per
+        active clip (without their cameras).
+        """
+        return RGroup(children=[view.root for view in self.frame_at(t)], uid=self.uid)
 
     def audio(self, start: float = 0.0, end: float | None = None, sample_rate: int = DEFAULT_SAMPLE_RATE) -> np.ndarray:
         """Every clip's sounds mixed on the global timeline, stereo float32
         for ``[start, end)`` (default: the whole timeline)."""
         placed = [entry for clip in self.clips for entry in clip.placed_sounds()]
         return mix(placed, start, self.duration if end is None else end, sample_rate)
-
-    def view_at(self, view: View, t: float) -> ViewState:
-        """The view's world and camera at global time ``t``."""
-        root = self.state_at(t, view.world)
-        clip = self._clip_of(view.camera)
-        if clip is not None and clip.world is not view.world:
-            raise ValueError(f"camera {view.camera.name!r} plays in world {clip.world.name!r}, not {view.world.name!r}")
-        return ViewState(root, self.camera_at(view.camera, t))
-
-    def view(self, view: View) -> Callable[[float], ViewState]:
-        """``t -> view_at(view, t)``, a scene function for the FrameComposer."""
-        return lambda t: self.view_at(view, t)
-
-    def camera_at(self, camera: Camera, t: float) -> RenderCamera:
-        """The renderer camera of ``camera`` at global time ``t``.
-
-        The camera's clip (the clip whose scene contains it) is evaluated
-        at its held time, so a camera keeps its placement before and after
-        its camera scene plays; the clip's transform places it in the
-        world. A camera in no clip keeps its initial values.
-        """
-        self._ensure_resolved()
-        clip = self._clip_of(camera)
-        if clip is None:
-            return camera.render_camera()
-        clip.scene.evaluate(clip.held_time(t), global_time=t)
-        return camera.render_camera(clip.transform)
-
-    def _clip_of(self, camera: Camera) -> Clip | None:
-        for clip in self.clips:
-            if any(camera in root.family() for root in clip.scene.roots):
-                return clip
-        return None
 
     def segments(self) -> Iterable[tuple[Clip, int, float, float]]:
         """``(clip, segment index, global start, global end)`` of every
@@ -496,12 +409,6 @@ class Timeline:
                     changed = True
             previous_end = timing.end
         return changed
-
-
-def _vector3(value: object) -> tuple[float, float, float]:
-    """Three floats from a vector (a scalar is used for all three)."""
-    x, y, z = np.broadcast_to(np.asarray(value, dtype=np.float64), (3,))
-    return float(x), float(y), float(z)
 
 
 def _segment_timing(

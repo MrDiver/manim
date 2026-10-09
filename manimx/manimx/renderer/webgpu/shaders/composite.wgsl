@@ -49,3 +49,10 @@ fn fs_composite(in: FullscreenVertex) -> @location(0) vec4<f32> {
     }
     return vec4<f32>(linear, alpha) * params.weight;
 }
+
+// Add `weight` times an image of several views (already composited over
+// each other by fs_composite, linear premultiplied) to the accumulator.
+@fragment
+fn fs_accumulate(in: FullscreenVertex) -> @location(0) vec4<f32> {
+    return textureLoad(lit_layer, vec2<i32>(floor(in.position.xy)), 0) * params.weight;
+}

@@ -13,7 +13,7 @@ See docs/animation_engine_design.md.
 
 from .animations import Animation, AnimationBuilder, ChangeSignals, SetValue, SignalChange, Target
 from .audio import Sound, SoundEvent, mix, write_wav
-from .camera import Camera, View
+from .camera import Camera
 from .clipping_group import ClippingGroup
 from .curve3d import Curve3D
 from .group import Group
@@ -30,7 +30,6 @@ from .simulation import Simulation
 from .snapshot import version_token
 from .time_map import MonotoneMap
 from .timing import NEVER, Clip, InvalidCue, Ramp, SegmentTiming, Timeline, UnresolvedEvents
-from .worlds import World, World2D, World3D
 
 __all__ = [
     "COLOR",
@@ -88,10 +87,6 @@ __all__ = [
     "Timeline",
     "UnresolvedEvents",
     "Vector3Signal",
-    "View",
-    "World",
-    "World2D",
-    "World3D",
     "animatable",
     "derive",
     "linear",

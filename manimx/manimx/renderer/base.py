@@ -19,10 +19,9 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from ..robjects import RNode
 from .cache import RNodeDataCache
 from .commands import CacheCommand
-from .config import RenderConfig
+from .config import Frame, RenderConfig
 
 
 class Renderer(ABC):
@@ -30,8 +29,9 @@ class Renderer(ABC):
         self.cache = RNodeDataCache()
 
     @abstractmethod
-    def render(self, root: RNode, config: RenderConfig) -> np.ndarray:
-        """Render ``root`` as seen by ``config.camera``.
+    def render(self, frame: Frame, config: RenderConfig) -> np.ndarray:
+        """Render ``frame``: a tree as seen by ``config.camera``, or views
+        (trees with their cameras) drawn over each other in order.
 
         Returns straight-alpha RGBA pixels, shape ``(pixel_height,
         pixel_width, 4)``, dtype ``uint8``, first row at the top.

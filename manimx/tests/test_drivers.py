@@ -39,7 +39,8 @@ def settings(**options) -> RenderSettings:
 
 def expected_frames(renderer: WGPURenderer) -> list[np.ndarray]:
     prepared = Navigation().prepare()
-    return [renderer.render(prepared.state_at(t), config(64, 36)) for t in settings().frame_times(prepared.duration)]
+    composer = FrameComposer(renderer)
+    return [composer.compose(prepared.frame_at(t), config(64, 36)) for t in settings().frame_times(prepared.duration)]
 
 
 def test_frame_times() -> None:

@@ -51,8 +51,7 @@ from typing import Any
 
 import numpy as np
 
-from ..robjects import RNode
-from ..renderer.config import RenderConfig, ViewState
+from ..renderer.config import Frame, RenderConfig
 from ..renderer.effects import Effect
 from .sinks import FrameFormat, FrameSink
 
@@ -64,7 +63,8 @@ Progress = Callable[[int, int], None]
 class FrameSource:
     """Something to render: a function of time and how long it lasts."""
 
-    state_at: Callable[[float], RNode | ViewState]
+    state_at: Callable[[float], Frame]
+    """What to render at a time (a timeline's or scene's ``frame_at``)."""
     duration: float
     audio: Callable[[float, float, int], np.ndarray] | None = None
     """``audio(start, end, sample_rate)``: stereo float32 samples, if any."""
@@ -122,7 +122,9 @@ def load_source(spec: Any) -> FrameSource:
         return target
     if hasattr(target, "state_at") and hasattr(target, "duration"):
         audio = getattr(target, "audio", None)
-        return FrameSource(target.state_at, target.duration, audio if callable(audio) else None)
+        # A timeline or prepared scene renders through its cameras.
+        frame_at = getattr(target, "frame_at", target.state_at)
+        return FrameSource(frame_at, target.duration, audio if callable(audio) else None)
     raise TypeError(f"cannot render {target!r}: it needs duration and state_at")
 
 

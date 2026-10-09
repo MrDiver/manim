@@ -71,19 +71,6 @@
       },
       "additionalProperties": false
     },
-    "camera": {
-      "type": "object",
-      "description": "The default camera (``\"camera\"``).",
-      "properties": {
-        "frame_height": {
-          "type": "number",
-          "default": 8.0,
-          "description": "World units shown vertically (Manim's default: 8).",
-          "minimum": 0
-        }
-      },
-      "additionalProperties": false
-    },
     "performance": {
       "type": "object",
       "description": "How rendering uses the machine (``\"performance\"``); never changes the image.",

@@ -72,7 +72,7 @@ def test_navigation_badge_properties(renderer: WGPURenderer) -> None:
     settings = navigation_config(320, 180)
 
     def frame(t: float) -> np.ndarray:
-        return renderer.render(prepared.state_at(t), settings).astype(int)
+        return renderer.render(prepared.frame_at(t), settings).astype(int)
 
     background = frame(0.0)
     assert len(np.unique(background.reshape(-1, 4), axis=0)) == 1  # empty before it grows
@@ -88,28 +88,26 @@ def test_navigation_badge_properties(renderer: WGPURenderer) -> None:
     assert np.all(outside == background[90, 20:60])
 
 
-def test_views_render_through_their_camera_and_blur_camera_moves(renderer: WGPURenderer) -> None:
-    from manimx.animation import Camera, Scene, Timeline, View
+def test_clips_render_through_their_camera_and_blur_camera_moves(renderer: WGPURenderer) -> None:
+    from manimx.animation import Scene, Timeline
     from manimx.userland import RIGHT, Dot
     from manimx.userland.rate_functions import linear
     from manimx.renderer import RenderConfig
 
-    camera = Camera(name="camera")
-
     class Pan(Scene):
         def construct(self):
             self.add(Dot(radius=0.3, name="dot"))
-            self.play(camera.animate.shift(RIGHT * 2), run_time=1, rate=linear)
+            self.play(self.camera.animate.shift(RIGHT * 2), run_time=1, rate=linear)
 
     timeline = Timeline()
     timeline.add(Pan().prepare())
-    view = timeline.view(View(timeline.worlds[0], camera))
+    view = timeline.frame_at
     settings = RenderConfig(pixel_width=160, pixel_height=90)
 
     def dot_columns(image: np.ndarray) -> np.ndarray:
         return np.nonzero(image[45, :, 0] > 128)[0]
 
-    start = dot_columns(renderer.render(view(0.0).root, settings))
+    start = dot_columns(renderer.render(view(0.0), settings))
     composer = FrameComposer(renderer)
     end = dot_columns(composer.compose(view, _at(settings, 1.0)))
     assert start.mean() == pytest.approx(80, abs=1)  # centered
@@ -118,3 +116,42 @@ def test_views_render_through_their_camera_and_blur_camera_moves(renderer: WGPUR
     blurred = FrameComposer(renderer, [MotionBlur(samples=8, shutter=0.5)]).compose(view, _at(settings, 0.5))
     partial = (blurred[45, :, 0] > 10) & (blurred[45, :, 0] < 245)
     assert partial.sum() > 4  # the dot smears along the camera move
+
+
+def test_overlapping_clips_are_drawn_over_each_other(renderer: WGPURenderer) -> None:
+    from manimx.animation import Scene, Timeline
+    from manimx.userland import LEFT, RIGHT, Dot
+    from manimx.renderer import RenderConfig
+
+    class Red(Scene):
+        def construct(self):
+            self.add(Dot(radius=1.0, color="#ff0000", name="dot"))
+            self.camera.shift(RIGHT)  # the dot appears left of center
+            self.wait(1)
+
+    class Blue(Scene):
+        def construct(self):
+            self.add(Dot(radius=1.0, color="#0000ff", name="dot"))
+            self.camera.shift(LEFT * 0.5)  # the dot appears right of center, over the red one
+            self.camera.zoom(2)
+            self.wait(1)
+
+    timeline = Timeline()
+    timeline.add(Blue().prepare(), layer=1)
+    timeline.add(Red().prepare())
+    settings = RenderConfig(pixel_width=160, pixel_height=90, background_color="#000000")
+
+    image = renderer.render(timeline.frame_at(0.5), settings)
+    row = image[45]
+    red = np.nonzero((row[:, 0] > 200) & (row[:, 2] < 50))[0]
+    blue = np.nonzero((row[:, 2] > 200) & (row[:, 0] < 50))[0]
+    unit = 160 / (8 * 16 / 9)  # pixels per unit
+    assert blue.mean() == pytest.approx(80 + unit, abs=1)  # through the blue clip's zoomed camera
+    assert len(blue) == pytest.approx(4 * unit, abs=2)  # zoomed in twice
+    assert red.max() == pytest.approx(80 - unit, abs=2)  # the higher layer covers the rest of the red dot
+    assert red.min() == pytest.approx(80 - 2 * unit, abs=1)  # through the red clip's camera
+    assert tuple(row[0, :3]) == (0, 0, 0)  # the background shows once, under both
+
+    motion_blurred = FrameComposer(renderer, [MotionBlur(samples=4, shutter=0.5)]).compose(timeline.frame_at, _at(settings, 0.5))
+    np.testing.assert_allclose(motion_blurred.astype(int), image.astype(int), atol=2)  # nothing moves
+    assert renderer.render(Timeline().frame_at(0.0), settings)[0, 0, 3] == 255  # no clips: background

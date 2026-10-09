@@ -30,8 +30,7 @@ from dataclasses import dataclass
 import numpy as np
 import wgpu
 
-from ..robjects import RNode
-from ..renderer.config import RenderConfig, ViewState
+from ..renderer.config import Frame, RenderConfig
 from ..renderer.webgpu import FrameComposer
 
 _ROW_ALIGNMENT = 256  # bytes_per_row of texture-to-buffer copies
@@ -67,7 +66,7 @@ class FramePipeline:
         self._pending: deque[_InFlight] = deque()
 
     def submit(
-        self, index: int, time: float, scene: RNode | ViewState | Callable[[float], RNode | ViewState]
+        self, index: int, time: float, scene: Frame | Callable[[float], Frame]
     ) -> Future[np.ndarray]:
         """Queue the frame at ``time``; the future gets its ``(H, W, 4)``
         uint8 RGBA pixels. Blocks only while all staging buffers are busy."""

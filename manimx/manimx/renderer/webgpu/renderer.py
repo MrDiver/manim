@@ -34,7 +34,7 @@ import wgpu
 
 from ...robjects import RNode, RShape3D
 from ..base import Renderer
-from ..config import RenderConfig
+from ..config import Frame, RenderConfig
 from ..effects import Effect
 from ..scene_graph import flatten_scene
 from .frame import FRAME_DTYPE, camera_frame
@@ -43,10 +43,10 @@ from .lighting_pass import LightingPass
 from .mesh_batch import MeshBatch
 from .mesh_pass import MeshPass
 from .profiler import GpuProfiler
+from .retained import RetainedVectors
 from .shadow_pass import ShadowPass
 from .shadow_views import build_shadow_views
 from .targets import RenderLayers, RenderTargets
-from .retained import RetainedVectors
 from .vector_pass import VectorPass
 
 if TYPE_CHECKING:
@@ -108,9 +108,11 @@ class WGPURenderer(Renderer):
         """Camera, viewport and time of the latest render (frame.wgsl)."""
         return self._frame_uniform
 
-    def render(self, root: RNode, config: RenderConfig) -> np.ndarray:
-        """Render ``root`` to ``(H, W, 4)`` uint8 RGBA with default compositing."""
-        return self.composer().compose(root, config)
+    def render(self, frame: Frame, config: RenderConfig) -> np.ndarray:
+        """Render ``frame`` (a tree, or views from ``frame_at``) to
+        ``(H, W, 4)`` uint8 RGBA with default compositing.
+        """
+        return self.composer().compose(frame, config)
 
     def composer(self, effects: Sequence[Effect] = ()) -> FrameComposer:
         """The composer for an effect chain, kept like everything else (its

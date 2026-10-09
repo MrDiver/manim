@@ -34,7 +34,7 @@ from typing import Any
 
 from .animation.scene import PreparedScene, Scene
 from .animation.timing import NEVER, Timeline
-from .renderer.config import Camera, RenderConfig
+from .renderer.config import RenderConfig
 from .renderer.effects import MotionBlur
 
 PROJECT_FILE = "manimx.json"
@@ -80,13 +80,6 @@ class OutputSettings:
 
 
 @dataclass
-class CameraSettings:
-    """The default camera (``"camera"``)."""
-
-    frame_height: float = _setting(8.0, "World units shown vertically (Manim's default: 8).", 0)
-
-
-@dataclass
 class PerformanceSettings:
     """How rendering uses the machine (``"performance"``); never changes the image."""
 
@@ -94,7 +87,7 @@ class PerformanceSettings:
     frames_in_flight: int = _setting(3, "Frames queued on the GPU per process.", 1)
 
 
-SECTIONS: dict[str, type] = {"output": OutputSettings, "camera": CameraSettings, "performance": PerformanceSettings}
+SECTIONS: dict[str, type] = {"output": OutputSettings, "performance": PerformanceSettings}
 
 
 @dataclass
@@ -121,7 +114,6 @@ class Project:
     root: Path
     name: str
     output: OutputSettings = field(default_factory=OutputSettings)
-    camera: CameraSettings = field(default_factory=CameraSettings)
     performance: PerformanceSettings = field(default_factory=PerformanceSettings)
     scenes: dict[str, SceneEntry] = field(default_factory=dict)
     timeline: list[ClipEntry] = field(default_factory=list)
@@ -190,18 +182,18 @@ class Project:
 
     # -- rendering --------------------------------------------------------------
 
-    def render_settings(self, output: OutputSettings | None = None, camera: CameraSettings | None = None) -> Any:
-        """Driver settings from the project's sections (or replacements)."""
+    def render_settings(self, output: OutputSettings | None = None) -> Any:
+        """Driver settings from the project's sections (or replacements).
+        Each scene renders through its own camera (``Scene.camera``).
+        """
         from .drivers import RenderSettings
 
         output = output or self.output
-        camera = camera or self.camera
         effects = (MotionBlur(samples=output.motion_blur, shutter=0.5 / output.fps),) if output.motion_blur > 1 else ()
         config = RenderConfig(
             pixel_width=output.width,
             pixel_height=output.height,
             background_color=output.background,
-            camera=Camera(frame_height=camera.frame_height),
         )
         return RenderSettings(
             config,
