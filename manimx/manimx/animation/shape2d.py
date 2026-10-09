@@ -14,8 +14,8 @@ from typing import Any
 import numpy as np
 
 from ..objects import Fill, RNode, RShape2D, Stroke
-from ..objects.geometry import arc_points, rectangle, regular_polygon
 from ..utils.color import WHITE, ParsableManimColor
+from .geometry import arc_points, rectangle_points, regular_polygon_points
 from .kinds import COLOR, DISCRETE, PATH
 from .node import (
     ABS,
@@ -133,17 +133,17 @@ class Dot(Shape2D):
 
 class Rectangle(Shape2D):
     def __init__(self, width: float = 4.0, height: float = 2.0, name: str | None = None, **style: Any) -> None:
-        super().__init__(rectangle(width, height).points, name, **style)
+        super().__init__(rectangle_points(width, height), name, **style)
 
 
 class Square(Shape2D):
     def __init__(self, side_length: float = 2.0, name: str | None = None, **style: Any) -> None:
-        super().__init__(rectangle(side_length, side_length).points, name, **style)
+        super().__init__(rectangle_points(side_length, side_length), name, **style)
 
 
 class RegularPolygon(Shape2D):
     def __init__(self, n: int = 6, radius: float = 1.0, name: str | None = None, **style: Any) -> None:
-        super().__init__(regular_polygon(n, radius).points, name, **style)
+        super().__init__(regular_polygon_points(n, radius), name, **style)
 
 
 class Polyline(Shape2D):

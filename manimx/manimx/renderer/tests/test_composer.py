@@ -2,9 +2,8 @@
 
 import numpy as np
 import pytest
-
-from manimx import Fill, RGroup, PbrMaterial, RShape3D, Stroke, Transform, sphere_mesh
-from manimx.objects.geometry import square
+from manimx.animation.geometry import rectangle_points
+from manimx.objects import RShape2D
 from manimx.renderer import (
     Bloom,
     FrameComposer,
@@ -16,6 +15,8 @@ from manimx.renderer import (
     WGPURenderer,
 )
 from manimx.utils.color import RED
+
+from manimx import Fill, PbrMaterial, RGroup, RShape3D, Stroke, Transform, sphere_mesh
 
 SIZE = {"pixel_width": 160, "pixel_height": 90}  # 11.25 pixels per world unit
 
@@ -54,7 +55,7 @@ def test_composer_validates_effects(renderer: WGPURenderer) -> None:
 def test_motion_blur_averages_sub_frames(renderer: WGPURenderer) -> None:
     def scene_at(time: float) -> RGroup:
         # A white bar that is only visible during the second half of the shutter.
-        bar = square(side_length=2.0, fill=Fill("#FFFFFF", opacity=1.0), stroke=Stroke(width=0.0))
+        bar = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill("#FFFFFF", opacity=1.0), stroke=Stroke(width=0.0))
         bar.visible = time > 0.0
         return RGroup(children=[bar])
 
@@ -99,7 +100,7 @@ def test_bloom_spreads_bright_light(renderer: WGPURenderer) -> None:
 
 def test_tone_map_affects_lit_layer_but_not_2d_colors(renderer: WGPURenderer) -> None:
     config = RenderConfig(**SIZE, ambient_intensity=0.0, default_lights=False)
-    flat = square(side_length=1.0, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0), transform=Transform(position=(-4.0, 0.0, 0.0)))
+    flat = RShape2D(points=rectangle_points(1.0, 1.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0), transform=Transform(position=(-4.0, 0.0, 0.0)))
     scene = RGroup(children=[flat, *_glowing_sphere().children])
 
     neutral = FrameComposer(renderer, [ToneMap(ToneMapOperator.PBR_NEUTRAL)]).compose(scene, config)

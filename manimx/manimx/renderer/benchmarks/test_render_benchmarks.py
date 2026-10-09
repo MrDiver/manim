@@ -11,13 +11,19 @@ import math
 
 import numpy as np
 import pytest
+from manimx.animation.geometry import arc_points
+from manimx.examples.manim_logo import M_GLYPH_POINTS, manim_logo
+from manimx.examples.manim_logo import config as logo_config
+from manimx.renderer import Bloom, Camera, FrameComposer, MotionBlur, RenderConfig
+from manimx.renderer.tessellation import tessellate_fill
+from manimx.utils.color import BLUE, RED, YELLOW
 
 from manimx import (
+    Fill,
+    PbrMaterial,
     RCurve3D,
     RDirectionalLight,
-    Fill,
     RGroup,
-    PbrMaterial,
     RPointLight,
     RShape2D,
     RShape3D,
@@ -27,12 +33,6 @@ from manimx import (
     box_mesh,
     sphere_mesh,
 )
-from manimx.examples.manim_logo import M_GLYPH_POINTS, manim_logo
-from manimx.examples.manim_logo import config as logo_config
-from manimx.objects.geometry import circle
-from manimx.renderer import Bloom, Camera, FrameComposer, MotionBlur, RenderConfig
-from manimx.renderer.tessellation import tessellate_fill
-from manimx.utils.color import BLUE, RED, YELLOW
 
 FULL_HD = {"pixel_width": 1920, "pixel_height": 1080}
 PERSPECTIVE = Camera.look_at((12, -16, 10), (0, 0, 1), field_of_view=math.radians(45), near=0.5, far=200)
@@ -42,12 +42,7 @@ def many_circles(count: int) -> RGroup:
     rng = np.random.default_rng(1)
     return RGroup(
         children=[
-            circle(
-                radius=0.15,
-                fill=Fill(RED if i % 2 else BLUE, opacity=0.6 if i % 3 == 0 else 1.0),
-                stroke=Stroke("#FFFFFF", width=2),
-                transform=Transform(position=(rng.uniform(-7, 7), rng.uniform(-4, 4), 0.0)),
-            )
+            RShape2D(points=arc_points(0.15), fill=Fill(RED if i % 2 else BLUE, opacity=0.6 if i % 3 == 0 else 1.0), stroke=Stroke("#FFFFFF", width=2), transform=Transform(position=(rng.uniform(-7, 7), rng.uniform(-4, 4), 0.0)))
             for i in range(count)
         ],
     )

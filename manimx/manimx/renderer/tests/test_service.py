@@ -6,12 +6,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import wgpu
+from manimx.animation.geometry import arc_points
+from manimx.objects import RShape2D, new_uid
+from manimx.renderer import MotionBlur, RenderConfig, RNodeDataCache, WGPURenderer
+from manimx.renderer.webgpu.gpu import ResourceCache
 
 from manimx import Fill, RGroup
-from manimx.objects import new_uid
-from manimx.objects.geometry import circle
-from manimx.renderer import RNodeDataCache, MotionBlur, RenderConfig, WGPURenderer
-from manimx.renderer.webgpu.gpu import ResourceCache
 
 
 @pytest.fixture(scope="module")
@@ -23,7 +23,7 @@ def renderer() -> WGPURenderer:
 
 
 def scene() -> RGroup:
-    return RGroup(children=[circle(fill=Fill("#e07a5f", opacity=1.0))])
+    return RGroup(children=[RShape2D(points=arc_points(), fill=Fill("#e07a5f", opacity=1.0))])
 
 
 def test_one_shared_renderer_with_composers_per_effect_chain(renderer: WGPURenderer) -> None:

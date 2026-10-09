@@ -1,13 +1,17 @@
-"""Basic shapes, ported from ``manim.mobject.geometry`` point generation."""
+"""Points of basic shapes, in the RBezierPath layout (four per cubic curve).
+
+The shape nodes (Circle, Rectangle, RegularPolygon, ...) are built from
+these, and code that builds render objects directly can use them too:
+``RShape2D(points=arc_points(1.0))``.
+"""
 
 from __future__ import annotations
 
 import math
-from typing import Any
 
 import numpy as np
 
-from .rshape2d import RShape2D
+from ..objects import RShape2D
 
 
 def arc_points(
@@ -16,7 +20,7 @@ def arc_points(
     angle: float = math.tau,
     num_curves: int = 8,
 ) -> np.ndarray:
-    """Cubic Bezier approximation of a circular arc (Manim's ``Arc``).
+    """Cubic Bezier approximation of a circular arc.
 
     Each piece spans ``angle / num_curves``; its handles lie on the tangents
     at distance ``4/3 * tan(theta / 4)`` times the radius.
@@ -39,28 +43,20 @@ def arc_points(
     return curves.reshape(-1, 2)
 
 
-def circle(radius: float = 1.0, **kwargs: Any) -> RShape2D:
-    return RShape2D(points=arc_points(radius), **kwargs)
-
-
-def regular_polygon(n: int, radius: float = 1.0, start_angle: float | None = None, **kwargs: Any) -> RShape2D:
-    """Manim's ``RegularPolygon``: odd ``n`` start with a vertex pointing up."""
+def regular_polygon_points(n: int, radius: float = 1.0, start_angle: float | None = None) -> np.ndarray:
+    """A closed regular polygon; odd ``n`` start with a vertex pointing up."""
     if start_angle is None:
         start_angle = (n % 2) * math.pi / 2
     angles = start_angle + np.arange(n) * math.tau / n
     corners = radius * np.column_stack([np.cos(angles), np.sin(angles)])
-    return RShape2D.from_corners(corners, closed=True, **kwargs)
+    return RShape2D.from_corners(corners, closed=True).points
 
 
-def triangle(**kwargs: Any) -> RShape2D:
-    return regular_polygon(3, **kwargs)
-
-
-def rectangle(width: float = 4.0, height: float = 2.0, **kwargs: Any) -> RShape2D:
-    """Corners in Manim's order: UR, UL, DL, DR."""
+def rectangle_points(width: float = 4.0, height: float = 2.0) -> np.ndarray:
+    """A closed rectangle centered at the origin, corners in the order
+    upper right, upper left, lower left, lower right."""
     w, h = width / 2, height / 2
-    return RShape2D.from_corners([(w, h), (-w, h), (-w, -h), (w, -h)], closed=True, **kwargs)
+    return RShape2D.from_corners([(w, h), (-w, h), (-w, -h), (w, -h)], closed=True).points
 
 
-def square(side_length: float = 2.0, **kwargs: Any) -> RShape2D:
-    return rectangle(side_length, side_length, **kwargs)
+__all__ = ["arc_points", "rectangle_points", "regular_polygon_points"]

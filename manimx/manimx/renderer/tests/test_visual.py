@@ -14,14 +14,27 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
-from manimx import CapStyle, RClippingGroup, Fill, RGroup, JointType, RShape2D, Stroke, Transform
+from manimx.animation.geometry import (
+    arc_points,
+    rectangle_points,
+    regular_polygon_points,
+)
 from manimx.examples.manim_logo import config as logo_config
 from manimx.examples.manim_logo import manim_logo
-from manimx.objects.geometry import circle, regular_polygon, square
 from manimx.renderer import RenderConfig, WGPURenderer
 from manimx.testing import ImageTolerance, assert_image_matches
 from manimx.utils.color import BLUE, GREEN, ORANGE, PURPLE, RED, WHITE, YELLOW
+
+from manimx import (
+    CapStyle,
+    Fill,
+    JointType,
+    RClippingGroup,
+    RGroup,
+    RShape2D,
+    Stroke,
+    Transform,
+)
 
 REFERENCES = Path(__file__).parent / "references"
 
@@ -74,11 +87,7 @@ def test_joints_and_caps(renderer: WGPURenderer, update_references: bool) -> Non
 
 
 def test_per_point_stroke_styles(renderer: WGPURenderer, update_references: bool) -> None:
-    rainbow = circle(
-        radius=1.5,
-        stroke=Stroke([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED], width=25),
-        transform=Transform(position=(-3.0, 0.0, 0.0)),
-    )
+    rainbow = RShape2D(points=arc_points(1.5), stroke=Stroke([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED], width=25), transform=Transform(position=(-3.0, 0.0, 0.0)))
     taper = RShape2D.from_corners(
         [(-1.5, -1.0), (0.0, 1.0), (1.5, -1.0)],
         stroke=Stroke([BLUE, GREEN], width=[2, 60], joint=JointType.ROUND, cap=CapStyle.ROUND),
@@ -91,9 +100,9 @@ def test_per_point_stroke_styles(renderer: WGPURenderer, update_references: bool
 
 def test_transparency_and_gradients(renderer: WGPURenderer, update_references: bool) -> None:
     shapes = [
-        regular_polygon(5, radius=1.5, fill=Fill([RED, BLUE], opacity=0.7), stroke=Stroke(YELLOW, width=12, opacity=0.5), transform=Transform(position=(-3.0, 0.0, 0.0))),
-        square(fill=Fill(RED, opacity=0.5), stroke=Stroke(WHITE, width=8), transform=Transform(position=(1.5, 0.5, 0.0))),
-        square(fill=Fill(BLUE, opacity=0.5), stroke=Stroke(WHITE, width=8), transform=Transform(position=(2.5, -0.5, 0.0))),
+        RShape2D(points=regular_polygon_points(5, 1.5), fill=Fill([RED, BLUE], opacity=0.7), stroke=Stroke(YELLOW, width=12, opacity=0.5), transform=Transform(position=(-3.0, 0.0, 0.0))),
+        RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=0.5), stroke=Stroke(WHITE, width=8), transform=Transform(position=(1.5, 0.5, 0.0))),
+        RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(BLUE, opacity=0.5), stroke=Stroke(WHITE, width=8), transform=Transform(position=(2.5, -0.5, 0.0))),
     ]
     image = renderer.render(RGroup(children=shapes), config(background_color="#222222"))
 
@@ -103,17 +112,13 @@ def test_transparency_and_gradients(renderer: WGPURenderer, update_references: b
 def test_shapes_in_3d(renderer: WGPURenderer, update_references: bool) -> None:
     flipped = RGroup(
         children=[
-            circle(fill=Fill(GREEN, opacity=1.0), stroke=Stroke(WHITE, width=8)),
-            square(side_length=0.8, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0)),
+            RShape2D(points=arc_points(), fill=Fill(GREEN, opacity=1.0), stroke=Stroke(WHITE, width=8)),
+            RShape2D(points=rectangle_points(0.8, 0.8), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0)),
         ],
         transform=Transform(position=(-3.0, 0.0, 0.0)).rotated(math.pi, (0, 1, 0)),
     )
     tilted = [
-        square(
-            fill=Fill(PURPLE, opacity=1.0),
-            stroke=Stroke(YELLOW, width=10),
-            transform=Transform(position=(2.5, 2.0 - 2.0 * i, 0.0)).rotated(angle, (1, 0, 0)).rotated(0.4, (0, 1, 0)),
-        )
+        RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(PURPLE, opacity=1.0), stroke=Stroke(YELLOW, width=10), transform=Transform(position=(2.5, 2.0 - 2.0 * i, 0.0)).rotated(angle, (1, 0, 0)).rotated(0.4, (0, 1, 0)))
         for i, angle in enumerate([0.8, 1.3, 1.5])
     ]
     image = renderer.render(RGroup(children=[flipped, *tilted]), config())
@@ -124,18 +129,18 @@ def test_shapes_in_3d(renderer: WGPURenderer, update_references: bool) -> None:
 def test_clipping(renderer: WGPURenderer, update_references: bool) -> None:
     stripes = RGroup(
         children=[
-            square(side_length=0.5, fill=Fill(color, opacity=1.0), stroke=Stroke(WHITE, width=4), transform=Transform(position=(-2.0 + 0.5 * i, 0.0, 0.0), scale=(1.0, 8.0, 1.0)))
+            RShape2D(points=rectangle_points(0.5, 0.5), fill=Fill(color, opacity=1.0), stroke=Stroke(WHITE, width=4), transform=Transform(position=(-2.0 + 0.5 * i, 0.0, 0.0), scale=(1.0, 8.0, 1.0)))
             for i, color in enumerate([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED, ORANGE, YELLOW])
         ],
     )
     soft_mask = RGroup(
         children=[
-            circle(radius=1.6, fill=Fill(opacity=1.0), stroke=Stroke(width=0)),
-            square(side_length=1.2, fill=Fill(opacity=0.4), stroke=Stroke(width=20, opacity=1.0), transform=Transform(position=(2.0, 0.0, 0.0))),
+            RShape2D(points=arc_points(1.6), fill=Fill(opacity=1.0), stroke=Stroke(width=0)),
+            RShape2D(points=rectangle_points(1.2, 1.2), fill=Fill(opacity=0.4), stroke=Stroke(width=20, opacity=1.0), transform=Transform(position=(2.0, 0.0, 0.0))),
         ],
     )
-    hard = RClippingGroup(mask=regular_polygon(6, radius=1.8, fill=Fill(opacity=1.0), stroke=Stroke(width=0)), content=stripes, transform=Transform(position=(-3.5, 0.0, 0.0)))
-    soft = RClippingGroup(mask=soft_mask, content=square(side_length=4.0, fill=Fill([BLUE, GREEN], opacity=1.0), stroke=Stroke(width=0)), transform=Transform(position=(1.5, 0.0, 0.0)).rotated(0.5, (0, 1, 0)))
+    hard = RClippingGroup(mask=RShape2D(points=regular_polygon_points(6, 1.8), fill=Fill(opacity=1.0), stroke=Stroke(width=0)), content=stripes, transform=Transform(position=(-3.5, 0.0, 0.0)))
+    soft = RClippingGroup(mask=soft_mask, content=RShape2D(points=rectangle_points(4.0, 4.0), fill=Fill([BLUE, GREEN], opacity=1.0), stroke=Stroke(width=0)), transform=Transform(position=(1.5, 0.0, 0.0)).rotated(0.5, (0, 1, 0)))
     image = renderer.render(RGroup(children=[hard, soft]), config(background_color="#222222"))
 
     check(image, "clipping", update_references)
@@ -157,8 +162,19 @@ def _perspective(eye: tuple, target: tuple) -> object:
 
 
 def test_meshes_and_lights(renderer: WGPURenderer, update_references: bool) -> None:
-    from manimx import RDirectionalLight, PbrMaterial, RPointLight, RShape3D, RSpotLight, Texture, box_mesh, sphere_mesh, torus_mesh
     from manimx.examples.blender_scene import _ground
+
+    from manimx import (
+        PbrMaterial,
+        RDirectionalLight,
+        RPointLight,
+        RShape3D,
+        RSpotLight,
+        Texture,
+        box_mesh,
+        sphere_mesh,
+        torus_mesh,
+    )
 
     i, j = np.indices((64, 64))
     checker = ((i // 8 + j // 8) % 2 * 200 + 40).astype(np.uint8)
@@ -180,8 +196,9 @@ def test_meshes_and_lights(renderer: WGPURenderer, update_references: bool) -> N
 
 
 def test_curves_3d(renderer: WGPURenderer, update_references: bool) -> None:
-    from manimx import RCurve3D
     from manimx.examples.blender_scene import _ground
+
+    from manimx import RCurve3D
 
     rainbow = [RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE]
     curves = [
@@ -203,12 +220,19 @@ def test_curves_3d(renderer: WGPURenderer, update_references: bool) -> None:
 
 
 def test_motion_blur_bloom_and_aces(renderer: WGPURenderer, update_references: bool) -> None:
-    from manimx import RCurve3D, RDirectionalLight, PbrMaterial, RShape3D, sphere_mesh
-    from manimx.renderer import Bloom, FrameComposer, MotionBlur, ToneMap, ToneMapOperator
+    from manimx.renderer import (
+        Bloom,
+        FrameComposer,
+        MotionBlur,
+        ToneMap,
+        ToneMapOperator,
+    )
+
+    from manimx import PbrMaterial, RCurve3D, RDirectionalLight, RShape3D, sphere_mesh
 
     def scene_at(t: float) -> RGroup:
-        spin = square(side_length=2, fill=Fill(BLUE, opacity=1), stroke=Stroke(WHITE, width=6), transform=Transform(position=(-3.5, 0, 0)).rotated(6 * t))
-        ball = circle(radius=0.6, fill=Fill(RED, opacity=1), stroke=Stroke(width=0), transform=Transform(position=(-1 + 8 * (t % 1), 2, 0)))
+        spin = RShape2D(points=rectangle_points(2, 2), fill=Fill(BLUE, opacity=1), stroke=Stroke(WHITE, width=6), transform=Transform(position=(-3.5, 0, 0)).rotated(6 * t))
+        ball = RShape2D(points=arc_points(0.6), fill=Fill(RED, opacity=1), stroke=Stroke(width=0), transform=Transform(position=(-1 + 8 * (t % 1), 2, 0)))
         glow = [
             RShape3D(mesh=sphere_mesh(0.5), material=PbrMaterial("#202020", emissive=color, emissive_strength=6), transform=Transform(position=(1 + 1.6 * i, -1.5, 0)))
             for i, color in enumerate([YELLOW, "#58C4DD", "#FC6255"])
@@ -225,8 +249,18 @@ def test_motion_blur_bloom_and_aces(renderer: WGPURenderer, update_references: b
 
 
 def test_shadows(renderer: WGPURenderer, update_references: bool) -> None:
-    from manimx import RCurve3D, RDirectionalLight, PbrMaterial, RPointLight, RShape3D, RSpotLight, box_mesh, sphere_mesh
     from manimx.examples.manim_logo import manim_logo
+
+    from manimx import (
+        PbrMaterial,
+        RCurve3D,
+        RDirectionalLight,
+        RPointLight,
+        RShape3D,
+        RSpotLight,
+        box_mesh,
+        sphere_mesh,
+    )
 
     logo = manim_logo()
     logo.transform = Transform(position=(0, 0.5, 1.8), scale=(0.6, 0.6, 0.6)).rotated(math.pi / 2, (1, 0, 0))

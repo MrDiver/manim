@@ -2,14 +2,22 @@ import math
 
 import numpy as np
 import pytest
+from manimx.animation.geometry import (
+    arc_points,
+    rectangle_points,
+    regular_polygon_points,
+)
+from manimx.objects.rshape2d import is_closed
+from manimx.objects.style import resample, to_rgb_array
+from manimx.utils.color import BLUE, RED
 
 from manimx import (
     CapStyle,
-    RClippingGroup,
     Fill,
-    RGroup,
     JointType,
     Quaternion,
+    RClippingGroup,
+    RGroup,
     RNode,
     RShape2D,
     RShape3D,
@@ -17,10 +25,6 @@ from manimx import (
     Transform,
     quaternion_from_axis_angle,
 )
-from manimx.objects.geometry import arc_points, circle, rectangle, square, triangle
-from manimx.objects.rshape2d import is_closed
-from manimx.objects.style import resample, to_rgb_array
-from manimx.utils.color import BLUE, RED
 
 # --- RNode: identity and versioning ------------------------------------
 
@@ -184,10 +188,10 @@ def test_subpaths_split_at_gaps() -> None:
 def test_geometry_matches_manim() -> None:
     # Values from manim's Circle() and Triangle().
     np.testing.assert_allclose(arc_points()[:4], [[1, 0], [1, 0.2652], [0.8946, 0.5196], [0.7071, 0.7071]], atol=1e-4)
-    np.testing.assert_allclose(triangle().points[::4], [[0, 1], [-0.866, -0.5], [0.866, -0.5]], atol=1e-3)
-    assert circle().num_curves == 8
-    np.testing.assert_allclose(square().points[0], [1.0, 1.0])
-    np.testing.assert_allclose(rectangle(4, 2).points[0], [2.0, 1.0])
+    np.testing.assert_allclose(RShape2D(points=regular_polygon_points(3, 1.0)).points[::4], [[0, 1], [-0.866, -0.5], [0.866, -0.5]], atol=1e-3)
+    assert RShape2D(points=arc_points()).num_curves == 8
+    np.testing.assert_allclose(RShape2D(points=rectangle_points(2.0, 2.0)).points[0], [1.0, 1.0])
+    np.testing.assert_allclose(RShape2D(points=rectangle_points(4, 2)).points[0], [2.0, 1.0])
 
 
 def test_shape3d_versions_mesh_and_material() -> None:

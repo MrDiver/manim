@@ -26,17 +26,18 @@ import math
 
 import numpy as np
 
+from ..animation.geometry import arc_points, rectangle_points, regular_polygon_points
 from ..objects import (
     CapStyle,
+    Fill,
+    JointType,
+    PbrMaterial,
     RClippingGroup,
     RCurve3D,
     RDirectionalLight,
-    Fill,
     RGroup,
-    JointType,
-    PbrMaterial,
-    RPointLight,
     RNode,
+    RPointLight,
     RShape2D,
     RShape3D,
     RSpotLight,
@@ -46,7 +47,6 @@ from ..objects import (
     sphere_mesh,
     torus_mesh,
 )
-from ..objects.geometry import circle, regular_polygon, square
 from ..renderer.config import Camera, RenderConfig
 from ..utils.color import BLUE, GREEN, ORANGE, PURPLE, RED, WHITE, YELLOW
 from .manim_logo import manim_logo
@@ -103,15 +103,15 @@ def orbit_camera(azimuth: float, elevation: float = 22.0, distance: float = 11.0
 
 def _face(side: str, fill: Fill, stroke: Stroke) -> RShape2D:
     normal, (angle, axis) = _SIDES[side]
-    return square(side_length=SIZE, fill=fill, stroke=stroke, transform=Transform(position=tuple(CENTER + HALF * np.array(normal))).rotated(angle, axis))
+    return RShape2D(points=rectangle_points(SIZE, SIZE), fill=fill, stroke=stroke, transform=Transform(position=tuple(CENTER + HALF * np.array(normal))).rotated(angle, axis))
 
 
 def _frame() -> RGroup:
     """Six stroked planes: four open side outlines, a solid lid and base."""
     outline = Stroke(FRAME_COLOR, width=6, joint=JointType.MITER)
     sides = [_face(side, Fill(opacity=0.0), outline) for side in _SIDES]
-    lid = square(side_length=SIZE, fill=Fill("#2a2a35", opacity=1.0), stroke=outline, transform=Transform(position=(0.0, 0.0, SIZE)))
-    base = square(side_length=SIZE, fill=Fill("#2a2a35", opacity=1.0), stroke=outline, transform=Transform().rotated(math.pi, (1, 0, 0)))
+    lid = RShape2D(points=rectangle_points(SIZE, SIZE), fill=Fill("#2a2a35", opacity=1.0), stroke=outline, transform=Transform(position=(0.0, 0.0, SIZE)))
+    base = RShape2D(points=rectangle_points(SIZE, SIZE), fill=Fill("#2a2a35", opacity=1.0), stroke=outline, transform=Transform().rotated(math.pi, (1, 0, 0)))
     return RGroup(children=[*sides, lid, base])
 
 
@@ -216,11 +216,11 @@ def grid_world() -> RGroup:
     )
     zigzag = RShape2D.from_corners([(-0.6, -0.3), (-0.3, 0.3), (0.0, -0.3), (0.3, 0.3), (0.6, -0.3)], stroke=Stroke(WHITE, width=14, joint=JointType.ROUND, cap=CapStyle.ROUND))
     hexagon = RClippingGroup(
-        mask=regular_polygon(6, radius=0.6, fill=Fill(opacity=1.0), stroke=Stroke(width=0)),
-        content=RGroup(children=[square(side_length=0.2, fill=Fill(c, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(-0.7 + 0.2 * i, 0, 0), scale=(1, 7, 1))) for i, c in enumerate([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED, ORANGE])]),
+        mask=RShape2D(points=regular_polygon_points(6, 0.6), fill=Fill(opacity=1.0), stroke=Stroke(width=0)),
+        content=RGroup(children=[RShape2D(points=rectangle_points(0.2, 0.2), fill=Fill(c, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(-0.7 + 0.2 * i, 0, 0), scale=(1, 7, 1))) for i, c in enumerate([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED, ORANGE])]),
     )
-    ring = circle(radius=0.5, stroke=Stroke([RED, YELLOW, GREEN, BLUE, PURPLE, RED], width=[4, 16, 4, 16, 4]))
-    pentagon = regular_polygon(5, radius=0.5, fill=Fill([RED, BLUE], opacity=0.7), stroke=Stroke(YELLOW, width=6, opacity=0.6))
+    ring = RShape2D(points=arc_points(0.5), stroke=Stroke([RED, YELLOW, GREEN, BLUE, PURPLE, RED], width=[4, 16, 4, 16, 4]))
+    pentagon = RShape2D(points=regular_polygon_points(5, 0.5), fill=Fill([RED, BLUE], opacity=0.7), stroke=Stroke(YELLOW, width=6, opacity=0.6))
     return RGroup(
         children=[
             _room("left", wall="#3d3d3d", floor="#353535"),

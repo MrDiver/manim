@@ -29,8 +29,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ..animation.geometry import arc_points, rectangle_points, regular_polygon_points
 from ..objects import Fill, RGroup, RShape2D, Stroke, Transform
-from ..objects.geometry import circle, square, triangle
 from ..renderer.config import RenderConfig
 from ..renderer.scene_graph import bounding_box
 
@@ -56,9 +56,9 @@ def manim_logo() -> RGroup:
         transform=Transform(position=(-2.25, 1.5, 0.0), scale=(7.0, 7.0, 1.0)),
     )
     shapes = [
-        triangle(transform=Transform(position=(1.0, 0.0, 0.0)), **_colored(LOGO_RED)),
-        square(transform=Transform(position=(0.0, 1.0, 0.0)), **_colored(LOGO_BLUE)),
-        circle(transform=Transform(position=(-1.0, 0.0, 0.0)), **_colored(LOGO_GREEN)),
+        RShape2D(points=regular_polygon_points(3, 1.0), transform=Transform(position=(1.0, 0.0, 0.0)), **_colored(LOGO_RED)),
+        RShape2D(points=rectangle_points(2.0, 2.0), transform=Transform(position=(0.0, 1.0, 0.0)), **_colored(LOGO_BLUE)),
+        RShape2D(points=arc_points(), transform=Transform(position=(-1.0, 0.0, 0.0)), **_colored(LOGO_GREEN)),
         ds_m,
     ]  # order matters: later shapes are drawn on top
 

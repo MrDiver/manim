@@ -7,14 +7,14 @@ signals, so renderer caches survive any number of snapshots.
 
 import numpy as np
 import pytest
-
-from manimx import Fill, RGroup, RShape2D, RSpotLight, Stroke
 from manimx.animation import PATH, RootSignal, Vector3Signal, derive, version_token
+from manimx.animation.geometry import arc_points
 from manimx.objects import new_uid
-from manimx.objects.geometry import arc_points
 from manimx.renderer import RNodeDataCache
 from manimx.renderer.scene_graph import flatten_scene
 from manimx.renderer.webgpu.vector_batch import VectorBatch
+
+from manimx import Fill, RGroup, RShape2D, RSpotLight, Stroke
 
 
 def test_uid_can_be_given_and_is_unique_otherwise() -> None:

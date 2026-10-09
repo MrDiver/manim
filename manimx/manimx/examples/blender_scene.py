@@ -19,8 +19,17 @@ import math
 
 import numpy as np
 
-from ..objects import CapStyle, RClippingGroup, Fill, RGroup, JointType, RShape2D, Stroke, Transform
-from ..objects.geometry import circle, regular_polygon, square
+from ..animation.geometry import arc_points, rectangle_points, regular_polygon_points
+from ..objects import (
+    CapStyle,
+    Fill,
+    JointType,
+    RClippingGroup,
+    RGroup,
+    RShape2D,
+    Stroke,
+    Transform,
+)
 from ..renderer.config import Camera, RenderConfig
 from ..renderer.scene_graph import bounding_box
 from ..utils.color import BLUE, GREEN, ORANGE, PURPLE, RED, WHITE, YELLOW
@@ -107,27 +116,27 @@ def _stress_ring() -> RGroup:
             )
         ],
     )
-    rainbow = circle(radius=1.4, stroke=Stroke([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED], width=[6, 30, 6, 30, 6]))
-    pentagon = regular_polygon(5, radius=1.5, fill=Fill([RED, BLUE], opacity=0.7), stroke=Stroke(YELLOW, width=10, opacity=0.6))
+    rainbow = RShape2D(points=arc_points(1.4), stroke=Stroke([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED], width=[6, 30, 6, 30, 6]))
+    pentagon = RShape2D(points=regular_polygon_points(5, 1.5), fill=Fill([RED, BLUE], opacity=0.7), stroke=Stroke(YELLOW, width=10, opacity=0.6))
     squares = RGroup(
         children=[
-            square(fill=Fill(RED, opacity=0.5), stroke=Stroke(WHITE, width=6), transform=Transform(position=(-0.5, 0.5, 0.0))),
-            square(fill=Fill(BLUE, opacity=0.5), stroke=Stroke(WHITE, width=6), transform=Transform(position=(0.5, -0.5, 0.0))),
+            RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=0.5), stroke=Stroke(WHITE, width=6), transform=Transform(position=(-0.5, 0.5, 0.0))),
+            RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(BLUE, opacity=0.5), stroke=Stroke(WHITE, width=6), transform=Transform(position=(0.5, -0.5, 0.0))),
         ],
     )
     clipped = RClippingGroup(
-        mask=regular_polygon(6, radius=1.5, fill=Fill(opacity=1.0), stroke=Stroke(width=0)),
+        mask=RShape2D(points=regular_polygon_points(6, 1.5), fill=Fill(opacity=1.0), stroke=Stroke(width=0)),
         content=RGroup(
             children=[
-                square(side_length=0.5, fill=Fill(color, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(-1.75 + 0.5 * i, 0.0, 0.0), scale=(1.0, 7.0, 1.0)))
+                RShape2D(points=rectangle_points(0.5, 0.5), fill=Fill(color, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(-1.75 + 0.5 * i, 0.0, 0.0), scale=(1.0, 7.0, 1.0)))
                 for i, color in enumerate([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED, ORANGE])
             ],
         ),
     )
     mirrored = RGroup(
         children=[
-            circle(fill=Fill(GREEN, opacity=1.0), stroke=Stroke(WHITE, width=8)),
-            square(side_length=0.8, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0)),
+            RShape2D(points=arc_points(), fill=Fill(GREEN, opacity=1.0), stroke=Stroke(WHITE, width=8)),
+            RShape2D(points=rectangle_points(0.8, 0.8), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0)),
         ],
     )
 

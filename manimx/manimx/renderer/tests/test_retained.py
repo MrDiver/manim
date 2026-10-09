@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
-from manimx import RClippingGroup, Fill, RGroup, Stroke, Transform
+from manimx.animation.geometry import (
+    arc_points,
+    rectangle_points,
+    regular_polygon_points,
+)
 from manimx.objects import new_uid
-from manimx.objects.geometry import circle, square, triangle
 from manimx.renderer import RenderConfig, WGPURenderer
-from manimx.renderer.scene_graph import flatten_scene
 from manimx.renderer.cache import RNodeDataCache
+from manimx.renderer.scene_graph import flatten_scene
 from manimx.renderer.webgpu.retained import RetainedVectors
+
+from manimx import Fill, RClippingGroup, RGroup, RShape2D, Stroke, Transform
 
 CONFIG = RenderConfig(pixel_width=160, pixel_height=90)
 
@@ -28,9 +32,21 @@ def renderer() -> WGPURenderer:
         pytest.skip(f"no usable GPU: {error}")
 
 
+def circle():
+    return arc_points()
+
+
+def square():
+    return rectangle_points(2.0, 2.0)
+
+
+def triangle():
+    return regular_polygon_points(3)
+
+
 def shape(kind, uid, x=0.0, color="#e07a5f", opacity=1.0, width=4.0):
-    return kind(
-        uid=uid, fill=Fill(color, opacity=opacity), stroke=Stroke("#f2cc8f", width=width),
+    return RShape2D(
+        points=kind(), uid=uid, fill=Fill(color, opacity=opacity), stroke=Stroke("#f2cc8f", width=width),
         transform=Transform(position=(x, 0.0, 0.0)), versions={"points": ("p", uid, kind.__name__), "fill": (color, opacity), "stroke": width},
     )  # fmt: skip
 

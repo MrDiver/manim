@@ -4,11 +4,12 @@ import math
 
 import numpy as np
 import pytest
-
-from manimx import RClippingGroup, Fill, RGroup, Stroke, Transform
-from manimx.objects.geometry import circle, square
+from manimx.animation.geometry import arc_points, rectangle_points
+from manimx.objects import RShape2D
 from manimx.renderer import RemoveObjects, RenderConfig, Renderer, WGPURenderer
 from manimx.utils.color import BLUE, RED
+
+from manimx import Fill, RClippingGroup, RGroup, Stroke, Transform
 
 WIDTH, HEIGHT = 160, 90  # 8 world units tall: 11.25 pixels per unit
 BACKGROUND = (0, 0, 0, 255)
@@ -40,7 +41,7 @@ def test_renderer_implements_interface(renderer: WGPURenderer) -> None:
 
 
 def test_renders_background_and_fill(renderer: WGPURenderer) -> None:
-    image = render(renderer, square(fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0)))
+    image = render(renderer, RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0)))
 
     assert image.shape == (HEIGHT, WIDTH, 4) and image.dtype == np.uint8
     assert pixel(image, 0, 0) == (*RED.to_int_rgb(), 255)
@@ -48,7 +49,7 @@ def test_renders_background_and_fill(renderer: WGPURenderer) -> None:
 
 
 def test_group_transform_moves_children(renderer: WGPURenderer) -> None:
-    shape = square(side_length=1.0, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0))
+    shape = RShape2D(points=rectangle_points(1.0, 1.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0))
     image = render(renderer, RGroup(children=[shape], transform=Transform(position=(3.0, 0.0, 0.0))))
 
     assert pixel(image, 3, 0) == (*RED.to_int_rgb(), 255)
@@ -56,21 +57,21 @@ def test_group_transform_moves_children(renderer: WGPURenderer) -> None:
 
 
 def test_later_objects_paint_over_earlier_ones(renderer: WGPURenderer) -> None:
-    below = square(fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0))
-    above = circle(radius=0.5, fill=Fill(BLUE, opacity=1.0), stroke=Stroke(width=0.0))
+    below = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0))
+    above = RShape2D(points=arc_points(0.5), fill=Fill(BLUE, opacity=1.0), stroke=Stroke(width=0.0))
 
     assert pixel(render(renderer, below, above), 0, 0) == (*BLUE.to_int_rgb(), 255)
     assert pixel(render(renderer, above, below), 0, 0) == (*RED.to_int_rgb(), 255)
 
 
 def test_stroke_is_drawn_over_its_fill(renderer: WGPURenderer) -> None:
-    shape = square(fill=Fill(RED, opacity=1.0), stroke=Stroke(BLUE, width=20.0))
+    shape = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(BLUE, width=20.0))
 
     assert pixel(render(renderer, shape), 1.0, 0.0) == (*BLUE.to_int_rgb(), 255)
 
 
 def test_transparent_fill_blends_over_background(renderer: WGPURenderer) -> None:
-    shape = square(fill=Fill("#FFFFFF", opacity=0.5), stroke=Stroke(width=0.0))
+    shape = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill("#FFFFFF", opacity=0.5), stroke=Stroke(width=0.0))
 
     r, g, b, _ = pixel(render(renderer, shape), 0, 0)
     assert 120 <= r <= 135 and r == g == b
@@ -78,14 +79,14 @@ def test_transparent_fill_blends_over_background(renderer: WGPURenderer) -> None
 
 def test_back_side_renders_like_front(renderer: WGPURenderer) -> None:
     def scene(flip: float) -> np.ndarray:
-        shape = circle(fill=Fill(RED, opacity=1.0), transform=Transform().rotated(flip, (0, 1, 0)))
+        shape = RShape2D(points=arc_points(), fill=Fill(RED, opacity=1.0), transform=Transform().rotated(flip, (0, 1, 0)))
         return render(renderer, shape)
 
     np.testing.assert_array_equal(scene(0.0), scene(math.pi))
 
 
 def test_remove_command_clears_renderer_cache(renderer: WGPURenderer) -> None:
-    shape = circle(fill=Fill(RED, opacity=1.0))
+    shape = RShape2D(points=arc_points(), fill=Fill(RED, opacity=1.0))
     render(renderer, shape)
     assert renderer.cache.get(shape.uid, "fill-mesh", shape.version("points")) is not None
 
@@ -95,15 +96,15 @@ def test_remove_command_clears_renderer_cache(renderer: WGPURenderer) -> None:
 
 
 def test_without_msaa(renderer: WGPURenderer) -> None:
-    image = render(renderer, square(fill=Fill(RED, opacity=1.0)), msaa_samples=1)
+    image = render(renderer, RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0)), msaa_samples=1)
 
     assert pixel(image, 0, 0) == (*RED.to_int_rgb(), 255)
 
 
 def test_clipping_shows_content_only_inside_mask(renderer: WGPURenderer) -> None:
     clip = RClippingGroup(
-        mask=circle(radius=1.0, fill=Fill(opacity=1.0), stroke=Stroke(width=0.0)),
-        content=square(side_length=4.0, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0)),
+        mask=RShape2D(points=arc_points(1.0), fill=Fill(opacity=1.0), stroke=Stroke(width=0.0)),
+        content=RShape2D(points=rectangle_points(4.0, 4.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0)),
     )
 
     image = render(renderer, clip)
@@ -114,8 +115,8 @@ def test_clipping_shows_content_only_inside_mask(renderer: WGPURenderer) -> None
 
 def test_soft_mask_multiplies_alpha(renderer: WGPURenderer) -> None:
     clip = RClippingGroup(
-        mask=square(fill=Fill(opacity=0.5), stroke=Stroke(width=0.0)),
-        content=square(fill=Fill("#FFFFFF", opacity=1.0), stroke=Stroke(width=0.0)),
+        mask=RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(opacity=0.5), stroke=Stroke(width=0.0)),
+        content=RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill("#FFFFFF", opacity=1.0), stroke=Stroke(width=0.0)),
     )
 
     r, g, b, _ = pixel(render(renderer, clip), 0, 0)
@@ -124,9 +125,9 @@ def test_soft_mask_multiplies_alpha(renderer: WGPURenderer) -> None:
 
 def test_nested_masks_intersect(renderer: WGPURenderer) -> None:
     def band(x: float) -> object:
-        return square(side_length=2.0, fill=Fill(opacity=1.0), stroke=Stroke(width=0.0), transform=Transform(position=(x, 0.0, 0.0)))
+        return RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(opacity=1.0), stroke=Stroke(width=0.0), transform=Transform(position=(x, 0.0, 0.0)))
 
-    content = square(side_length=6.0, fill=Fill(BLUE, opacity=1.0), stroke=Stroke(width=0.0))
+    content = RShape2D(points=rectangle_points(6.0, 6.0), fill=Fill(BLUE, opacity=1.0), stroke=Stroke(width=0.0))
     inner = RClippingGroup(mask=band(0.5), content=content)
     outer = RClippingGroup(mask=band(-0.5), content=inner)
 
@@ -145,7 +146,7 @@ def _brightness(image: np.ndarray, x: float, y: float) -> int:
 
 
 def test_mesh_is_lit_from_the_light_side(renderer: WGPURenderer) -> None:
-    from manimx import RDirectionalLight, PbrMaterial, RShape3D, sphere_mesh
+    from manimx import PbrMaterial, RDirectionalLight, RShape3D, sphere_mesh
 
     sphere = RShape3D(mesh=sphere_mesh(2.0), material=PbrMaterial("#FFFFFF", roughness=1.0))
     light = RDirectionalLight.aimed((1.0, 0.0, 0.0))  # shines towards +x
@@ -172,8 +173,8 @@ def test_meshes_and_vectors_share_depth(renderer: WGPURenderer) -> None:
     from manimx import PbrMaterial, RShape3D, box_mesh
 
     wall = RShape3D(mesh=box_mesh(4.0, 4.0, 0.2), material=PbrMaterial("#000000", roughness=1.0))
-    behind = square(fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(0.0, 0.0, -1.0)))
-    front = circle(radius=0.5, fill=Fill(BLUE, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(1.0, 0.0, 1.0)))
+    behind = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(0.0, 0.0, -1.0)))
+    front = RShape2D(points=arc_points(0.5), fill=Fill(BLUE, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(1.0, 0.0, 1.0)))
 
     image = render(renderer, front, wall, behind, ambient_intensity=0.0, default_lights=False)
 
@@ -191,7 +192,7 @@ def test_frames_without_meshes_after_meshes_start_from_empty_3d_layers() -> None
         reused = WGPURenderer()
     except Exception as error:  # pragma: no cover - depends on the machine
         pytest.skip(f"no usable GPU: {error}")
-    flat = square(fill=Fill(RED, opacity=1.0), transform=Transform(position=(0.0, 0.0, -2.0)))
+    flat = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0), transform=Transform(position=(0.0, 0.0, -2.0)))
     sphere = RShape3D(mesh=sphere_mesh(2.0), material=PbrMaterial("#FFFFFF", emissive="#FFFFFF"))
 
     expected = render(WGPURenderer(), flat)

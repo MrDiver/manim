@@ -4,15 +4,33 @@ import math
 
 import numpy as np
 import pytest
-
-from manimx import RClippingGroup, Fill, RGroup, JointType, RNode, RShape2D, Stroke, Transform
+from manimx.animation.geometry import arc_points, rectangle_points
 from manimx.objects import new_uid
-from manimx.objects.geometry import arc_points, circle, square
-from manimx.renderer import ClearScene, RNodeDataCache, RemoveObjects
+from manimx.renderer import ClearScene, RemoveObjects, RNodeDataCache
 from manimx.renderer.config import Camera, RenderConfig
 from manimx.renderer.scene_graph import NO_CLIP, bounding_box, flatten, flatten_scene
-from manimx.renderer.tessellation import SIDE_CHORD, SIDE_CONTROL, SIDE_SOLID, tessellate_fill
-from manimx.renderer.webgpu.vector_batch import NO_NEIGHBOR, STROKE_WIDTH_SCALE, VectorBatch
+from manimx.renderer.tessellation import (
+    SIDE_CHORD,
+    SIDE_CONTROL,
+    SIDE_SOLID,
+    tessellate_fill,
+)
+from manimx.renderer.webgpu.vector_batch import (
+    NO_NEIGHBOR,
+    STROKE_WIDTH_SCALE,
+    VectorBatch,
+)
+
+from manimx import (
+    Fill,
+    JointType,
+    RClippingGroup,
+    RGroup,
+    RNode,
+    RShape2D,
+    Stroke,
+    Transform,
+)
 
 # --- scene graph ----------------------------------------------------------------
 
@@ -69,7 +87,7 @@ def test_clipping_group_without_mask_does_not_clip() -> None:
 
 
 def test_bounding_box_uses_world_anchors() -> None:
-    root = RGroup(children=[square(transform=Transform(position=(1.0, 0.0, 0.0)))])
+    root = RGroup(children=[RShape2D(points=rectangle_points(2.0, 2.0), transform=Transform(position=(1.0, 0.0, 0.0)))])
 
     low, high = bounding_box(root)
 
@@ -199,7 +217,7 @@ def _batch(*shapes: RShape2D, cache: RNodeDataCache | None = None) -> VectorBatc
 
 
 def test_batch_links_closed_subpaths_into_a_loop() -> None:
-    batch = _batch(square(stroke=Stroke(joint=JointType.ROUND)))
+    batch = _batch(RShape2D(points=rectangle_points(2.0, 2.0), stroke=Stroke(joint=JointType.ROUND)))
     curves = batch.stroke_curves
 
     assert list(curves["first_point"]) == [0, 4, 8, 12]
@@ -224,9 +242,9 @@ def test_batch_matches_shared_anchor_styles() -> None:
 
 
 def test_batch_splits_and_sorts_transparent_draws() -> None:
-    opaque = square(fill=Fill(opacity=1.0))
-    back = square(fill=Fill(opacity=0.5), stroke=Stroke(width=0.0))
-    front = square(fill=Fill(opacity=0.5), stroke=Stroke(opacity=0.0))
+    opaque = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(opacity=1.0))
+    back = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(opacity=0.5), stroke=Stroke(width=0.0))
+    front = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(opacity=0.5), stroke=Stroke(opacity=0.0))
     batch = _batch(front, opaque, back)
 
     assert len(batch.opaque_draws) == 2  # opaque fill + opaque stroke
@@ -237,7 +255,7 @@ def test_batch_splits_and_sorts_transparent_draws() -> None:
 
 def test_batch_reuses_cached_fill_mesh_until_points_change() -> None:
     cache = RNodeDataCache()
-    shape = circle(fill=Fill(opacity=1.0))
+    shape = RShape2D(points=arc_points(), fill=Fill(opacity=1.0))
     _batch(shape, cache=cache)
     mesh = cache.get(shape.uid, "fill-mesh", shape.version("points"))
     assert mesh is not None
@@ -252,8 +270,8 @@ def test_batch_reuses_cached_fill_mesh_until_points_change() -> None:
 
 
 def test_batch_draws_masks_separately_and_clipped_content_transparent() -> None:
-    mask = circle(fill=Fill(opacity=1.0), stroke=Stroke(width=0.0))
-    content = square(fill=Fill(opacity=1.0), stroke=Stroke(width=0.0))
+    mask = RShape2D(points=arc_points(), fill=Fill(opacity=1.0), stroke=Stroke(width=0.0))
+    content = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(opacity=1.0), stroke=Stroke(width=0.0))
     clip = RClippingGroup(mask=mask, content=content)
 
     batch = VectorBatch.build(flatten_scene(clip), RNodeDataCache(), np.zeros(3))
@@ -265,7 +283,7 @@ def test_batch_draws_masks_separately_and_clipped_content_transparent() -> None:
 
 
 def test_batch_skips_empty_and_invisible_styles() -> None:
-    batch = _batch(RShape2D(), square(fill=Fill(opacity=0.0), stroke=Stroke(width=0.0)))
+    batch = _batch(RShape2D(), RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(opacity=0.0), stroke=Stroke(width=0.0)))
 
     assert len(batch.opaque_draws) == len(batch.transparent_draws) == 0
     assert len(batch.instances) == 0

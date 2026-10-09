@@ -31,13 +31,13 @@ What it draws:
 ```python
 from PIL import Image
 
-from manimx import Fill, RGroup, Stroke, Transform
-from manimx.objects.geometry import circle, square
+from manimx import Fill, RGroup, RShape2D, Stroke, Transform
+from manimx.animation.geometry import arc_points, rectangle_points
 from manimx.renderer import RenderConfig, WGPURenderer
 
 scene = RGroup(children=[
-    square(fill=Fill("#525893", opacity=1.0), stroke=Stroke("#525893")),
-    circle(fill=Fill("#87c2a5", opacity=1.0), transform=Transform(position=(1.5, 0.0, 0.0))),
+    RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill("#525893", opacity=1.0), stroke=Stroke("#525893")),
+    RShape2D(points=arc_points(1.0), fill=Fill("#87c2a5", opacity=1.0), transform=Transform(position=(1.5, 0.0, 0.0))),
 ])
 
 renderer = WGPURenderer()  # create once and reuse: it caches GPU resources

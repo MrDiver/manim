@@ -4,20 +4,31 @@ import math
 
 import numpy as np
 import pytest
-
-from manimx import RClippingGroup, RDirectionalLight, Fill, RGroup, PbrMaterial, RShape3D, Stroke, Transform, box_mesh
-from manimx.objects.geometry import square
-from manimx.renderer import RNodeDataCache, RenderConfig, WGPURenderer
+from manimx.animation.geometry import rectangle_points
+from manimx.objects import RShape2D
+from manimx.renderer import RenderConfig, RNodeDataCache, WGPURenderer
 from manimx.renderer.scene_graph import NO_CLIP, flatten_scene
 from manimx.renderer.webgpu.mesh_batch import MeshBatch
 from manimx.renderer.webgpu.shadow_views import build_shadow_views
 from manimx.renderer.webgpu.vector_batch import FLAG_FRONT_ONLY, VectorBatch
 from manimx.utils.color import RED
 
+from manimx import (
+    Fill,
+    PbrMaterial,
+    RClippingGroup,
+    RDirectionalLight,
+    RGroup,
+    RShape3D,
+    Stroke,
+    Transform,
+    box_mesh,
+)
+
 
 def _portal(world: RGroup, flip: bool = False, **options: object) -> RClippingGroup:
     transform = Transform().rotated(math.pi, (0, 1, 0)) if flip else Transform()
-    mask = square(side_length=4.0, fill=Fill(opacity=1.0), stroke=Stroke(width=0), transform=transform)
+    mask = RShape2D(points=rectangle_points(4.0, 4.0), fill=Fill(opacity=1.0), stroke=Stroke(width=0), transform=transform)
     return RClippingGroup(mask=mask, content=world, **options)
 
 
@@ -28,7 +39,7 @@ def _world(*children) -> RGroup:
 def test_scoped_lights_and_scope_membership() -> None:
     inner_light = RDirectionalLight.aimed((0, 0, -1))
     outer_light = RDirectionalLight.aimed((0, 0, -1))
-    nested = RClippingGroup(mask=square(), content=RShape3D())
+    nested = RClippingGroup(mask=RShape2D(points=rectangle_points(2.0, 2.0)), content=RShape3D())
     scene = flatten_scene(RGroup(children=[outer_light, _portal(_world(inner_light, RShape3D(), nested))]))
 
     assert [item.clip for item in scene.lights] == [NO_CLIP, 0]
@@ -36,7 +47,7 @@ def test_scoped_lights_and_scope_membership() -> None:
 
 
 def test_one_sided_masks_are_flagged() -> None:
-    scene = flatten_scene(_portal(_world(square()), one_sided=True))
+    scene = flatten_scene(_portal(_world(RShape2D(points=rectangle_points(2.0, 2.0))), one_sided=True))
 
     batch = VectorBatch.build(scene, RNodeDataCache(), np.zeros(3))
 
@@ -75,7 +86,7 @@ def _center(renderer: WGPURenderer, root: RGroup, **config: object) -> tuple[int
 
 def test_one_sided_mask_closes_from_behind(renderer: WGPURenderer) -> None:
     def world() -> RGroup:
-        return _world(square(side_length=2.0, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(0, 0, -1))))
+        return _world(RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(0, 0, -1))))
 
     assert _center(renderer, _portal(world(), one_sided=True)) == tuple(RED.to_int_rgb())
     assert _center(renderer, _portal(world(), flip=True, one_sided=True)) == (0, 0, 0)
