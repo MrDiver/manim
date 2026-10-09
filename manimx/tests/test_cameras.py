@@ -81,7 +81,7 @@ def test_views_pair_a_world_with_a_camera_placed_by_its_clip() -> None:
     timeline.add(prepared(content)).place(position=(1, 0, 0), scale=2)
 
     state = timeline.view_at(View(stage, camera), 0.5)
-    assert state.root.id == "stage" and len(state.root.children) == 1
+    assert state.root.uid == stage.uid and len(state.root.children) == 1
     assert state.camera.transform.position == (1.0, 0.0, 22.0)  # the clip's transform applies
     assert state.camera.frame_height == 16.0  # and its scale, so the view shows the same
 

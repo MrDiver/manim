@@ -17,26 +17,26 @@ from manimx.utils.color import RED
 
 def _portal(world: Group, flip: bool = False, **options: object) -> ClippingGroup:
     transform = Transform().rotated(math.pi, (0, 1, 0)) if flip else Transform()
-    mask = square("mask", side_length=4.0, fill=Fill(opacity=1.0), stroke=Stroke(width=0), transform=transform)
-    return ClippingGroup("portal", mask=mask, content=world, **options)
+    mask = square(side_length=4.0, fill=Fill(opacity=1.0), stroke=Stroke(width=0), transform=transform)
+    return ClippingGroup(mask=mask, content=world, **options)
 
 
 def _world(*children) -> Group:
-    return Group("world", children=list(children))
+    return Group(children=list(children))
 
 
 def test_scoped_lights_and_scope_membership() -> None:
-    inner_light = DirectionalLight.aimed("inner", (0, 0, -1))
-    outer_light = DirectionalLight.aimed("outer", (0, 0, -1))
-    nested = ClippingGroup("nested", mask=square("m2"), content=Shape3D("deep"))
-    scene = flatten_scene(Group("root", children=[outer_light, _portal(_world(inner_light, Shape3D("inside"), nested))]))
+    inner_light = DirectionalLight.aimed((0, 0, -1))
+    outer_light = DirectionalLight.aimed((0, 0, -1))
+    nested = ClippingGroup(mask=square(), content=Shape3D())
+    scene = flatten_scene(Group(children=[outer_light, _portal(_world(inner_light, Shape3D(), nested))]))
 
     assert [item.clip for item in scene.lights] == [NO_CLIP, 0]
     assert scene.in_scope(1, 0) and scene.in_scope(0, NO_CLIP) and not scene.in_scope(NO_CLIP, 0)
 
 
 def test_one_sided_masks_are_flagged() -> None:
-    scene = flatten_scene(_portal(_world(square("content")), one_sided=True))
+    scene = flatten_scene(_portal(_world(square()), one_sided=True))
 
     batch = VectorBatch.build(scene, MobjectDataCache(), np.zeros(3))
 
@@ -45,10 +45,10 @@ def test_one_sided_masks_are_flagged() -> None:
 
 
 def test_scoped_shadows_use_only_their_scope() -> None:
-    inside = Shape3D("inside", mesh=box_mesh(1, 1, 1))
-    outside = Shape3D("outside", mesh=box_mesh(1, 1, 1), transform=Transform(position=(50, 0, 0)))
-    sun = DirectionalLight.aimed("sun", (0, 0, -1))
-    scene = flatten_scene(Group("root", children=[outside, _portal(_world(inside, sun))]))
+    inside = Shape3D(mesh=box_mesh(1, 1, 1))
+    outside = Shape3D(mesh=box_mesh(1, 1, 1), transform=Transform(position=(50, 0, 0)))
+    sun = DirectionalLight.aimed((0, 0, -1))
+    scene = flatten_scene(Group(children=[outside, _portal(_world(inside, sun))]))
     config = RenderConfig()
     batch = MeshBatch.build(scene, MobjectDataCache(), config)
 
@@ -75,7 +75,7 @@ def _center(renderer: WGPURenderer, root: Group, **config: object) -> tuple[int,
 
 def test_one_sided_mask_closes_from_behind(renderer: WGPURenderer) -> None:
     def world() -> Group:
-        return _world(square("red", side_length=2.0, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(0, 0, -1))))
+        return _world(square(side_length=2.0, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(0, 0, -1))))
 
     assert _center(renderer, _portal(world(), one_sided=True)) == tuple(RED.to_int_rgb())
     assert _center(renderer, _portal(world(), flip=True, one_sided=True)) == (0, 0, 0)
@@ -83,12 +83,12 @@ def test_one_sided_mask_closes_from_behind(renderer: WGPURenderer) -> None:
 
 
 def test_scoped_light_only_lights_its_world(renderer: WGPURenderer) -> None:
-    def wall(name: str, x: float) -> Shape3D:
-        return Shape3D(name, mesh=box_mesh(2, 2, 0.2), material=PbrMaterial("#FFFFFF", roughness=1.0), transform=Transform(position=(x, 0, 0)))
+    def wall(x: float) -> Shape3D:
+        return Shape3D(mesh=box_mesh(2, 2, 0.2), material=PbrMaterial("#FFFFFF", roughness=1.0), transform=Transform(position=(x, 0, 0)))
 
-    sun = DirectionalLight.aimed("sun", (0, 0, -1), intensity=3.0)
-    lit = _portal(_world(wall("inside", 0.0), sun))
-    root = Group("root", children=[lit, wall("outside", 3.0)])
+    sun = DirectionalLight.aimed((0, 0, -1), intensity=3.0)
+    lit = _portal(_world(wall(0.0), sun))
+    root = Group(children=[lit, wall(3.0)])
     image = renderer.render(root, RenderConfig(pixel_width=160, pixel_height=90, ambient_intensity=0.0))
 
     assert image[45, 80, :3].astype(int).sum() > 300  # inside the portal: lit

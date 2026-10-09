@@ -50,20 +50,19 @@ def _colored(color: str) -> dict:
 
 def manim_logo() -> Group:
     ds_m = Shape2D(
-        "ds_m",
         points=np.load(M_GLYPH_POINTS),
         fill=Fill(LOGO_BLACK, opacity=1.0),
         stroke=Stroke(LOGO_BLACK, width=0.0),  # MathTex has no stroke
         transform=Transform(position=(-2.25, 1.5, 0.0), scale=(7.0, 7.0, 1.0)),
     )
     shapes = [
-        triangle("triangle", transform=Transform(position=(1.0, 0.0, 0.0)), **_colored(LOGO_RED)),
-        square("square", transform=Transform(position=(0.0, 1.0, 0.0)), **_colored(LOGO_BLUE)),
-        circle("circle", transform=Transform(position=(-1.0, 0.0, 0.0)), **_colored(LOGO_GREEN)),
+        triangle(transform=Transform(position=(1.0, 0.0, 0.0)), **_colored(LOGO_RED)),
+        square(transform=Transform(position=(0.0, 1.0, 0.0)), **_colored(LOGO_BLUE)),
+        circle(transform=Transform(position=(-1.0, 0.0, 0.0)), **_colored(LOGO_GREEN)),
         ds_m,
     ]  # order matters: later shapes are drawn on top
 
-    logo = Group("logo", children=shapes)
+    logo = Group(children=shapes)
     # move_to(ORIGIN): shift the group so its bounding box is centered.
     low, high = bounding_box(logo)
     logo.transform = logo.transform.translated(-(low + high) / 2)

@@ -41,10 +41,8 @@ PERSPECTIVE = Camera.look_at((12, -16, 10), (0, 0, 1), field_of_view=math.radian
 def many_circles(count: int) -> Group:
     rng = np.random.default_rng(1)
     return Group(
-        "circles",
         children=[
             circle(
-                f"c{i}",
                 radius=0.15,
                 fill=Fill(RED if i % 2 else BLUE, opacity=0.6 if i % 3 == 0 else 1.0),
                 stroke=Stroke("#FFFFFF", width=2),
@@ -58,9 +56,8 @@ def many_circles(count: int) -> Group:
 def glyph_grid(columns: int, rows: int) -> Group:
     points = np.load(M_GLYPH_POINTS)
     return Group(
-        "glyphs",
         children=[
-            Shape2D(f"m{c}-{r}", points=points, fill=Fill("#FFFFFF", opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(-6.5 + c * 0.7, 3.5 - r * 0.8, 0.0), scale=(1.2, 1.2, 1.0)))
+            Shape2D(points=points, fill=Fill("#FFFFFF", opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(-6.5 + c * 0.7, 3.5 - r * 0.8, 0.0), scale=(1.2, 1.2, 1.0)))
             for c in range(columns)
             for r in range(rows)
         ],
@@ -69,10 +66,8 @@ def glyph_grid(columns: int, rows: int) -> Group:
 
 def helices(count: int) -> Group:
     return Group(
-        "helices",
         children=[
             Curve3D.parametric(
-                f"h{i}",
                 lambda t, i=i: (math.cos(t) + (i % 10 - 4.5) * 2.2, math.sin(t) + (i // 10 - 2) * 2.2, 0.1 * t),
                 (0.0, 8 * math.pi),
                 128,
@@ -87,16 +82,16 @@ def lit_scene(spheres: int, shadows: bool = True) -> Group:
     rng = np.random.default_rng(2)
     material = PbrMaterial("#b0b0b0", roughness=0.5)
     balls = [
-        Shape3D(f"s{i}", mesh=sphere_mesh(0.4), material=material, transform=Transform(position=(rng.uniform(-6, 6), rng.uniform(-6, 6), rng.uniform(0.4, 3))))
+        Shape3D(mesh=sphere_mesh(0.4), material=material, transform=Transform(position=(rng.uniform(-6, 6), rng.uniform(-6, 6), rng.uniform(0.4, 3))))
         for i in range(spheres)
     ]
-    floor = Shape3D("floor", mesh=box_mesh(16, 16, 0.2), material=PbrMaterial("#d0d0d0", roughness=0.9), transform=Transform(position=(0, 0, -0.1)))
+    floor = Shape3D(mesh=box_mesh(16, 16, 0.2), material=PbrMaterial("#d0d0d0", roughness=0.9), transform=Transform(position=(0, 0, -0.1)))
     lights = [
-        DirectionalLight.aimed("sun", (0.6, 1.0, -1.2), cast_shadows=shadows),
-        SpotLight.aimed("spot", (-6, -4, 8), (0, 0, 0), intensity=80, outer_cone_angle=0.6, size=0.3, cast_shadows=shadows),
-        PointLight("bulb", intensity=8, transform=Transform(position=(2, -2, 2)), cast_shadows=shadows),
+        DirectionalLight.aimed((0.6, 1.0, -1.2), cast_shadows=shadows),
+        SpotLight.aimed((-6, -4, 8), (0, 0, 0), intensity=80, outer_cone_angle=0.6, size=0.3, cast_shadows=shadows),
+        PointLight(intensity=8, transform=Transform(position=(2, -2, 2)), cast_shadows=shadows),
     ]
-    return Group("lit", children=[floor, *balls, *lights])
+    return Group(children=[floor, *balls, *lights])
 
 
 # --- 2D ---------------------------------------------------------------------------

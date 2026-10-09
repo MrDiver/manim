@@ -26,18 +26,18 @@ from manimx.utils.color import BLUE, RED
 
 
 def test_render_object_defaults_to_identity_transform() -> None:
-    obj = RenderObject("object")
+    obj = RenderObject()
 
     assert obj.transform.rotation == Quaternion(1.0, 0.0, 0.0, 0.0)
     assert obj.visible is True
 
 
 def test_uids_are_unique() -> None:
-    assert len({RenderObject("a").uid for _ in range(100)}) == 100
+    assert len({RenderObject().uid for _ in range(100)}) == 100
 
 
 def test_only_versioned_fields_bump_versions() -> None:
-    shape = Shape2D.from_corners("s", [(0, 0), (1, 0)])
+    shape = Shape2D.from_corners([(0, 0), (1, 0)])
     before = shape.version("points", "fill", "stroke")
 
     shape.transform = shape.transform.translated((1.0, 0.0, 0.0))
@@ -49,11 +49,11 @@ def test_only_versioned_fields_bump_versions() -> None:
 
 def test_version_rejects_unversioned_field() -> None:
     with pytest.raises(ValueError, match="transform is not versioned"):
-        Shape2D("s").version("transform")
+        Shape2D().version("transform")
 
 
 def test_shape_points_are_read_only() -> None:
-    shape = Shape2D.from_corners("s", [(0, 0), (1, 0)])
+    shape = Shape2D.from_corners([(0, 0), (1, 0)])
 
     with pytest.raises(ValueError, match="read-only"):
         shape.points[0, 0] = 5.0
@@ -68,8 +68,8 @@ def test_shape_points_are_read_only() -> None:
 
 
 def test_group_children_are_mutable() -> None:
-    group = Group("group")
-    child = Shape2D("child")
+    group = Group()
+    child = Shape2D()
 
     group.children.append(child)
 
@@ -77,10 +77,10 @@ def test_group_children_are_mutable() -> None:
 
 
 def test_clipping_group_children_are_mask_and_content() -> None:
-    mask, content = Shape2D("mask"), Shape2D("content")
+    mask, content = Shape2D(), Shape2D()
 
-    assert ClippingGroup("clip", mask=mask, content=content).children == [mask, content]
-    assert ClippingGroup("clip", content=content).children == [content]
+    assert ClippingGroup(mask=mask, content=content).children == [mask, content]
+    assert ClippingGroup(content=content).children == [content]
 
 
 # --- Transform -----------------------------------------------------------------
@@ -140,7 +140,6 @@ def test_style_lists_resample_over_points() -> None:
 
 def test_stroke_per_point_values() -> None:
     shape = Shape2D.from_corners(
-        "s",
         [(0, 0), (1, 0), (2, 0)],
         stroke=Stroke([RED, BLUE], width=[0.0, 8.0], opacity=0.5, joint=[JointType.ROUND, JointType.BEVEL]),
     )
@@ -178,42 +177,42 @@ def test_styles_compare_by_value() -> None:
 
 def test_shape2d_validates_points() -> None:
     with pytest.raises(ValueError, match="shape \\(N, 2\\)"):
-        Shape2D("s", points=np.zeros((4, 3)))
+        Shape2D(points=np.zeros((4, 3)))
     with pytest.raises(ValueError, match="four entries"):
-        Shape2D("s", points=np.zeros((3, 2)))
+        Shape2D(points=np.zeros((3, 2)))
 
 
 def test_from_corners_builds_straight_cubics() -> None:
-    shape = Shape2D.from_corners("s", [(0, 0), (3, 0)])
+    shape = Shape2D.from_corners([(0, 0), (3, 0)])
 
     np.testing.assert_allclose(shape.points, [[0, 0], [1, 0], [2, 0], [3, 0]])
 
 
 def test_subpaths_split_at_gaps() -> None:
-    first = Shape2D.from_corners("a", [(0, 0), (1, 0), (1, 1)], closed=True).points
-    second = Shape2D.from_corners("b", [(5, 5), (6, 5)]).points
-    shape = Shape2D("s", points=np.vstack([first, second]))
+    first = Shape2D.from_corners([(0, 0), (1, 0), (1, 1)], closed=True).points
+    second = Shape2D.from_corners([(5, 5), (6, 5)]).points
+    shape = Shape2D(points=np.vstack([first, second]))
 
     subpaths = shape.subpaths()
 
     assert [len(p) for p in subpaths] == [12, 4]
     assert is_closed(subpaths[0]) and not is_closed(subpaths[1])
-    assert Shape2D("empty").subpaths() == []
+    assert Shape2D().subpaths() == []
 
 
 def test_geometry_matches_manim() -> None:
     # Values from manim's Circle() and Triangle().
     np.testing.assert_allclose(arc_points()[:4], [[1, 0], [1, 0.2652], [0.8946, 0.5196], [0.7071, 0.7071]], atol=1e-4)
-    np.testing.assert_allclose(triangle("t").points[::4], [[0, 1], [-0.866, -0.5], [0.866, -0.5]], atol=1e-3)
-    assert circle("c").num_curves == 8
-    np.testing.assert_allclose(square("s").points[0], [1.0, 1.0])
-    np.testing.assert_allclose(rectangle("r", 4, 2).points[0], [2.0, 1.0])
+    np.testing.assert_allclose(triangle().points[::4], [[0, 1], [-0.866, -0.5], [0.866, -0.5]], atol=1e-3)
+    assert circle().num_curves == 8
+    np.testing.assert_allclose(square().points[0], [1.0, 1.0])
+    np.testing.assert_allclose(rectangle(4, 2).points[0], [2.0, 1.0])
 
 
 def test_shape3d_versions_mesh_and_material() -> None:
     from manimx import PbrMaterial, sphere_mesh
 
-    shape = Shape3D("mesh")
+    shape = Shape3D()
     before = shape.version("mesh", "material")
     shape.material = PbrMaterial(roughness=0.1)
     shape.mesh = sphere_mesh()

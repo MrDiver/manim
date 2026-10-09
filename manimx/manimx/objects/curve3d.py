@@ -26,7 +26,6 @@ class Curve3D(BezierPath):
     @classmethod
     def parametric(
         cls,
-        id: str,
         function: Callable[[float], Any],
         t_range: tuple[float, float],
         samples: int = 64,
@@ -46,4 +45,4 @@ class Curve3D(BezierPath):
             [anchors[:-1], anchors[:-1] + handles[:-1], anchors[1:] - handles[1:], anchors[1:]],
             axis=1,
         )
-        return cls(id, points=curves.reshape(-1, 3), **kwargs)
+        return cls(points=curves.reshape(-1, 3), **kwargs)

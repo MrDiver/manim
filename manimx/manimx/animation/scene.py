@@ -373,7 +373,7 @@ class PreparedScene:
         """
         self.evaluate(t, global_time)
         children = [snapshot for mobject in self.roots if mobject.present.value and (snapshot := mobject.snapshot()) is not None]
-        return RenderGroup("scene", children=children)
+        return RenderGroup(children=children)
 
     def sounds(self) -> list[tuple[float, Sound, float]]:
         """``(compiled time, sound, volume)`` of every sound in the scene."""

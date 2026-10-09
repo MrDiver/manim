@@ -30,7 +30,9 @@ class RenderObject:
     """Scene-graph node: identity, local 3D transform and visibility.
 
     Nodes compare by identity. Geometry and style live only on leaf objects
-    such as :class:`Shape2D`; groups only arrange their children.
+    such as :class:`Shape2D`; groups only arrange their children. Render
+    objects carry no names: names and searching belong to the scene
+    objects they are snapshots of (manimx.animation).
 
     Identity and change tracking, which the renderer's caches rely on:
 
@@ -46,7 +48,6 @@ class RenderObject:
       distinct token.
     """
 
-    id: str
     transform: Transform = field(default_factory=Transform)
     visible: bool = True
     _: KW_ONLY

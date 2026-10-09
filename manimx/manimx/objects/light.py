@@ -56,9 +56,9 @@ class DirectionalLight(Light):
     size: float = 0.03  # angular diameter in radians, about 1.7 degrees
 
     @classmethod
-    def aimed(cls, id: str, direction: tuple[float, float, float], **kwargs: Any) -> Self:
+    def aimed(cls, direction: tuple[float, float, float], **kwargs: Any) -> Self:
         """A light shining in world ``direction``."""
-        return cls(id, transform=Transform(rotation=_rotation_towards(direction)), **kwargs)
+        return cls(transform=Transform(rotation=_rotation_towards(direction)), **kwargs)
 
 
 @dataclass(slots=True, eq=False)
@@ -94,7 +94,6 @@ class SpotLight(Light):
     @classmethod
     def aimed(
         cls,
-        id: str,
         position: tuple[float, float, float],
         target: tuple[float, float, float],
         **kwargs: Any,
@@ -102,7 +101,7 @@ class SpotLight(Light):
         """A spot light at ``position`` shining at ``target``."""
         direction = np.subtract(target, position)
         rotation = _rotation_towards(tuple(direction))
-        return cls(id, transform=Transform(position=position, rotation=rotation), **kwargs)
+        return cls(transform=Transform(position=position, rotation=rotation), **kwargs)
 
 
 def _rotation_towards(direction: tuple[float, float, float]) -> Quaternion:

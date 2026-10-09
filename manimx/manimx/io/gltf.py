@@ -47,12 +47,10 @@ _COMPONENT_COUNTS = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT2": 4, "M
 _TRIANGLES = 4
 
 
-def load_gltf(path: str | Path, *, z_up: bool = True, name: str | None = None) -> Group:
+def load_gltf(path: str | Path, *, z_up: bool = True) -> Group:
     """Load the default scene of a glTF file as a :class:`Group`."""
     path = Path(path)
-    return _Importer(pygltflib.GLTF2().load(str(path)), path.parent).scene(
-        name or path.stem, z_up
-    )
+    return _Importer(pygltflib.GLTF2().load(str(path)), path.parent).scene(z_up)
 
 
 class _Importer:
@@ -64,34 +62,33 @@ class _Importer:
         self._textures: dict[int, Texture] = {}
         self._materials: dict[int, PbrMaterial] = {}
 
-    def scene(self, name: str, z_up: bool) -> Group:
+    def scene(self, z_up: bool) -> Group:
         gltf = self.gltf
         if gltf.scenes:
             roots = gltf.scenes[gltf.scene or 0].nodes or []
         else:  # no scene: every node that is nobody's child is a root
             children = {c for node in gltf.nodes for c in (node.children or [])}
             roots = [i for i in range(len(gltf.nodes)) if i not in children]
-        model = Group(name, children=[self.node(i) for i in roots])
+        model = Group(children=[self.node(i) for i in roots])
         if z_up:
             # glTF's +y (up) becomes +z, its +z (front) becomes -y.
-            return Group(f"{name}-z-up", children=[model], transform=Transform().rotated(math.pi / 2, (1, 0, 0)))
+            return Group(children=[model], transform=Transform().rotated(math.pi / 2, (1, 0, 0)))
         return model
 
     # -- nodes and meshes ---------------------------------------------------
 
     def node(self, index: int) -> Group:
         node = self.gltf.nodes[index]
-        name = node.name or f"node-{index}"
         children: list[RenderObject] = []
         if node.mesh is not None:
-            children += self.mesh(node.mesh, name)
+            children += self.mesh(node.mesh)
         children += [self.node(child) for child in node.children or []]
-        return Group(name, children=children, transform=_node_transform(node))
+        return Group(children=children, transform=_node_transform(node))
 
-    def mesh(self, index: int, node_name: str) -> list[Shape3D]:
+    def mesh(self, index: int) -> list[Shape3D]:
         mesh = self.gltf.meshes[index]
         shapes = []
-        for number, primitive in enumerate(mesh.primitives):
+        for primitive in mesh.primitives:
             mode = primitive.mode if primitive.mode is not None else _TRIANGLES
             if mode != _TRIANGLES:
                 continue  # points and lines have no surface to shade
@@ -110,7 +107,7 @@ class _Importer:
                 tangents=self.accessor(attributes.TANGENT) if attributes.TANGENT is not None else None,
             )
             material = self.material(primitive.material) if primitive.material is not None else PbrMaterial()
-            shapes.append(Shape3D(f"{mesh.name or node_name}-{number}", mesh=data, material=material))
+            shapes.append(Shape3D(mesh=data, material=material))
         return shapes
 
     # -- materials and textures ---------------------------------------------

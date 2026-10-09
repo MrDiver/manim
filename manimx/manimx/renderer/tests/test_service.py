@@ -8,6 +8,7 @@ import pytest
 import wgpu
 
 from manimx import Fill, Group
+from manimx.objects import new_uid
 from manimx.objects.geometry import circle
 from manimx.renderer import MobjectDataCache, MotionBlur, RenderConfig, WGPURenderer
 from manimx.renderer.webgpu.gpu import ResourceCache
@@ -22,7 +23,7 @@ def renderer() -> WGPURenderer:
 
 
 def scene() -> Group:
-    return Group("root", children=[circle("c", fill=Fill("#e07a5f", opacity=1.0))])
+    return Group(children=[circle(fill=Fill("#e07a5f", opacity=1.0))])
 
 
 def test_one_shared_renderer_with_composers_per_effect_chain(renderer: WGPURenderer) -> None:
@@ -64,14 +65,15 @@ def test_renders_after_size_changes_match_a_fresh_renderer(renderer: WGPURendere
 
 def test_cache_entries_unused_for_a_while_are_swept() -> None:
     cache = MobjectDataCache()
-    cache.put(1, "mesh", "v1", "old")
+    old, kept, other = new_uid(), new_uid(), new_uid()
+    cache.put(old, "mesh", "v1", "old")
     cache.next_generation()
-    cache.get_or_create(2, "mesh", "v1", lambda: "kept")
+    cache.get_or_create(kept, "mesh", "v1", lambda: "kept")
     cache.next_generation()
 
-    assert cache.sweep(max_age=1) == 1  # uid 1 was last used two generations ago
-    assert cache.get(1, "mesh", "v1") is None and cache.get(2, "mesh", "v1") == "kept"
-    cache.invalidate(2)
-    cache.put(3, "mesh", "v1", "x")
+    assert cache.sweep(max_age=1) == 1  # old was last used two generations ago
+    assert cache.get(old, "mesh", "v1") is None and cache.get(kept, "mesh", "v1") == "kept"
+    cache.invalidate(kept)
+    cache.put(other, "mesh", "v1", "x")
     cache.retain([])
     assert len(cache) == 0 and cache.sweep(0) == 0

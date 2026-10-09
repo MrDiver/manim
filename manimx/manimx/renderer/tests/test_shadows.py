@@ -22,14 +22,14 @@ def _views(root: Group, **config: object):
 
 def _lights() -> list:
     return [
-        DirectionalLight.aimed("sun", (0, 0, -1)),
-        SpotLight.aimed("spot", (0, 0, 5), (0, 0, 0)),
-        PointLight("bulb", transform=Transform(position=(0, 0, 3))),
+        DirectionalLight.aimed((0, 0, -1)),
+        SpotLight.aimed((0, 0, 5), (0, 0, 0)),
+        PointLight(transform=Transform(position=(0, 0, 3))),
     ]
 
 
 def test_each_light_kind_gets_its_shadow_views() -> None:
-    views, lights = _views(Group("root", children=[Shape3D("box"), *_lights()]))
+    views, lights = _views(Group(children=[Shape3D(), *_lights()]))
 
     assert len(views) == 1 + 1 + 6  # directional, spot, six cube faces
     assert list(lights["shadow_view"]) == [0, 1, 2]
@@ -39,18 +39,18 @@ def test_each_light_kind_gets_its_shadow_views() -> None:
 def test_shadow_toggles() -> None:
     lights = _lights()
     lights[1].cast_shadows = False
-    views, rows = _views(Group("root", children=[Shape3D("box"), *lights]))
+    views, rows = _views(Group(children=[Shape3D(), *lights]))
     assert list(rows["shadow_view"]) == [0, NO_SHADOW, 1]
 
-    views, rows = _views(Group("root", children=[Shape3D("box"), *_lights()]), shadows=False)
+    views, rows = _views(Group(children=[Shape3D(), *_lights()]), shadows=False)
     assert len(views) == 0 and set(rows["shadow_view"]) == {NO_SHADOW}
 
-    views, rows = _views(Group("root", children=_lights()))  # nothing to shadow
+    views, rows = _views(Group(children=_lights()))  # nothing to shadow
     assert len(views) == 0
 
 
 def test_directional_view_covers_the_scene() -> None:
-    root = Group("root", children=[Shape3D("box", mesh=box_mesh(4, 4, 4)), DirectionalLight.aimed("sun", (1, 1, -1))])
+    root = Group(children=[Shape3D(mesh=box_mesh(4, 4, 4)), DirectionalLight.aimed((1, 1, -1))])
     views, _ = _views(root)
 
     view_projection = views.views["view_projection"][0].T
@@ -68,10 +68,10 @@ def renderer() -> WGPURenderer:
 
 
 def _scene(**options: object) -> Group:
-    floor = Shape3D("floor", mesh=box_mesh(10, 10, 0.2), material=PbrMaterial("#FFFFFF", roughness=1.0), transform=Transform(position=(0, 0, -0.1)))
-    blocker = Shape3D("blocker", mesh=box_mesh(2, 2, 0.2), material=PbrMaterial("#FFFFFF"), transform=Transform(position=(0, 0, 2)), **options)
-    sun = DirectionalLight.aimed("sun", (0, 0, -1), intensity=3.0)
-    return Group("root", children=[floor, blocker, sun])
+    floor = Shape3D(mesh=box_mesh(10, 10, 0.2), material=PbrMaterial("#FFFFFF", roughness=1.0), transform=Transform(position=(0, 0, -0.1)))
+    blocker = Shape3D(mesh=box_mesh(2, 2, 0.2), material=PbrMaterial("#FFFFFF"), transform=Transform(position=(0, 0, 2)), **options)
+    sun = DirectionalLight.aimed((0, 0, -1), intensity=3.0)
+    return Group(children=[floor, blocker, sun])
 
 
 CAMERA = Camera.look_at((0, -0.01, 12), (0, 0, 0), up=(0, 1, 0), field_of_view=math.radians(60))
@@ -92,7 +92,7 @@ def test_blocker_shadows_the_floor(renderer: WGPURenderer) -> None:
     # Seen from above, the blocker hides its own shadow; look just beside it
     # with a light that comes in at an angle instead.
     tilted = _scene()
-    tilted.children[2] = DirectionalLight.aimed("sun", (1, 0, -1), intensity=3.0)
+    tilted.children[2] = DirectionalLight.aimed((1, 0, -1), intensity=3.0)
     assert _brightness(renderer, tilted, 2.5) < lit_floor / 3
     assert _brightness(renderer, tilted, 2.5, shadows=False) > lit_floor / 2
     no_caster = _scene(cast_shadows=False)
@@ -103,7 +103,7 @@ def test_blocker_shadows_the_floor(renderer: WGPURenderer) -> None:
 def test_softness_widens_the_penumbra(renderer: WGPURenderer) -> None:
     def edge_profile(size: float) -> np.ndarray:
         root = _scene()
-        root.children[2] = DirectionalLight.aimed("sun", (1, 0, -1), intensity=3.0, size=size)
+        root.children[2] = DirectionalLight.aimed((1, 0, -1), intensity=3.0, size=size)
         return np.array([_brightness(renderer, root, x) for x in np.linspace(1.0, 4.5, 15)])
 
     hard, soft = edge_profile(0.0), edge_profile(0.4)

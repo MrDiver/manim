@@ -163,7 +163,7 @@ class Mobject:
             return None
         alphas = (*alphas, self.alpha)
         children = [snapshot for child in self.children if (snapshot := child.snapshot(alphas)) is not None]
-        return RenderGroup(self.name, children=children, transform=self._transform(), uid=self.uid)
+        return RenderGroup(children=children, transform=self._transform(), uid=self.uid)
 
     def _collapsed(self) -> bool:
         """Scaled to nothing: invisible, and a zero scale would leave the
@@ -236,7 +236,6 @@ class VMobject(Mobject):
         alphas = (*alphas, self.alpha)
         alpha = math.prod(signal.value for signal in alphas)
         shape = Shape2D(
-            self.name,
             uid=self.uid,
             points=self.points.value,
             fill=Fill(np.array(self.fill_color.value), opacity=min(1.0, max(0.0, self.fill_opacity.value * alpha))),
@@ -255,7 +254,7 @@ class VMobject(Mobject):
         if not self.children:
             return shape
         children = [snapshot for child in self.children if (snapshot := child.snapshot(alphas)) is not None]
-        return RenderGroup(f"{self.name}-family", children=[shape, *children], uid=new_uid())
+        return RenderGroup(children=[shape, *children], uid=new_uid())
 
 
 class Group(Mobject):
@@ -291,7 +290,7 @@ class ClippingGroup(Mobject):
         if mask is None or content is None:
             return None  # nothing to show through
         return RenderClippingGroup(
-            self.name, mask=mask, content=content, one_sided=self.one_sided, transform=self._transform(), uid=self.uid
+            mask=mask, content=content, one_sided=self.one_sided, transform=self._transform(), uid=self.uid
         )
 
 
@@ -314,24 +313,24 @@ class Dot(VMobject):
 
 class Rectangle(VMobject):
     def __init__(self, width: float = 4.0, height: float = 2.0, name: str | None = None, **style: Any) -> None:
-        super().__init__(rectangle("rectangle", width, height).points, name, **style)
+        super().__init__(rectangle(width, height).points, name, **style)
 
 
 class Square(VMobject):
     def __init__(self, side_length: float = 2.0, name: str | None = None, **style: Any) -> None:
-        super().__init__(rectangle("square", side_length, side_length).points, name, **style)
+        super().__init__(rectangle(side_length, side_length).points, name, **style)
 
 
 class RegularPolygon(VMobject):
     def __init__(self, n: int = 6, radius: float = 1.0, name: str | None = None, **style: Any) -> None:
-        super().__init__(regular_polygon("polygon", n, radius).points, name, **style)
+        super().__init__(regular_polygon(n, radius).points, name, **style)
 
 
 class Polyline(VMobject):
     """Straight segments through ``corners`` (closed into a polygon if asked)."""
 
     def __init__(self, corners: Sequence[Sequence[float]], closed: bool = False, name: str | None = None, **style: Any) -> None:
-        super().__init__(Shape2D.from_corners("polyline", corners, closed=closed).points, name, **style)
+        super().__init__(Shape2D.from_corners(corners, closed=closed).points, name, **style)
 
 
 class Triangle(RegularPolygon):

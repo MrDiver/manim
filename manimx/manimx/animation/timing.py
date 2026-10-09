@@ -202,7 +202,7 @@ class Clip:
         return self._group(state.children)
 
     def _group(self, children: list) -> RenderGroup:
-        return RenderGroup(self.name, transform=self.transform, children=children, uid=self.uid)
+        return RenderGroup(transform=self.transform, children=children, uid=self.uid)
 
     def event_of(self, cue: str) -> str:
         return self.cue_events.get(cue, cue)
@@ -377,7 +377,7 @@ class Timeline:
             if compiled is not None:
                 state = clip.scene.state_at(compiled, global_time=t)
                 children.append(clip._group(state.children))
-        return RenderGroup(world.name, children=children, uid=world.uid)
+        return RenderGroup(children=children, uid=world.uid)
 
     def audio(self, start: float = 0.0, end: float | None = None, sample_rate: int = DEFAULT_SAMPLE_RATE) -> np.ndarray:
         """Every clip's sounds mixed on the global timeline, stereo float32

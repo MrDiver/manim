@@ -29,6 +29,7 @@ from manimx.animation import (
     derive,
 )
 from manimx.animation.rate_functions import linear
+from naming import by_name
 
 
 def prepare(construct):
@@ -41,12 +42,12 @@ def prepare(construct):
     return Built().prepare()
 
 
-def objects(state):
-    return {child.id: child for child in state.children}
+def objects(prepared, t):
+    return by_name(prepared.state_at(t).children, prepared.roots)
 
 
-def position(state, name):
-    return objects(state)[name].transform.position
+def position(prepared, t, name):
+    return objects(prepared, t)[name].transform.position
 
 
 def test_play_places_animations_and_moves_the_cursor() -> None:
@@ -60,9 +61,9 @@ def test_play_places_animations_and_moves_the_cursor() -> None:
     prepared = prepare(construct)
 
     assert prepared.duration == 4.0
-    assert position(prepared.state_at(1.0), "square") == (1.0, 0.0, 0.0)
-    assert position(prepared.state_at(2.5), "square") == (2.0, 0.0, 0.0)  # waiting
-    assert position(prepared.state_at(3.5), "square") == (2.0, 0.5, 0.0)
+    assert position(prepared, 1.0, "square") == (1.0, 0.0, 0.0)
+    assert position(prepared, 2.5, "square") == (2.0, 0.0, 0.0)  # waiting
+    assert position(prepared, 3.5, "square") == (2.0, 0.5, 0.0)
 
 
 def test_axes_animate_independently_and_absolute_overrides() -> None:
@@ -74,9 +75,9 @@ def test_axes_animate_independently_and_absolute_overrides() -> None:
 
     prepared = prepare(construct)
 
-    assert position(prepared.state_at(1.0), "dot") == (2.0, -1.0, 0.0)
-    assert position(prepared.state_at(2.5), "dot") == (2.0, -1.0, 0.0)  # halfway back
-    assert position(prepared.state_at(3.0), "dot") == (0.0, 0.0, 0.0)
+    assert position(prepared, 1.0, "dot") == (2.0, -1.0, 0.0)
+    assert position(prepared, 2.5, "dot") == (2.0, -1.0, 0.0)  # halfway back
+    assert position(prepared, 3.0, "dot") == (0.0, 0.0, 0.0)
 
 
 def test_direct_edits_do_not_rewrite_the_past() -> None:
@@ -90,8 +91,8 @@ def test_direct_edits_do_not_rewrite_the_past() -> None:
 
     prepared = prepare(construct)
 
-    assert position(prepared.state_at(0.5), "square") == (-1.0, 0.0, 0.0)
-    assert position(prepared.state_at(1.0), "square") == (-1.0, 1.0, 0.0)
+    assert position(prepared, 0.5, "square") == (-1.0, 0.0, 0.0)
+    assert position(prepared, 1.0, "square") == (-1.0, 1.0, 0.0)
 
 
 def test_authoring_reads_see_everything_recorded_so_far() -> None:
@@ -107,7 +108,7 @@ def test_authoring_reads_see_everything_recorded_so_far() -> None:
     prepared = prepare(construct)
 
     np.testing.assert_allclose(seen["center"], [3, 0, 0])
-    assert position(prepared.state_at(2.0), "b") == (3.0, 1.0, 0.0)
+    assert position(prepared, 2.0, "b") == (3.0, 1.0, 0.0)
 
 
 def test_presence_follows_add_remove_and_fades() -> None:
@@ -122,11 +123,11 @@ def test_presence_follows_add_remove_and_fades() -> None:
 
     prepared = prepare(construct)
 
-    assert list(objects(prepared.state_at(0.5))) == ["square"]
-    assert list(objects(prepared.state_at(1.5))) == ["square", "circle"]
-    assert objects(prepared.state_at(1.5))["circle"].stroke.opacity[0] == pytest.approx(0.5)
-    assert objects(prepared.state_at(2.5))["square"].fill.opacity[0] == pytest.approx(0.5)
-    assert list(objects(prepared.state_at(3.5))) == ["circle"]
+    assert list(objects(prepared, 0.5)) == ["square"]
+    assert list(objects(prepared, 1.5)) == ["square", "circle"]
+    assert objects(prepared, 1.5)["circle"].stroke.opacity[0] == pytest.approx(0.5)
+    assert objects(prepared, 2.5)["square"].fill.opacity[0] == pytest.approx(0.5)
+    assert list(objects(prepared, 3.5)) == ["circle"]
 
 
 def test_lagged_fade_in_hides_mobjects_until_their_own_start() -> None:
@@ -136,9 +137,9 @@ def test_lagged_fade_in_hides_mobjects_until_their_own_start() -> None:
 
     prepared = prepare(construct)
 
-    assert list(objects(prepared.state_at(0.25))) == ["dot-0"]
-    assert list(objects(prepared.state_at(1.0))) == ["dot-0", "dot-1", "dot-2"]
-    assert objects(prepared.state_at(1.0))["dot-2"].fill.opacity[0] == pytest.approx(0.0)
+    assert list(objects(prepared, 0.25)) == ["dot-0"]
+    assert list(objects(prepared, 1.0)) == ["dot-0", "dot-1", "dot-2"]
+    assert objects(prepared, 1.0)["dot-2"].fill.opacity[0] == pytest.approx(0.0)
     assert prepared.duration == 2.0
 
 
@@ -153,9 +154,9 @@ def test_fade_with_shift_and_removal_by_hand() -> None:
 
     prepared = prepare(construct)
 
-    assert position(prepared.state_at(0.5), "dot") == (0.0, -0.5, 0.0)
-    assert position(prepared.state_at(1.5), "dot") == (0.5, 0.0, 0.0)
-    assert objects(prepared.state_at(2.0)) == {}
+    assert position(prepared, 0.5, "dot") == (0.0, -0.5, 0.0)
+    assert position(prepared, 1.5, "dot") == (0.5, 0.0, 0.0)
+    assert objects(prepared, 2.0) == {}
 
 
 def test_rotate_sweeps_full_turns_and_indicate_returns() -> None:
@@ -166,10 +167,10 @@ def test_rotate_sweeps_full_turns_and_indicate_returns() -> None:
 
     prepared = prepare(construct)
 
-    half = objects(prepared.state_at(0.5))["square"].transform.rotation
+    half = objects(prepared, 0.5)["square"].transform.rotation
     assert abs(half.w) == pytest.approx(0.0, abs=1e-9)  # half a turn
-    assert objects(prepared.state_at(1.5))["square"].transform.scale[0] == pytest.approx(1.2)
-    assert objects(prepared.state_at(2.0))["square"].transform.scale[0] == pytest.approx(1.0)
+    assert objects(prepared, 1.5)["square"].transform.scale[0] == pytest.approx(1.2)
+    assert objects(prepared, 2.0)["square"].transform.scale[0] == pytest.approx(1.0)
 
 
 def test_style_changes_and_animate_rotate_and_scale() -> None:
@@ -180,12 +181,12 @@ def test_style_changes_and_animate_rotate_and_scale() -> None:
         scene.play(square.animate.set_fill(opacity=0.25).set_alpha(0.5), rate=linear)
 
     prepared = prepare(construct)
-    done = objects(prepared.state_at(1.0))["square"]
+    done = objects(prepared, 1.0)["square"]
 
     np.testing.assert_allclose(done.fill.color[0], [1, 0, 0])
     assert done.transform.scale == (2.0, 2.0, 2.0)
     assert done.stroke.width[0] == 8.0 and done.stroke.opacity[0] == 0.5
-    faded = objects(prepared.state_at(2.0))["square"]
+    faded = objects(prepared, 2.0)["square"]
     assert faded.fill.opacity[0] == pytest.approx(0.125)
 
 
@@ -198,13 +199,13 @@ def test_groups_move_their_children_and_pass_alpha_on() -> None:
         scene.play(group.animate.shift(RIGHT).set_alpha(0.5), rate=linear)
 
     prepared = prepare(construct)
-    state = objects(prepared.state_at(2.0))
+    state = objects(prepared, 2.0)
 
-    assert set(objects(prepared.state_at(0.5))) == {"a"}  # on its own until the group arrives
+    assert set(objects(prepared, 0.5)) == {"a"}  # on its own until the group arrives
     assert set(state) == {"group"}  # then drawn once, through the group
     group = state["group"]
     assert group.transform.position == (1.0, 0.0, 0.0)
-    assert [child.id for child in group.children] == ["a", "b"]
+    assert list(by_name(group.children, prepared.roots)) == ["a", "b"]
     assert group.children[1].fill.opacity[0] == pytest.approx(0.5)
 
 
@@ -219,8 +220,8 @@ def test_derived_signals_follow_animated_ones() -> None:
 
     prepared = prepare(construct)
 
-    assert position(prepared.state_at(0.5), "label") == (1.0, 0.5, 0.0)
-    assert objects(prepared.state_at(0.5))["label"].stroke.width[0] == 1.5
+    assert position(prepared, 0.5, "label") == (1.0, 0.5, 0.0)
+    assert objects(prepared, 0.5)["label"].stroke.width[0] == 1.5
 
 
 def test_derived_signals_cannot_be_animated_or_set() -> None:
@@ -252,7 +253,7 @@ def test_state_at_is_pure_and_order_independent() -> None:
 
     def signature(t):
         state = prepared.state_at(t)
-        return [(c.id, c.transform.position, tuple(np.round(c.fill.color[0], 9)), float(c.fill.opacity[0])) for c in state.children]
+        return [(c.uid, c.transform.position, tuple(np.round(c.fill.color[0], 9)), float(c.fill.opacity[0])) for c in state.children]
 
     forward = [signature(t) for t in times]
     shuffled = {t: signature(t) for t in np.random.default_rng(7).permutation(times)}
@@ -266,7 +267,7 @@ def test_snapshots_keep_identity_and_cache_versions() -> None:
         scene.play(square.animate.shift(RIGHT))
 
     prepared = prepare(construct)
-    first, second = objects(prepared.state_at(0.2))["square"], objects(prepared.state_at(0.7))["square"]
+    first, second = objects(prepared, 0.2)["square"], objects(prepared, 0.7)["square"]
 
     assert isinstance(first, Shape2D) and first.uid == second.uid
     assert first.version("points", "fill") == second.version("points", "fill")  # only moved
@@ -304,11 +305,11 @@ def test_builder_overrides_and_shapes() -> None:
     prepared = prepare(construct)
 
     assert prepared.duration == 5.0
-    assert position(prepared.state_at(2.0), "rect") == (1.0, 0.0, 0.0)
-    assert position(prepared.state_at(5.0), "pentagon") == (1.0, 1.0, 0.0)
+    assert position(prepared, 2.0, "rect") == (1.0, 0.0, 0.0)
+    assert position(prepared, 5.0, "pentagon") == (1.0, 1.0, 0.0)
     assert repr(Square(name="s")) == "Square('s')"
     prepared.refresh()  # nothing moved: values unchanged
-    assert position(prepared.state_at(5.0), "pentagon") == (1.0, 1.0, 0.0)
+    assert position(prepared, 5.0, "pentagon") == (1.0, 1.0, 0.0)
 
 
 def test_grow_from_center_and_shrink_to_center() -> None:
@@ -322,11 +323,11 @@ def test_grow_from_center_and_shrink_to_center() -> None:
 
     prepared = prepare(construct)
 
-    assert objects(prepared.state_at(0.0)) == {}  # scale 0: nothing to draw
-    assert objects(prepared.state_at(0.5))["square"].transform.scale == (1.0, 1.0, 1.0)
-    assert objects(prepared.state_at(1.0))["square"].transform.scale == (2.0, 2.0, 2.0)
-    assert objects(prepared.state_at(1.5))["square"].transform.scale == (1.0, 1.0, 1.0)
-    assert objects(prepared.state_at(2.0)) == {}  # shrunk and removed
+    assert objects(prepared, 0.0) == {}  # scale 0: nothing to draw
+    assert objects(prepared, 0.5)["square"].transform.scale == (1.0, 1.0, 1.0)
+    assert objects(prepared, 1.0)["square"].transform.scale == (2.0, 2.0, 2.0)
+    assert objects(prepared, 1.5)["square"].transform.scale == (1.0, 1.0, 1.0)
+    assert objects(prepared, 2.0) == {}  # shrunk and removed
 
 
 def test_clipping_groups_snapshot_to_render_clipping_groups() -> None:
@@ -342,10 +343,10 @@ def test_clipping_groups_snapshot_to_render_clipping_groups() -> None:
         scene.play(mask.animate.set_alpha(0.0), rate=linear)
 
     prepared = prepare(construct)
-    clip = objects(prepared.state_at(1.0))["clip"]
+    clip = objects(prepared, 1.0)["clip"]
 
     assert isinstance(clip, RenderClippingGroup) and clip.one_sided
-    assert clip.mask.id == "mask" and clip.content.id == "line"
+    assert list(by_name([clip.mask, clip.content], prepared.roots)) == ["mask", "line"]
     assert clip.transform.position == (0.0, 1.0, 0.0)
     assert prepared.state_at(2.0).children[0].mask.fill.opacity[0] == 0.0  # mask faded: content hidden by the renderer
 
@@ -361,4 +362,4 @@ def test_clipping_group_without_visible_parts_is_skipped() -> None:
 
     prepared = prepare(construct)
 
-    assert "clip" not in objects(prepared.state_at(0.0)) and "clip" in objects(prepared.state_at(1.0))
+    assert "clip" not in objects(prepared, 0.0) and "clip" in objects(prepared, 1.0)

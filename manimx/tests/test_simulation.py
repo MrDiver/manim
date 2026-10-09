@@ -5,6 +5,7 @@ import pytest
 
 from manimx.animation import RIGHT, UP, Dot, Polyline, Scene, Simulation, Timeline
 from manimx.animation.rate_functions import linear
+from naming import by_name
 
 
 def prepared(construct):
@@ -16,7 +17,7 @@ def prepared(construct):
 
 
 def x_of(prepared_scene, t, name):
-    return {c.id: c for c in prepared_scene.state_at(t).children}[name].transform.position
+    return by_name(prepared_scene.state_at(t).children, prepared_scene.roots)[name].transform.position
 
 
 def falling(ball, calls=None):
@@ -148,7 +149,7 @@ def test_paths_that_change_point_count_switch_between_keyframes() -> None:
         scene.play(Simulation(grow, dt=0.5, duration=1, keyframe_rate=2))
 
     scene = prepared(construct)
-    counts = [len({c.id: c for c in scene.state_at(t).children}["line"].points) for t in (0.0, 0.25, 0.5, 1.0)]
+    counts = [len(by_name(scene.state_at(t).children, scene.roots)["line"].points) for t in (0.0, 0.25, 0.5, 1.0)]
     assert counts[0] < counts[2] < counts[3] and counts[1] == counts[0]
 
 

@@ -7,6 +7,7 @@ import pytest
 from manimx.animation import RIGHT, SEGMENT_GAP, Dot, Scene, Timeline, World2D, World3D
 from manimx.animation.rate_functions import linear
 from manimx.objects import Transform, quaternion_from_axis_angle
+from naming import by_name, clip_names, timeline_roots
 
 
 def prepared(construct):
@@ -26,8 +27,8 @@ def moving(scene):
     scene.play(dot.animate.shift(RIGHT * 2), run_time=2, rate=linear)
 
 
-def dot_x(group):
-    return {child.id: child for child in group.children}["dot"].transform.position[0]
+def dot_x(timeline, group):
+    return by_name(group.children, timeline_roots(timeline))["dot"].transform.position[0]
 
 
 def test_clips_play_in_the_default_world_with_stable_identities() -> None:
@@ -35,7 +36,7 @@ def test_clips_play_in_the_default_world_with_stable_identities() -> None:
     clip = timeline.add(prepared(moving), name="intro")
 
     first, later = timeline.state_at(0.5), timeline.state_at(4.0)
-    assert first.id == "world" and isinstance(timeline.worlds[0], World3D)
+    assert isinstance(timeline.worlds[0], World3D)
     assert first.uid == later.uid == timeline.worlds[0].uid
     assert first.children[0].uid == later.children[0].uid == clip.uid
     assert clip.world is timeline.world("world")
@@ -49,7 +50,7 @@ def test_clip_transform_places_the_whole_scene() -> None:
 
     group = timeline.state_at(1.0).children[0]
     assert group.transform.position == (0.0, 0.0, -3.0) and group.transform.scale == (2.0, 2.0, 2.0)
-    assert dot_x(group) == pytest.approx(1.0)  # the scene itself is unchanged
+    assert dot_x(timeline, group) == pytest.approx(1.0)  # the scene itself is unchanged
 
     clip.place(layer=3)  # other arguments stay
     assert clip.transform.position == (0.0, 0.0, -3.0) and clip.layer == 3
@@ -61,7 +62,7 @@ def test_layers_order_drawing_and_ties_keep_insertion_order() -> None:
     timeline.add(prepared(moving), name="first")
     timeline.add(prepared(moving), name="second")
 
-    assert [group.id for group in timeline.state_at(0.0).children] == ["first", "second", "top"]
+    assert clip_names(timeline.state_at(0.0).children, timeline) == ["first", "second", "top"]
 
 
 def test_worlds_keep_their_clips_apart() -> None:
@@ -71,8 +72,8 @@ def test_worlds_keep_their_clips_apart() -> None:
     timeline.add(prepared(moving), name="label", world=hud)
 
     assert timeline.worlds[1] is hud
-    assert [group.id for group in timeline.state_at(0.0).children] == ["stage"]
-    assert [group.id for group in timeline.state_at(0.0, world=hud).children] == ["label"]
+    assert clip_names(timeline.state_at(0.0).children, timeline) == ["stage"]
+    assert clip_names(timeline.state_at(0.0, world=hud).children, timeline) == ["label"]
 
 
 def test_2d_worlds_only_allow_placement_in_their_plane() -> None:
@@ -105,10 +106,10 @@ def test_stills_ignore_start_cut_and_time_map() -> None:
     clip.place(position=(1, 0, 0))
 
     still = clip.still(3.0)  # playing time 3: one second into the second segment
-    assert dot_x(still) == pytest.approx(3.0)
+    assert dot_x(timeline, still) == pytest.approx(3.0)
     assert still.uid == clip.uid and still.transform.position == (1.0, 0.0, 0.0)
-    assert dot_x(clip.still(2.0)) == pytest.approx(2.0)  # the boundary shows the first segment's end
-    assert dot_x(clip.still(99.0)) == pytest.approx(4.0)  # clamped to the end
+    assert dot_x(timeline, clip.still(2.0)) == pytest.approx(2.0)  # the boundary shows the first segment's end
+    assert dot_x(timeline, clip.still(99.0)) == pytest.approx(4.0)  # clamped to the end
 
 
 def test_compiled_time_at_inverts_playing_time() -> None:

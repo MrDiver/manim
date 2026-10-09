@@ -70,10 +70,10 @@ _SIDES = {
 def portal_cube() -> Group:
     worlds = {"front": logo_world(), "right": mesh_world(), "back": curve_world(), "left": grid_world()}
     portals = [
-        ClippingGroup(f"portal-{side}", mask=_face(f"mask-{side}", side, Fill(opacity=1.0), Stroke(width=0)), content=world, one_sided=True)
+        ClippingGroup(mask=_face(side, Fill(opacity=1.0), Stroke(width=0)), content=world, one_sided=True)
         for side, world in worlds.items()
     ]
-    return Group("portal-cube", children=[*portals, _frame()])
+    return Group(children=[*portals, _frame()])
 
 
 def views(pixel_width: int = 1280, pixel_height: int = 720) -> dict[str, RenderConfig]:
@@ -101,21 +101,21 @@ def orbit_camera(azimuth: float, elevation: float = 22.0, distance: float = 11.0
 # --------------------------------------------------------------------------
 
 
-def _face(id: str, side: str, fill: Fill, stroke: Stroke) -> Shape2D:
+def _face(side: str, fill: Fill, stroke: Stroke) -> Shape2D:
     normal, (angle, axis) = _SIDES[side]
-    return square(id, side_length=SIZE, fill=fill, stroke=stroke, transform=Transform(position=tuple(CENTER + HALF * np.array(normal))).rotated(angle, axis))
+    return square(side_length=SIZE, fill=fill, stroke=stroke, transform=Transform(position=tuple(CENTER + HALF * np.array(normal))).rotated(angle, axis))
 
 
 def _frame() -> Group:
     """Six stroked planes: four open side outlines, a solid lid and base."""
     outline = Stroke(FRAME_COLOR, width=6, joint=JointType.MITER)
-    sides = [_face(f"edge-{side}", side, Fill(opacity=0.0), outline) for side in _SIDES]
-    lid = square("lid", side_length=SIZE, fill=Fill("#2a2a35", opacity=1.0), stroke=outline, transform=Transform(position=(0.0, 0.0, SIZE)))
-    base = square("base", side_length=SIZE, fill=Fill("#2a2a35", opacity=1.0), stroke=outline, transform=Transform().rotated(math.pi, (1, 0, 0)))
-    return Group("frame", children=[*sides, lid, base])
+    sides = [_face(side, Fill(opacity=0.0), outline) for side in _SIDES]
+    lid = square(side_length=SIZE, fill=Fill("#2a2a35", opacity=1.0), stroke=outline, transform=Transform(position=(0.0, 0.0, SIZE)))
+    base = square(side_length=SIZE, fill=Fill("#2a2a35", opacity=1.0), stroke=outline, transform=Transform().rotated(math.pi, (1, 0, 0)))
+    return Group(children=[*sides, lid, base])
 
 
-def _room(name: str, open_side: str, wall: str, floor: str) -> Group:
+def _room(open_side: str, wall: str, floor: str) -> Group:
     """Floor, ceiling and three walls just inside the cube; the wall behind
     the portal is left out so the camera can look in.
 
@@ -125,16 +125,16 @@ def _room(name: str, open_side: str, wall: str, floor: str) -> Group:
     inset = SIZE - 0.04
     thickness = 0.02
     walls = [
-        Shape3D(f"{name}-floor", mesh=box_mesh(inset, inset, thickness), material=PbrMaterial(floor, roughness=0.8), transform=Transform(position=(0.0, 0.0, 0.03)), cast_shadows=False),
-        Shape3D(f"{name}-ceiling", mesh=box_mesh(inset, inset, thickness), material=PbrMaterial(wall, roughness=0.9), transform=Transform(position=(0.0, 0.0, SIZE - 0.03)), cast_shadows=False),
+        Shape3D(mesh=box_mesh(inset, inset, thickness), material=PbrMaterial(floor, roughness=0.8), transform=Transform(position=(0.0, 0.0, 0.03)), cast_shadows=False),
+        Shape3D(mesh=box_mesh(inset, inset, thickness), material=PbrMaterial(wall, roughness=0.9), transform=Transform(position=(0.0, 0.0, SIZE - 0.03)), cast_shadows=False),
     ]
     for side, (normal, _) in _SIDES.items():
         if side == open_side:
             continue
         position = CENTER + (HALF - 0.03) * np.array(normal)
         size = (thickness, inset, inset) if normal[0] else (inset, thickness, inset)
-        walls.append(Shape3D(f"{name}-wall-{side}", mesh=box_mesh(*size), material=PbrMaterial(wall, roughness=0.9), transform=Transform(position=tuple(position)), cast_shadows=False))
-    return Group(f"{name}-room", children=walls)
+        walls.append(Shape3D(mesh=box_mesh(*size), material=PbrMaterial(wall, roughness=0.9), transform=Transform(position=tuple(position)), cast_shadows=False))
+    return Group(children=walls)
 
 
 def _facing(side: str, obj: RenderObject, position: tuple[float, float, float]) -> RenderObject:
@@ -153,12 +153,11 @@ def logo_world() -> Group:
     logo = manim_logo()
     logo.transform = Transform(scale=(0.55, 0.55, 0.55))
     return Group(
-        "logo-world",
         children=[
-            _room("logo", "front", wall="#ece6e2", floor="#d8d0ca"),
+            _room("front", wall="#ece6e2", floor="#d8d0ca"),
             _facing("front", logo, (0.0, 0.6, 2.0)),
-            SpotLight.aimed("logo-key", (-1.0, -1.6, 3.6), (0.0, 0.6, 1.5), intensity=25, color="#fff1dc", outer_cone_angle=0.9, inner_cone_angle=0.5, size=0.4),
-            PointLight("logo-fill", intensity=3, color="#ffe0c0", transform=Transform(position=(1.2, -1.2, 1.0))),
+            SpotLight.aimed((-1.0, -1.6, 3.6), (0.0, 0.6, 1.5), intensity=25, color="#fff1dc", outer_cone_angle=0.9, inner_cone_angle=0.5, size=0.4),
+            PointLight(intensity=3, color="#ffe0c0", transform=Transform(position=(1.2, -1.2, 1.0))),
         ],
     )
 
@@ -167,20 +166,19 @@ def mesh_world() -> Group:
     rng = np.random.default_rng(7)
     palette = ["#58C4DD", "#FC6255", "#83C167", "#FFFF00", "#9A72AC"]
     balls = [
-        Shape3D(f"ball-{i}", mesh=sphere_mesh(0.25 + 0.15 * rng.random()), material=PbrMaterial(palette[i % 5], roughness=0.3 + 0.4 * rng.random(), metallic=float(i % 3 == 0)), transform=Transform(position=(rng.uniform(-1.4, 1.4), rng.uniform(-1.4, 1.4), 0.45)))
+        Shape3D(mesh=sphere_mesh(0.25 + 0.15 * rng.random()), material=PbrMaterial(palette[i % 5], roughness=0.3 + 0.4 * rng.random(), metallic=float(i % 3 == 0)), transform=Transform(position=(rng.uniform(-1.4, 1.4), rng.uniform(-1.4, 1.4), 0.45)))
         for i in range(9)
     ]
-    torus = Shape3D("torus", mesh=torus_mesh(0.6, 0.2), material=PbrMaterial("#d4af37", metallic=1.0, roughness=0.25), transform=Transform(position=(0.3, 0.2, 1.6)).rotated(1.1, (0, 1, 0)))
-    column = Shape3D("column", mesh=box_mesh(0.5, 0.5, 2.4), material=PbrMaterial("#e8e8e8", roughness=0.6), transform=Transform(position=(-0.9, 1.1, 1.25)))
+    torus = Shape3D(mesh=torus_mesh(0.6, 0.2), material=PbrMaterial("#d4af37", metallic=1.0, roughness=0.25), transform=Transform(position=(0.3, 0.2, 1.6)).rotated(1.1, (0, 1, 0)))
+    column = Shape3D(mesh=box_mesh(0.5, 0.5, 2.4), material=PbrMaterial("#e8e8e8", roughness=0.6), transform=Transform(position=(-0.9, 1.1, 1.25)))
     return Group(
-        "mesh-world",
         children=[
-            _room("mesh", "right", wall="#3a2e3e", floor="#c9b8a8"),
+            _room("right", wall="#3a2e3e", floor="#c9b8a8"),
             *balls,
             torus,
             column,
-            DirectionalLight.aimed("sunset", (-1.0, 0.4, -0.45), intensity=4.0, color="#ffb070", size=0.05),
-            PointLight("sky", intensity=4, color="#7090ff", transform=Transform(position=(1.2, -1.2, 3.4)), size=0.3),
+            DirectionalLight.aimed((-1.0, 0.4, -0.45), intensity=4.0, color="#ffb070", size=0.05),
+            PointLight(intensity=4, color="#7090ff", transform=Transform(position=(1.2, -1.2, 3.4)), size=0.3),
         ],
     )
 
@@ -188,7 +186,6 @@ def mesh_world() -> Group:
 def curve_world() -> Group:
     rainbow = [RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED]
     knot = Curve3D.parametric(
-        "trefoil",
         lambda t: (0.45 * (math.sin(t) + 2 * math.sin(2 * t)), 0.45 * (math.cos(t) - 2 * math.cos(2 * t)), 2.0 - 0.45 * math.sin(3 * t)),
         (0.0, 2 * math.pi),
         120,
@@ -196,7 +193,6 @@ def curve_world() -> Group:
     )
     helices = [
         Curve3D.parametric(
-            f"helix-{i}",
             lambda t, i=i: (1.45 * math.cos(i * math.pi / 2) + 0.25 * math.cos(t), 1.45 * math.sin(i * math.pi / 2) + 0.25 * math.sin(t), 0.2 + 0.11 * t),
             (0.0, 10 * math.pi),
             120,
@@ -205,39 +201,35 @@ def curve_world() -> Group:
         for i in range(4)
     ]
     return Group(
-        "curve-world",
-        children=[_room("curve", "back", wall="#101018", floor="#181828"), knot, *helices, PointLight("curve-glow", intensity=2, color="#6060ff", transform=Transform(position=(0, 0, 3.5)))],
+        children=[_room("back", wall="#101018", floor="#181828"), knot, *helices, PointLight(intensity=2, color="#6060ff", transform=Transform(position=(0, 0, 3.5)))],
     )
 
 
 def grid_world() -> Group:
     lines = [((c, -1.9), (c, 1.9)) for c in np.arange(-1.5, 1.6, 0.5)] + [((-1.9, c), (1.9, c)) for c in np.arange(-1.5, 1.6, 0.5)]
-    grid = Shape2D("grid-lines", points=np.vstack([Shape2D.from_corners("line", line).points for line in lines]), stroke=Stroke("#7a7a7a", width=2), transform=Transform(position=(0, 0, 0.05)))
+    grid = Shape2D(points=np.vstack([Shape2D.from_corners(line).points for line in lines]), stroke=Stroke("#7a7a7a", width=2), transform=Transform(position=(0, 0, 0.05)))
     axes = Group(
-        "grid-axes",
         children=[
-            Shape2D.from_corners("x-axis", [(-1.9, 0), (1.9, 0)], stroke=Stroke("#ff3352", width=3), transform=Transform(position=(0, 0, 0.06))),
-            Shape2D.from_corners("y-axis", [(0, -1.9), (0, 1.9)], stroke=Stroke("#8bdc00", width=3), transform=Transform(position=(0, 0, 0.06))),
+            Shape2D.from_corners([(-1.9, 0), (1.9, 0)], stroke=Stroke("#ff3352", width=3), transform=Transform(position=(0, 0, 0.06))),
+            Shape2D.from_corners([(0, -1.9), (0, 1.9)], stroke=Stroke("#8bdc00", width=3), transform=Transform(position=(0, 0, 0.06))),
         ],
     )
-    zigzag = Shape2D.from_corners("zigzag", [(-0.6, -0.3), (-0.3, 0.3), (0.0, -0.3), (0.3, 0.3), (0.6, -0.3)], stroke=Stroke(WHITE, width=14, joint=JointType.ROUND, cap=CapStyle.ROUND))
+    zigzag = Shape2D.from_corners([(-0.6, -0.3), (-0.3, 0.3), (0.0, -0.3), (0.3, 0.3), (0.6, -0.3)], stroke=Stroke(WHITE, width=14, joint=JointType.ROUND, cap=CapStyle.ROUND))
     hexagon = ClippingGroup(
-        "grid-clip",
-        mask=regular_polygon("grid-hexagon", 6, radius=0.6, fill=Fill(opacity=1.0), stroke=Stroke(width=0)),
-        content=Group("grid-stripes", children=[square(f"grid-stripe-{i}", side_length=0.2, fill=Fill(c, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(-0.7 + 0.2 * i, 0, 0), scale=(1, 7, 1))) for i, c in enumerate([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED, ORANGE])]),
+        mask=regular_polygon(6, radius=0.6, fill=Fill(opacity=1.0), stroke=Stroke(width=0)),
+        content=Group(children=[square(side_length=0.2, fill=Fill(c, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(-0.7 + 0.2 * i, 0, 0), scale=(1, 7, 1))) for i, c in enumerate([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED, ORANGE])]),
     )
-    ring = circle("grid-ring", radius=0.5, stroke=Stroke([RED, YELLOW, GREEN, BLUE, PURPLE, RED], width=[4, 16, 4, 16, 4]))
-    pentagon = regular_polygon("grid-pentagon", 5, radius=0.5, fill=Fill([RED, BLUE], opacity=0.7), stroke=Stroke(YELLOW, width=6, opacity=0.6))
+    ring = circle(radius=0.5, stroke=Stroke([RED, YELLOW, GREEN, BLUE, PURPLE, RED], width=[4, 16, 4, 16, 4]))
+    pentagon = regular_polygon(5, radius=0.5, fill=Fill([RED, BLUE], opacity=0.7), stroke=Stroke(YELLOW, width=6, opacity=0.6))
     return Group(
-        "grid-world",
         children=[
-            _room("grid", "left", wall="#3d3d3d", floor="#353535"),
+            _room("left", wall="#3d3d3d", floor="#353535"),
             grid,
             axes,
             _facing("left", zigzag, (0.0, -1.0, 2.6)),
             _facing("left", hexagon, (0.5, 0.6, 1.4)),
             _facing("left", ring, (-0.6, 0.9, 2.8)),
-            Group("grid-flat", children=[pentagon], transform=Transform(position=(-0.4, -0.7, 0.4))),
-            DirectionalLight.aimed("grid-sun", (0.3, 0.5, -1.0), intensity=2.0),
+            Group(children=[pentagon], transform=Transform(position=(-0.4, -0.7, 0.4))),
+            DirectionalLight.aimed((0.3, 0.5, -1.0), intensity=2.0),
         ],
     )

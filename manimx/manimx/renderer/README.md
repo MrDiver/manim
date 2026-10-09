@@ -35,9 +35,9 @@ from manimx import Fill, Group, Stroke, Transform
 from manimx.objects.geometry import circle, square
 from manimx.renderer import RenderConfig, WGPURenderer
 
-scene = Group("scene", children=[
-    square("square", fill=Fill("#525893", opacity=1.0), stroke=Stroke("#525893")),
-    circle("circle", fill=Fill("#87c2a5", opacity=1.0), transform=Transform(position=(1.5, 0.0, 0.0))),
+scene = Group(children=[
+    square(fill=Fill("#525893", opacity=1.0), stroke=Stroke("#525893")),
+    circle(fill=Fill("#87c2a5", opacity=1.0), transform=Transform(position=(1.5, 0.0, 0.0))),
 ])
 
 renderer = WGPURenderer()  # create once and reuse: it caches GPU resources
@@ -71,12 +71,12 @@ Without `field_of_view` the camera is orthographic and shows
 from manimx import DirectionalLight, PbrMaterial, PointLight, Shape3D, SpotLight, Transform, sphere_mesh
 from manimx.io import load_gltf
 
-ball = Shape3D("ball", mesh=sphere_mesh(1.0), material=PbrMaterial("#FC6255", roughness=0.3),
+ball = Shape3D(mesh=sphere_mesh(1.0), material=PbrMaterial("#FC6255", roughness=0.3),
                transform=Transform(position=(0, 0, 1)))
 helmet = load_gltf("DamagedHelmet.glb")  # a Group; converted from glTF's Y-up to Z-up
-sun = DirectionalLight.aimed("sun", (-1, 1, -2), intensity=3.0, size=0.03)  # size: softness
-lamp = PointLight("lamp", color="#58C4DD", intensity=15, transform=Transform(position=(-2, -2, 2)))
-spot = SpotLight.aimed("spot", (0, -4, 6), (0, 0, 0), outer_cone_angle=0.4)
+sun = DirectionalLight.aimed((-1, 1, -2), intensity=3.0, size=0.03)  # size: softness
+lamp = PointLight(color="#58C4DD", intensity=15, transform=Transform(position=(-2, -2, 2)))
+spot = SpotLight.aimed((0, -4, 6), (0, 0, 0), outer_cone_angle=0.4)
 ```
 
 Only `Shape3D` meshes are lit. 2D shapes and curves keep their exact Manim
@@ -90,7 +90,7 @@ default key light is used.
 ```python
 from manimx import ClippingGroup
 
-portal = ClippingGroup("portal", mask=square_face, content=world, one_sided=True)
+portal = ClippingGroup(mask=square_face, content=world, one_sided=True)
 ```
 
 The content is shown multiplied by the mask's alpha. The mask counts its

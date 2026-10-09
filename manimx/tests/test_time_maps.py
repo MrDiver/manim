@@ -6,6 +6,7 @@ import pytest
 
 from manimx.animation import RIGHT, Dot, InvalidCue, MonotoneMap, Ramp, Scene, Timeline, UnresolvedEvents
 from manimx.animation.rate_functions import linear
+from naming import by_name, timeline_roots
 
 
 def prepared(construct):
@@ -18,7 +19,7 @@ def prepared(construct):
 
 def x_at(timeline, t, name="dot"):
     group = timeline.state_at(t).children[0]
-    return {child.id: child for child in group.children}[name].transform.position[0]
+    return by_name(group.children, timeline_roots(timeline))[name].transform.position[0]
 
 
 def counting(scene):

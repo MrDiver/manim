@@ -48,7 +48,6 @@ class BezierPath(RenderObject):
     @classmethod
     def from_corners(
         cls,
-        id: str,
         corners: Sequence[Sequence[float]],
         *,
         closed: bool = False,
@@ -65,7 +64,7 @@ class BezierPath(RenderObject):
         curves = np.stack(
             [starts, (2 * starts + ends) / 3, (starts + 2 * ends) / 3, ends], axis=1
         )
-        return cls(id, points=curves.reshape(-1, cls.DIMENSION), **kwargs)
+        return cls(points=curves.reshape(-1, cls.DIMENSION), **kwargs)
 
     @property
     def num_curves(self) -> int:

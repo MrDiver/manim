@@ -38,7 +38,7 @@ TO_UPRIGHT = (1.0, 0.0, 0.0)
 
 
 def blender_scene() -> Group:
-    return Group("scene", children=[_ground(), _upright_logo(), _stress_ring()])
+    return Group(children=[_ground(), _upright_logo(), _stress_ring()])
 
 
 def views(pixel_width: int = 1920, pixel_height: int = 1080) -> dict[str, RenderConfig]:
@@ -66,20 +66,18 @@ def _ground() -> Group:
     lines += [((-GRID_EXTENT, c), (GRID_EXTENT, c)) for c in coordinates]
     # One shape, one open subpath per grid line.
     grid = Shape2D(
-        "grid",
-        points=np.vstack([Shape2D.from_corners("line", line).points for line in lines]),
+        points=np.vstack([Shape2D.from_corners(line).points for line in lines]),
         stroke=Stroke(GRID_COLOR, width=2.0),
     )
     extent = (-GRID_EXTENT, GRID_EXTENT)
-    x_axis = Shape2D.from_corners("x-axis", [(extent[0], 0), (extent[1], 0)], stroke=Stroke(AXIS_X, width=3.0))
-    y_axis = Shape2D.from_corners("y-axis", [(0, extent[0]), (0, extent[1])], stroke=Stroke(AXIS_Y, width=3.0))
+    x_axis = Shape2D.from_corners([(extent[0], 0), (extent[1], 0)], stroke=Stroke(AXIS_X, width=3.0))
+    y_axis = Shape2D.from_corners([(0, extent[0]), (0, extent[1])], stroke=Stroke(AXIS_Y, width=3.0))
     z_axis = Shape2D.from_corners(
-        "z-axis",
         [(0, 0), (0, 8)],
         stroke=Stroke(AXIS_Z, width=3.0),
         transform=Transform().rotated(math.pi / 2, TO_UPRIGHT),
     )
-    return Group("ground", children=[grid, x_axis, y_axis, z_axis])
+    return Group(children=[grid, x_axis, y_axis, z_axis])
 
 
 def _upright_logo() -> Group:
@@ -90,7 +88,6 @@ def _upright_logo() -> Group:
     scale = 1.6
     placement = Transform(position=(0.0, 0.0, scale * height / 2 + 0.2), scale=(scale, scale, scale))
     return Group(
-        "upright-logo",
         children=[logo],
         transform=placement.rotated(math.pi / 2, TO_UPRIGHT).rotated(math.radians(30.0), (0, 0, 1)),
     )
@@ -99,10 +96,8 @@ def _upright_logo() -> Group:
 def _stress_ring() -> Group:
     """Stress-test shapes on a circle around the logo, each oriented differently."""
     zigzag = Group(
-        "zigzags",
         children=[
             Shape2D.from_corners(
-                f"zigzag-{joint.name}",
                 [(-1.0, -0.5), (-0.5, 0.5), (0.0, -0.5), (0.5, 0.5), (1.0, -0.5)],
                 stroke=Stroke(WHITE, width=20, joint=joint, cap=cap),
                 transform=Transform(position=(0.0, 1.5 - 1.5 * i, 0.0)),
@@ -112,31 +107,27 @@ def _stress_ring() -> Group:
             )
         ],
     )
-    rainbow = circle("rainbow", radius=1.4, stroke=Stroke([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED], width=[6, 30, 6, 30, 6]))
-    pentagon = regular_polygon("pentagon", 5, radius=1.5, fill=Fill([RED, BLUE], opacity=0.7), stroke=Stroke(YELLOW, width=10, opacity=0.6))
+    rainbow = circle(radius=1.4, stroke=Stroke([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED], width=[6, 30, 6, 30, 6]))
+    pentagon = regular_polygon(5, radius=1.5, fill=Fill([RED, BLUE], opacity=0.7), stroke=Stroke(YELLOW, width=10, opacity=0.6))
     squares = Group(
-        "transparent-squares",
         children=[
-            square("back", fill=Fill(RED, opacity=0.5), stroke=Stroke(WHITE, width=6), transform=Transform(position=(-0.5, 0.5, 0.0))),
-            square("front", fill=Fill(BLUE, opacity=0.5), stroke=Stroke(WHITE, width=6), transform=Transform(position=(0.5, -0.5, 0.0))),
+            square(fill=Fill(RED, opacity=0.5), stroke=Stroke(WHITE, width=6), transform=Transform(position=(-0.5, 0.5, 0.0))),
+            square(fill=Fill(BLUE, opacity=0.5), stroke=Stroke(WHITE, width=6), transform=Transform(position=(0.5, -0.5, 0.0))),
         ],
     )
     clipped = ClippingGroup(
-        "clipped-stripes",
-        mask=regular_polygon("hexagon", 6, radius=1.5, fill=Fill(opacity=1.0), stroke=Stroke(width=0)),
+        mask=regular_polygon(6, radius=1.5, fill=Fill(opacity=1.0), stroke=Stroke(width=0)),
         content=Group(
-            "stripes",
             children=[
-                square(f"stripe-{i}", side_length=0.5, fill=Fill(color, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(-1.75 + 0.5 * i, 0.0, 0.0), scale=(1.0, 7.0, 1.0)))
+                square(side_length=0.5, fill=Fill(color, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(-1.75 + 0.5 * i, 0.0, 0.0), scale=(1.0, 7.0, 1.0)))
                 for i, color in enumerate([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED, ORANGE])
             ],
         ),
     )
     mirrored = Group(
-        "mirrored",
         children=[
-            circle("disc", fill=Fill(GREEN, opacity=1.0), stroke=Stroke(WHITE, width=8)),
-            square("inner", side_length=0.8, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0)),
+            circle(fill=Fill(GREEN, opacity=1.0), stroke=Stroke(WHITE, width=8)),
+            square(side_length=0.8, fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0)),
         ],
     )
 
@@ -160,4 +151,4 @@ def _stress_ring() -> Group:
             scale=orientation.scale,
         )
         children.append(shape)
-    return Group("stress-ring", children=children)
+    return Group(children=children)

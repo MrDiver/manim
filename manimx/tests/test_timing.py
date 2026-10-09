@@ -14,6 +14,7 @@ from manimx.animation import (
     derive,
 )
 from manimx.animation.rate_functions import linear
+from naming import by_name, timeline_roots
 
 
 def prepared(construct):
@@ -24,9 +25,9 @@ def prepared(construct):
     return Built().prepare()
 
 
-def x_of(state, clip=0, name="dot"):
+def x_of(timeline, state, clip=0, name="dot"):
     group = state.children[clip]
-    return {child.id: child for child in group.children}[name].transform.position[0]
+    return by_name(group.children, timeline_roots(timeline))[name].transform.position[0]
 
 
 def two_part(scene):
@@ -83,10 +84,10 @@ def test_holds_until_the_event_fires() -> None:
     timeline.fire("next", 5.0)
     timeline.add(prepared(two_part))
 
-    assert x_of(timeline.state_at(1.0)) == 1.0
-    assert x_of(timeline.state_at(3.0)) == 2.0  # holding
-    assert x_of(timeline.state_at(4.99)) == 2.0
-    assert x_of(timeline.state_at(6.0)) == 3.0
+    assert x_of(timeline, timeline.state_at(1.0)) == 1.0
+    assert x_of(timeline, timeline.state_at(3.0)) == 2.0  # holding
+    assert x_of(timeline, timeline.state_at(4.99)) == 2.0
+    assert x_of(timeline, timeline.state_at(6.0)) == 3.0
     assert timeline.duration == 7.0
     assert timeline.state_at(7.5).children == []  # the clip has ended
 
@@ -102,7 +103,7 @@ def test_scaling_a_segment_stretches_it() -> None:
     timeline = Timeline(events={"next": 2.0})
     timeline.add(prepared(two_part), scales={1: 2.0})
 
-    assert x_of(timeline.state_at(4.0)) == 3.0  # half speed: 2 s in, half done
+    assert x_of(timeline, timeline.state_at(4.0)) == 3.0  # half speed: 2 s in, half done
     assert timeline.duration == 6.0
 
 
@@ -111,7 +112,7 @@ def test_clip_start_offsets_everything() -> None:
     timeline.add(prepared(two_part), start=3.0)
 
     assert timeline.state_at(2.0).children == []  # not started yet
-    assert x_of(timeline.state_at(4.0)) == 1.0
+    assert x_of(timeline, timeline.state_at(4.0)) == 1.0
 
 
 def test_hold_shows_the_end_of_the_previous_segment_only() -> None:
@@ -126,8 +127,8 @@ def test_hold_shows_the_end_of_the_previous_segment_only() -> None:
     timeline = Timeline(events={"go": 5.0})
     timeline.add(prepared(construct))
 
-    holding = {c.id for c in timeline.state_at(3.0).children[0].children}
-    after = {c.id for c in timeline.state_at(5.0).children[0].children}
+    holding = set(by_name(timeline.state_at(3.0).children[0].children, timeline_roots(timeline)))
+    after = set(by_name(timeline.state_at(5.0).children[0].children, timeline_roots(timeline)))
     assert holding == {"dot"} and after == {"dot", "late"}
 
 
@@ -146,8 +147,8 @@ def test_scene_time_freezes_during_holds_and_global_time_runs() -> None:
     timeline.add(prepared(construct))
 
     holding = timeline.state_at(3.0)
-    assert x_of(holding, name="scene") == 1.0 and x_of(holding, name="global") == 3.0
-    assert x_of(timeline.state_at(4.5), name="scene") == 1.5
+    assert x_of(timeline, holding, name="scene") == 1.0 and x_of(timeline, holding, name="global") == 3.0
+    assert x_of(timeline, timeline.state_at(4.5), name="scene") == 1.5
 
 
 # --- events across clips ----------------------------------------------------------
@@ -217,9 +218,9 @@ def test_live_mode_holds_until_a_presenter_fires() -> None:
     timeline = Timeline(live=True)
     clip = timeline.add(prepared(two_part))
 
-    assert x_of(timeline.state_at(100.0)) == 2.0  # holds indefinitely
+    assert x_of(timeline, timeline.state_at(100.0)) == 2.0  # holds indefinitely
     timeline.fire("next", 101.0)  # the presenter clicks
-    assert x_of(timeline.state_at(102.0)) == 3.0
+    assert x_of(timeline, timeline.state_at(102.0)) == 3.0
     assert clip.end == 103.0
 
 

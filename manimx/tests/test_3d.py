@@ -80,9 +80,9 @@ def test_material_converts_colors_to_linear() -> None:
 
 
 def test_lights_point_along_their_local_minus_z() -> None:
-    sun = DirectionalLight.aimed("sun", (1.0, 0.0, 0.0))
-    spot = SpotLight.aimed("spot", (0.0, 0.0, 5.0), (0.0, 0.0, 0.0))
-    down = DirectionalLight.aimed("down", (0.0, 0.0, 1.0))  # opposite of -z
+    sun = DirectionalLight.aimed((1.0, 0.0, 0.0))
+    spot = SpotLight.aimed((0.0, 0.0, 5.0), (0.0, 0.0, 0.0))
+    down = DirectionalLight.aimed((0.0, 0.0, 1.0))  # opposite of -z
 
     def direction(light: object) -> np.ndarray:
         return light.transform.matrix()[:3, :3] @ [0.0, 0.0, -1.0]
@@ -91,14 +91,14 @@ def test_lights_point_along_their_local_minus_z() -> None:
     np.testing.assert_allclose(direction(spot), [0, 0, -1], atol=1e-12)
     np.testing.assert_allclose(direction(down), [0, 0, 1], atol=1e-12)
     with pytest.raises(ValueError, match="cone"):
-        SpotLight("bad", inner_cone_angle=0.5, outer_cone_angle=0.4)
+        SpotLight(inner_cone_angle=0.5, outer_cone_angle=0.4)
     with pytest.raises(ValueError, match="zero"):
-        DirectionalLight.aimed("bad", (0.0, 0.0, 0.0))
+        DirectionalLight.aimed((0.0, 0.0, 0.0))
 
 
 def test_scene_collects_lights_in_world_space() -> None:
-    lamp = PointLight("lamp", transform=Transform(position=(1.0, 0.0, 0.0)))
-    root = Group("root", children=[lamp], transform=Transform(position=(0.0, 2.0, 0.0)))
+    lamp = PointLight(transform=Transform(position=(1.0, 0.0, 0.0)))
+    root = Group(children=[lamp], transform=Transform(position=(0.0, 2.0, 0.0)))
 
     scene = flatten_scene(root)
 
@@ -108,11 +108,10 @@ def test_scene_collects_lights_in_world_space() -> None:
 
 def test_light_records() -> None:
     root = Group(
-        "root",
         children=[
-            DirectionalLight.aimed("sun", (0, 0, -1), intensity=2.0),
-            PointLight("lamp", color="#FF0000", intensity=3.0, range=5.0),
-            SpotLight.aimed("spot", (0, 0, 2), (0, 0, 0), inner_cone_angle=0.1, outer_cone_angle=0.2),
+            DirectionalLight.aimed((0, 0, -1), intensity=2.0),
+            PointLight(color="#FF0000", intensity=3.0, range=5.0),
+            SpotLight.aimed((0, 0, 2), (0, 0, 0), inner_cone_angle=0.1, outer_cone_angle=0.2),
         ],
     )
 
@@ -126,7 +125,7 @@ def test_light_records() -> None:
 
 
 def test_default_light_only_without_scene_lights() -> None:
-    empty = flatten_scene(Group("empty"))
+    empty = flatten_scene(Group())
 
     assert len(MeshBatch.build(empty, MobjectDataCache(), RenderConfig()).lights) == 1
     assert len(MeshBatch.build(empty, MobjectDataCache(), RenderConfig(default_lights=False)).lights) == 0
@@ -139,12 +138,12 @@ def test_mesh_batch_groups_draws_by_texture_set() -> None:
     texture = Texture(np.zeros((2, 2, 4), np.uint8))
     plain, textured = PbrMaterial(), PbrMaterial(base_color_texture=texture)
     shapes = [
-        Shape3D("a", mesh=box_mesh(), material=plain),
-        Shape3D("b", mesh=sphere_mesh(), material=textured),
-        Shape3D("c", mesh=box_mesh(), material=plain),
+        Shape3D(mesh=box_mesh(), material=plain),
+        Shape3D(mesh=sphere_mesh(), material=textured),
+        Shape3D(mesh=box_mesh(), material=plain),
     ]
 
-    batch = MeshBatch.build(flatten_scene(Group("root", children=shapes)), MobjectDataCache(), RenderConfig())
+    batch = MeshBatch.build(flatten_scene(Group(children=shapes)), MobjectDataCache(), RenderConfig())
 
     assert len(batch.materials) == 2
     assert [len(group.draws) for group in batch.groups] == [2, 1]
@@ -158,14 +157,14 @@ def test_meshes_cannot_be_masks() -> None:
     from manimx import ClippingGroup
 
     with pytest.raises(NotImplementedError, match="mask"):
-        flatten(ClippingGroup("clip", mask=Shape3D("mesh"), content=Shape2D("c")))
+        flatten(ClippingGroup(mask=Shape3D(), content=Shape2D()))
 
 
 # --- Curve3D ----------------------------------------------------------------------
 
 
 def test_curve3d_is_a_camera_facing_stroke() -> None:
-    curve = Curve3D.from_corners("c", [(0, 0, 0), (1, 0, 1), (2, 0, 0)], stroke=Stroke(width=10))
+    curve = Curve3D.from_corners([(0, 0, 0), (1, 0, 1), (2, 0, 0)], stroke=Stroke(width=10))
 
     batch = VectorBatch.build(flatten_scene(curve), MobjectDataCache(), np.zeros(3))
 
@@ -175,13 +174,13 @@ def test_curve3d_is_a_camera_facing_stroke() -> None:
 
 
 def test_parametric_curve_passes_through_samples() -> None:
-    helix = Curve3D.parametric("helix", lambda t: (math.cos(t), math.sin(t), t), (0.0, math.tau), samples=16)
+    helix = Curve3D.parametric(lambda t: (math.cos(t), math.sin(t), t), (0.0, math.tau), samples=16)
 
     assert helix.num_curves == 16
     np.testing.assert_allclose(helix.points[0], [1, 0, 0])
     np.testing.assert_allclose(helix.points[-1], [1, 0, math.tau], atol=1e-12)
     with pytest.raises(ValueError, match=r"\(N, 3\)"):
-        Curve3D("flat", points=np.zeros((4, 2)))
+        Curve3D(points=np.zeros((4, 2)))
 
 
 # --- glTF import ------------------------------------------------------------------
