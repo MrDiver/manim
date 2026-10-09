@@ -204,16 +204,16 @@ backend independent, so a path tracer or a Blender bridge could reuse them.
 ```mermaid
 flowchart TD
     A["scene tree + RenderConfig"] --> B["flatten_scene():<br/>world matrices, painter's order,<br/>clip scopes, lights"]
-    B --> C["VectorBatch.build():<br/>shared buffers + indirect draws<br/>(fill meshes from the cache)"]
-    B --> D["MeshBatch.build():<br/>vertices, materials, lights"]
+    B --> C["RetainedVectors.build():<br/>patch per-object slots<br/>(records from the cache)<br/>+ this frame's indirect draws"]
+    B --> D["MeshBatch.build():<br/>vertices, materials, lights<br/>(skipped without meshes)"]
     D --> E["build_shadow_views():<br/>one view per directional or spot light,<br/>six per point light"]
-    C & D & E --> F["upload to persistent GPU buffers"]
+    C & D & E --> F["upload changed ranges to<br/>persistent GPU buffers"]
     F --> P1
 
-    subgraph GPU["one command encoder"]
+    subgraph GPU["one command encoder (the composer's, per sub-frame)"]
         P1["mask passes<br/>one per clip scope -> mask layer"] --> P2
-        P2["shadow passes<br/>casters' depth per shadow view"] --> P3
-        P3["geometry pass<br/>meshes -> MSAA G-buffer + depth"] --> P4
+        P2["shadow passes<br/>casters' depth per shadow view<br/>(only with meshes)"] --> P3
+        P3["geometry pass<br/>meshes -> MSAA G-buffer + depth<br/>(without meshes: cleared once, then skipped)"] --> P4
         P4["lighting pass<br/>every sample x every light,<br/>PCSS shadows -> lit layer (HDR)"] --> P5
         P5["vector pass<br/>2D shapes and curves -> vector layer,<br/>own depth + test against mesh depth"]
     end
@@ -303,19 +303,37 @@ flowchart BT
 
 ### Caching and object lifecycle
 
+The renderer is a long-lived service: `WGPURenderer.shared()` is the
+process's instance, and everything it builds is kept across calls.
+
 ```mermaid
 flowchart LR
     Obj["RenderObject<br/>uid (never reused)<br/>versioned fields"] -->|"assigning points, fill, stroke, mesh..."| V["version +1"]
     V --> Key["cache key (uid, kind, version)"]
-    Key -->|hit| Reuse["reuse triangulation / packed vertices"]
+    Key -->|hit| Reuse["reuse triangulation, stroke records,<br/>packed vertices"]
     Key -->|miss| Build["rebuild and replace the entry"]
-    Mgr["scene manager"] -->|"RemoveObjects / ClearScene"| R["renderer.submit()"] --> C["every cache drops the entries"]
+    Obj --> Slot["retained slot (uid, mask role)"]
+    Slot -->|"same versions, same matrix"| Nothing["nothing written"]
+    Slot -->|"new matrix"| Patch["patch the 80-byte object entry"]
+    Slot -->|"new versions"| Repack["rewrite its records, upload the range"]
+    Mgr["scene manager"] -->|"RemoveObjects / ClearScene"| R["renderer.submit()"] --> C["the cache drops the entries"]
+    Gen["every 1024 renders"] --> Sweep["drop entries unused for 1024 renders"]
 ```
 
-Fields declared with `versioned()` count their assignments. Moving an
-object (its `transform`) never invalidates its triangulation; replacing
-its `points` does. Versioned arrays are read-only, so mutating them in
-place is an error rather than a stale cache.
+| What | Kept by | Key | Dropped |
+|---|---|---|---|
+| derived data (tessellations, stroke topology and points, centers, mesh vertices) | `MobjectDataCache` | (uid, kind) + version | on a new version, after 1024 unused renders, or by command |
+| packed vector records on the GPU | `RetainedVectors` (`retained.py`) | (uid, mask role) | when the shape is absent from a render; arenas repacked when garbage outweighs live records |
+| texture views, bind groups | `ResourceCache` (`gpu.py`) | texture (weak) / layout + resource identities | with their texture / LRU (512) |
+| render targets and attachments | `RenderTargets` | size, MSAA, mask capacity | on a size change |
+| composers (pipelines, texture pool) | `WGPURenderer.composer(effects)` | effect chain | with the renderer |
+
+Fields declared with `versioned()` count their assignments, unless the
+producer passes explicit tokens (the animation engine derives them from
+signal versions). Moving an object (its `transform`) never invalidates its
+data; it only patches its object entry. Replacing its `points` does.
+Versioned arrays are read-only, so mutating them in place is an error rather
+than a stale cache.
 
 ### Module map
 
@@ -329,13 +347,14 @@ place is an error rather than a stale cache.
 | `effects.py` | effect settings for the composer |
 | `webgpu/renderer.py` | `WGPURenderer`: builds batches, encodes the passes |
 | `webgpu/composer.py` | `FrameComposer`: sub-frames, effects, compositing |
-| `webgpu/vector_batch.py`, `vector_pass.py` | 2D shapes and curves |
+| `webgpu/vector_batch.py`, `vector_pass.py` | 2D shapes and curves: record layout, draw lists, the pass |
+| `webgpu/retained.py` | `RetainedVectors`: per-object slots in persistent arenas, patched per render |
 | `webgpu/mesh_batch.py`, `mesh_pass.py` | meshes, materials, lights (geometry pass) |
 | `webgpu/lighting_pass.py` | deferred lighting |
 | `webgpu/shadow_views.py`, `shadow_pass.py` | shadow map views and rendering |
 | `webgpu/targets.py` | all render targets of a frame, `RenderLayers` |
 | `webgpu/frame.py` | the per-frame uniform block |
-| `webgpu/gpu.py` | device, formats, growable buffers, WGSL includes |
+| `webgpu/gpu.py` | device, formats, growable buffers (full or ranged uploads), `ResourceCache`, WGSL includes |
 | `webgpu/profiler.py` | GPU timestamp queries per pass |
 
 ---
