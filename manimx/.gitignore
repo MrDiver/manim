@@ -1,2 +1,6 @@
 # pytest-benchmark baselines are machine specific
 .benchmarks/
+
+# The Rust core: build output and the built extension module
+core/target/
+manimx/_core*.so

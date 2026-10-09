@@ -20,12 +20,16 @@ dependencies = [
 manimx = "manimx.cli:run"
 
 [build-system]
-requires = ["uv_build>=0.10.0,<0.13.0"]
-build-backend = "uv_build"
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
 
-[tool.uv.build-backend]
-module-root = ""
-module-name = "manimx"
+[tool.maturin]
+# Mixed project: the Python package manimx plus the Rust core (core/,
+# see CORE.md) as the extension module manimx._core.
+python-source = "."
+module-name = "manimx._core"
+manifest-path = "core/Cargo.toml"
+features = ["pyo3/extension-module"]
 
 [dependency-groups]
 test = [
@@ -38,6 +42,8 @@ test = [
 
 [tool.uv]
 default-groups = ["test"]
+# Rebuild the core when its sources change.
+cache-keys = [{ file = "pyproject.toml" }, { file = "core/Cargo.toml" }, { file = "core/src/**/*.rs" }]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "manimx/renderer/tests"]
