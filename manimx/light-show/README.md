@@ -26,11 +26,14 @@ uv run manimx still Finale -t 9.4 # one frame
   (`find_all(tags="material:Lens")`), and pans, tilts and pumps them.
 - **SpotLights inside a model**: each moving head's `SpotLight` is a child
   of its `head` node, so panning the yoke and tilting the head aim the
-  light. `Aim` (`scenes/rig.py`) works out pan and tilt for any moving
-  world point. The spots have no visible cone in the air yet; you see
-  them where they land.
-- **Custom animations**: `Aim` and `Drive` (any signal set to a function of
-  time) carry the whole choreography: strobes, chases and color cycles.
+  light. `MovingHead.pan_tilt()` (`scenes/rig.py`) works out pan and tilt
+  for any world point. The spots have no visible cone in the air yet; you
+  see them where they land.
+- **Animations on the beat grid**: `scenes/lights.py` has what a lighting
+  console plays (`Aim`, `Flash`, `Pulse`, `Strobe`, `Chase`, `Fade`,
+  `Recolor`, `Rainbow`). Each one is a function of its progress only. The
+  scenes start every section with `wait_until(bar)` and play them for the
+  section's length, so 32 strobe flashes over four bars are eighth notes.
 - **Derived signals instead of updaters**: the camera path, the spinning
   mirror ball, the sculpture, the arches, the floor grid and the speaker
   cones are functions of `scene_time`. Each lens glows with its light's
@@ -47,8 +50,9 @@ uv run manimx still Finale -t 9.4 # one frame
 ## Files
 
 - `scenes/light_show.py`, `scenes/finale.py`: the two scenes
-- `scenes/rig.py`: the stage, the moving heads, `Aim`, `Drive`, `fly`,
-  the ManimX logo (not a scene)
+- `scenes/rig.py`: the stage, the moving heads, `fly`, the ManimX logo
+  (not a scene)
+- `scenes/lights.py`: the light animations and their paths
 - `scenes/music.py`: the instruments, the arrangement, the beat grid
 - `tools/build_assets.py`: generates `assets/*.glb` from manimx's geometry
   helpers (`uv run python tools/build_assets.py`)

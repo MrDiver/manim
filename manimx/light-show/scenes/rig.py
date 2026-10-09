@@ -3,22 +3,21 @@
 Not a scene itself (it is not registered in manimx.json): ``light_show``
 and ``finale`` import it and build their own copy of the stage.
 
-The vocabulary, all ordinary manimx animations and derived signals:
+What it provides:
 
+* :func:`build_stage`: the floor, the stage, the trusses with the moving
+  heads, speakers, the mirror ball, the sculpture and the arches.
+  Everything that moves on its own is a derived signal of
+  ``scene_time``.
 * :class:`MovingHead`: a glTF fixture with a SpotLight in its head. Its
   lens glows with the light's color and intensity (derived signals), and
   :meth:`MovingHead.pan_tilt` turns a world point into the yoke's pan and
-  the head's tilt.
-* :class:`Aim`: point a moving head at a moving world point, ``target(t)``.
-  Panning the yoke and tilting the head turn the spot with them, because
-  the light is a child of the head.
-* :class:`Drive`: set any signal to ``value(t)`` for a while (intensity
-  chases, strobes, color cycles).
-* :func:`fly`: the camera along a smooth path through timed waypoints, as
-  derived signals of ``scene_time``, so it keeps flying while the scene
+  the head's tilt. The animations that play the lights are in
+  ``lights.py``.
+* :func:`fly`: the camera along a smooth path through waypoints in
+  ``scene_time``, as derived signals, so it keeps flying while the scene
   plays one section after another.
-
-t is always the time in seconds since the animation started.
+* :func:`manimx_logo`: the ManimX logo.
 """
 
 from __future__ import annotations
@@ -27,26 +26,20 @@ import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import quaternion
 from manimx.animation import (
     COLOR,
     ROTATION,
-    Animation,
     Camera,
-    Change,
     Group,
     RootSignal,
     Shape2D,
     Shape3D,
     SpotLight,
-    Target,
     TimeSignals,
     derive,
-    linear,
-    smooth,
 )
 from manimx.examples.manim_logo import LOGO_BLUE, LOGO_GREEN, LOGO_RED, M_GLYPH_POINTS
 from manimx.renderer import Camera as RenderCamera
@@ -159,48 +152,6 @@ class MovingHead:
         self.yoke.rotation.set(pan)
         self.head.rotation.set(tilt)
         return self
-
-
-@dataclass(eq=False)
-class Aim(Animation):
-    """Point ``fixture`` at ``target(t)``, a world point. During the first
-    ``blend`` seconds it turns smoothly from wherever it pointed before."""
-
-    fixture: MovingHead
-    target: Callable[[float], Sequence[float]]
-    run_time: float = 1.0
-    blend: float = 0.5
-    rate: Any = staticmethod(linear)
-
-    def targets(self) -> Sequence[Target]:
-        return [
-            Target(self.fixture.yoke.rotation, Change.ABSOLUTE),
-            Target(self.fixture.head.rotation, Change.ABSOLUTE),
-        ]
-
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
-        t = alpha * self.run_time
-        pan, tilt = self.fixture.pan_tilt(self.target(t))
-        value = pan if signal is self.fixture.yoke.rotation else tilt
-        if t < self.blend:
-            return ROTATION.interpolate(start_value, value, smooth(t / self.blend))
-        return value
-
-
-@dataclass(eq=False)
-class Drive(Animation):
-    """Set ``signal`` to ``value(t)``."""
-
-    signal: RootSignal
-    value: Callable[[float], Any]
-    run_time: float = 1.0
-    rate: Any = staticmethod(linear)
-
-    def targets(self) -> Sequence[Target]:
-        return [Target(self.signal, Change.ABSOLUTE)]
-
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
-        return self.value(alpha * self.run_time)
 
 
 def on_floor(x: float, y: float, z: float = 0.0) -> np.ndarray:
@@ -518,8 +469,6 @@ def stand_up(logo: Logo, center: Sequence[float] = tuple(LOGO_CENTER), scale: fl
 
 
 __all__ = [
-    "Aim",
-    "Drive",
     "Logo",
     "MovingHead",
     "Stage",

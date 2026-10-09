@@ -1,14 +1,18 @@
 """LightShow: a camera flight through a club, with moving heads on the beat.
 
-32 seconds, 16 bars at 120 BPM, in five sections, each one ``play`` call
-holding an ``Aim`` and a few ``Drive`` animations per moving head:
+32 seconds, 16 bars at 120 BPM, in five sections. Every section starts
+with ``wait_until`` at its bar, so it lands on the beat however long the
+one before took, and plays animations of ``lights.py``: functions of
+their progress, which fit the beat because their counts fit the
+section (32 strobe flashes in four bars are eighth notes).
 
 ====  ========  ==========================================================
 bars  section   the lights
 ====  ========  ==========================================================
-0-3   intro     the heads open one per beat, deep blue, slow circles
-4-7   build     cyan and magenta circles around the sculpture, pulsing
-                with the kick; a strobe speeds up into the drop
+0-3   intro     the heads open one per beat, deep blue, then circle,
+                pulsing with the kick
+4-7   build     cyan and magenta circles around the sculpture, pulsing;
+                a strobe speeds up into the drop
 8-11  drop      sweeps across the floor, strobing on eighths, a new color
                 every bar
 12-14 ballyhoo  crossing figure-eights, a rainbow across the rig, a chase
@@ -26,29 +30,12 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
-from manimx.animation import Scene, smooth
+from manimx.animation import Scene
+from manimx.userland import IN, OUT
 
-from .music import BAR, BEAT, DROP, SHOW_LENGTH, kick_envelope, show_track
-from .rig import (
-    AMBER,
-    CYAN,
-    DEEP_BLUE,
-    MAGENTA,
-    RED,
-    SCULPTURE,
-    VIOLET,
-    WHITE,
-    Aim,
-    Drive,
-    MovingHead,
-    Stage,
-    build_stage,
-    fly,
-    hue,
-    on_floor,
-    rgb,
-)
+from .lights import Aim, Chase, Fade, Flash, Pulse, Rainbow, Recolor, Strobe, circle, still
+from .music import BAR, BEAT, DROP, SHOW_LENGTH, show_track
+from .rig import AMBER, CYAN, MAGENTA, RED, SCULPTURE, VIOLET, WHITE, MovingHead, Stage, build_stage, fly, on_floor
 
 FULL = 700.0
 """A moving head's intensity when fully open."""
@@ -63,164 +50,122 @@ CAMERA_PATH = [
     (27.5, (-11.0, -9.0, 11.0), (0.0, 1.0, 1.5)),
     (SHOW_LENGTH, (0.0, -13.0, 3.4), (0.0, 8.6, 3.7)),
 ]
+FLOOR = on_floor(*SCULPTURE[:2])
+DROP_COLORS = (RED, AMBER, VIOLET, CYAN)
 
 
 class LightShow(Scene):
     def construct(self) -> None:
         stage = build_stage(self.time)
+        heads = stage.heads
+        for i, head in enumerate(heads):
+            head.point_at(circle(FLOOR, ring_radius(i), 1.0, phase(i, heads))(0.0))
         self.add(stage.root)
         self.camera.set_field_of_view(math.radians(48))
         self.camera.near, self.camera.far = 0.1, 160.0
         fly(self.camera, self.time, CAMERA_PATH)
         self.play_wave(show_track())
 
-        heads = stage.heads
-        front, back = stage.front, stage.back
-        self.play(*intro(heads), run_time=4 * BAR)
-        self.play(*build(heads), run_time=4 * BAR)
-        self.play(*drop(front, back), run_time=4 * BAR)
+        # Intro: one head opens per beat, then they circle with the kick.
+        self.play(*(Flash(head.light, peak=FULL, rest=0.35 * FULL, decay=0.5) for head in heads), lag_ratio=1.0, run_time=BEAT)
+        self.wait_until(len(heads) * BEAT)
+        self.play(*intro(heads), run_time=2 * BAR - len(heads) * BEAT)
+
+        self.wait_until(4 * BAR)
+        self.play(*build(heads), run_time=3 * BAR)
+        self.play(*into_the_drop(heads), run_time=BAR)
+
+        self.wait_until(DROP)
+        self.play(*drop(stage.front, stage.back), run_time=4 * BAR)
+
+        self.wait_until(12 * BAR)
         self.play(*ballyhoo(heads), run_time=3 * BAR)
+
+        self.wait_until(15 * BAR)
         self.play(*hit(heads), *clear_the_floor(stage), run_time=BAR)
 
 
-def color_of(head: MovingHead, value) -> Drive:
-    return Drive(head.light.color, value)
+def ring_radius(i: int) -> float:
+    return 3.5 + 1.5 * (i % 2)
 
 
-def intensity_of(head: MovingHead, value) -> Drive:
-    return Drive(head.light.intensity, value)
-
-
-def circle_around(center, radius: float, speed: float, phase: float):
-    return lambda t: center + radius * np.array([math.cos(speed * t + phase), math.sin(speed * t + phase), 0.0])
+def phase(i: int, heads: list[MovingHead]) -> float:
+    return i * math.tau / len(heads)
 
 
 def intro(heads: list[MovingHead]):
-    """Bars 0-3: one head opens per beat with a flash, then breathes."""
+    """Bars 2-3 (after the heads opened): slow circles around the
+    sculpture, pulsing with the kick, half cyan, half magenta."""
     for i, head in enumerate(heads):
-        opens = (i + 1) * BEAT
-
-        def level(t: float, opens: float = opens) -> float:
-            if t < opens:
-                return 0.0
-            flash = math.exp(-(t - opens) / 0.25)
-            return FULL * (0.35 + 0.65 * flash + 0.3 * kick_envelope(t))
-
-        ring = circle_around(
-            on_floor(*SCULPTURE[:2]),
-            3.5 + 1.5 * (i % 2),
-            0.35,
-            i * math.tau / len(heads),
-        )
-        yield Aim(head, ring, blend=1.0)
-        yield intensity_of(head, level)
-        yield color_of(
-            head,
-            lambda t, i=i: rgb(DEEP_BLUE) if t < 2 * BAR else rgb(CYAN if i % 2 else MAGENTA),
-        )
+        yield Aim(head, circle(FLOOR, ring_radius(i), 0.2, phase(i, heads)), blend=0.0)
+        yield Pulse(head.light, beats=7, peak=FULL, rest=0.35 * FULL, decay=0.4)
+        yield Recolor(head.light, [CYAN if i % 2 else MAGENTA])
 
 
 def build(heads: list[MovingHead]):
-    """Bars 4-7: circles around the sculpture pulsing with the kick; the
-    last bar strobes faster and faster, all white, aimed at the middle."""
-    start = 4 * BAR
+    """Bars 4-6: circles around the sculpture, alternating directions,
+    pulsing on every beat."""
     for i, head in enumerate(heads):
-        ring = circle_around(
-            on_floor(*SCULPTURE[:2]),
-            2.5 + 2.0 * (i % 3),
-            0.9 * (1 if i % 2 else -1),
-            i * 1.3,
-        )
-
-        def target(t: float, ring=ring):
-            if t < 3 * BAR:
-                return ring(t)
-            mix = min(1.0, (t - 3 * BAR) / BAR)  # pull in to the sculpture
-            return (1 - mix) * ring(t) + mix * SCULPTURE
-
-        def level(t: float) -> float:
-            if t < 3 * BAR:
-                return FULL * (0.25 + 0.75 * kick_envelope(start + t, 0.2))
-            # A strobe speeding up from 4 to 16 flashes per second: the
-            # phase is the integral of that frequency.
-            since = t - 3 * BAR
-            phase = (4.0 * since + 6.0 * since**2 / BAR) % 1.0
-            return FULL * (1.0 if phase < 0.35 else 0.0) * (0.6 + 0.4 * since / BAR)
-
-        yield Aim(head, target, blend=0.6)
-        yield intensity_of(head, level)
-        yield color_of(
-            head,
-            lambda t, i=i: rgb(WHITE) if t >= 3 * BAR else rgb(CYAN if i % 2 else MAGENTA),
-        )
+        yield Aim(head, circle(FLOOR, 2.5 + 2.0 * (i % 3), 0.85 if i % 2 else -0.85, i * 1.3), blend=0.1)
+        yield Pulse(head.light, beats=12, peak=FULL, rest=0.25 * FULL, decay=0.4)
+        yield Recolor(head.light, [CYAN if i % 2 else MAGENTA])
 
 
-DROP_COLORS = (RED, AMBER, VIOLET, CYAN)
+def into_the_drop(heads: list[MovingHead]):
+    """Bar 7: all white on the sculpture, a strobe speeding up from 4 to
+    16 flashes a second."""
+    for head in heads:
+        yield Aim(head, still(SCULPTURE), blend=0.5)
+        yield Strobe(head.light, flashes=20, level=0.8 * FULL, duty=0.35, speedup=4.0)
+        yield Recolor(head.light, [WHITE])
 
 
 def drop(front: list[MovingHead], back: list[MovingHead]):
-    """Bars 8-11: the front sweeps fans across the floor, strobing on
-    eighths; the back hits on the kicks; a new color every bar."""
+    """Bars 8-11: the front sweeps fans across the floor (one swing a
+    bar), strobing on eighths; the back circles fast and hits on the
+    kicks; a new color every bar."""
     for i, head in enumerate(front):
         spread = (i - 2) / 2  # -1 .. 1 across the truss
 
-        def sweep(t: float, spread: float = spread):
-            swing = math.sin(math.pi * t / BAR * 2)
-            return on_floor(
-                9.0 * spread * swing + 2.0 * spread,
-                -1.5 + 4.0 * math.cos(math.pi * t / BAR),
-            )
+        def sweep(u: float, spread: float = spread):
+            swing = math.sin(math.tau * 4 * u)
+            return on_floor(9.0 * spread * swing + 2.0 * spread, -1.5 + 4.0 * math.cos(math.tau * 2 * u))
 
-        def level(t: float) -> float:
-            eighth = (t % (BEAT / 2)) / (BEAT / 2)
-            return FULL * (1.0 if eighth < 0.45 else 0.08)
-
-        yield Aim(head, sweep, blend=0.25)
-        yield intensity_of(head, level)
-        yield color_of(head, lambda t: rgb(DROP_COLORS[int(t // BAR) % 4]))
+        yield Aim(head, sweep, blend=0.05)
+        yield Strobe(head.light, flashes=32, level=FULL, rest=0.08 * FULL, duty=0.45)
+        yield Recolor(head.light, DROP_COLORS)
     for i, head in enumerate(back):
-        ring = circle_around(on_floor(*SCULPTURE[:2]), 2.0, 2.2 * (1 if i % 2 else -1), i * math.pi / 2)
-        yield Aim(head, ring, blend=0.25)
-        yield intensity_of(head, lambda t: FULL * (0.1 + 0.9 * kick_envelope(DROP + t, 0.12)))
-        yield color_of(head, lambda t: rgb(DROP_COLORS[(int(t // BAR) + 2) % 4]))
+        yield Aim(head, circle(FLOOR, 2.0, 2.8 if i % 2 else -2.8, i * math.pi / 2), blend=0.05)
+        yield Pulse(head.light, beats=16, peak=FULL, rest=0.1 * FULL, decay=0.25)
+        yield Recolor(head.light, DROP_COLORS[2:] + DROP_COLORS[:2])
 
 
 def ballyhoo(heads: list[MovingHead]):
     """Bars 12-14: crossing figure-eights, a rainbow running across the
-    rig, and a chase that lights one head after another on sixteenths."""
+    rig, and a chase lighting one head after another on sixteenths."""
     count = len(heads)
     for i, head in enumerate(heads):
 
-        def figure(t: float, i: int = i):
-            return on_floor(6.0 * math.sin(1.6 * t + i), 0.5 + 4.0 * math.sin(3.2 * t + 2 * i))
+        def figure(u: float, i: int = i):
+            return on_floor(6.0 * math.sin(9.6 * u + i), 0.5 + 4.0 * math.sin(19.2 * u + 2 * i))
 
-        def level(t: float, i: int = i) -> float:
-            lead = int(t / (BEAT / 4)) % count
-            return FULL * (1.0 if lead == i else 0.3)
-
-        yield Aim(head, figure, blend=0.5)
-        yield intensity_of(head, level)
-        yield color_of(head, lambda t, i=i: hue(i / count + 0.25 * t))
-
-
-def clear_the_floor(stage: Stage):
-    """Bar 15, from its second beat: the sculpture sinks into the floor and
-    the mirror ball rises into the rig, so ``Finale`` finds the floor
-    empty after the blackout."""
-
-    def away(t: float) -> float:
-        return smooth(min(1.0, max(0.0, (t - BEAT) / (2.5 * BEAT))))
-
-    bottom = stage.sculpture.position.z.value
-    yield Drive(stage.sculpture.position.z, lambda t: bottom - 4.0 * away(t))
-    top = stage.ball.position.z.value
-    yield Drive(stage.ball.position.z, lambda t: top + 6.0 * away(t))
+        yield Aim(head, figure, blend=0.1)
+        yield Rainbow(head.light, turns=1.5, offset=i / count)
+    yield Chase([head.light for head in heads], steps=48, level=FULL, rest=0.3 * FULL)
 
 
 def hit(heads: list[MovingHead]):
-    """Bar 15: everything on the sculpture, full white, fading into a
-    blackout on the last beat."""
+    """Bar 15: everything on the sculpture, full white, fading out into
+    the blackout at the end of the bar."""
     for head in heads:
-        yield Aim(head, lambda t: SCULPTURE, blend=0.3)
-        yield intensity_of(head, lambda t: FULL * 1.3 * max(0.0, 1.0 - t / (3.5 * BEAT)) ** 1.5)
-        yield color_of(head, lambda t: rgb(WHITE))
+        yield Aim(head, still(SCULPTURE), blend=0.15)
+        yield Fade(head.light.intensity, 0.0, start=1.3 * FULL)
+        yield Recolor(head.light, [WHITE])
+
+
+def clear_the_floor(stage: Stage):
+    """Bar 15: the sculpture sinks into the floor and the mirror ball
+    rises into the rig, so ``Finale`` finds the floor empty after the
+    blackout."""
+    yield stage.sculpture.animate.shift(IN * 4.0)
+    yield stage.ball.animate.shift(OUT * 6.0)

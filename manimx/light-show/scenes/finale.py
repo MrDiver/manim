@@ -18,32 +18,19 @@ the bloom makes them glow, and the motion blur draws their trails.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
-from manimx.animation import PointLight, Scene, Shape3D, Simulation, smooth
+from manimx.animation import PointLight, Scene, Shape3D, Simulation
 from manimx.examples.manim_logo import LOGO_BLUE, LOGO_GREEN, LOGO_RED
 from manimx.robjects.transform import rotation_towards
+from manimx.userland import Box, FadeIn
 from manimx.userland.geometry import sphere_mesh
 
+from .lights import Aim, Fade, Flash, Recolor
 from .music import FINALE_BEATS, FINALE_LENGTH, FINALE_X, boom, finale_track, whoosh
-from .rig import (
-    AMBER,
-    CYAN,
-    LOGO_CENTER,
-    LOGO_LIGHT,
-    MAGENTA,
-    WHITE,
-    X_GLOW,
-    Aim,
-    Drive,
-    build_stage,
-    fly,
-    manimx_logo,
-    on_floor,
-    rgb,
-    stand_up,
-)
+from .rig import AMBER, CYAN, LOGO_CENTER, LOGO_LIGHT, MAGENTA, WHITE, X_GLOW, build_stage, fly, manimx_logo, on_floor, rgb, stand_up
 
 GRAVITY = 9.81
 SPARKS_PER_SHELL = 64
@@ -91,12 +78,22 @@ CAMERA_PATH = [
 ]
 
 
+X_GLOW_REST = 3.0
+"""The X's glow between bursts."""
+
+
 class Finale(Scene):
     def construct(self) -> None:
         stage = build_stage(self.time, beat=finale_beat, centerpiece=False)
         logo = stand_up(manimx_logo(), scale=1.35)
-        for part in (logo.circle, logo.square, logo.triangle, logo.m):
+        parts = [(logo.circle, LOGO_GREEN), (logo.square, LOGO_BLUE), (logo.triangle, LOGO_RED), (logo.m, LOGO_LIGHT)]
+        for (part, color), head in zip(parts, stage.back, strict=True):
             part.alpha.set(0.0)
+            head.point_at(on_floor(0.55 * head.mount[0], 7.0, 0.8))
+            head.light.color.set(rgb(color))
+        for i, head in enumerate(stage.front):
+            head.point_at(on_floor(-6.0 + 3.0 * i, 3.0))
+            head.light.color.set(rgb(WHITE))
         logo.x.set_scale(0.0)
         self.add(stage.root, logo.root)
         self.camera.set_field_of_view(math.radians(48))
@@ -105,74 +102,38 @@ class Finale(Scene):
         self.play_wave(finale_track())
 
         # The logo, part by part on the beat, each part with its own light.
-        parts = [
-            (logo.circle, LOGO_GREEN),
-            (logo.square, LOGO_BLUE),
-            (logo.triangle, LOGO_RED),
-            (logo.m, LOGO_LIGHT),
-        ]
-        reveal = []
-        for (part, color), head, at in zip(parts, stage.back, FINALE_BEATS, strict=True):
-            reveal += slam_in(part, at)
-            reveal += [
-                Aim(
-                    head,
-                    lambda t, x=head.mount[0]: on_floor(0.55 * x, 7.0, 0.8),
-                    blend=0.01,
-                ),
-                Drive(head.light.color, lambda t, c=color: rgb(c)),
-                Drive(
-                    head.light.intensity,
-                    lambda t, at=at: 0.0 if t < at else 500.0 * (0.6 + 0.4 * math.exp(-(t - at) / 0.3)),
-                ),
-            ]
-        for i, head in enumerate(stage.front):  # dark until the X, then a white flash
-            reveal += [
-                Aim(head, lambda t, i=i: on_floor(-6.0 + 3.0 * i, 3.0), blend=0.01),
-                Drive(head.light.color, lambda t: rgb(WHITE)),
-                Drive(
-                    head.light.intensity,
-                    lambda t: 0.0 if t < FINALE_X else 900.0 * math.exp(-(t - FINALE_X) / 0.35),
-                ),
-            ]
-        grow = lambda t: smooth(min(1.0, max(0.0, (t - FINALE_X) / 0.3)))  # noqa: E731
-        reveal += [Drive(axis, grow) for axis in logo.x.scale.axes]
-        reveal += [
-            Drive(
-                bar.emissive_strength,
-                lambda t: 0.0 if t < FINALE_X else 3.0 + 9.0 * math.exp(-(t - FINALE_X) / 0.25),
-            )
-            for bar in logo.bars
-        ]
-        self.play(*reveal, run_time=FIREWORKS_START)
+        for (part, _), head, at in zip(parts, stage.back, FINALE_BEATS, strict=True):
+            self.wait_until(at)
+            self.play(*slam_in(part), Flash(head.light, peak=500.0, rest=300.0, run_time=0.4))
+
+        # The X grows in on the big kick, glowing; the front rig flashes white.
+        self.wait_until(FINALE_X)
+        self.play(
+            logo.x.animate.set_scale(1.0).set_run_time(0.3),
+            *(Fade(bar.emissive_strength, X_GLOW_REST, start=12.0, run_time=0.6) for bar in logo.bars),
+            *(Flash(head.light, peak=900.0, rest=0.0, decay=0.5, run_time=0.6) for head in stage.front),
+        )
 
         # The fireworks, with the rig swaying slowly in warm colors underneath.
-        fireworks = make_fireworks()
-        rig = []
-        for i, head in enumerate(stage.heads):
-            sway = lambda t, i=i: on_floor(
-                7.0 * math.sin(0.8 * t + 0.7 * i),
-                4.0 + 2.5 * math.cos(0.6 * t + i),
-                0.0,
-            )  # noqa: E731
-            rig += [
-                Aim(head, sway, blend=1.0),
-                Drive(head.light.color, lambda t, i=i: rgb((AMBER, MAGENTA, CYAN)[i % 3])),
-                Drive(head.light.intensity, lambda t: 260.0 * min(1.0, t / 1.5)),
-            ]
-        rig += [Drive(bar.emissive_strength, lambda t: 3.0 + 6.0 * burst_glow(t)) for bar in logo.bars]
-        self.play(fireworks, *rig, run_time=FIREWORKS_LENGTH)
+        self.wait_until(FIREWORKS_START)
+        self.play(
+            make_fireworks(logo.bars),
+            *(Aim(head, sway(i), blend=0.15, run_time=FIREWORKS_LENGTH) for i, head in enumerate(stage.heads)),
+            *(Fade(head.light.intensity, 260.0, run_time=1.5) for head in stage.heads),
+            *(Recolor(head.light, [(AMBER, MAGENTA, CYAN)[i % 3]], run_time=0.1) for i, head in enumerate(stage.heads)),
+        )
 
 
-def slam_in(part, at: float):
-    """Fade ``part`` in at ``at`` while it shrinks from 1.3 times its size."""
+def slam_in(part):
+    """Fade ``part`` in while it shrinks from 1.3 times its size."""
+    size = part.scale.value
+    part.set_scale((1.3 * size[0], 1.3 * size[1], size[2]))
+    return [FadeIn(part, run_time=0.3), part.animate.set_scale(size).set_run_time(0.3)]
 
-    def progress(t: float) -> float:
-        return smooth(min(1.0, max(0.0, (t - at) / 0.3)))
 
-    return [Drive(part.alpha, progress)] + [
-        Drive(axis, lambda t, size=axis.value: size * (1.3 - 0.3 * progress(t))) for axis in part.scale.axes[:2]
-    ]
+def sway(i: int):
+    """A slow wander over the floor in front of the stage."""
+    return lambda u: on_floor(7.0 * math.sin(7.5 * u + 0.7 * i), 4.0 + 2.5 * math.cos(5.6 * u + i))
 
 
 def finale_beat(t: float) -> float:
@@ -182,16 +143,11 @@ def finale_beat(t: float) -> float:
     return math.exp(-min(past) / 0.2) if past else 0.0
 
 
-def burst_glow(t: float) -> float:
-    """1 at every burst (t since the fireworks started), fading quickly."""
-    past = [t - (s.launch + s.rise) for s in SHELLS if s.launch + s.rise <= t]
-    return math.exp(-min(past) / 0.3) if past else 0.0
-
-
-def make_fireworks() -> Simulation:
+def make_fireworks(glowing: Sequence[Box]) -> Simulation:
     """The fireworks as a Simulation, with its rockets and sparks (all
     hidden, scale 0, until the step function lights them) and two point
-    lights for the flashes."""
+    lights for the flashes. Every burst also lights up ``glowing`` (the
+    X), which settles back to its rest glow."""
     rng = np.random.default_rng(7)
     mesh = sphere_mesh(1.0, 10, 6)  # one mesh for every spark
 
@@ -246,6 +202,8 @@ def make_fireworks() -> Simulation:
         flash = flashes[index % 2]
         flash.move_to(where).set_color(shell.color)
         flash_state[index % 2] = (2500.0 * shell.speed / 6.0, simulation.time)
+        for node in glowing:
+            node.set_emissive(strength=X_GLOW_REST + 6.0)
         simulation.emit("burst")
         simulation.play_wave(boom(index), volume=0.3 * shell.speed / 6.0)  # the salvo's five bangs add up
 
@@ -284,6 +242,9 @@ def make_fireworks() -> Simulation:
                 sparks[i].rotation.set(rotation_towards(tuple(velocity[i])))
             sparks[i].set_emissive(strength=14.0 * left**1.5 * twinkle)
 
+        for node in glowing:
+            if node.emissive_strength.value > X_GLOW_REST:
+                node.set_emissive(strength=X_GLOW_REST + (node.emissive_strength.value - X_GLOW_REST) * math.exp(-dt / 0.3))
         for flash, (peak, at) in zip(flashes, flash_state, strict=True):
             flash.set_intensity(peak * math.exp(-(now - at) / 0.25) if now >= at else 0.0)
 
