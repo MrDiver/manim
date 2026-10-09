@@ -833,7 +833,7 @@ flowchart LR
   `pyproject.toml` and the root `uv.lock` belong to the user.
 - Tests: `uv run --active pytest` in `manimx/`, with coverage at least 90%.
 - Benchmark: check the power mode, run `scripts/benchmark_project.py
-  example-project --check-reference <ref.npz>`, report.
+  tests/projects/benchmark --check-reference <ref.npz>`, report.
 - Don't run `ruff check` without `--no-fix`: the project config fixes files
   in place.
 - Describe everything with its name from the Python code.

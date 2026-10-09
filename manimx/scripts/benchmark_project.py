@@ -1,8 +1,8 @@
 """Benchmark rendering a manimx project, stage by stage.
 
-    uv run python scripts/benchmark_project.py example-project
-    uv run python scripts/benchmark_project.py example-project --save-reference /tmp/ref.npz
-    uv run python scripts/benchmark_project.py example-project --check-reference /tmp/ref.npz
+    uv run python scripts/benchmark_project.py tests/projects/benchmark
+    uv run python scripts/benchmark_project.py tests/projects/benchmark --save-reference /tmp/ref.npz
+    uv run python scripts/benchmark_project.py tests/projects/benchmark --check-reference /tmp/ref.npz
 
 Renders the project's timeline in one process with the project's output
 settings (and once without motion blur), and prints:

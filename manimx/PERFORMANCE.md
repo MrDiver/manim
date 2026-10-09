@@ -6,7 +6,7 @@ step, so every change is justified by numbers and regressions show up.
 ## How we measure
 
 ```sh
-uv run python scripts/benchmark_project.py example-project --check-reference /tmp/ref.npz
+uv run python scripts/benchmark_project.py tests/projects/benchmark --check-reference /tmp/ref.npz
 ```
 
 - **Workload:** the example project (Intro: the Manim logo, Bounce: five
