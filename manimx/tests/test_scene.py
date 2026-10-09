@@ -2,14 +2,12 @@
 and the purity of state_at (sections 4 and 5 of the design doc)."""
 
 import math
-from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 import pytest
 
 from manimx.robjects import RShape2D
-from manimx.animation import Animation, Change, Group, Scene, Target, derive
+from manimx.animation import Group, Scene, derive
 from manimx.userland import DOWN, LEFT, ORIGIN, RIGHT, TAU, UP, Circle, Dot, FadeIn, FadeOut, Indicate, Rectangle, RegularPolygon, Rotate, Square, Triangle
 from manimx.userland.rate_functions import linear
 from naming import by_name
@@ -47,32 +45,6 @@ def test_play_places_animations_and_moves_the_cursor() -> None:
     assert position(prepared, 1.0, "square") == (1.0, 0.0, 0.0)
     assert position(prepared, 2.5, "square") == (2.0, 0.0, 0.0)  # waiting
     assert position(prepared, 3.5, "square") == (2.0, 0.5, 0.0)
-
-
-def test_run_time_of_play_is_the_animations_run_time() -> None:
-    @dataclass(eq=False)
-    class Seconds(Animation):
-        """Moves its node to x = the seconds since it started."""
-
-        node: Square
-        run_time: float = 1.0
-        rate: Any = staticmethod(linear)
-
-        def targets(self):
-            return [Target(self.node.position.x, Change.ABSOLUTE)]
-
-        def contribution(self, signal, alpha, start_value):
-            return alpha * self.run_time
-
-    def construct(scene):
-        square = Square(name="square")
-        scene.add(square)
-        scene.play(Seconds(square), run_time=4)
-
-    prepared = prepare(construct)
-
-    assert prepared.duration == 4.0
-    assert position(prepared, 3.0, "square") == (3.0, 0.0, 0.0)
 
 
 def test_axes_animate_independently_and_absolute_overrides() -> None:

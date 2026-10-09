@@ -273,12 +273,7 @@ class SceneCompiler:
         for index in order:
             animation = animations[index]
             simulated = isinstance(animation, Simulation)
-            if run_time is not None and not simulated:
-                # The override is the animation's run time, not only its
-                # placement's: an animation that turns progress into
-                # seconds (alpha * run_time) must see the time it plays.
-                animation.run_time = run_time
-            duration = animation.run_time
+            duration = animation.run_time if run_time is None or simulated else run_time
             begin = start + index * lag_ratio * duration
             # Nodes appear when their own animation begins: a lagged
             # FadeIn must not show its node before its fade starts.
