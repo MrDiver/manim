@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 from manimx.userland.geometry import arc_points, rectangle_points
-from manimx.renderer import RemoveObjects, RenderConfig, Renderer, WGPURenderer
+from manimx.renderer import Camera, RemoveObjects, RenderConfig, Renderer, WGPURenderer
 from manimx.robjects import RShape2D
 from manimx.robjects.transform import rotation_towards
 from manimx.utils.color import BLUE, RED
@@ -63,6 +63,31 @@ def test_later_objects_paint_over_earlier_ones(renderer: WGPURenderer) -> None:
 
     assert pixel(render(renderer, below, above), 0, 0) == (*BLUE.to_int_rgb(), 255)
     assert pixel(render(renderer, above, below), 0, 0) == (*RED.to_int_rgb(), 255)
+
+
+def test_late_layers_stay_ordered_far_away_in_perspective(renderer: WGPURenderer) -> None:
+    # Two overlapping shapes in an upright plane 20 units away, after 200
+    # other objects, so their layers are in the hundreds. Far away the depth
+    # is close to 1, where fwidth(depth) is too coarse for the layer bias:
+    # the shape below used to show through in streaks.
+    others = [
+        RShape2D(points=rectangle_points(0.1, 0.1), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0), transform=Transform(position=(0.0, -40.0, 0.0)))
+        for _ in range(200)
+    ]
+    below = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0.0), transform=Transform(position=(0.3, 0.4, 0.0)))
+    above = RShape2D(points=arc_points(1.0, num_curves=16), fill=Fill(BLUE, opacity=1.0), stroke=Stroke(width=0.0))
+    upright = Transform(position=(0.0, 8.0, 4.0), rotation=rotation_towards((0.0, 1.0, 0.0)))
+    camera = Camera.look_at((0.0, -12.0, 2.5), (0.0, 8.0, 4.0), field_of_view=math.radians(48), near=0.1, far=160.0)
+
+    image = renderer.render(
+        RGroup(children=[*others, RGroup(children=[below, above], transform=upright)]),
+        RenderConfig(pixel_width=960, pixel_height=540, camera=camera, msaa_samples=4),
+    )
+
+    disc = image[250:290, 460:500, :3].astype(int)  # well inside the circle at the image center
+    red = (np.abs(disc - RED.to_int_rgb()).sum(axis=-1) < 60).sum()
+    blue = (np.abs(disc - BLUE.to_int_rgb()).sum(axis=-1) < 60).sum()
+    assert blue == disc.shape[0] * disc.shape[1] and red == 0
 
 
 def test_stroke_is_drawn_over_its_fill(renderer: WGPURenderer) -> None:

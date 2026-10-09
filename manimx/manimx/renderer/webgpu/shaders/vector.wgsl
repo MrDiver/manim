@@ -116,6 +116,8 @@ struct VertexOutput {
     // edges.
     @location(1) @interpolate(perspective, sample) uv: vec2<f32>,
     @location(2) @interpolate(flat) side: f32,
+    // 1 / clip w, linear in screen space: see layer_slope().
+    @location(5) @interpolate(linear) inverse_w: f32,
 };
 
 fn project(world: vec3<f32>) -> vec4<f32> {
@@ -137,6 +139,24 @@ fn layered_depth(depth: f32, layer: f32, slope: f32) -> f32 {
     return depth - layer * (frame.layer_depth_step + LAYER_SLOPE_SCALE * slope);
 }
 
+/// The depth change across one pixel, for the layer bias.
+///
+/// The bias multiplies the slope by the layer, so the slope's error is
+/// multiplied too, and it must stay below one layer step even for layers
+/// in the hundreds (every object of a scene, meshes included, takes a
+/// painter's order). `fwidth` of the depth itself is too coarse for that
+/// under a perspective projection: far from the camera the depth is close
+/// to 1, where float32 resolves only about 6e-8, so the difference between
+/// neighbouring pixels comes out with an error of that size, and coplanar
+/// layers in the hundreds swap. In perspective the depth is
+/// `z = -P[2][2] + P[2][3] / w`, so its slope is `|P[2][3]|` times the slope
+/// of `1 / w`, which is far from 1 and resolved a thousand times finer.
+/// Orthographic depth is linear in the view depth and keeps `fwidth(z)`.
+fn layer_slope(in: VertexOutput) -> f32 {
+    let perspective = frame.projection[2][3] != 0.0;  // row 3 (w) reads view z
+    return select(fwidth(in.clip_position.z), abs(frame.projection[3][2]) * fwidth(in.inverse_w), perspective);
+}
+
 /// A position outside the clip volume; triangles made of it are discarded.
 const CULLED = vec4<f32>(0.0, 0.0, 2.0, 1.0);
 
@@ -152,10 +172,14 @@ fn vs_main(
         culled.clip_position = CULLED;
         return culled;
     }
+    var out: VertexOutput;
     if instance.kind == KIND_FILL {
-        return fill_vertex(object, vertex_index);
+        out = fill_vertex(object, vertex_index);
+    } else {
+        out = stroke_vertex(object, stroke_curves[instance.curve], vertex_index);
     }
-    return stroke_vertex(object, stroke_curves[instance.curve], vertex_index);
+    out.inverse_w = 1.0 / out.clip_position.w;
+    return out;
 }
 
 struct FragmentOutput {
@@ -181,13 +205,16 @@ fn faces_camera(object: Object) -> bool {
 @fragment
 fn fs_main(in: VertexOutput, @builtin(sample_index) sample: u32) -> FragmentOutput {
     // Derivatives must be taken before any fragment may be discarded.
+    // The mesh test compares against a stored depth, which is as coarse as
+    // `fwidth(z)`; the layer bias needs the finer slope (see layer_slope).
     let slope = fwidth(in.clip_position.z);
+    let fine_slope = layer_slope(in);
     if hidden_by_meshes(in.clip_position, sample, slope) {
         discard;
     }
     var out: FragmentOutput;
     out.color = premultiplied(shade(in));
-    out.depth = layered_depth(in.clip_position.z, in.layer, slope);
+    out.depth = layered_depth(in.clip_position.z, in.layer, fine_slope);
     return out;
 }
 
