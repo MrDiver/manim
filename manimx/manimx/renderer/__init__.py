@@ -1,5 +1,5 @@
 from .base import Renderer
-from .cache import MobjectDataCache
+from .cache import RNodeDataCache
 from .commands import CacheCommand, ClearScene, RemoveObjects
 from .config import Camera, RenderConfig, ViewState
 from .effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap, ToneMapOperator
@@ -12,7 +12,7 @@ __all__ = [
     "ClearScene",
     "Effect",
     "FrameComposer",
-    "MobjectDataCache",
+    "RNodeDataCache",
     "MotionBlur",
     "RemoveObjects",
     "RenderConfig",

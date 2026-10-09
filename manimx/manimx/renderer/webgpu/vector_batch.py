@@ -29,7 +29,7 @@ import numpy as np
 
 from ...objects import RShape2D
 from ...objects.rbezier_path import POINTS_PER_CURVE, TOLERANCE_FOR_POINT_EQUALITY, RBezierPath
-from ..cache import MobjectDataCache
+from ..cache import RNodeDataCache
 from ..scene_graph import NO_CLIP, DrawItem, FlatScene
 from ..tessellation import FillMesh, tessellate_fill
 
@@ -122,7 +122,7 @@ class VectorBatch:
     upload all of it). None for a batch built from scratch."""
 
     @staticmethod
-    def build(scene: FlatScene, cache: MobjectDataCache, camera_position: np.ndarray) -> VectorBatch:
+    def build(scene: FlatScene, cache: RNodeDataCache, camera_position: np.ndarray) -> VectorBatch:
         builder = _BatchBuilder(cache, camera_position)
         for item in scene.items:
             builder.add(item)
@@ -134,7 +134,7 @@ class VectorBatch:
 
 @dataclass(slots=True)
 class _BatchBuilder:
-    cache: MobjectDataCache
+    cache: RNodeDataCache
     camera_position: np.ndarray
     objects: list[np.ndarray] = field(default_factory=list)
     instances: list[np.ndarray] = field(default_factory=list)

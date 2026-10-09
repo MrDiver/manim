@@ -20,14 +20,14 @@ from abc import ABC, abstractmethod
 import numpy as np
 
 from ..objects import RNode
-from .cache import MobjectDataCache
+from .cache import RNodeDataCache
 from .commands import CacheCommand
 from .config import RenderConfig
 
 
 class Renderer(ABC):
     def __init__(self) -> None:
-        self.cache = MobjectDataCache()
+        self.cache = RNodeDataCache()
 
     @abstractmethod
     def render(self, root: RNode, config: RenderConfig) -> np.ndarray:

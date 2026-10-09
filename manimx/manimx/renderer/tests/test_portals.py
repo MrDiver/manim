@@ -7,7 +7,7 @@ import pytest
 
 from manimx import RClippingGroup, RDirectionalLight, Fill, RGroup, PbrMaterial, RShape3D, Stroke, Transform, box_mesh
 from manimx.objects.geometry import square
-from manimx.renderer import MobjectDataCache, RenderConfig, WGPURenderer
+from manimx.renderer import RNodeDataCache, RenderConfig, WGPURenderer
 from manimx.renderer.scene_graph import NO_CLIP, flatten_scene
 from manimx.renderer.webgpu.mesh_batch import MeshBatch
 from manimx.renderer.webgpu.shadow_views import build_shadow_views
@@ -38,7 +38,7 @@ def test_scoped_lights_and_scope_membership() -> None:
 def test_one_sided_masks_are_flagged() -> None:
     scene = flatten_scene(_portal(_world(square()), one_sided=True))
 
-    batch = VectorBatch.build(scene, MobjectDataCache(), np.zeros(3))
+    batch = VectorBatch.build(scene, RNodeDataCache(), np.zeros(3))
 
     assert batch.objects["flags"][-1] & FLAG_FRONT_ONLY  # the mask, built last
     assert not batch.objects["flags"][0] & FLAG_FRONT_ONLY
@@ -50,9 +50,9 @@ def test_scoped_shadows_use_only_their_scope() -> None:
     sun = RDirectionalLight.aimed((0, 0, -1))
     scene = flatten_scene(RGroup(children=[outside, _portal(_world(inside, sun))]))
     config = RenderConfig()
-    batch = MeshBatch.build(scene, MobjectDataCache(), config)
+    batch = MeshBatch.build(scene, RNodeDataCache(), config)
 
-    views = build_shadow_views(scene, batch.light_items, batch.lights, MobjectDataCache(), config)
+    views = build_shadow_views(scene, batch.light_items, batch.lights, RNodeDataCache(), config)
 
     assert views.scopes == [0]
     assert batch.lights["scope"][0] == 0

@@ -10,7 +10,7 @@ from manimx.objects import new_uid
 from manimx.objects.geometry import circle, square, triangle
 from manimx.renderer import RenderConfig, WGPURenderer
 from manimx.renderer.scene_graph import flatten_scene
-from manimx.renderer.cache import MobjectDataCache
+from manimx.renderer.cache import RNodeDataCache
 from manimx.renderer.webgpu.retained import RetainedVectors
 
 CONFIG = RenderConfig(pixel_width=160, pixel_height=90)
@@ -55,7 +55,7 @@ def test_patched_renders_equal_fresh_renders(renderer: WGPURenderer) -> None:
 
 
 def test_a_moving_shape_only_rewrites_its_object_entry() -> None:
-    retained, cache = RetainedVectors(), MobjectDataCache()
+    retained, cache = RetainedVectors(), RNodeDataCache()
     retained.build(flatten_scene(RGroup(children=[shape(circle, A, 0), shape(square, B, 2)])), cache, np.zeros(3))
     batch = retained.build(flatten_scene(RGroup(children=[shape(circle, A, 1), shape(square, B, 2)])), cache, np.zeros(3))
 
@@ -66,7 +66,7 @@ def test_a_moving_shape_only_rewrites_its_object_entry() -> None:
 
 
 def test_garbage_is_repacked() -> None:
-    retained, cache = RetainedVectors(), MobjectDataCache()
+    retained, cache = RetainedVectors(), RNodeDataCache()
     for _ in range(1, 400):  # every frame a new shape replaces the last: its ranges become garbage
         retained.build(flatten_scene(RGroup(children=[shape(circle, new_uid())])), cache, np.zeros(3))
     assert retained.arenas["stroke_points"].used < 4096 + 400 and len(retained.slots) == 1

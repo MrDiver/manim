@@ -22,14 +22,14 @@ from typing import TYPE_CHECKING
 from ..objects import RClippingGroup, RGroup, RNode
 
 if TYPE_CHECKING:
-    from .cache import MobjectDataCache
+    from .cache import RNodeDataCache
 
 
 class CacheCommand(ABC):
-    """An operation applied to a :class:`MobjectDataCache`."""
+    """An operation applied to a :class:`RNodeDataCache`."""
 
     @abstractmethod
-    def apply(self, cache: MobjectDataCache) -> None: ...
+    def apply(self, cache: RNodeDataCache) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +43,7 @@ class RemoveObjects(CacheCommand):
         """Command removing ``root`` and all of its descendants."""
         return cls(tuple(obj.uid for obj in _descendants(root)))
 
-    def apply(self, cache: MobjectDataCache) -> None:
+    def apply(self, cache: RNodeDataCache) -> None:
         for uid in self.uids:
             cache.invalidate(uid)
 
@@ -52,7 +52,7 @@ class RemoveObjects(CacheCommand):
 class ClearScene(CacheCommand):
     """The whole scene was replaced: drop all cached data."""
 
-    def apply(self, cache: MobjectDataCache) -> None:
+    def apply(self, cache: RNodeDataCache) -> None:
         cache.clear()
 
 

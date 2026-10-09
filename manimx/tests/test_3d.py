@@ -25,7 +25,7 @@ from manimx import (
     torus_mesh,
 )
 from manimx.io import load_gltf
-from manimx.renderer import MobjectDataCache, RenderConfig
+from manimx.renderer import RNodeDataCache, RenderConfig
 from manimx.renderer.scene_graph import flatten, flatten_scene
 from manimx.renderer.webgpu.mesh_batch import LIGHT_DIRECTIONAL, LIGHT_POINT, LIGHT_SPOT, MeshBatch
 from manimx.renderer.webgpu.vector_batch import FLAG_CAMERA_FACING, VectorBatch
@@ -115,7 +115,7 @@ def test_light_records() -> None:
         ],
     )
 
-    lights = MeshBatch.build(flatten_scene(root), MobjectDataCache(), RenderConfig()).lights
+    lights = MeshBatch.build(flatten_scene(root), RNodeDataCache(), RenderConfig()).lights
 
     assert list(lights["kind"]) == [LIGHT_DIRECTIONAL, LIGHT_POINT, LIGHT_SPOT]
     np.testing.assert_allclose(lights["direction"][0], [0, 0, -1], atol=1e-6)
@@ -127,8 +127,8 @@ def test_light_records() -> None:
 def test_default_light_only_without_scene_lights() -> None:
     empty = flatten_scene(RGroup())
 
-    assert len(MeshBatch.build(empty, MobjectDataCache(), RenderConfig()).lights) == 1
-    assert len(MeshBatch.build(empty, MobjectDataCache(), RenderConfig(default_lights=False)).lights) == 0
+    assert len(MeshBatch.build(empty, RNodeDataCache(), RenderConfig()).lights) == 1
+    assert len(MeshBatch.build(empty, RNodeDataCache(), RenderConfig(default_lights=False)).lights) == 0
 
 
 # --- mesh batch -------------------------------------------------------------------
@@ -143,7 +143,7 @@ def test_mesh_batch_groups_draws_by_texture_set() -> None:
         RShape3D(mesh=box_mesh(), material=plain),
     ]
 
-    batch = MeshBatch.build(flatten_scene(RGroup(children=shapes)), MobjectDataCache(), RenderConfig())
+    batch = MeshBatch.build(flatten_scene(RGroup(children=shapes)), RNodeDataCache(), RenderConfig())
 
     assert len(batch.materials) == 2
     assert [len(group.draws) for group in batch.groups] == [2, 1]
@@ -166,7 +166,7 @@ def test_meshes_cannot_be_masks() -> None:
 def test_curve3d_is_a_camera_facing_stroke() -> None:
     curve = RCurve3D.from_corners([(0, 0, 0), (1, 0, 1), (2, 0, 0)], stroke=Stroke(width=10))
 
-    batch = VectorBatch.build(flatten_scene(curve), MobjectDataCache(), np.zeros(3))
+    batch = VectorBatch.build(flatten_scene(curve), RNodeDataCache(), np.zeros(3))
 
     assert batch.objects["flags"][0] == FLAG_CAMERA_FACING
     assert len(batch.fill_vertices) == 0  # curves have no fill

@@ -23,7 +23,7 @@ import numpy as np
 
 from ...objects import RDirectionalLight, RPointLight, RShape3D, RSpotLight
 from ...objects.rbezier_path import RBezierPath
-from ..cache import MobjectDataCache
+from ..cache import RNodeDataCache
 from ..config import RenderConfig
 from ..scene_graph import NO_CLIP, FlatScene, LightItem
 from .frame import frame_data
@@ -66,7 +66,7 @@ def build_shadow_views(
     scene: FlatScene,
     lights: list[LightItem],
     light_rows: np.ndarray,
-    cache: MobjectDataCache,
+    cache: RNodeDataCache,
     config: RenderConfig,
 ) -> ShadowViews:
     """Assign shadow map layers to lights; writes ``light_rows["shadow_view"]``.
@@ -116,7 +116,7 @@ def build_shadow_views(
     return ShadowViews(frames, np.array(views, dtype=SHADOW_VIEW_DTYPE), scopes)
 
 
-def scene_bounds(scene: FlatScene, cache: MobjectDataCache, scope: int = NO_CLIP) -> tuple[np.ndarray, float] | None:
+def scene_bounds(scene: FlatScene, cache: RNodeDataCache, scope: int = NO_CLIP) -> tuple[np.ndarray, float] | None:
     """Bounding sphere ``(center, radius)`` of the drawn objects in ``scope``
     (all objects for NO_CLIP), or None if there are none."""
     corners = []

@@ -12,7 +12,7 @@ from manimx import Fill, RGroup, RShape2D, RSpotLight, Stroke
 from manimx.animation import PATH, RootSignal, Vector3Signal, derive, version_token
 from manimx.objects import new_uid
 from manimx.objects.geometry import arc_points
-from manimx.renderer import MobjectDataCache
+from manimx.renderer import RNodeDataCache
 from manimx.renderer.scene_graph import flatten_scene
 from manimx.renderer.webgpu.vector_batch import VectorBatch
 
@@ -73,7 +73,7 @@ def test_snapshots_from_unchanged_signals_share_cached_triangulations() -> None:
     radius = RootSignal(1.0)
     x = RootSignal(0.0)
     points = derive(lambda r: arc_points(r), radius, kind=PATH)
-    cache = MobjectDataCache()
+    cache = RNodeDataCache()
 
     def snapshot() -> RGroup:
         from manimx import Transform

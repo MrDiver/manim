@@ -165,7 +165,7 @@ flowchart LR
         Interface["Renderer<br/>render(), submit()"]
         Graph["scene_graph<br/>flatten_scene()"]
         Tess["tessellation<br/>fills -> triangles"]
-        Cache["MobjectDataCache<br/>(uid, kind) -> (version, data)"]
+        Cache["RNodeDataCache<br/>(uid, kind) -> (version, data)"]
         Commands["commands<br/>RemoveObjects, ClearScene"]
         Config["RenderConfig, Camera"]
         Effects["effects<br/>MotionBlur, Bloom, ToneMap, ShaderEffect"]
@@ -322,7 +322,7 @@ flowchart LR
 
 | What | Kept by | Key | Dropped |
 |---|---|---|---|
-| derived data (tessellations, stroke topology and points, centers, mesh vertices) | `MobjectDataCache` | (uid, kind) + version | on a new version, after 1024 unused renders, or by command |
+| derived data (tessellations, stroke topology and points, centers, mesh vertices) | `RNodeDataCache` | (uid, kind) + version | on a new version, after 1024 unused renders, or by command |
 | packed vector records on the GPU | `RetainedVectors` (`retained.py`) | (uid, mask role) | when the shape is absent from a render; arenas repacked when garbage outweighs live records |
 | texture views, bind groups | `ResourceCache` (`gpu.py`) | texture (weak) / layout + resource identities | with their texture / LRU (512) |
 | render targets and attachments | `RenderTargets` | size, MSAA, mask capacity | on a size change |

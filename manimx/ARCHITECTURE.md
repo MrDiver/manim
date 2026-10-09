@@ -73,7 +73,7 @@ flowchart LR
 |---|---|---|
 | `manimx.objects` | `RNode` and its subclasses `RGroup`, `RClippingGroup`, `RBezierPath` (→ `RShape2D`, `RCurve3D`), `RShape3D`, `RLight` (→ `RDirectionalLight`, `RPointLight`, `RSpotLight`); `Transform`, `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`; `new_uid()`, `versioned()` | numpy |
 | `manimx.animation` | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses, `PositionMixin`, `RotationMixin`, `ScalableMixin`; `Animation` and its subclasses; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound` | objects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
-| `manimx.renderer` | `flatten_scene()` → `FlatScene`; `tessellate_fill()`; `MobjectDataCache`; `RenderConfig`, `renderer.Camera`, `ViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `RemoveObjects`, `ClearScene` | objects |
+| `manimx.renderer` | `flatten_scene()` → `FlatScene`; `tessellate_fill()`; `RNodeDataCache`; `RenderConfig`, `renderer.Camera`, `ViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `RemoveObjects`, `ClearScene` | objects |
 | `manimx.renderer.webgpu` | `WGPURenderer`, `FrameComposer`, `RetainedVectors`, `VectorBatch`, `MeshBatch`, `VectorPass`, `MeshPass`, `LightingPass`, `ShadowPass`, `RenderTargets`, `RenderLayers`, `ResourceCache`, `GPUContext` | wgpu |
 | `manimx.drivers` | `render()`, `FramePipeline`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation |
 | `manimx.project` | `Project`, `OutputSettings`, `CameraSettings`, `PerformanceSettings`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers |
@@ -427,7 +427,7 @@ cache correct:
    returns it, and versioned arrays are read-only.
 4. **Purity:** `state_at` has no side effects on its result.
 5. **Lifecycle:** `renderer.submit(RemoveObjects(...))` drops the data of
-   objects gone for good. Otherwise `MobjectDataCache.sweep()` ages entries
+   objects gone for good. Otherwise `RNodeDataCache.sweep()` ages entries
    out (section 8).
 
 ## 8. `WGPURenderer` as a service
@@ -438,7 +438,7 @@ classDiagram
     class WGPURenderer {
         shared()$ WGPURenderer
         context: GPUContext
-        cache: MobjectDataCache
+        cache: RNodeDataCache
         resources: ResourceCache
         profiler: GpuProfiler
         composer(effects) FrameComposer
@@ -448,7 +448,7 @@ classDiagram
     class GPUContext {
         device
     }
-    class MobjectDataCache {
+    class RNodeDataCache {
         entries: uid and kind to version and data
         generation
         next_generation()
@@ -479,7 +479,7 @@ classDiagram
         bind group
     }
     WGPURenderer *-- GPUContext
-    WGPURenderer *-- MobjectDataCache
+    WGPURenderer *-- RNodeDataCache
     WGPURenderer *-- ResourceCache
     WGPURenderer *-- RetainedVectors
     WGPURenderer *-- RenderTargets : per size
@@ -501,7 +501,7 @@ and the tests use it. One thread renders at a time.
 |---|---|---|
 | `flatten_scene()` → `FlatScene` (`DrawItem`s with world matrices and painter's order, `ClipScope`s, `LightItem`s) | every call | every call |
 | `RetainedVectors.build()` for `RShape2D` and `RCurve3D` | nothing written to its `_Slot` | new world matrix: the 80-byte object entry; new `fill`/`stroke` version: its records in place; new `points` version: records moved, curves and instances rewritten |
-| `MobjectDataCache` (`tessellate_fill()` result, stroke records, center, `RShape3D` vertices) | hit | rebuilt for the new version |
+| `RNodeDataCache` (`tessellate_fill()` result, stroke records, center, `RShape3D` vertices) | hit | rebuilt for the new version |
 | `GrowableBuffer.write()` | nothing uploaded | only the written record ranges |
 | `MeshBatch.build()`, `build_shadow_views()`, geometry and lighting passes | skipped while the `FlatScene` contains no `RShape3D` (G-buffer and lit target cleared once) | run when an `RShape3D` is present |
 | Mask, shadow and vector passes | recorded into the `FrameComposer`'s command encoder | same |
@@ -510,7 +510,7 @@ and the tests use it. One thread renders at a time.
 
 | Cache | Key | Lives until |
 |---|---|---|
-| `MobjectDataCache` | (uid, kind) with a version | replaced on a new version; dropped after 1024 renders unused (`sweep()`), or by `RemoveObjects` / `ClearScene` |
+| `RNodeDataCache` | (uid, kind) with a version | replaced on a new version; dropped after 1024 renders unused (`sweep()`), or by `RemoveObjects` / `ClearScene` |
 | `RetainedVectors._Slot` | (uid, mask scope) | freed when its `RNode` is missing from a render; `_Arena`s repacked when garbage outweighs live records |
 | `ResourceCache.view()` | the texture (weak key) | its texture |
 | `ResourceCache.bind_group()` | the layout plus the identities of the bound resources | LRU, 512 entries |
@@ -660,7 +660,7 @@ flowchart LR
 **`RNode` contract**
 
 - **`uid` plus version tokens are the only change detection.** The renderer
-  never compares data deeply. `MobjectDataCache` and `RetainedVectors` use
+  never compares data deeply. `RNodeDataCache` and `RetainedVectors` use
   the same keys.
 
 **`WGPURenderer`**

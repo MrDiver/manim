@@ -24,7 +24,7 @@ import numpy as np
 from ...objects import RDirectionalLight, PbrMaterial, RPointLight, RShape3D, RSpotLight, Texture
 from ...objects.material import linear_rgb
 from ...objects.mesh import MeshData
-from ..cache import MobjectDataCache
+from ..cache import RNodeDataCache
 from ..config import RenderConfig
 from ..scene_graph import NO_CLIP, FlatScene, LightItem
 
@@ -114,7 +114,7 @@ class MeshBatch:
         return _indexed_args([draw for group in self.groups for draw in group.draws])
 
     @staticmethod
-    def build(scene: FlatScene, cache: MobjectDataCache, config: RenderConfig) -> MeshBatch:
+    def build(scene: FlatScene, cache: RNodeDataCache, config: RenderConfig) -> MeshBatch:
         objects, vertices, indices, materials, shadow_draws = [], [], [], [], []
         material_slots: dict[int, int] = {}
         groups: dict[tuple[int, ...], DrawGroup] = {}

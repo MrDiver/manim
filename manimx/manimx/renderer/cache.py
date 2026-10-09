@@ -1,7 +1,7 @@
 """Per-object data cache shared by renderer backends.
 
-See ``docs/render_engine_target_architecture.md`` section 9
-("MobjectDataCache"). The cache is a dictionary addressed by IDs only, never by
+See ``docs/render_engine_target_architecture.md`` section 9 (which calls
+it MobjectDataCache). The cache is a dictionary addressed by IDs only, never by
 live objects:
 
     (uid, kind) -> (version, data)
@@ -33,7 +33,7 @@ T = TypeVar("T")
 _MISS = object()
 
 
-class MobjectDataCache:
+class RNodeDataCache:
     def __init__(self) -> None:
         self._entries: dict[tuple[int, str], tuple[Hashable, Any]] = {}
         self._used: dict[tuple[int, str], int] = {}

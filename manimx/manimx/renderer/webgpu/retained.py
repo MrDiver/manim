@@ -34,7 +34,7 @@ import numpy as np
 
 from ...objects import RShape2D
 from ...objects.rbezier_path import RBezierPath
-from ..cache import MobjectDataCache
+from ..cache import RNodeDataCache
 from ..scene_graph import NO_CLIP, DrawItem, FlatScene
 from ..tessellation import tessellate_fill
 from .vector_batch import (
@@ -149,7 +149,7 @@ class RetainedVectors:
     slots: dict[tuple[int, int], _Slot] = field(default_factory=dict)
     free_objects: list[int] = field(default_factory=list)
 
-    def build(self, scene: FlatScene, cache: MobjectDataCache, camera_position: np.ndarray) -> VectorBatch:
+    def build(self, scene: FlatScene, cache: RNodeDataCache, camera_position: np.ndarray) -> VectorBatch:
         if self._too_much_garbage():
             self.__init__()  # repack everything from scratch
         draws: list[_Draw] = []
@@ -168,7 +168,7 @@ class RetainedVectors:
     def _add(
         self,
         item: DrawItem,
-        cache: MobjectDataCache,
+        cache: RNodeDataCache,
         camera_position: np.ndarray,
         draws: list[_Draw],
         seen: set[tuple[int, int]],
@@ -210,7 +210,7 @@ class RetainedVectors:
             draw.clip = item.clip
             draws.append(draw)
 
-    def _fill(self, shape: RBezierPath, slot: _Slot, cache: MobjectDataCache, distance: float, layer: int) -> _Draw | None:
+    def _fill(self, shape: RBezierPath, slot: _Slot, cache: RNodeDataCache, distance: float, layer: int) -> _Draw | None:
         if not isinstance(shape, RShape2D):
             return None
         opacity = shape.fill.opacity
@@ -243,7 +243,7 @@ class RetainedVectors:
             layer=layer,
         )
 
-    def _stroke(self, shape: RBezierPath, slot: _Slot, cache: MobjectDataCache, distance: float, layer: int) -> _Draw | None:
+    def _stroke(self, shape: RBezierPath, slot: _Slot, cache: RNodeDataCache, distance: float, layer: int) -> _Draw | None:
         stroke = shape.stroke
         if not (np.any(stroke.width > 0.0) and np.any(stroke.opacity > 0.0)):
             return None

@@ -10,7 +10,7 @@ import wgpu
 from manimx import Fill, RGroup
 from manimx.objects import new_uid
 from manimx.objects.geometry import circle
-from manimx.renderer import MobjectDataCache, MotionBlur, RenderConfig, WGPURenderer
+from manimx.renderer import RNodeDataCache, MotionBlur, RenderConfig, WGPURenderer
 from manimx.renderer.webgpu.gpu import ResourceCache
 
 
@@ -64,7 +64,7 @@ def test_renders_after_size_changes_match_a_fresh_renderer(renderer: WGPURendere
 
 
 def test_cache_entries_unused_for_a_while_are_swept() -> None:
-    cache = MobjectDataCache()
+    cache = RNodeDataCache()
     old, kept, other = new_uid(), new_uid(), new_uid()
     cache.put(old, "mesh", "v1", "old")
     cache.next_generation()

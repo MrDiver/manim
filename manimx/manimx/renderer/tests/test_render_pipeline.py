@@ -8,7 +8,7 @@ import pytest
 from manimx import RClippingGroup, Fill, RGroup, JointType, RNode, RShape2D, Stroke, Transform
 from manimx.objects import new_uid
 from manimx.objects.geometry import arc_points, circle, square
-from manimx.renderer import ClearScene, MobjectDataCache, RemoveObjects
+from manimx.renderer import ClearScene, RNodeDataCache, RemoveObjects
 from manimx.renderer.config import Camera, RenderConfig
 from manimx.renderer.scene_graph import NO_CLIP, bounding_box, flatten, flatten_scene
 from manimx.renderer.tessellation import SIDE_CHORD, SIDE_CONTROL, SIDE_SOLID, tessellate_fill
@@ -82,7 +82,7 @@ def test_bounding_box_uses_world_anchors() -> None:
 
 
 def test_cache_misses_on_new_version() -> None:
-    cache, uid = MobjectDataCache(), new_uid()
+    cache, uid = RNodeDataCache(), new_uid()
     cache.put(uid, "mesh", (1,), "old")
 
     assert cache.get(uid, "mesh", (1,)) == "old"
@@ -93,7 +93,7 @@ def test_cache_misses_on_new_version() -> None:
 
 
 def test_cache_retain_and_clear() -> None:
-    cache = MobjectDataCache()
+    cache = RNodeDataCache()
     first, second, third = new_uid(), new_uid(), new_uid()
     for uid in (first, second, third):
         cache.put(uid, "mesh", 0, uid)
@@ -107,7 +107,7 @@ def test_cache_retain_and_clear() -> None:
 def test_remove_objects_command_drops_whole_subtree() -> None:
     a, b, keep = RShape2D(), RShape2D(), RShape2D()
     group = RGroup(children=[a, RClippingGroup(content=b)])
-    cache = MobjectDataCache()
+    cache = RNodeDataCache()
     for obj in (a, b, keep):
         cache.put(obj.uid, "mesh", 0, obj.uid)
         cache.put(obj.uid, "other", 0, obj.uid)
@@ -191,10 +191,10 @@ def test_tessellation_records_where_every_vertex_comes_from() -> None:
 # --- vector batch -----------------------------------------------------------------
 
 
-def _batch(*shapes: RShape2D, cache: MobjectDataCache | None = None) -> VectorBatch:
+def _batch(*shapes: RShape2D, cache: RNodeDataCache | None = None) -> VectorBatch:
     root = RGroup(children=list(shapes))
     if cache is None:  # not `or`: an empty cache is falsy
-        cache = MobjectDataCache()
+        cache = RNodeDataCache()
     return VectorBatch.build(flatten_scene(root), cache, np.array([0.0, 0.0, 11.0]))
 
 
@@ -236,7 +236,7 @@ def test_batch_splits_and_sorts_transparent_draws() -> None:
 
 
 def test_batch_reuses_cached_fill_mesh_until_points_change() -> None:
-    cache = MobjectDataCache()
+    cache = RNodeDataCache()
     shape = circle(fill=Fill(opacity=1.0))
     _batch(shape, cache=cache)
     mesh = cache.get(shape.uid, "fill-mesh", shape.version("points"))
@@ -256,7 +256,7 @@ def test_batch_draws_masks_separately_and_clipped_content_transparent() -> None:
     content = square(fill=Fill(opacity=1.0), stroke=Stroke(width=0.0))
     clip = RClippingGroup(mask=mask, content=content)
 
-    batch = VectorBatch.build(flatten_scene(clip), MobjectDataCache(), np.zeros(3))
+    batch = VectorBatch.build(flatten_scene(clip), RNodeDataCache(), np.zeros(3))
 
     assert len(batch.opaque_draws) == 0
     assert len(batch.transparent_draws) == 1
