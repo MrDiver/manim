@@ -628,9 +628,16 @@ is uploaded in full.
 | pipelines and shader modules | `WGPURenderer`, `FrameComposer` | variant | their owner |
 | `FrameComposer` | `RenderService` | the tuple of effects | the `RenderService` |
 
-**`FrameComposer.compose_texture()`**, for every time of
-`MotionBlur.sample_times(t)` (or just `t`):
-- calls the scene function;
+**`FrameComposer.compose_texture()`** first calls the scene function for
+every time of `MotionBlur.sample_times(t)` (or just `t`) and keys the
+views with `_TreeKeys`: a leaf by its identity, a group by its placement
+and its children's keys, a node of the frame before by the key it had. If
+every sub-frame matches the frame before and the config is the same apart
+from its time, nothing is rendered: `FrameComposer.held` is set, the
+output texture still holds the frame, and `FramePipeline` gives that
+frame the previous image without a copy or a readback. With a
+`ShaderEffect` (which may read `frame.time`) every frame is rendered.
+Otherwise, for every sub-frame it
 - calls `RenderService.render_layers()` (flatten, pack, render);
 - applies `Bloom` and `ShaderEffect(stage="lit")` to `RenderLayers.lit`;
 - composites `RenderLayers.lit` and `RenderLayers.vector` over the background

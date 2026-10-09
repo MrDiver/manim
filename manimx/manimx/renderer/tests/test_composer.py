@@ -135,3 +135,43 @@ def test_shader_effects_on_both_stages(renderer: RenderService) -> None:
     assert tuple(column(inverted, 0.0)) == (255, 255, 255)
     dark = FrameComposer(renderer, [darken_lit]).compose(_glowing_sphere(), RenderConfig(**SIZE))
     assert column(dark, 0.0).sum() == 0
+
+
+def _counting(renderer: RenderService) -> list:
+    calls: list = []
+    original = renderer.render_layers
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    renderer.render_layers = counting
+    return calls
+
+
+def test_a_frame_like_the_one_before_is_held(renderer: RenderService) -> None:
+    square = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0))
+    moved = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0), transform=Transform(position=(1.0, 0.0, 0.0)))
+    composer = FrameComposer(renderer, [MotionBlur(samples=4)])
+    calls = _counting(renderer)
+    try:
+        first = composer.compose(lambda t: RGroup(children=[square]), RenderConfig(**SIZE, time=1.0))
+        assert len(calls) == 4 and not composer.held
+        # Same nodes in new wrappers, at a later time: nothing is rendered.
+        again = composer.compose(lambda t: RGroup(children=[square]), RenderConfig(**SIZE, time=2.0))
+        assert len(calls) == 4 and composer.held
+        np.testing.assert_array_equal(again, first)
+        composer.compose(lambda t: RGroup(children=[moved]), RenderConfig(**SIZE, time=3.0))
+        assert len(calls) == 8 and not composer.held  # another picture
+        composer.compose(lambda t: RGroup(children=[moved]), RenderConfig(**SIZE, time=4.0, background_color=RED))
+        assert len(calls) == 12 and not composer.held  # another config
+    finally:
+        del renderer.render_layers
+
+
+def test_frames_with_shader_effects_are_never_held(renderer: RenderService) -> None:
+    pulse = ShaderEffect("fn effect(uv: vec2<f32>, pixel: vec2<i32>) -> vec4<f32> { return vec4<f32>(fract(frame.time), 0.0, 0.0, 1.0); }")
+    composer = FrameComposer(renderer, [pulse])
+    first = composer.compose(RGroup(), RenderConfig(**SIZE, time=0.25))
+    second = composer.compose(RGroup(), RenderConfig(**SIZE, time=0.5))
+    assert not composer.held and first[0, 0, 0] != second[0, 0, 0]

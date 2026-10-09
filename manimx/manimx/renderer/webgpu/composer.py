@@ -27,6 +27,14 @@ blur averages whole images.
 
 All intermediate images are linear and premultiplied; see composite.wgsl
 for how 3D and 2D content are combined so that 2D colors stay exact.
+
+A frame that shows the same as the previous one is not rendered again.
+Render nodes are immutable and snapshots of unchanged scene nodes are the
+same objects, so a cheap key (:class:`_TreeKeys`) tells when all
+sub-frames of a frame show the same as those of the frame before, with
+the same config apart from its time: :attr:`FrameComposer.held` then says
+so, and the output texture still holds the frame. A :class:`ShaderEffect`
+may read ``frame.time``, so with one in the chain every frame is rendered.
 """
 
 from __future__ import annotations
@@ -38,7 +46,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import wgpu
 
-from ...robjects import RGroup, RNode
+from ...robjects import RClippingGroup, RGroup, RNode
 from ..config import Camera, Frame, RenderConfig, ViewState
 from ..effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap
 from .gpu import COLOR_FORMAT, HDR_FORMAT, GPUContext, ResourceCache, expand_includes
@@ -84,6 +92,12 @@ class FrameComposer:
         self._textures = _TexturePool(self._context.device)
         self._bloom = _BloomProcessor(self._context, self._passes, self._textures, renderer.profiler)
         self._shaders = _ShaderProcessor(self._context, renderer.frame_uniform, self._textures, self._resources)
+        self._keys = _TreeKeys()
+        self._last: tuple[object, wgpu.GPUTexture] | None = None
+        """The key of the last composed frame and its output texture."""
+        self.held = False
+        """Whether the last :meth:`compose_texture` returned the previous
+        frame unchanged, without rendering."""
         self._composite_params = self._context.device.create_buffer(
             size=_UNIFORM_STRIDE * 64, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST
         )
@@ -103,10 +117,20 @@ class FrameComposer:
         """The frame as an RGBA8 GPU texture (sRGB values, straight alpha)."""
         device = self._context.device
         size = (config.pixel_width, config.pixel_height)
+        sub_frames = [(time, weight, _views(scene(time) if callable(scene) else scene)) for time, weight in self._sub_frames(scene, config.time)]
+        self.held = False
+        if not any(isinstance(effect, ShaderEffect) for effect in self.effects):
+            keys = [self._keys.key(views) for _, _, views in sub_frames]
+            self._keys.next_frame()
+            frame_key = (tuple(keys), dataclasses.replace(config, time=0.0))
+            if self._last is not None and self._last[0] == frame_key:
+                self.held = True
+                return self._last[1]
+        else:
+            frame_key = None
         accumulator = self._textures.get("accumulator", size, HDR_FORMAT)
 
-        for index, (time, weight) in enumerate(self._sub_frames(scene, config.time)):
-            views = _views(scene(time) if callable(scene) else scene)
+        for index, (time, weight, views) in enumerate(sub_frames):
             sub_config = dataclasses.replace(config, time=time)
             if len(views) == 1:
                 # One submission per sub-frame: the renderer's passes and the
@@ -149,6 +173,7 @@ class FrameComposer:
             encoder, "finalize.wgsl", "fs_finalize", output, [self._resources.view(frame)], timing=self.service.renderer.profiler.pass_timing("finalize")
         )
         device.queue.submit([encoder.finish()])
+        self._last = None if frame_key is None else (frame_key, output)
         return output
 
     def _sub_frames(self, scene: SceneSource, time: float) -> list[tuple[float, float]]:
@@ -221,6 +246,44 @@ def _views(frame: Frame) -> list[tuple[RNode, Camera | None]]:
         return [(frame.root, frame.camera)]
     views = [(view.root, view.camera) for view in frame]
     return views or [(RGroup(), None)]
+
+
+class _TreeKeys:
+    """Keys that are equal when two frames show the same thing.
+
+    A leaf's key is its identity (render nodes are immutable); a group's
+    is its placement (transform, alpha, visibility) and its children's
+    keys, so the wrappers that ``state_at`` builds anew every time compare
+    by value. A node seen in the current or the previous frame keeps its
+    key, so a reused group costs a lookup instead of a walk. The nodes are
+    held with their keys, so their ids cannot be reused meanwhile.
+    """
+
+    def __init__(self) -> None:
+        self._previous: dict[int, tuple[RNode, object]] = {}
+        self._current: dict[int, tuple[RNode, object]] = {}
+
+    def key(self, views: list[tuple[RNode, Camera | None]]) -> object:
+        return tuple((self._node(root), camera) for root, camera in views)
+
+    def next_frame(self) -> None:
+        self._previous, self._current = self._current, {}
+
+    def _node(self, node: RNode | None) -> object:
+        if node is None:
+            return None
+        entry = self._current.get(id(node)) or self._previous.get(id(node))
+        if entry is None or entry[0] is not node:
+            placement = (node.transform, node.alpha, node.visible)
+            if isinstance(node, RGroup):
+                key: object = ("group", placement, tuple(self._node(child) for child in node.children))
+            elif isinstance(node, RClippingGroup):
+                key = ("clip", placement, node.one_sided, self._node(node.mask), self._node(node.content))
+            else:
+                key = ("leaf", id(node))
+            entry = (node, key)
+        self._current[id(node)] = entry
+        return entry[1]
 
 
 def _validate(effects: tuple[Effect, ...]) -> None:

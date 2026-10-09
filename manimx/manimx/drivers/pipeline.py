@@ -17,6 +17,10 @@ before the copy of the previous frame has read it.
 
 Results arrive as :class:`concurrent.futures.Future` objects, completed
 in submission order; attach callbacks to put frames wherever they go.
+
+A frame the composer holds (it shows the same as the frame before, see
+``FrameComposer.held``) uses no staging buffer: its future gets the
+previous frame's image, with no copy and no readback.
 """
 
 from __future__ import annotations
@@ -64,17 +68,27 @@ class FramePipeline:
             for i in range(in_flight)
         ]
         self._pending: deque[_InFlight] = deque()
+        self._last: Future[np.ndarray] | None = None
+        """The future of the last submitted frame; a held frame (see
+        FrameComposer.held) gets its image."""
 
     def submit(
         self, index: int, time: float, scene: Frame | Callable[[float], Frame]
     ) -> Future[np.ndarray]:
         """Queue the frame at ``time``; the future gets its ``(H, W, 4)``
         uint8 RGBA pixels. Blocks only while all staging buffers are busy."""
+        config = dataclasses.replace(self.config, time=time)
+        texture = self.composer.compose_texture(scene, config)
+        future: Future[np.ndarray] = Future()
+        future.set_running_or_notify_cancel()
+        if self.composer.held and self._last is not None:
+            # The same picture as the frame before: no copy, no readback.
+            self._last.add_done_callback(lambda done: _pass_on(done, future))
+            self._last = future
+            return future
         if not self._free:
             self._finish_oldest()
         staging = self._free.pop()
-        config = dataclasses.replace(self.config, time=time)
-        texture = self.composer.compose_texture(scene, config)
         encoder = self._device.create_command_encoder(label="readback")
         encoder.copy_texture_to_buffer(
             {"texture": texture, "origin": (0, 0, 0), "mip_level": 0},
@@ -82,9 +96,8 @@ class FramePipeline:
             (config.pixel_width, config.pixel_height, 1),
         )
         self._device.queue.submit([encoder.finish()])
-        future: Future[np.ndarray] = Future()
-        future.set_running_or_notify_cancel()
         self._pending.append(_InFlight(index, staging, staging.map_async(wgpu.MapMode.READ), future))
+        self._last = future
         return future
 
     def flush(self) -> None:
@@ -107,3 +120,12 @@ class FramePipeline:
             frame.future.set_result(image)
         finally:
             self._free.append(frame.staging)
+
+
+def _pass_on(done: Future[np.ndarray], future: Future[np.ndarray]) -> None:
+    """Complete ``future`` like ``done`` (a held frame repeats its image)."""
+    error = done.exception()
+    if error is not None:
+        future.set_exception(error)
+    else:
+        future.set_result(done.result())

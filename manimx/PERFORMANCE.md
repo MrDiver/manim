@@ -529,6 +529,34 @@ product equals the float32 of the former float64 product on every
 reference frame. `test_alpha_renders_like_the_opacity_it_multiplies`
 allows a difference of 1 in 8 bits for other values.
 
+### Q. Frames like the one before are held
+
+A frame whose sub-frames all show what the frame before showed (waits,
+pauses between plays) was rendered again in full: eight sub-frames, their
+composites and a readback. ManimGX holds such frames instead. Now the
+composer keys every sub-frame's views (`_TreeKeys`: leaves by identity,
+since render nodes are immutable and snapshots of unchanged nodes are the
+same objects; groups by placement and children; nodes of the frame before
+by their remembered key, so a reused group costs a lookup). A frame equal
+to the frame before, with the same config apart from its time, is not
+rendered (`FrameComposer.held`), and `FramePipeline` resolves its future
+with the previous image, with no copy and no readback. Frames with a
+`ShaderEffect` are never held: it may read `frame.time`.
+
+Power profile `balanced`, like step P:
+
+| | fps (blur 8) |
+|---|---|
+| before | 63.8 / 63.9 |
+| after (three runs) | 69.0 / 68.2 / 68.5 |
+
++7%, frames bit-identical. Dropped in the same round: rendering a frame
+whose sub-frames are all equal once, with weight one, instead of eight
+times at one eighth. Holding already covers every such frame but the
+first of a still stretch, so it measured 70.4 against 69.0 fps (one run
+each, within noise), and it changed four reference frames by 1 of 255
+(one render against eight summed in a 16-bit float accumulator).
+
 ## Where the time goes now
 
 Benchmark project with `PortalOrbit`, after steps L to O: 48.6 to about

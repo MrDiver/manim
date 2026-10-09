@@ -190,3 +190,25 @@ def test_tees_feed_every_sink_and_close_them_all() -> None:
     with pytest.raises(OSError, match="disk full"):
         render(SOURCE, Tee((Failing(), kept)), settings())
     assert len(kept.frames) == 11  # closed although the first sink failed
+
+
+def test_held_frames_repeat_the_image_before_them(renderer: RenderService) -> None:
+    """Frames like the one before need no staging buffer, yet arrive in
+    order with the same pixels as frames rendered on their own."""
+    from manimx.robjects import Fill, RGroup, RShape2D, Transform
+    from manimx.userland.geometry import rectangle_points
+
+    still = RShape2D(points=rectangle_points(1.0, 1.0), fill=Fill("#e07a5f", opacity=1.0))
+    moved = RShape2D(points=rectangle_points(1.0, 1.0), fill=Fill("#e07a5f", opacity=1.0), transform=Transform(position=(1.0, 0.0, 0.0)))
+    shown = [still, still, still, moved, moved, still]
+    composer = FrameComposer(renderer)
+    pipeline = FramePipeline(composer, config(64, 36), in_flight=2)
+    futures, held = [], []
+    for index, shape in enumerate(shown):
+        futures.append(pipeline.submit(index, float(index), lambda t, shape=shape: RGroup(children=[shape])))
+        held.append(composer.held)
+    pipeline.flush()
+
+    assert held == [False, True, True, False, True, False]
+    for future, shape in zip(futures, shown, strict=True):
+        np.testing.assert_array_equal(future.result(), FrameComposer(renderer).compose(RGroup(children=[shape]), config(64, 36)))
