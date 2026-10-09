@@ -17,9 +17,10 @@ from .camera import Camera
 from .clipping_group import ClippingGroup
 from .curve3d import Curve3D
 from .group import Group
-from .kinds import COLOR, COLORS, DISCRETE, FACTOR, PATH, ROTATION, SCALAR, SCALARS, SignalKind
+from .kinds import ARRAY, COLOR, COLORS, DISCRETE, FACTOR, PATH, ROTATION, SCALAR, SCALARS, SignalKind
 from .light import DirectionalLight, Light, PointLight, SpotLight
 from .node import Node, PositionMixin, RotationMixin, ScalableMixin, animatable
+from .particles import Particles
 from .rates import linear, smooth
 from .scene import SEGMENT_GAP, Cue, Emit, PreparedScene, Scene, Segment
 from .shape2d import Shape2D
@@ -32,6 +33,7 @@ from .time_map import MonotoneMap
 from .timing import NEVER, Clip, InvalidCue, Ramp, SegmentTiming, Timeline, UnresolvedEvents
 
 __all__ = [
+    "ARRAY",
     "COLOR",
     "COLORS",
     "DISCRETE",
@@ -60,6 +62,7 @@ __all__ = [
     "Light",
     "MonotoneMap",
     "Node",
+    "Particles",
     "Placement",
     "PointLight",
     "PositionMixin",

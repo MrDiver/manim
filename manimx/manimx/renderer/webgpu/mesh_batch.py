@@ -25,6 +25,7 @@ from ...robjects import (
     PbrMaterial,
     RDirectionalLight,
     RPointLight,
+    RParticles,
     RShape3D,
     RSpotLight,
     Texture,
@@ -123,11 +124,11 @@ class MeshBatch:
 
     @staticmethod
     def build(scene: FlatScene, cache: RNodeDataCache, config: RenderConfig) -> MeshBatch:
-        worlds, object_materials, clips = [], [], []
+        worlds, object_materials, clips = [], [], []  # per object; particles add one block each
         vertices, indices, materials, shadow_draws = [], [], [], []
         material_slots: dict[int, int] = {}
         groups: dict[tuple[int, ...], DrawGroup] = {}
-        vertex_count = index_count = 0
+        vertex_count = index_count = object_count = 0
 
         light_items = scene.lights or (default_lights(config) if config.default_lights else [])
         for item in scene.items:
@@ -141,18 +142,32 @@ class MeshBatch:
             # Snapshots build a new PbrMaterial every time; equal versions
             # mean equal values, so the entry (with its color conversions)
             # is cached per shape and version.
-            slot_key = id(material)
-            if slot_key not in material_slots:
-                material_slots[slot_key] = len(materials)
-                materials.append(cache.get_or_create(shape.uid, "material-entry", shape.version("material"), lambda: _material_entry(material)))
-
-            worlds.append(item.world)
-            object_materials.append(material_slots[slot_key])
-            clips.append(item.clip)
+            entry = cache.get_or_create(shape.uid, "material-entry", shape.version("material"), lambda: _material_entry(material))
+            first_object = object_count
+            if isinstance(shape, RParticles):
+                # One object and one material per drawn particle, drawn as
+                # instances of one draw (the shader reads objects[instance]).
+                shown = np.all(np.abs(shape.scales) > 1e-9, axis=1)
+                count = int(shown.sum())
+                if count == 0:
+                    continue
+                worlds.append(item.world @ _particle_matrices(shape.positions[shown], shape.rotations[shown], shape.scales[shown]))
+                object_materials.append(np.arange(len(materials), len(materials) + count))
+                materials.append(_tinted(entry, shape.colors[shown]))
+            else:
+                count = 1
+                slot_key = id(material)
+                if slot_key not in material_slots:
+                    material_slots[slot_key] = len(materials)
+                    materials.append(entry[None])
+                worlds.append(item.world[None])
+                object_materials.append(np.array([material_slots[slot_key]]))
+            clips.append(np.full(count, item.clip))
+            object_count += count
 
             key = tuple(t.uid if t else 0 for t in material.textures)
             group = groups.setdefault(key, DrawGroup(material.textures))
-            draw = (len(shape.mesh.indices), 1, index_count, vertex_count, len(worlds) - 1)
+            draw = (len(shape.mesh.indices), count, index_count, vertex_count, first_object)
             group.draws.append(draw)
             if shape.cast_shadows:
                 shadow_draws.append((draw, item.clip))
@@ -162,21 +177,21 @@ class MeshBatch:
             vertex_count += len(mesh_vertices)
             index_count += len(shape.mesh.indices)
 
-        objects = np.zeros(len(worlds), MESH_OBJECT_DTYPE)
+        objects = np.zeros(object_count, MESH_OBJECT_DTYPE)
         if worlds:
-            world = np.array(worlds)
+            world = np.concatenate(worlds)
             normal = np.zeros_like(world)
             normal[:, :3, :3] = np.linalg.inv(world[:, :3, :3]).transpose(0, 2, 1)
             normal[:, 3, 3] = 1.0
             objects["model"] = world.transpose(0, 2, 1)  # WGSL matrices are column-major
             objects["normal_matrix"] = normal.transpose(0, 2, 1)
-            objects["material"] = object_materials
-            objects["clip"] = clips
+            objects["material"] = np.concatenate(object_materials)
+            objects["clip"] = np.concatenate(clips)
         return MeshBatch(
             objects=objects,
             vertices=np.concatenate(vertices) if vertices else np.zeros(0, MESH_VERTEX_DTYPE),
             indices=np.concatenate(indices) if indices else np.zeros(0, np.uint32),
-            materials=np.array(materials, dtype=MATERIAL_DTYPE) if materials else np.zeros(0, MATERIAL_DTYPE),
+            materials=np.concatenate(materials) if materials else np.zeros(0, MATERIAL_DTYPE),
             lights=light_array(light_items, config),
             light_items=light_items,
             groups=list(groups.values()),
@@ -197,6 +212,36 @@ def _interleave(mesh: MeshData) -> np.ndarray:
     if mesh.tangents is not None:
         vertices["tangent"] = mesh.tangents
     return vertices
+
+
+def _particle_matrices(positions: np.ndarray, rotations: np.ndarray, scales: np.ndarray) -> np.ndarray:
+    """Local matrices (N, 4, 4) of particles: translate, rotate (unit
+    quaternions w, x, y, z, normalized here since they interpolate
+    linearly), scale."""
+    q = rotations / np.linalg.norm(rotations, axis=1, keepdims=True)
+    w, x, y, z = q.T
+    rotation = np.stack(
+        [
+            np.stack([1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)], axis=-1),
+            np.stack([2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)], axis=-1),
+            np.stack([2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)], axis=-1),
+        ],
+        axis=1,
+    )
+    matrices = np.zeros((len(positions), 4, 4))
+    matrices[:, :3, :3] = rotation * scales[:, None, :]
+    matrices[:, :3, 3] = positions
+    matrices[:, 3, 3] = 1.0
+    return matrices
+
+
+def _tinted(entry: np.ndarray, colors: np.ndarray) -> np.ndarray:
+    """``entry`` once per particle: base and emissive color times the
+    particle's color, emissive also times its glow."""
+    entries = np.repeat(entry[None], len(colors))
+    entries["base_color"][:, :3] *= colors[:, :3]
+    entries["emissive"][:, :3] *= colors[:, :3] * colors[:, 3:4]
+    return entries
 
 
 def _material_entry(material: PbrMaterial) -> np.ndarray:

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...robjects import RDirectionalLight, RPointLight, RShape3D, RSpotLight
+from ...robjects import RDirectionalLight, RParticles, RPointLight, RShape3D, RSpotLight
 from ...robjects.rbezier_path import RBezierPath
 from ..cache import RNodeDataCache
 from ..config import RenderConfig
@@ -129,7 +129,11 @@ def scene_bounds(scene: FlatScene, cache: RNodeDataCache, scope: int = NO_CLIP) 
         obj = item.obj
         if not scene.in_scope(item.clip, scope):
             continue
-        if isinstance(obj, RShape3D) and obj.mesh.vertex_count:
+        if isinstance(obj, RParticles) and obj.mesh.vertex_count:
+            local = _particle_box(obj, cache)
+            if local is None:
+                continue
+        elif isinstance(obj, RShape3D) and obj.mesh.vertex_count:
             local = cache.get_or_create(obj.uid, "bounds", obj.version("mesh"), lambda: _box(obj.mesh.positions))
         elif isinstance(obj, RBezierPath) and obj.num_curves:
             local = cache.get_or_create(obj.uid, "bounds", obj.version("points"), lambda: _box(obj.points_3d()))
@@ -141,6 +145,18 @@ def scene_bounds(scene: FlatScene, cache: RNodeDataCache, scope: int = NO_CLIP) 
     points = np.concatenate(corners)
     low, high = points.min(axis=0), points.max(axis=0)
     return (low + high) / 2, max(float(np.linalg.norm(high - low)) / 2, 1e-3)
+
+
+def _particle_box(obj: RParticles, cache: RNodeDataCache) -> np.ndarray | None:
+    """The corners of a box around every shown particle: their positions,
+    grown by the mesh's reach times the largest scale."""
+    shown = np.all(np.abs(obj.scales) > 1e-9, axis=1)
+    if not shown.any():
+        return None
+    mesh = cache.get_or_create(obj.uid, "bounds", obj.version("mesh"), lambda: _box(obj.mesh.positions))
+    reach = float(np.linalg.norm(mesh, axis=1).max() * np.abs(obj.scales[shown]).max())
+    positions = obj.positions[shown]
+    return _box(np.vstack([positions.min(axis=0) - reach, positions.max(axis=0) + reach]))
 
 
 def _box(points: np.ndarray) -> np.ndarray:

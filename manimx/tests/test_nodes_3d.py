@@ -270,3 +270,49 @@ def test_meshes_are_interleaved_once_while_shapes_move(renderer: WGPURenderer, m
 def test_mesh_data_is_shared_not_copied() -> None:
     mesh = box_mesh()
     assert Shape3D(mesh).snapshot().mesh is mesh and isinstance(mesh, MeshData)
+
+
+# --- Particles ----------------------------------------------------------------------
+
+
+def test_particles_snapshot_to_one_rparticles_and_animate_their_arrays() -> None:
+    from manimx.animation import Particles
+    from manimx.robjects import RParticles
+
+    sparks = Particles(2, sphere_mesh(1.0, 8, 6), "sparks")
+
+    def construct(scene):
+        scene.add(sparks)
+        scene.play(sparks.animate.set_positions([[2.0, 0.0, 0.0], [0.0, 4.0, 0.0]]), rate=linear)
+
+    prepared = prepare(construct)
+    (snapshot,) = prepared.state_at(0.5).children
+
+    assert isinstance(snapshot, RParticles)
+    np.testing.assert_allclose(snapshot.positions, [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]])
+    np.testing.assert_allclose(snapshot.rotations, [[1.0, 0.0, 0.0, 0.0]] * 2)
+    assert not snapshot.positions.flags.writeable
+    with pytest.raises(ValueError, match=r"expected shape \(2, 3\)"):
+        sparks.set_scales([[1.0, 1.0, 1.0]])
+
+
+def test_particles_draw_as_instances_with_their_color_and_hide_at_scale_zero(renderer: WGPURenderer) -> None:
+    from manimx.animation import Particles
+    from manimx.renderer.webgpu.mesh_batch import MeshBatch
+
+    sparks = Particles(3, box_mesh(1.0, 1.0, 1.0), color="#000000", emissive="#ffffff", emissive_strength=1.0)
+    sparks.set_positions([[-2.0, 0.0, 0.0], [0.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
+    sparks.set_colors([[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0]])
+    sparks.set_scales([[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [0.0, 1.0, 1.0]])  # the third is hidden
+    root = sparks.snapshot()
+    config = RenderConfig(pixel_width=160, pixel_height=90, background_color="#000000", shadows=False)
+
+    batch = MeshBatch.build(flatten_scene(root), renderer.cache, config)
+    image = renderer.render(root, config)
+
+    assert len(batch.objects) == 2 and batch.draws["instance_count"].tolist() == [2]
+    scale = 90 / 8  # pixels per unit with the default camera
+    red, green, hidden = (image[45, int(80 + x * scale), :3] for x in (-2.0, 0.0, 2.0))
+    assert red[0] > 200 and red[0] > 4 * red[1]
+    assert green[1] > 200 and green[1] > 4 * green[0]
+    assert hidden.max() < 30

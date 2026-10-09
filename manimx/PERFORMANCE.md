@@ -358,6 +358,30 @@ the base or the final value). `frame_at` did not change measurably
 (3.9 / 14.3 ms before, 4.0 / 16.6 ms after on light-show), and two
 reference frames changed, so it was reverted.
 
+### K. Particles: one node for many copies of a mesh
+
+The light-show fireworks were 832 spark and 12 rocket `Shape3D` nodes:
+832 snapshots, 832 objects in `MeshBatch.build()`, and a simulation
+recording about 6800 signals. `Particles` (a `Shape3D` with four array
+signals: positions, rotations, scales, colors) holds them in two nodes;
+the simulation records eight arrays, and the renderer draws each node
+with one instanced draw (the mesh shader already reads its object by
+instance index), building all its object and material rows with numpy.
+
+Measured with the machine in low-power mode (so absolute numbers are
+below the other rows), light-show 38–44 s, no motion blur, alternating
+the old and the new `finale.py`:
+
+| | ms/render | frame_at | mesh batch |
+|---|---|---|---|
+| 844 Shape3D nodes | 73 | 39.1 ms | 21.6 ms |
+| 2 Particles nodes | 28 | 7.2 ms | 7.6 ms |
+
+Preparing light-show (baking the fireworks) drops from 6.5 to 2.0 s.
+The benchmark project has no particles; its frames are bit-identical,
+and `MeshBatch` there measured 2.68 ms before and 1.98 ms after in the
+same power state.
+
 ## Where the time goes now
 
 5.89 ms per frame against 13.43 at the start (2.3× faster): `render_layers`

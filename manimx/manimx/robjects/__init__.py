@@ -5,6 +5,7 @@ from .rcurve3d import RCurve3D
 from .rgroup import RGroup
 from .rlight import RDirectionalLight, RLight, RPointLight, RSpotLight
 from .rnode import RNode, new_uid
+from .rparticles import RParticles
 from .rshape2d import RShape2D
 from .rshape3d import RShape3D
 from .style import CapStyle, Fill, JointType, Stroke
@@ -23,6 +24,7 @@ __all__ = [
     "RGroup",
     "RLight",
     "RNode",
+    "RParticles",
     "RPointLight",
     "RShape2D",
     "RShape3D",

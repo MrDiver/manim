@@ -256,6 +256,13 @@ class PathKind(SignalKind):
         return a is b or (a.shape == b.shape and bool(np.array_equal(a, b)))
 
 
+class ArrayKind(PathKind):
+    """Per-element float arrays of shape ``(N, K)`` (the positions, scales
+    or colors of N particles), interpolated element-wise like paths."""
+
+    name = "array"
+
+
 class DiscreteKind(SignalKind):
     """Values without in-between states (visibility, joint types, meshes):
     an absolute change switches at the end of the animation."""
@@ -279,4 +286,5 @@ COLOR = ColorKind()
 COLORS = ColorsKind()
 SCALARS = ScalarsKind()
 PATH = PathKind()
+ARRAY = ArrayKind()
 DISCRETE = DiscreteKind()
