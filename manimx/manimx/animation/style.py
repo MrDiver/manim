@@ -51,16 +51,19 @@ def cap(value: CapStyle) -> CapStyle:
     return value
 
 
-def fill(color: Any, opacity: Any, alpha: float) -> Fill:
+def fill(color: Any, opacity: Any) -> Fill:
     """The Fill for signal values ``color`` (COLORS) and ``opacity``
-    (SCALARS), with ``opacity`` multiplied by the enclosing ``alpha``."""
-    return Fill(_color_argument(color), opacity=_unit(opacity, alpha))
+    (SCALARS, clamped to [0, 1]). A node's ``alpha`` is not part of it:
+    it becomes the snapshot's ``RNode.alpha``.
+    """
+    return Fill(_color_argument(color), opacity=_unit(opacity))
 
 
-def stroke(color: Any, opacity: Any, width: Any, joint: Any, cap: CapStyle, alpha: float) -> Stroke:
-    """The Stroke for the stroke signal values, with ``opacity`` multiplied
-    by the enclosing ``alpha`` and widths kept non-negative."""
-    return Stroke(_color_argument(color), opacity=_unit(opacity, alpha), width=_non_negative(width), joint=joint, cap=cap)
+def stroke(color: Any, opacity: Any, width: Any, joint: Any, cap: CapStyle) -> Stroke:
+    """The Stroke for the stroke signal values, opacity clamped to [0, 1]
+    and widths kept non-negative (``alpha`` as for :func:`fill`).
+    """
+    return Stroke(_color_argument(color), opacity=_unit(opacity), width=_non_negative(width), joint=joint, cap=cap)
 
 
 def _is_one_color(value: Any) -> bool:
@@ -83,14 +86,15 @@ def _color_argument(value: Any) -> np.ndarray | list[tuple[float, ...]]:
     return [tuple(row) for row in array.tolist()]
 
 
-def _unit(value: Any, alpha: float) -> float | np.ndarray:
-    """``value * alpha`` clamped to [0, 1]; plain floats for single values
-    (Fill and Stroke check those without numpy)."""
+def _unit(value: Any) -> float | np.ndarray:
+    """``value`` clamped to [0, 1]; plain floats for single values (Fill
+    and Stroke check those without numpy).
+    """
     if isinstance(value, Real):
-        return min(1.0, max(0.0, float(value) * alpha))
+        return min(1.0, max(0.0, float(value)))
     if len(value) == 1:
-        return min(1.0, max(0.0, float(value[0]) * alpha))
-    return np.clip(np.asarray(value, dtype=np.float64) * alpha, 0.0, 1.0)
+        return min(1.0, max(0.0, float(value[0])))
+    return np.clip(np.asarray(value, dtype=np.float64), 0.0, 1.0)
 
 
 def _non_negative(value: Any) -> float | np.ndarray:

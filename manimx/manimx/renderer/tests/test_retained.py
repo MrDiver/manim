@@ -58,10 +58,10 @@ def triangle():
     return regular_polygon_points(3)
 
 
-def shape(kind, uid, x=0.0, color="#e07a5f", opacity=1.0, width=4.0):
+def shape(kind, uid, x=0.0, color="#e07a5f", opacity=1.0, width=4.0, alpha=1.0):
     return RShape2D(
         points=kind(), uid=uid, fill=Fill(color, opacity=opacity), stroke=Stroke("#f2cc8f", width=width),
-        transform=Transform(position=(x, 0.0, 0.0)), versions={"points": ("p", uid, kind.__name__), "fill": (color, opacity), "stroke": width},
+        transform=Transform(position=(x, 0.0, 0.0)), alpha=alpha, versions={"points": ("p", uid, kind.__name__), "fill": (color, opacity), "stroke": width},
     )  # fmt: skip
 
 
@@ -75,6 +75,10 @@ def frames():
     yield [shape(square, B, 2), shape(circle, C, 0)]  # one arrives (reuses the slot)
     yield [RClippingGroup(mask=shape(circle, D, 0), content=RGroup(children=[shape(square, B, 0.5)]))]
     yield [shape(circle, C, 1), shape(square, B, -1)]  # order and placement swap
+    yield [shape(circle, C, 1, alpha=0.5), shape(square, B, -1)]  # one fades
+    yield [RGroup(children=[shape(circle, C, 1, alpha=0.5), shape(square, B, -1)], alpha=0.5)]  # a group fades too
+    yield [shape(circle, C, 1, alpha=0.0), shape(square, B, -1)]  # faded out: kept, not drawn
+    yield [shape(circle, C, 1), shape(square, B, -1)]  # and back
 
 
 def test_patched_renders_equal_fresh_renders(renderer: RenderService) -> None:
@@ -93,6 +97,26 @@ def test_a_moving_shape_only_rewrites_its_object_entry() -> None:
     assert all(batch.dirty[name] == [] for name in ("instances", "fill_vertices", "fill_colors", "stroke_points", "stroke_curves"))
     unchanged = retained.build(flatten_scene(RGroup(children=[shape(circle, A, 1), shape(square, B, 2)])), cache, np.zeros(3))
     assert all(ranges == [] for ranges in unchanged.dirty.values())
+
+
+def test_a_fade_only_rewrites_the_object_entry() -> None:
+    retained, cache = RetainedVectors(), RNodeDataCache()
+    retained.build(flatten_scene(RGroup(children=[shape(circle, A, 0), shape(square, B, 2)])), cache, np.zeros(3))
+    batch = retained.build(flatten_scene(RGroup(children=[shape(circle, A, 0, alpha=0.5), shape(square, B, 2)])), cache, np.zeros(3))
+
+    assert batch.dirty["objects"] == [(0, 1)] and batch.objects[0]["alpha"] == 0.5
+    assert all(batch.dirty[name] == [] for name in ("instances", "fill_vertices", "fill_colors", "stroke_points", "stroke_curves"))
+    assert len(batch.transparent_draws) == 2 and len(batch.opaque_draws) == 2  # the faded circle blends
+
+
+def test_alpha_renders_like_the_opacity_it_multiplies(renderer: RenderService) -> None:
+    """Fading by alpha on the GPU looks like multiplying the style's
+    opacities on the CPU (as snapshots did before), up to rounding."""
+    faded = renderer.render(RGroup(children=[shape(circle, A, opacity=0.8, alpha=0.5)]), CONFIG)
+    baked = RenderService().render(
+        RGroup(children=[RShape2D(points=circle(), fill=Fill("#e07a5f", opacity=0.4), stroke=Stroke("#f2cc8f", opacity=0.5))]), CONFIG
+    )
+    assert np.abs(faded.astype(int) - baked.astype(int)).max() <= 1
 
 
 def test_garbage_is_repacked() -> None:

@@ -43,6 +43,7 @@ struct Object {
     clip: i32,                  // layer in `mask_layers`, or NO_CLIP
     flags: u32,                 // FLAG_* bits
     fill_colors: u32,           // index of the shape's first point in `fill_colors`
+    alpha: f32,                 // Node.alpha times every one above: multiplies every color's alpha
 };
 
 /// The stroke ribbon faces the camera (Curve3D) instead of lying in the
@@ -238,6 +239,11 @@ fn fs_mask(in: VertexOutput) -> @location(0) vec4<f32> {
     return premultiplied(shade(in));
 }
 
+/// A straight-alpha color times the object's alpha (fades).
+fn faded(color: vec4<f32>, object: Object) -> vec4<f32> {
+    return vec4<f32>(color.rgb, min(color.a * object.alpha, 1.0));
+}
+
 fn premultiplied(color: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(color.rgb * color.a, color.a);
 }
@@ -287,7 +293,7 @@ fn fill_vertex(object: Object, vertex_index: u32) -> VertexOutput {
     out.clip_position = project(world);
     out.layer = object.layer;
     out.clip = object.clip;
-    out.color = fill_color(object, vertex);
+    out.color = faded(fill_color(object, vertex), object);
     out.uv = vertex.uv;
     out.side = vertex.side;
     return out;
@@ -476,7 +482,7 @@ fn stroke_vertex(object: Object, record: StrokeCurve, vertex_index: u32) -> Vert
     if vertex_index < RIBBON_VERTICES {
         let world = ribbon_position(object, curve, record, vertex_index);
         out.clip_position = project(world.xyz);
-        out.color = curve_color(curve, world.w);
+        out.color = faded(curve_color(curve, world.w), object);
         return out;
     }
 
@@ -514,7 +520,7 @@ fn stroke_vertex(object: Object, record: StrokeCurve, vertex_index: u32) -> Vert
         return out;
     }
     out.clip_position = project(center + offset * half_width);
-    out.color = curve_color(curve, t);
+    out.color = faded(curve_color(curve, t), object);
     return out;
 }
 

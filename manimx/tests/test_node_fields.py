@@ -72,7 +72,8 @@ def test_shape2d_carries_gradients_widths_joints_and_caps() -> None:
     shape.set_alpha(0.5)
     snapshot = shape.snapshot()
     np.testing.assert_allclose(snapshot.fill.color, [[1, 0, 0], [0, 0, 1]])
-    np.testing.assert_allclose(snapshot.fill.opacity, [0.1, 0.4])
+    np.testing.assert_allclose(snapshot.fill.opacity, [0.2, 0.8])
+    assert snapshot.alpha == 0.5
     np.testing.assert_allclose(snapshot.stroke.color, [[0, 1, 0]])
     np.testing.assert_allclose(snapshot.stroke.width, [2.0, 8.0, 2.0])
     assert snapshot.stroke.joint == (JointType.MITER, JointType.ROUND) and snapshot.stroke.cap is CapStyle.ROUND

@@ -204,6 +204,10 @@ class MeshBatch:
             # mean equal values, so the entry (with its color conversions)
             # is cached per shape and version.
             entry = cache.get_or_create(shape.uid, "material-entry", shape.version("material"), lambda: _material_entry(material))
+            if item.alpha != 1.0:
+                # The item's alpha (Node.alpha, times every one above) fades the material.
+                entry = entry.copy()
+                entry["base_color"][3] *= item.alpha
             first_object = object_count
             if isinstance(shape, RParticles):
                 # One object and one material per drawn particle, drawn as
@@ -217,7 +221,7 @@ class MeshBatch:
                 materials.append(_tinted(entry, shape.colors[shown]))
             else:
                 count = 1
-                slot_key = id(material)
+                slot_key = (id(material), item.alpha)
                 if slot_key not in material_slots:
                     material_slots[slot_key] = len(materials)
                     materials.append(entry[None])
@@ -334,7 +338,7 @@ def light_array(lights: list[LightItem], config: RenderConfig) -> np.ndarray:
         # Lights shine along their local -z axis.
         direction = -item.world[:3, 2]
         row["direction"] = direction / np.linalg.norm(direction)
-        row["color"] = np.array(linear_rgb(light.color)) * light.intensity
+        row["color"] = np.array(linear_rgb(light.color)) * (light.intensity * item.alpha)
         row["size"] = light.size
         row["shadow_view"] = -1
         row["scope"] = item.clip

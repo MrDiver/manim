@@ -79,17 +79,17 @@ class Light(Node):
     def set_cast_shadows(self, cast_shadows: bool) -> ChangeList:
         return [(self.cast_shadows, ABS, cast_shadows)]
 
-    def _build_snapshot(self, alphas: tuple[Signal, ...]) -> RNode | None:
+    def _build_snapshot(self) -> RNode | None:
         if self._hidden():
             return None
-        alpha = math.prod(signal.value for signal in (*alphas, self.alpha))
         return self._render_class()(
             uid=self.uid,
             color=np.array(self.color.value),
-            intensity=max(0.0, self.intensity.value * alpha),
+            intensity=max(0.0, self.intensity.value),
             size=max(0.0, self.size.value),
             cast_shadows=bool(self.cast_shadows.value),
             transform=self._transform(),
+            alpha=self.alpha.value,
             **self._render_fields(),
         )
 

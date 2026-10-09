@@ -9,7 +9,8 @@ is drawn as a mask). Each render diffs the flat scene against the slots,
 using the render contract's identity and version tokens:
 
 * unchanged shape, unchanged placement: nothing is written;
-* new world matrix, layer or clip: the shape's 80-byte object entry;
+* new world matrix, layer, clip or alpha: the shape's 96-byte object
+  entry;
 * new fill colors or stroke style (version changed): its color or point
   records, in place;
 * new points: its records are written to a new range (the old one
@@ -76,6 +77,7 @@ class _Slot:
     layer: int = -1
     clip: int = NO_CLIP - 1
     flags: int = -1
+    alpha: float = -1.0
     points_key: object = None
     """Points version the geometry ranges below were built from."""
     fill_mesh: object = None
@@ -144,11 +146,15 @@ class RetainedVectors:
         layer = 2 * item.order
         flags = (0 if isinstance(shape, RShape2D) else FLAG_CAMERA_FACING) | (FLAG_FRONT_ONLY if front_only else 0)
         entry = self.arenas["objects"].data[slot.object : slot.object + 1]
-        if slot.world is None or not np.array_equal(slot.world, item.world) or (slot.layer, slot.clip, slot.flags) != (layer, item.clip, flags):
+        placement = (layer, item.clip, flags, item.alpha)
+        if slot.world is None or not np.array_equal(slot.world, item.world) or (slot.layer, slot.clip, slot.flags, slot.alpha) != placement:
             entry["model"] = item.world.T  # WGSL matrices are column-major
-            entry["layer"], entry["clip"], entry["flags"] = layer, item.clip, flags
+            entry["layer"], entry["clip"], entry["flags"], entry["alpha"] = placement
             self.arenas["objects"].touch(slot.object, slot.object + 1)
-            slot.world, slot.layer, slot.clip, slot.flags = item.world, layer, item.clip, flags
+            slot.world = item.world
+            slot.layer, slot.clip, slot.flags, slot.alpha = placement
+        if item.alpha <= 0.0:
+            return  # invisible: the slot stays, nothing is drawn
 
         local_center = cache.get_or_create(shape.uid, "center", points_key, lambda: np.append(shape.points_3d().mean(axis=0), 1.0))
         distance = float(np.linalg.norm((item.world @ local_center)[:3] - camera_position))
@@ -156,7 +162,7 @@ class RetainedVectors:
         for draw in (self._fill(shape, slot, cache, distance, layer), self._stroke(shape, slot, cache, distance, layer + 1)):
             if draw is None:
                 continue
-            draw.opaque &= not clipped
+            draw.opaque &= not clipped and item.alpha >= 1.0
             draw.mask_of = mask_of
             draw.casts_shadow = shape.cast_shadows and mask_of == NO_CLIP
             draw.clip = item.clip

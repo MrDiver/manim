@@ -8,7 +8,6 @@ them in a :class:`~manimx.animation.Group` together. Shapes built on it
 
 from __future__ import annotations
 
-import math
 from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
@@ -42,9 +41,9 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
     ==================  ========  ==========================================
     ``points``          PATH      ``points``
     ``fill_color``      COLORS    ``fill.color`` (one color or a gradient)
-    ``fill_opacity``    SCALARS   ``fill.opacity`` (times every ``alpha``)
+    ``fill_opacity``    SCALARS   ``fill.opacity``
     ``stroke_color``    COLORS    ``stroke.color``
-    ``stroke_opacity``  SCALARS   ``stroke.opacity`` (times every ``alpha``)
+    ``stroke_opacity``  SCALARS   ``stroke.opacity``
     ``stroke_width``    SCALARS   ``stroke.width``
     ``stroke_joint``    DISCRETE  ``stroke.joint`` (one, or one per curve)
     ``stroke_cap``      DISCRETE  ``stroke.cap``
@@ -133,30 +132,26 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         """Whether this shape blocks light for lit meshes behind it."""
         return [(self.cast_shadows, ABS, cast_shadows)]
 
-    def _build_snapshot(self, alphas: tuple[Signal, ...]) -> RNode | None:
+    def _build_snapshot(self) -> RNode | None:
         if self._hidden():
             return None
-        alphas = (*alphas, self.alpha)
-        fill_token = version_token(self.fill_color, self.fill_opacity, *alphas)
-        stroke_token = version_token(
-            self.stroke_color, self.stroke_width, self.stroke_opacity, self.stroke_joint, self.stroke_cap, *alphas
-        )
+        fill_token = version_token(self.fill_color, self.fill_opacity)
+        stroke_token = version_token(self.stroke_color, self.stroke_width, self.stroke_opacity, self.stroke_joint, self.stroke_cap)
         # Fill and Stroke are immutable values of the signals in their
         # token: while the token holds, the previous value is still right.
+        # alpha is not part of them: it becomes the snapshot's alpha.
         cached_fill, cached_stroke = self._styles
-        if cached_fill[0] != fill_token or cached_stroke[0] != stroke_token:
-            alpha = math.prod(signal.value for signal in alphas)
-            if cached_fill[0] != fill_token:
-                cached_fill = (fill_token, style.fill(self.fill_color.value, self.fill_opacity.value, alpha))
-            if cached_stroke[0] != stroke_token:
-                cached_stroke = (
-                    stroke_token,
-                    style.stroke(
-                        self.stroke_color.value, self.stroke_opacity.value, self.stroke_width.value,
-                        self.stroke_joint.value, self.stroke_cap.value, alpha,
-                    ),  # fmt: skip
-                )
-            self._styles = (cached_fill, cached_stroke)
+        if cached_fill[0] != fill_token:
+            cached_fill = (fill_token, style.fill(self.fill_color.value, self.fill_opacity.value))
+        if cached_stroke[0] != stroke_token:
+            cached_stroke = (
+                stroke_token,
+                style.stroke(
+                    self.stroke_color.value, self.stroke_opacity.value, self.stroke_width.value,
+                    self.stroke_joint.value, self.stroke_cap.value,
+                ),  # fmt: skip
+            )
+        self._styles = (cached_fill, cached_stroke)
         return RShape2D(
             uid=self.uid,
             points=self.points.value,
@@ -164,6 +159,7 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
             stroke=cached_stroke[1],
             cast_shadows=bool(self.cast_shadows.value),
             transform=self._transform(),
+            alpha=self.alpha.value,
             versions={"points": version_token(self.points), "fill": fill_token, "stroke": stroke_token},
         )
 

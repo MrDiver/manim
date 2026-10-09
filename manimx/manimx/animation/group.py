@@ -6,7 +6,6 @@ from collections.abc import Iterable, Iterator
 
 from ..robjects import RGroup, RNode
 from .node import Node, PositionMixin, RotationMixin, ScalableMixin, find, find_all
-from .signals import Signal
 
 
 class Group(PositionMixin, RotationMixin, ScalableMixin, Node):
@@ -35,20 +34,19 @@ class Group(PositionMixin, RotationMixin, ScalableMixin, Node):
         for child in self.children:
             yield from child.family()
 
-    def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RNode | None:
+    def snapshot(self) -> RNode | None:
         """Like :meth:`Node.snapshot`, and the children's snapshots are
         part of the token: a group is reused while its own signals hold
         and every child returned the same render node as before."""
         if self._hidden():
             return None
-        inner = (*alphas, self.alpha)
-        children = [snapshot for child in self.children if (snapshot := child.snapshot(inner)) is not None]
+        children = [snapshot for child in self.children if (snapshot := child.snapshot()) is not None]
         # The previous snapshot keeps its children alive, so equal ids mean the same objects.
-        token = (self._snapshot_token(alphas), tuple(map(id, children)))
+        token = (self._snapshot_token(), tuple(map(id, children)))
         last = self._last_snapshot
         if last is not None and last[0] == token:
             return last[1]
-        snapshot = RGroup(children=children, transform=self._transform(), uid=self.uid)
+        snapshot = RGroup(children=children, transform=self._transform(), alpha=self.alpha.value, uid=self.uid)
         self._last_snapshot = (token, snapshot)
         return snapshot
 

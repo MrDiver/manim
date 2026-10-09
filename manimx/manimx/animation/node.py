@@ -43,7 +43,6 @@ from .animations import AnimationBuilder
 from .kinds import DISCRETE, FACTOR, ROTATION, SCALAR
 from .signal_tracks import Change
 from .signals import RootSignal, Signal, Vector3Signal, derive
-from .snapshot import version_token
 
 ChangeList = list[tuple[RootSignal, Change, Any]]
 
@@ -75,7 +74,9 @@ class Node:
       id and classes. A name is meant to identify one node but is not
       checked for uniqueness: imported models often repeat names.
     * ``alpha``: an opacity multiplier for fades; it multiplies the
-      opacity of the whole subtree.
+      opacity of the whole subtree. Snapshots carry it as
+      ``RNode.alpha``, and the renderer multiplies it down the tree, so
+      a fade never rebuilds the fills and strokes below.
     * ``present``: whether the node is in the scene; managed by the
       scene's ``add`` and ``remove``.
 
@@ -126,29 +127,31 @@ class Node:
 
     # -- render state -------------------------------------------------------
 
-    def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RNode | None:
+    def snapshot(self) -> RNode | None:
         """Render state for the current signal values (None if invisible).
 
-        ``alphas`` are the ``alpha`` signals of the enclosing groups.
-
-        While no signal of the node and no alpha above it changed, the
-        previous snapshot is returned again: render nodes are immutable,
-        and the renderer's caches then hit on the same object. Versions,
-        not values, are compared (a revisited time builds once more)."""
-        token = self._snapshot_token(alphas)
+        While no signal of the node changed, the previous snapshot is
+        returned again: render nodes are immutable, and the renderer's
+        caches then hit on the same object. Versions, not values, are
+        compared (a revisited time builds once more). A snapshot depends
+        on this node's signals alone: ``alpha`` becomes its
+        ``RNode.alpha``, and the renderer multiplies the alphas of the
+        enclosing groups in.
+        """
+        token = self._snapshot_token()
         last = self._last_snapshot
         if last is not None and last[0] == token:
             return last[1]
-        snapshot = self._build_snapshot(alphas)
+        snapshot = self._build_snapshot()
         self._last_snapshot = (token, snapshot)
         return snapshot
 
-    def _snapshot_token(self, alphas: tuple[Signal, ...]) -> Hashable:
+    def _snapshot_token(self) -> Hashable:
         """Changes whenever a snapshot could: a version of any signal of
-        this node or of the alphas above it."""
-        return (tuple(signal.version for signal in self.signals()), version_token(*alphas))
+        this node."""
+        return tuple(signal.version for signal in self.signals())
 
-    def _build_snapshot(self, alphas: tuple[Signal, ...]) -> RNode | None:
+    def _build_snapshot(self) -> RNode | None:
         """Build the render state (see :meth:`snapshot`)."""
         raise NotImplementedError
 

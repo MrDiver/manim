@@ -81,8 +81,8 @@ class Particles(Shape3D):
     def set_colors(self, colors: Any) -> ChangeList:
         return [(self.colors, ABS, self._rows(colors, 4))]
 
-    def _build_snapshot(self, alphas: tuple[Signal, ...]) -> RNode | None:
-        shape = super()._build_snapshot(alphas)
+    def _build_snapshot(self) -> RNode | None:
+        shape = super()._build_snapshot()
         if shape is None:
             return None
         return RParticles(
@@ -91,6 +91,7 @@ class Particles(Shape3D):
             material=shape.material,
             cast_shadows=shape.cast_shadows,
             transform=shape.transform,
+            alpha=shape.alpha,
             versions={"mesh": shape.version("mesh"), "material": shape.version("material")},
             positions=self.positions.value,
             rotations=self.rotations.value,

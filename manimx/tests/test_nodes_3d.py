@@ -77,8 +77,10 @@ def test_alpha_multiplies_opacity_and_factors_are_clamped() -> None:
     group = Group(shape)
     group.set_alpha(0.5)
 
-    material = group.snapshot().children[0].material
-    assert material.opacity == pytest.approx(0.2)
+    root = group.snapshot()
+    material = root.children[0].material
+    assert material.opacity == pytest.approx(0.8)  # alphas travel on their own...
+    assert flatten_scene(root).items[0].alpha == pytest.approx(0.25)  # ...multiplied when flattened
     assert (material.metallic, material.roughness, material.emissive_strength) == (1.0, 0.0, 0.0)
     shape.set_emissive("#0000FF")
     assert shape.emissive.value == (0.0, 0.0, 1.0)
@@ -195,8 +197,8 @@ def test_fade_animate_rotate_derive_and_follow_on_3d_nodes() -> None:
 
     prepared = prepare(construct)
     half = {child.uid: child for child in prepared.state_at(0.5).children}
-    assert half[ball.uid].material.opacity == pytest.approx(0.5)
-    assert half[lamp.uid].intensity == pytest.approx(5.0)
+    assert half[ball.uid].alpha == pytest.approx(0.5)
+    assert half[lamp.uid].alpha == pytest.approx(0.5) and half[lamp.uid].intensity == pytest.approx(10.0)
     end = {child.uid: child for child in prepared.state_at(2.0).children}
     assert end[ball.uid].transform.position == (2.0, 0.0, 0.0) and end[ball.uid].material.roughness == pytest.approx(0.7)
     assert end[lamp.uid].transform.position == (2.0, 0.0, 2.0)  # followed the ball

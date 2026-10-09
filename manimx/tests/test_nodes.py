@@ -12,7 +12,7 @@ from manimx.robjects import RShape2D
 class Bare(Node):
     """A node with no transform parts (like a light without position)."""
 
-    def snapshot(self, alphas=()):
+    def snapshot(self):
         return None
 
 

@@ -96,7 +96,7 @@ class Camera(PositionMixin, RotationMixin, Node):
 
     # -- render state -------------------------------------------------------
 
-    def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RNode | None:
+    def snapshot(self) -> RNode | None:
         return None  # cameras are never drawn
 
     def render_camera(self) -> RenderCamera:

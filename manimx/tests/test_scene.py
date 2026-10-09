@@ -5,6 +5,7 @@ import math
 
 import numpy as np
 import pytest
+from manimx.renderer.scene_graph import flatten_scene
 
 from manimx.robjects import RShape2D
 from manimx.animation import Group, Scene, derive
@@ -149,8 +150,10 @@ def test_presence_follows_add_remove_and_fades() -> None:
 
     assert list(objects(prepared, 0.5)) == ["square"]
     assert list(objects(prepared, 1.5)) == ["square", "circle"]
-    assert objects(prepared, 1.5)["circle"].stroke.opacity[0] == pytest.approx(0.5)
-    assert objects(prepared, 2.5)["square"].fill.opacity[0] == pytest.approx(0.5)
+    # alpha travels as the snapshot's alpha; the style keeps its own opacity.
+    assert objects(prepared, 1.5)["circle"].alpha == pytest.approx(0.5)
+    assert objects(prepared, 1.5)["circle"].stroke.opacity[0] == 1.0
+    assert objects(prepared, 2.5)["square"].alpha == pytest.approx(0.5)
     assert list(objects(prepared, 3.5)) == ["circle"]
 
 
@@ -163,7 +166,7 @@ def test_lagged_fade_in_hides_mobjects_until_their_own_start() -> None:
 
     assert list(objects(prepared, 0.25)) == ["dot-0"]
     assert list(objects(prepared, 1.0)) == ["dot-0", "dot-1", "dot-2"]
-    assert objects(prepared, 1.0)["dot-2"].fill.opacity[0] == pytest.approx(0.0)
+    assert objects(prepared, 1.0)["dot-2"].alpha == pytest.approx(0.0)
     assert prepared.duration == 2.0
 
 
@@ -211,7 +214,7 @@ def test_style_changes_and_animate_rotate_and_scale() -> None:
     assert done.transform.scale == (2.0, 2.0, 2.0)
     assert done.stroke.width[0] == 8.0 and done.stroke.opacity[0] == 0.5
     faded = objects(prepared, 2.0)["square"]
-    assert faded.fill.opacity[0] == pytest.approx(0.125)
+    assert faded.fill.opacity[0] == pytest.approx(0.25) and faded.alpha == pytest.approx(0.5)
 
 
 def test_groups_move_their_children_and_pass_alpha_on() -> None:
@@ -230,7 +233,9 @@ def test_groups_move_their_children_and_pass_alpha_on() -> None:
     group = state["group"]
     assert group.transform.position == (1.0, 0.0, 0.0)
     assert list(by_name(group.children, prepared.roots)) == ["a", "b"]
-    assert group.children[1].fill.opacity[0] == pytest.approx(0.5)
+    # The renderer multiplies the group's alpha into its children.
+    assert group.alpha == pytest.approx(0.5) and group.children[1].alpha == 1.0
+    assert flatten_scene(group).items[1].alpha == pytest.approx(0.5)
 
 
 def test_derived_signals_follow_animated_ones() -> None:
@@ -373,7 +378,7 @@ def test_clipping_groups_snapshot_to_render_clipping_groups() -> None:
     assert isinstance(clip, RClippingGroup) and clip.one_sided
     assert list(by_name([clip.mask, clip.content], prepared.roots)) == ["mask", "line"]
     assert clip.transform.position == (0.0, 1.0, 0.0)
-    assert prepared.state_at(2.0).children[0].mask.fill.opacity[0] == 0.0  # mask faded: content hidden by the renderer
+    assert prepared.state_at(2.0).children[0].mask.alpha == 0.0  # mask faded: content hidden by the renderer
 
 
 def test_clipping_group_without_visible_parts_is_skipped() -> None:

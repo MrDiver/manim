@@ -6,7 +6,6 @@ Bezier curves whose stroke ribbon always faces the camera. It is a leaf.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
@@ -41,7 +40,7 @@ class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
     ==================  ========  ==========================================
     ``points``          PATH      ``points``
     ``stroke_color``    COLORS    ``stroke.color`` (one color or a gradient)
-    ``stroke_opacity``  SCALARS   ``stroke.opacity`` (times every ``alpha``)
+    ``stroke_opacity``  SCALARS   ``stroke.opacity``
     ``stroke_width``    SCALARS   ``stroke.width``
     ``stroke_joint``    DISCRETE  ``stroke.joint`` (one, or one per curve)
     ``stroke_cap``      DISCRETE  ``stroke.cap``
@@ -109,24 +108,23 @@ class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
     def set_cast_shadows(self, cast_shadows: bool) -> ChangeList:
         return [(self.cast_shadows, ABS, cast_shadows)]
 
-    def _build_snapshot(self, alphas: tuple[Signal, ...]) -> RNode | None:
+    def _build_snapshot(self) -> RNode | None:
         if self._hidden():
             return None
-        alphas = (*alphas, self.alpha)
-        alpha = math.prod(signal.value for signal in alphas)
         return RCurve3D(
             uid=self.uid,
             points=self.points.value,
             stroke=style.stroke(
                 self.stroke_color.value, self.stroke_opacity.value, self.stroke_width.value,
-                self.stroke_joint.value, self.stroke_cap.value, alpha,
+                self.stroke_joint.value, self.stroke_cap.value,
             ),  # fmt: skip
             cast_shadows=bool(self.cast_shadows.value),
             transform=self._transform(),
+            alpha=self.alpha.value,
             versions={
                 "points": version_token(self.points),
                 "stroke": version_token(
-                    self.stroke_color, self.stroke_width, self.stroke_opacity, self.stroke_joint, self.stroke_cap, *alphas
+                    self.stroke_color, self.stroke_width, self.stroke_opacity, self.stroke_joint, self.stroke_cap
                 ),
             },
         )

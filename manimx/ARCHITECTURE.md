@@ -470,18 +470,25 @@ cache correct:
    `version_token()` of the `RootSignal`s a field is computed from, so
    equal tokens mean equal values:
    - `Shape2D`: `points` from `points`; `fill` from `fill_color` and
-     `fill_opacity`, `stroke` from the five stroke signals, each plus every
-     `alpha` above. While a token holds, the snapshot reuses its `Fill`
-     and `Stroke` values (PERFORMANCE.md, step F);
+     `fill_opacity`, `stroke` from the five stroke signals. While a token
+     holds, the snapshot reuses its `Fill` and `Stroke` values
+     (PERFORMANCE.md, step F);
    - `Curve3D`: `points` and `stroke` the same way;
    - `Shape3D`: `mesh` from the `mesh` signal (a `DISCRETE` signal holding
      a `MeshData`, whose version changes only when another `MeshData` is
-     set); `material` from the six factor signals plus every `alpha`.
+     set); `material` from the six factor signals.
      Moving, turning or scaling a `Shape3D` therefore keeps both tokens,
      and `MeshBatch` keeps its interleaved vertices;
    - lights have no versioned fields.
 
    `RNode.transform` is not versioned; it is compared directly.
+   Neither is `RNode.alpha`: every snapshot carries its `Node.alpha` there,
+   `SceneFlattener` multiplies the alphas down the tree (`DrawItem.alpha`,
+   `LightItem.alpha`), and the renderer applies the product per object
+   (the vector shader multiplies every color's alpha, `MeshBatch` the
+   material's, `light_array()` the intensity). An `alpha` therefore never
+   enters a style or its version token: a fade changes one number per
+   object, and a group's fade reuses the snapshots of everything in it.
 3. **Immutability:** an `RNode` is never changed after `state_at`
    returns it, and versioned arrays are read-only.
 4. **Purity:** `state_at` has no side effects on its result.
@@ -597,7 +604,7 @@ is uploaded in full.
 | Step | `RNode` unchanged | `RNode` changed |
 |---|---|---|
 | `SceneFlattener.flatten()` → `FlatScene` | every call | every call |
-| `RetainedVectors.build()` for `RShape2D` and `RCurve3D` | nothing written to its `_Slot` | new world matrix: the 80-byte object entry; new `fill`/`stroke` version: its records in place; new `points` version: records moved, curves and instances rewritten |
+| `RetainedVectors.build()` for `RShape2D` and `RCurve3D` | nothing written to its `_Slot` | new world matrix or alpha: the 96-byte object entry; new `fill`/`stroke` version: its records in place; new `points` version: records moved, curves and instances rewritten |
 | `RNodeDataCache` (`tessellate_fill()` result, stroke records, center, `RShape3D` vertices) | hit | rebuilt for the new version |
 | `MeshBatch.build()`, `build_shadow_views()` | skipped while the `FlatScene` contains no `RShape3D` | run when an `RShape3D` is present |
 | `RetainedMeshes` (mesh vertices and indices) | its ranges kept, nothing written | new `mesh` version: written over its ranges if the size fits, else into new ones |

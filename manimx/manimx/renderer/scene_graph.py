@@ -40,6 +40,8 @@ class DrawItem:
     """Position in depth-first tree order (Manim's painter's order)."""
     clip: int = NO_CLIP
     """Index of the innermost enclosing :class:`ClipScope`, or ``NO_CLIP``."""
+    alpha: float = 1.0
+    """Product of the ``alpha`` of the leaf and all its ancestors (>= 0)."""
 
 
 @dataclass(slots=True, eq=False)
@@ -59,6 +61,9 @@ class LightItem:
     world: np.ndarray
     clip: int = NO_CLIP
     """The clip scope the light is limited to, or NO_CLIP for everything."""
+    alpha: float = 1.0
+    """Product of the ``alpha`` of the light and its ancestors (>= 0);
+    multiplies its intensity."""
 
 
 @dataclass(slots=True, eq=False)
@@ -87,7 +92,7 @@ class SceneFlattener:
 
     def flatten(self, root: RNode) -> FlatScene:
         scene = FlatScene()
-        _walk(root, np.eye(4), NO_CLIP, scene, mask_of=None)
+        _walk(root, np.eye(4), NO_CLIP, scene, mask_of=None, parent_alpha=1.0)
         return scene
 
 
@@ -125,6 +130,7 @@ def _walk(
     clip: int,
     scene: FlatScene,
     mask_of: ClipScope | None,
+    parent_alpha: float,
 ) -> None:
     """Visit ``obj`` and its subtree.
 
@@ -136,18 +142,20 @@ def _walk(
         return
     # Child transforms compose with the parent: world = parent @ local.
     world = parent_world @ obj.transform.matrix()
+    # Alphas multiply down the tree like transforms.
+    alpha = max(0.0, parent_alpha * obj.alpha)
 
     if isinstance(obj, RLight):
         if mask_of is None:
-            scene.lights.append(LightItem(obj, world, clip))
+            scene.lights.append(LightItem(obj, world, clip, alpha))
     elif isinstance(obj, RShape3D) and mask_of is not None:
         raise NotImplementedError("3D meshes cannot be part of a mask")
     elif isinstance(obj, (RBezierPath, RShape3D)):
         target = scene.items if mask_of is None else mask_of.mask
-        target.append(DrawItem(obj, world, order=len(target), clip=clip))
+        target.append(DrawItem(obj, world, order=len(target), clip=clip, alpha=alpha))
     elif isinstance(obj, RGroup):
         for child in obj.children:
-            _walk(child, world, clip, scene, mask_of)
+            _walk(child, world, clip, scene, mask_of, alpha)
     elif isinstance(obj, RClippingGroup):
         if mask_of is not None:
             raise NotImplementedError("an RClippingGroup inside a mask is not supported")
@@ -156,8 +164,8 @@ def _walk(
             scope = ClipScope(obj, parent=clip)
             scene.clips.append(scope)
             content_clip = len(scene.clips) - 1
-            _walk(obj.mask, world, clip, scene, mask_of=scope)
+            _walk(obj.mask, world, clip, scene, mask_of=scope, parent_alpha=alpha)
         if obj.content is not None:
-            _walk(obj.content, world, content_clip, scene, mask_of=None)
+            _walk(obj.content, world, content_clip, scene, mask_of=None, parent_alpha=alpha)
     else:
         raise TypeError(f"unsupported render object: {type(obj).__name__}")

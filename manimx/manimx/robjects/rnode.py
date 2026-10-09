@@ -65,6 +65,13 @@ class RNode:
     serves render trees built directly, e.g. in renderer tests.
     """
     _: KW_ONLY
+    alpha: float = 1.0
+    """Multiplies the opacity of this node and its whole subtree (fills,
+    strokes and materials; a light's intensity). The snapshot of a
+    ``Node`` carries its ``Node.alpha`` here. It is not versioned: like
+    :attr:`transform`, the renderer applies it per object, so a fade
+    changes one number instead of every color record.
+    """
     uid: int = field(default_factory=new_uid)
     versions: InitVar[Mapping[str, Hashable] | None] = None
     _versions: dict[str, Hashable] = field(default_factory=dict, init=False, repr=False)

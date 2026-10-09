@@ -498,6 +498,37 @@ because the fps change stayed within noise:
   texture. Shadow passes only run for changed layers now (0.47 ms GPU per
   frame in `PortalOrbit`). Nothing left promised more than 1 to 2%.
 
+### P. Alpha per object, not baked into styles
+
+`Node.alpha` (fades, `FadeIn`, `FadeOut`, `set_alpha`) was multiplied into
+every `Fill` and `Stroke` opacity at snapshot time. So during a fade every
+shape below got a new style version, and `RetainedVectors` rebuilt and
+uploaded its per-point color records in every sub-frame; a group's fade
+also rebuilt every snapshot below it, since the alphas above were part of
+each snapshot's token.
+
+Now `RNode.alpha` carries the node's `alpha`, `SceneFlattener` multiplies
+it down the tree like the world matrix, and the vector shader multiplies
+every color's alpha by the object's (one more float in the object entry,
+80 to 96 bytes). Styles and their tokens no longer contain any alpha. A
+fade rewrites one object entry; a group's fade reuses every snapshot
+below it. Meshes multiply the material's opacity and lights their
+intensity by the item's alpha, in `MeshBatch`.
+
+Measured with the power profile `balanced` (so absolute numbers are below
+the other rows), committed code and the change alternating:
+
+| | fps (blur 8) | frame_at | vector records |
+|---|---|---|---|
+| before | 62.0 / 60.9 | 3.49 ms | 2.60 ms |
+| after | 63.8 / 63.9 | 3.07 ms | 2.42 ms |
+
+About +4% on the benchmark, which fades little; fade-heavy scenes gain
+more. Frames are bit-identical to the reference: the GPU's float32
+product equals the float32 of the former float64 product on every
+reference frame. `test_alpha_renders_like_the_opacity_it_multiplies`
+allows a difference of 1 in 8 bits for other values.
+
 ## Where the time goes now
 
 Benchmark project with `PortalOrbit`, after steps L to O: 48.6 to about

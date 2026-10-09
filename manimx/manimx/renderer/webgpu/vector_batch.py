@@ -6,7 +6,9 @@ GPU calls makes the data layout testable on its own.
 
 Buffers (dtypes mirror the WGSL structs one to one):
 
-* ``objects``        one entry per path: model matrix, depth layer, clip, flags
+* ``objects``        one entry per path: model matrix, depth layer, clip, flags,
+                     alpha (the item's, multiplied into every color on the
+                     GPU, so fades rewrite this entry only)
 * ``instances``      what each draw instance generates (fill or stroke curve)
 * ``fill_vertices``  all tessellated fill triangles, concatenated; geometry
                      only (cached per points version)
@@ -51,7 +53,15 @@ FLAG_FRONT_ONLY = 2
 STROKE_VERTEX_COUNT = 24 * 6 + 2 * 8 * 3
 
 OBJECT_DTYPE = np.dtype(
-    [("model", "<f4", (4, 4)), ("layer", "<f4"), ("clip", "<i4"), ("flags", "<u4"), ("fill_colors", "<u4")]
+    [
+        ("model", "<f4", (4, 4)),
+        ("layer", "<f4"),
+        ("clip", "<i4"),
+        ("flags", "<u4"),
+        ("fill_colors", "<u4"),
+        ("alpha", "<f4"),
+        ("_pad", "<f4", 3),
+    ]
 )
 INSTANCE_DTYPE = np.dtype(
     [("kind", "<u4"), ("object", "<u4"), ("curve", "<u4"), ("_pad", "<u4")]
@@ -79,7 +89,7 @@ DRAW_INDIRECT_DTYPE = np.dtype(
     [("vertex_count", "<u4"), ("instance_count", "<u4"), ("first_vertex", "<u4"), ("first_instance", "<u4")]
 )
 
-assert OBJECT_DTYPE.itemsize == 80
+assert OBJECT_DTYPE.itemsize == 96
 assert INSTANCE_DTYPE.itemsize == 16
 assert FILL_VERTEX_DTYPE.itemsize == 32
 assert STROKE_POINT_DTYPE.itemsize == 32
@@ -162,7 +172,10 @@ class _BatchBuilder:
         entry["layer"] = layer
         entry["clip"] = item.clip
         entry["flags"] = (0 if isinstance(shape, RShape2D) else FLAG_CAMERA_FACING) | (FLAG_FRONT_ONLY if front_only else 0)
+        entry["alpha"] = item.alpha
         self.objects.append(entry)
+        if item.alpha <= 0.0:
+            return  # invisible: no draws
 
         local_center = self.cache.get_or_create(shape.uid, "center", shape.version("points"), lambda: np.append(shape.points_3d().mean(axis=0), 1.0))
         center = item.world @ local_center
@@ -174,7 +187,7 @@ class _BatchBuilder:
         ):
             if draw is None:
                 continue
-            draw.opaque &= not clipped
+            draw.opaque &= not clipped and item.alpha >= 1.0
             draw.mask_of = mask_of
             draw.casts_shadow = shape.cast_shadows and mask_of == NO_CLIP
             draw.clip = item.clip

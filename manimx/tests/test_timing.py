@@ -231,4 +231,4 @@ def test_fade_in_after_an_event() -> None:
     timeline.add(prepared(construct))
 
     assert timeline.state_at(1.0).children[0].children == []
-    assert timeline.state_at(2.5).children[0].children[0].fill.opacity[0] == pytest.approx(0.5)
+    assert timeline.state_at(2.5).children[0].children[0].alpha == pytest.approx(0.5)

@@ -33,7 +33,6 @@ hitting while the shape moves, turns, scales or changes its material.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Iterable, Iterator
 
 import numpy as np
@@ -187,14 +186,12 @@ class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
     def set_cast_shadows(self, cast_shadows: bool) -> ChangeList:
         return [(self.cast_shadows, ABS, cast_shadows)]
 
-    def _build_snapshot(self, alphas: tuple[Signal, ...]) -> RNode | None:
+    def _build_snapshot(self) -> RNode | None:
         if self._hidden():
             return None
-        alphas = (*alphas, self.alpha)
-        alpha = math.prod(signal.value for signal in alphas)
         material = PbrMaterial(
             base_color=np.array(self.base_color.value),
-            opacity=_unit(self.opacity.value * alpha),
+            opacity=_unit(self.opacity.value),
             metallic=_unit(self.metallic.value),
             roughness=_unit(self.roughness.value),
             emissive=np.array(self.emissive.value),
@@ -213,9 +210,10 @@ class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
             material=material,
             cast_shadows=bool(self.cast_shadows.value),
             transform=self._transform(),
+            alpha=self.alpha.value,
             versions={
                 "mesh": version_token(self.mesh),
-                "material": version_token(*self._material_signals(), *alphas),
+                "material": version_token(*self._material_signals()),
             },
         )
 
