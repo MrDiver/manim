@@ -1,4 +1,4 @@
-"""Curve3D: a stroke-only path in 3D space, and the curves built on it.
+"""Curve3D: a stroke-only path in 3D space.
 
 A :class:`Curve3D` snapshots to an :class:`~manimx.robjects.RCurve3D`: cubic
 Bezier curves whose stroke ribbon always faces the camera. It is a leaf.
@@ -7,7 +7,7 @@ Bezier curves whose stroke ribbon always faces the camera. It is a leaf.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
 import numpy as np
@@ -15,7 +15,6 @@ import numpy as np
 from ..robjects import CapStyle, JointType, RCurve3D, RNode
 from ..utils.color import WHITE
 from . import style
-from .geometry import parametric_points
 from .kinds import COLORS, DISCRETE, PATH, SCALARS
 from .node import (
     ABS,
@@ -133,19 +132,4 @@ class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
         )
 
 
-class ParametricCurve3D(Curve3D):
-    """A smooth curve through ``function(t)`` (a 3D point) at ``samples``
-    evenly spaced ``t`` in ``t_range`` (see geometry.parametric_points)."""
-
-    def __init__(
-        self,
-        function: Callable[[float], Any],
-        t_range: tuple[float, float] = (0.0, 1.0),
-        samples: int = 64,
-        name: str | None = None,
-        **style: Any,
-    ) -> None:
-        super().__init__(parametric_points(function, t_range, samples), name, **style)
-
-
-__all__ = ["Curve3D", "ParametricCurve3D"]
+__all__ = ["Curve3D"]

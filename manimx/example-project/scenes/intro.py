@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from manimx.animation import DOWN, LEFT, PI, RIGHT, UP, Circle, FadeIn, FadeOut, Group, Indicate, Rectangle, Scene, Square, Shape2D, Triangle
+from manimx.animation import Group, Scene, Shape2D
+from manimx.userland import DOWN, LEFT, PI, RIGHT, UP, Circle, FadeIn, FadeOut, Indicate, Rectangle, Square, Triangle
 from manimx.examples.manim_logo import BACKGROUND, LOGO_BLACK, LOGO_BLUE, LOGO_GREEN, LOGO_RED, M_GLYPH_POINTS, manim_logo
 
-CENTER = -np.array(manim_logo().transform.position)  # the logo's center in Manim's layout
+CENTER = -np.array(manim_logo().position.value)  # the logo's center in Manim's layout
 
 
 class Intro(Scene):

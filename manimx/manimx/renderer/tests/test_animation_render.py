@@ -89,8 +89,9 @@ def test_navigation_badge_properties(renderer: WGPURenderer) -> None:
 
 
 def test_views_render_through_their_camera_and_blur_camera_moves(renderer: WGPURenderer) -> None:
-    from manimx.animation import RIGHT, Camera, Dot, Scene, Timeline, View
-    from manimx.animation.rate_functions import linear
+    from manimx.animation import Camera, Scene, Timeline, View
+    from manimx.userland import RIGHT, Dot
+    from manimx.userland.rate_functions import linear
     from manimx.renderer import RenderConfig
 
     camera = Camera(name="camera")

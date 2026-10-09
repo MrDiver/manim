@@ -4,22 +4,15 @@ import math
 
 import numpy as np
 import pytest
-from manimx.animation.geometry import box_mesh
+from manimx.userland.geometry import box_mesh
 from manimx.renderer import Camera, RenderConfig, RNodeDataCache, WGPURenderer
 from manimx.renderer.scene_graph import flatten_scene
 from manimx.renderer.webgpu.mesh_batch import MeshBatch
 from manimx.renderer.webgpu.shadow_views import NO_SHADOW, build_shadow_views
 from manimx.robjects.transform import rotation_towards
 
-from manimx import (
-    PbrMaterial,
-    RDirectionalLight,
-    RGroup,
-    RPointLight,
-    RShape3D,
-    RSpotLight,
-    Transform,
-)
+from manimx import PbrMaterial
+from manimx.robjects import RDirectionalLight, RGroup, RPointLight, RShape3D, RSpotLight, Transform
 
 
 def _views(root: RGroup, **config: object):

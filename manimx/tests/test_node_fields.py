@@ -7,21 +7,9 @@ import dataclasses
 
 import numpy as np
 import pytest
-from manimx.animation import (
-    COLORS,
-    SCALARS,
-    Circle,
-    ClippingGroup,
-    Curve3D,
-    DirectionalLight,
-    PointLight,
-    Scene,
-    Shape2D,
-    Shape3D,
-    SpotLight,
-    Square,
-)
-from manimx.animation.rate_functions import linear
+from manimx.animation import COLORS, SCALARS, ClippingGroup, Curve3D, DirectionalLight, PointLight, Scene, Shape2D, Shape3D, SpotLight
+from manimx.userland import Circle, Square
+from manimx.userland.rate_functions import linear
 from manimx.robjects import (
     CapStyle,
     Fill,

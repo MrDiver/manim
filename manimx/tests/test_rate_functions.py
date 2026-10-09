@@ -6,16 +6,17 @@ import math
 import numpy as np
 import pytest
 
-from manimx.animation import rate_functions as rates
+from manimx.userland import rate_functions as rates
 
 # Rate functions that do not end at 1: they return to the start, or decay.
 ENDS_ELSEWHERE = {"there_and_back", "there_and_back_with_pause", "wiggle", "running_start", "not_quite_there", "exponential_decay", "lingering"}
-# Every module-level function whose first parameter is the progress `t`
-# (wrappers like squish_rate_func take a function first).
+# Every function of the module whose first parameter is the progress `t`
+# (wrappers like squish_rate_func take a function first), including linear
+# and smooth, which the core defines and the module re-exports.
 NAMES = sorted(
     name
     for name, function in inspect.getmembers(rates, inspect.isfunction)
-    if function.__module__ == rates.__name__ and list(inspect.signature(function).parameters)[:1] == ["t"]
+    if function.__module__ in (rates.__name__, "manimx.animation.rates") and list(inspect.signature(function).parameters)[:1] == ["t"]
 )
 
 

@@ -136,7 +136,7 @@ def test_render_with_worker_processes(project) -> None:
 
 def test_errors_point_at_the_problem(project, tmp_path, monkeypatch, capsys) -> None:
     (project / "scenes" / "intro.py").write_text(
-        "from manimx.animation import Scene, Square\n\n"
+        "from manimx.animation import Scene\nfrom manimx.userland import Square\n\n"
         "class Intro(Scene):\n"
         "    def construct(self):\n"
         "        Square().animate.shfit((1, 0, 0))\n"

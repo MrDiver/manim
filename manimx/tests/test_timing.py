@@ -2,18 +2,9 @@
 
 import pytest
 
-from manimx.animation import (
-    RIGHT,
-    SEGMENT_GAP,
-    UP,
-    Dot,
-    FadeIn,
-    Scene,
-    Timeline,
-    UnresolvedEvents,
-    derive,
-)
-from manimx.animation.rate_functions import linear
+from manimx.animation import SEGMENT_GAP, Scene, Timeline, UnresolvedEvents, derive
+from manimx.userland import RIGHT, UP, Dot, FadeIn
+from manimx.userland.rate_functions import linear
 from naming import by_name, timeline_roots
 
 

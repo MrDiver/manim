@@ -4,7 +4,7 @@ import math
 
 import numpy as np
 import pytest
-from manimx.animation.geometry import arc_points, corner_points, rectangle_points
+from manimx.userland.geometry import arc_points, corner_points, rectangle_points
 from manimx.renderer import ClearScene, RemoveObjects, RNodeDataCache
 from manimx.renderer.config import Camera, RenderConfig
 from manimx.renderer.scene_graph import NO_CLIP, bounding_box, flatten, flatten_scene
@@ -21,16 +21,8 @@ from manimx.renderer.webgpu.vector_batch import (
 )
 from manimx.robjects import new_uid
 
-from manimx import (
-    Fill,
-    JointType,
-    RClippingGroup,
-    RGroup,
-    RNode,
-    RShape2D,
-    Stroke,
-    Transform,
-)
+from manimx import JointType
+from manimx.robjects import Fill, RClippingGroup, RGroup, RNode, RShape2D, Stroke, Transform
 
 # --- scene graph ----------------------------------------------------------------
 

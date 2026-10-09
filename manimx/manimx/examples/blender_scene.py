@@ -19,16 +19,9 @@ import math
 
 import numpy as np
 
-from ..animation import (
-    Circle,
-    ClippingGroup,
-    Group,
-    Polyline,
-    RegularPolygon,
-    Shape2D,
-    Square,
-)
-from ..animation.geometry import corner_points
+from ..animation import ClippingGroup, Group, Shape2D
+from ..userland import Circle, Polyline, RegularPolygon, Square
+from ..userland.geometry import corner_points
 from ..renderer.config import Camera, RenderConfig
 from ..renderer.scene_graph import bounding_box
 from ..robjects import CapStyle, JointType

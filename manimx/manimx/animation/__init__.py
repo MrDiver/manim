@@ -1,146 +1,72 @@
-"""The animation engine: signals, animations and compiled scenes.
+"""The animation engine (core): signals, scene nodes, animations and
+compiled scenes.
 
-See docs/animation_engine_design.md. This package never imports the
-renderer; it produces render state (manimx.robjects) that any renderer can
-draw.
+This package is the core of the scene side: the node classes with render
+counterparts (Shape2D, Curve3D, Shape3D, the lights, Group,
+ClippingGroup), the Animation contract, Scene, Timeline and Simulation.
+What a project could write on top of it (Circle, FadeIn, rate functions,
+the glTF loader, ...) lives in manimx.userland. It produces render state
+(manimx.robjects) that any renderer can draw.
+
+See docs/animation_engine_design.md.
 """
 
-from . import rate_functions
-from .animations import (
-    Animation,
-    AnimationBuilder,
-    ChangeSignals,
-    FadeIn,
-    FadeOut,
-    GrowFromCenter,
-    Indicate,
-    Rotate,
-    SetValue,
-    ShrinkToCenter,
-    SignalChange,
-    Target,
-)
+from .animations import Animation, AnimationBuilder, ChangeSignals, SetValue, SignalChange, Target
 from .audio import Sound, SoundEvent, mix, write_wav
 from .camera import Camera, View
 from .clipping_group import ClippingGroup
-from .constants import (
-    DEGREES,
-    DL,
-    DOWN,
-    DR,
-    IN,
-    LEFT,
-    ORIGIN,
-    OUT,
-    PI,
-    RIGHT,
-    TAU,
-    UL,
-    UP,
-    UR,
-)
-from .curve3d import Curve3D, ParametricCurve3D
+from .curve3d import Curve3D
 from .group import Group
 from .kinds import COLOR, COLORS, DISCRETE, FACTOR, PATH, ROTATION, SCALAR, SCALARS, SignalKind
 from .light import DirectionalLight, Light, PointLight, SpotLight
 from .node import Node, PositionMixin, RotationMixin, ScalableMixin, animatable
+from .rates import linear, smooth
 from .scene import SEGMENT_GAP, Cue, Emit, PreparedScene, Scene, Segment
-from .shape2d import (
-    Circle,
-    Dot,
-    Polyline,
-    Rectangle,
-    RegularPolygon,
-    Shape2D,
-    Square,
-    Triangle,
-)
-from .shape3d import Box, ParametricSurface, Shape3D, Sphere, Torus
+from .shape2d import Shape2D
+from .shape3d import Shape3D
 from .signal_tracks import Change, Entry, Placement, SignalTrack
-from .signals import (
-    DerivedSignal,
-    RootSignal,
-    Signal,
-    TimeSignals,
-    Vector3Signal,
-    derive,
-)
+from .signals import DerivedSignal, RootSignal, Signal, TimeSignals, Vector3Signal, derive
 from .simulation import Simulation
 from .snapshot import version_token
 from .time_map import MonotoneMap
-from .timing import (
-    NEVER,
-    Clip,
-    InvalidCue,
-    Ramp,
-    SegmentTiming,
-    Timeline,
-    UnresolvedEvents,
-)
+from .timing import NEVER, Clip, InvalidCue, Ramp, SegmentTiming, Timeline, UnresolvedEvents
 from .worlds import World, World2D, World3D
 
 __all__ = [
     "COLOR",
     "COLORS",
-    "DEGREES",
     "DISCRETE",
-    "DL",
-    "DOWN",
-    "DR",
     "FACTOR",
-    "IN",
-    "LEFT",
     "NEVER",
-    "ORIGIN",
-    "OUT",
     "PATH",
-    "PI",
-    "RIGHT",
     "ROTATION",
     "SCALAR",
     "SCALARS",
     "SEGMENT_GAP",
-    "TAU",
-    "UL",
-    "UP",
-    "UR",
     "Animation",
     "AnimationBuilder",
-    "Box",
     "Camera",
     "Change",
     "ChangeSignals",
-    "Circle",
     "Clip",
     "ClippingGroup",
     "Cue",
     "Curve3D",
     "DerivedSignal",
     "DirectionalLight",
-    "Dot",
     "Emit",
     "Entry",
-    "FadeIn",
-    "FadeOut",
     "Group",
-    "GrowFromCenter",
-    "Indicate",
     "InvalidCue",
     "Light",
     "MonotoneMap",
     "Node",
-    "ParametricCurve3D",
-    "ParametricSurface",
     "Placement",
     "PointLight",
-    "Polyline",
     "PositionMixin",
     "PreparedScene",
     "Ramp",
-    "Rectangle",
-    "RegularPolygon",
     "RootSignal",
-    "Rotate",
     "RotationMixin",
     "ScalableMixin",
     "Scene",
@@ -149,7 +75,6 @@ __all__ = [
     "SetValue",
     "Shape2D",
     "Shape3D",
-    "ShrinkToCenter",
     "Signal",
     "SignalChange",
     "SignalKind",
@@ -157,14 +82,10 @@ __all__ = [
     "Simulation",
     "Sound",
     "SoundEvent",
-    "Sphere",
     "SpotLight",
-    "Square",
     "Target",
     "TimeSignals",
     "Timeline",
-    "Torus",
-    "Triangle",
     "UnresolvedEvents",
     "Vector3Signal",
     "View",
@@ -173,8 +94,9 @@ __all__ = [
     "World3D",
     "animatable",
     "derive",
+    "linear",
     "mix",
-    "rate_functions",
+    "smooth",
     "version_token",
     "write_wav",
 ]

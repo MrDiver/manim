@@ -14,7 +14,7 @@ What it draws:
 - **RCurve3D**: stroke-only Bezier curves in 3D, always facing the camera,
   thinner with distance.
 - **RShape3D**: lit triangle meshes with glTF metallic-roughness materials
-  and textures. glTF/GLB files are imported with `manimx.io.load_gltf`, which
+  and textures. glTF/GLB files are imported with `manimx.userland.load_gltf`, which
   builds scene nodes; their snapshots are `RShape3D`s.
 - **Lights**: directional, point and spot, with soft contact-hardening
   shadows.
@@ -33,7 +33,7 @@ What it draws:
 from PIL import Image
 
 from manimx import Fill, RGroup, RShape2D, Stroke, Transform
-from manimx.animation.geometry import arc_points, rectangle_points
+from manimx.userland.geometry import arc_points, rectangle_points
 from manimx.renderer import RenderConfig, WGPURenderer
 
 scene = RGroup(children=[
@@ -72,7 +72,8 @@ Scenes are written with scene nodes (manimx.animation), and their
 snapshots are the render objects below:
 
 ```python
-from manimx.animation import DirectionalLight, PointLight, Sphere, SpotLight
+from manimx.animation import DirectionalLight, PointLight, SpotLight
+from manimx.userland import Sphere
 from manimx.robjects import PbrMaterial
 
 ball = Sphere(1.0, name="ball", material=PbrMaterial("#FC6255", roughness=0.3)).move_to((0, 0, 1))

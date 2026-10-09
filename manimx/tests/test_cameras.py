@@ -3,8 +3,9 @@
 import numpy as np
 import pytest
 
-from manimx.animation import LEFT, RIGHT, Camera, Dot, Scene, Timeline, View, World3D
-from manimx.animation.rate_functions import linear
+from manimx.animation import Camera, Scene, Timeline, View, World3D
+from manimx.userland import LEFT, RIGHT, Dot
+from manimx.userland.rate_functions import linear
 from manimx.robjects import Transform
 
 

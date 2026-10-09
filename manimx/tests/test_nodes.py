@@ -4,24 +4,8 @@ for parts it lacks."""
 from __future__ import annotations
 
 import pytest
-from manimx.animation import (
-    UP,
-    Camera,
-    Circle,
-    ClippingGroup,
-    FadeIn,
-    FadeOut,
-    Group,
-    GrowFromCenter,
-    Indicate,
-    Node,
-    PositionMixin,
-    Rotate,
-    RotationMixin,
-    ScalableMixin,
-    ShrinkToCenter,
-    Square,
-)
+from manimx.animation import Camera, ClippingGroup, Group, Node, PositionMixin, RotationMixin, ScalableMixin
+from manimx.userland import UP, Circle, FadeIn, FadeOut, GrowFromCenter, Indicate, Rotate, ShrinkToCenter, Square
 from manimx.robjects import RShape2D
 
 

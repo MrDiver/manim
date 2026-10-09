@@ -8,13 +8,13 @@ signals, so renderer caches survive any number of snapshots.
 import numpy as np
 import pytest
 from manimx.animation import PATH, RootSignal, Vector3Signal, derive, version_token
-from manimx.animation.geometry import arc_points
+from manimx.userland.geometry import arc_points
 from manimx.robjects import new_uid
 from manimx.renderer import RNodeDataCache
 from manimx.renderer.scene_graph import flatten_scene
 from manimx.renderer.webgpu.vector_batch import VectorBatch
 
-from manimx import Fill, RGroup, RShape2D, RSpotLight, Stroke
+from manimx.robjects import Fill, RGroup, RShape2D, RSpotLight, Stroke
 
 
 def test_uid_can_be_given_and_is_unique_otherwise() -> None:
@@ -76,7 +76,7 @@ def test_snapshots_from_unchanged_signals_share_cached_triangulations() -> None:
     cache = RNodeDataCache()
 
     def snapshot() -> RGroup:
-        from manimx import Transform
+        from manimx.robjects import Transform
 
         shape = RShape2D(
             uid=uid,

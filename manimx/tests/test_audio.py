@@ -7,8 +7,9 @@ import wave
 import numpy as np
 import pytest
 
-from manimx.animation import Dot, Scene, Simulation, Sound, Timeline, mix, write_wav
-from manimx.animation.rate_functions import linear
+from manimx.animation import Scene, Simulation, Sound, Timeline, mix, write_wav
+from manimx.userland import Dot
+from manimx.userland.rate_functions import linear
 
 RATE = 1000  # a low sample rate keeps sample positions easy to check
 needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")

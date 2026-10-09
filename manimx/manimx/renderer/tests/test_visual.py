@@ -14,13 +14,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from manimx.animation.geometry import (
-    arc_points,
-    corner_points,
-    parametric_points,
-    rectangle_points,
-    regular_polygon_points,
-)
+from manimx.userland.geometry import arc_points, corner_points, parametric_points, rectangle_points, regular_polygon_points
 from manimx.examples.manim_logo import config as logo_config
 from manimx.examples.manim_logo import manim_logo
 from manimx.renderer import RenderConfig, WGPURenderer
@@ -28,16 +22,8 @@ from manimx.robjects.transform import rotation_towards
 from manimx.testing import ImageTolerance, assert_image_matches
 from manimx.utils.color import BLUE, GREEN, ORANGE, PURPLE, RED, WHITE, YELLOW
 
-from manimx import (
-    CapStyle,
-    Fill,
-    JointType,
-    RClippingGroup,
-    RGroup,
-    RShape2D,
-    Stroke,
-    Transform,
-)
+from manimx import CapStyle, JointType
+from manimx.robjects import Fill, RClippingGroup, RGroup, RShape2D, Stroke, Transform
 
 REFERENCES = Path(__file__).parent / "references"
 
@@ -159,8 +145,9 @@ def _perspective(eye: tuple, target: tuple) -> object:
 def test_meshes_and_lights(renderer: WGPURenderer, update_references: bool) -> None:
     from manimx.examples.blender_scene import _ground
 
-    from manimx import PbrMaterial, RDirectionalLight, RPointLight, RShape3D, RSpotLight, Texture
-    from manimx.animation.geometry import box_mesh, sphere_mesh, torus_mesh
+    from manimx import PbrMaterial, Texture
+    from manimx.robjects import RDirectionalLight, RPointLight, RShape3D, RSpotLight
+    from manimx.userland.geometry import box_mesh, sphere_mesh, torus_mesh
 
     i, j = np.indices((64, 64))
     checker = ((i // 8 + j // 8) % 2 * 200 + 40).astype(np.uint8)
@@ -184,7 +171,7 @@ def test_meshes_and_lights(renderer: WGPURenderer, update_references: bool) -> N
 def test_curves_3d(renderer: WGPURenderer, update_references: bool) -> None:
     from manimx.examples.blender_scene import _ground
 
-    from manimx import RCurve3D
+    from manimx.robjects import RCurve3D
 
     rainbow = [RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE]
     curves = [
@@ -208,8 +195,9 @@ def test_motion_blur_bloom_and_aces(renderer: WGPURenderer, update_references: b
         ToneMapOperator,
     )
 
-    from manimx import PbrMaterial, RCurve3D, RDirectionalLight, RShape3D
-    from manimx.animation.geometry import sphere_mesh
+    from manimx import PbrMaterial
+    from manimx.robjects import RCurve3D, RDirectionalLight, RShape3D
+    from manimx.userland.geometry import sphere_mesh
 
     def scene_at(t: float) -> RGroup:
         spin = RShape2D(points=rectangle_points(2, 2), fill=Fill(BLUE, opacity=1), stroke=Stroke(WHITE, width=6), transform=Transform(position=(-3.5, 0, 0)).rotated(6 * t))
@@ -230,8 +218,9 @@ def test_motion_blur_bloom_and_aces(renderer: WGPURenderer, update_references: b
 def test_shadows(renderer: WGPURenderer, update_references: bool) -> None:
     from manimx.examples.manim_logo import manim_logo
 
-    from manimx import PbrMaterial, RCurve3D, RDirectionalLight, RPointLight, RShape3D, RSpotLight
-    from manimx.animation.geometry import box_mesh, sphere_mesh
+    from manimx import PbrMaterial
+    from manimx.robjects import RCurve3D, RDirectionalLight, RPointLight, RShape3D, RSpotLight
+    from manimx.userland.geometry import box_mesh, sphere_mesh
 
     logo = manim_logo().move_to((0, 0.5, 1.8)).set_scale(0.6).rotate(math.pi / 2, (1, 0, 0)).snapshot()
     scene = RGroup(

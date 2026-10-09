@@ -27,7 +27,7 @@ from manimx.examples.portal_cube import portal_cube, views
 from manimx.renderer import WGPURenderer
 from manimx.renderer.scene_graph import flatten_scene
 
-from manimx import RGroup, RLight
+from manimx.robjects import RGroup, RLight
 
 SIDES = ["front", "right", "back", "left"]
 WIDTH, HEIGHT = 320, 180

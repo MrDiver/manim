@@ -25,22 +25,9 @@ from typing import Any
 
 import numpy as np
 
-from ..animation import (
-    Animation,
-    Change,
-    Circle,
-    ClippingGroup,
-    Group,
-    GrowFromCenter,
-    Node,
-    Polyline,
-    RootSignal,
-    Scene,
-    ShrinkToCenter,
-    Target,
-    derive,
-)
-from ..animation.rate_functions import ease_out_cubic, linear
+from ..animation import Animation, Change, ClippingGroup, Group, Node, RootSignal, Scene, Target, derive
+from ..userland import Circle, GrowFromCenter, Polyline, ShrinkToCenter
+from ..userland.rate_functions import ease_out_cubic, linear
 from ..renderer.config import Camera, RenderConfig
 
 BACKGROUND = "#070b1a"

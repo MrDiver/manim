@@ -1,7 +1,7 @@
 """Shape definitions: the points of paths and the meshes of solids.
 
-Everything that generates geometry lives here, on the scene side. The
-shape nodes are built from it (Circle from arc_points(), Polyline from
+Everything that generates geometry lives here, in userland. The shape
+classes of userland are built from it (Circle from arc_points(), Polyline from
 corner_points(), ParametricCurve3D from parametric_points(), Box from
 box_mesh(), ...), and code that builds render objects directly, such as
 renderer tests, takes its points and meshes from here too. The render

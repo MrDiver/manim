@@ -21,7 +21,8 @@ Render it alone with ``manimx render {cls}``, or the whole timeline with
 
 from __future__ import annotations
 
-from manimx.animation import DOWN, PI, UP, Circle, FadeIn, FadeOut, Scene, Square
+from manimx.animation import Scene
+from manimx.userland import DOWN, PI, UP, Circle, FadeIn, FadeOut, Square
 
 
 class {cls}(Scene):
@@ -47,7 +48,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from manimx.animation import DOWN, LEFT, UP, Dot, FadeIn, FadeOut, Rectangle, Scene, Simulation
+from manimx.animation import Scene, Simulation
+from manimx.userland import DOWN, LEFT, UP, Dot, FadeIn, FadeOut, Rectangle
 
 GRAVITY = 9.81
 FLOOR = -2.5

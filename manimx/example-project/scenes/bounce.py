@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from manimx.animation import DOWN, LEFT, RIGHT, UP, Circle, Dot, FadeIn, FadeOut, Rectangle, Scene, Simulation
+from manimx.animation import Scene, Simulation
+from manimx.userland import DOWN, LEFT, RIGHT, UP, Circle, Dot, FadeIn, FadeOut, Rectangle
 from manimx.animation.audio import DEFAULT_SAMPLE_RATE
-from manimx.animation.rate_functions import there_and_back
+from manimx.userland.rate_functions import there_and_back
 
 GRAVITY = 9.81
 FLOOR = -3.0

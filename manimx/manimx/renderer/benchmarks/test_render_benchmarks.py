@@ -11,12 +11,7 @@ import math
 
 import numpy as np
 import pytest
-from manimx.animation.geometry import (
-    arc_points,
-    box_mesh,
-    parametric_points,
-    sphere_mesh,
-)
+from manimx.userland.geometry import arc_points, box_mesh, parametric_points, sphere_mesh
 from manimx.examples.manim_logo import M_GLYPH_POINTS, manim_logo
 from manimx.examples.manim_logo import config as logo_config
 from manimx.renderer import Bloom, Camera, FrameComposer, MotionBlur, RenderConfig
@@ -24,19 +19,8 @@ from manimx.renderer.tessellation import tessellate_fill
 from manimx.robjects.transform import rotation_towards
 from manimx.utils.color import BLUE, RED, YELLOW
 
-from manimx import (
-    Fill,
-    PbrMaterial,
-    RCurve3D,
-    RDirectionalLight,
-    RGroup,
-    RPointLight,
-    RShape2D,
-    RShape3D,
-    RSpotLight,
-    Stroke,
-    Transform,
-)
+from manimx import PbrMaterial
+from manimx.robjects import Fill, RCurve3D, RDirectionalLight, RGroup, RPointLight, RShape2D, RShape3D, RSpotLight, Stroke, Transform
 
 FULL_HD = {"pixel_width": 1920, "pixel_height": 1080}
 PERSPECTIVE = Camera.look_at((12, -16, 10), (0, 0, 1), field_of_view=math.radians(45), near=0.5, far=200)

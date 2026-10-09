@@ -6,12 +6,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import wgpu
-from manimx.animation.geometry import arc_points
+from manimx.userland.geometry import arc_points
 from manimx.robjects import RShape2D, new_uid
 from manimx.renderer import MotionBlur, RenderConfig, RNodeDataCache, WGPURenderer
 from manimx.renderer.webgpu.gpu import ResourceCache
 
-from manimx import Fill, RGroup
+from manimx.robjects import Fill, RGroup
 
 
 @pytest.fixture(scope="module")

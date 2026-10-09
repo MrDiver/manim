@@ -52,7 +52,7 @@ from enum import Enum
 from typing import Any, Protocol
 
 from .kinds import SignalKind
-from .rate_functions import linear, smooth
+from .rates import linear, smooth
 from .signals import RootSignal
 
 RateFunction = Callable[[float], float]

@@ -83,7 +83,7 @@ uv run manimx remove scene TitleCard     # unregister; asks whether to delete th
 A scene describes what happens in `construct()`:
 
 ```python
-from manimx.animation import DOWN, PI, RIGHT, UP, Circle, FadeIn, FadeOut, Indicate, Scene, Square
+from manimx import DOWN, PI, RIGHT, UP, Circle, FadeIn, FadeOut, Indicate, Scene, Square
 
 
 class TitleCard(Scene):
@@ -108,8 +108,15 @@ The building blocks:
 | Changes | `shift`, `move_to`, `rotate`, `scale_by`, `set_scale`, `set_alpha` |
 | Animations | `x.animate.<changes>` (chain several), `FadeIn`, `FadeOut` (both take `shift=`), `Rotate(x, angle)`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter` |
 | Timing | `self.play(..., run_time=2, rate=..., lag_ratio=0.3)`, `self.wait(seconds)` |
-| Rate functions | `from manimx.animation.rate_functions import linear, smooth, there_and_back, ease_in_out_cubic, ...` |
+| Rate functions | `from manimx.userland.rate_functions import linear, smooth, there_and_back, ease_in_out_cubic, ...` |
 | Directions | `UP`, `DOWN`, `LEFT`, `RIGHT`, `IN`, `OUT`, `ORIGIN`, `UL`, `UR`, `DL`, `DR`, and `PI`, `TAU`, `DEGREES` |
+
+Everything above is importable from `manimx`. Behind it are two packages:
+`manimx.animation` is the core (scene nodes, signals, `Scene`, the
+`Animation` contract), and `manimx.userland` is what is built on top of
+it (the shapes, the animations, rate functions, constants, the glTF
+loader). Your own shapes and animations belong to the same layer as
+userland: they use exactly the same public API.
 
 Things that work differently from Manim:
 
@@ -127,7 +134,7 @@ Things that work differently from Manim:
 
   ```python
   import math
-  from manimx.animation import derive
+  from manimx import derive
 
   dot.position.y = derive(lambda t: 0.3 * math.sin(4 * t), self.time.scene_time)
   ```
@@ -141,7 +148,7 @@ again, and every frame can be rendered independently and in parallel.
 
 ```python
 import numpy as np
-from manimx.animation import RIGHT, UP, Dot, Rectangle, Scene, Simulation
+from manimx import RIGHT, UP, Dot, Rectangle, Scene, Simulation
 
 
 class Drop(Scene):

@@ -6,7 +6,8 @@ Render it alone with ``manimx render Outro``, or the whole timeline with
 
 from __future__ import annotations
 
-from manimx.animation import DOWN, PI, UP, Circle, FadeIn, FadeOut, Scene, Square
+from manimx.animation import Scene
+from manimx.userland import DOWN, PI, UP, Circle, FadeIn, FadeOut, Square
 
 
 class Outro(Scene):

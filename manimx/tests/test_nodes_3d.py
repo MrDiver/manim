@@ -7,32 +7,10 @@ import math
 
 import numpy as np
 import pytest
-from manimx.animation import (
-    OUT,
-    RIGHT,
-    UP,
-    Box,
-    Circle,
-    Curve3D,
-    DirectionalLight,
-    FadeIn,
-    Group,
-    Indicate,
-    Light,
-    ParametricCurve3D,
-    ParametricSurface,
-    PointLight,
-    Rotate,
-    Scene,
-    Shape3D,
-    Simulation,
-    Sphere,
-    SpotLight,
-    Torus,
-    derive,
-)
-from manimx.animation.geometry import box_mesh, sphere_mesh, surface_mesh
-from manimx.animation.rate_functions import linear
+from manimx.animation import Curve3D, DirectionalLight, Group, Light, PointLight, Scene, Shape3D, Simulation, SpotLight, derive
+from manimx.userland import OUT, RIGHT, UP, Box, Circle, FadeIn, Indicate, ParametricCurve3D, ParametricSurface, Rotate, Sphere, Torus
+from manimx.userland.geometry import box_mesh, sphere_mesh, surface_mesh
+from manimx.userland.rate_functions import linear
 from manimx.renderer import RenderConfig, WGPURenderer
 from manimx.renderer.scene_graph import flatten_scene
 from manimx.robjects import (

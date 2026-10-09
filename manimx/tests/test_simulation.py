@@ -3,8 +3,9 @@
 import numpy as np
 import pytest
 
-from manimx.animation import RIGHT, UP, Dot, Polyline, Scene, Simulation, Timeline
-from manimx.animation.rate_functions import linear
+from manimx.animation import Scene, Simulation, Timeline
+from manimx.userland import RIGHT, UP, Dot, Polyline
+from manimx.userland.rate_functions import linear
 from naming import by_name
 
 

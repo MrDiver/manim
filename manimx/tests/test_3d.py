@@ -6,16 +6,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 from gltf_fixtures import GlbWriter
-from manimx.animation import Group, Rotate, Scene
-from manimx.animation.geometry import (
-    box_mesh,
-    corner_points,
-    parametric_points,
-    sphere_mesh,
-    torus_mesh,
-)
-from manimx.animation.rate_functions import linear
-from manimx.io import load_gltf
+from manimx.animation import Group, Scene
+from manimx.userland import Rotate
+from manimx.userland.geometry import box_mesh, corner_points, parametric_points, sphere_mesh, torus_mesh
+from manimx.userland.rate_functions import linear
+from manimx.userland import load_gltf
 from manimx.renderer import RenderConfig, RNodeDataCache
 from manimx.renderer.scene_graph import flatten, flatten_scene
 from manimx.renderer.webgpu.mesh_batch import (
@@ -27,20 +22,8 @@ from manimx.renderer.webgpu.mesh_batch import (
 from manimx.renderer.webgpu.vector_batch import FLAG_CAMERA_FACING, VectorBatch
 from manimx.robjects.transform import rotation_towards
 
-from manimx import (
-    MeshData,
-    PbrMaterial,
-    RCurve3D,
-    RDirectionalLight,
-    RGroup,
-    RPointLight,
-    RShape2D,
-    RShape3D,
-    RSpotLight,
-    Stroke,
-    Texture,
-    Transform,
-)
+from manimx import MeshData, PbrMaterial, Texture
+from manimx.robjects import RCurve3D, RDirectionalLight, RGroup, RPointLight, RShape2D, RShape3D, RSpotLight, Stroke, Transform
 
 # --- meshes ---------------------------------------------------------------------
 
@@ -166,7 +149,7 @@ def test_mesh_batch_groups_draws_by_texture_set() -> None:
 
 
 def test_meshes_cannot_be_masks() -> None:
-    from manimx import RClippingGroup
+    from manimx.robjects import RClippingGroup
 
     with pytest.raises(NotImplementedError, match="mask"):
         flatten(RClippingGroup(mask=RShape3D(), content=RShape2D()))

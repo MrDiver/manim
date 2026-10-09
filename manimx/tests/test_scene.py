@@ -6,29 +6,10 @@ import math
 import numpy as np
 import pytest
 
-from manimx import RShape2D
-from manimx.animation import (
-    DOWN,
-    LEFT,
-    ORIGIN,
-    RIGHT,
-    TAU,
-    UP,
-    Circle,
-    Dot,
-    FadeIn,
-    FadeOut,
-    Group,
-    Indicate,
-    Rectangle,
-    RegularPolygon,
-    Rotate,
-    Scene,
-    Square,
-    Triangle,
-    derive,
-)
-from manimx.animation.rate_functions import linear
+from manimx.robjects import RShape2D
+from manimx.animation import Group, Scene, derive
+from manimx.userland import DOWN, LEFT, ORIGIN, RIGHT, TAU, UP, Circle, Dot, FadeIn, FadeOut, Indicate, Rectangle, RegularPolygon, Rotate, Square, Triangle
+from manimx.userland.rate_functions import linear
 from naming import by_name
 
 
@@ -313,7 +294,7 @@ def test_builder_overrides_and_shapes() -> None:
 
 
 def test_grow_from_center_and_shrink_to_center() -> None:
-    from manimx.animation import GrowFromCenter, ShrinkToCenter
+    from manimx.userland import GrowFromCenter, ShrinkToCenter
 
     def construct(scene):
         square = Square(name="square", fill_opacity=1.0)
@@ -331,8 +312,9 @@ def test_grow_from_center_and_shrink_to_center() -> None:
 
 
 def test_clipping_groups_snapshot_to_render_clipping_groups() -> None:
-    from manimx import RClippingGroup
-    from manimx.animation import ClippingGroup, Polyline
+    from manimx.robjects import RClippingGroup
+    from manimx.animation import ClippingGroup
+    from manimx.userland import Polyline
 
     def construct(scene):
         mask = Circle(name="mask", fill_opacity=1.0)
@@ -352,7 +334,8 @@ def test_clipping_groups_snapshot_to_render_clipping_groups() -> None:
 
 
 def test_clipping_group_without_visible_parts_is_skipped() -> None:
-    from manimx.animation import ClippingGroup, GrowFromCenter
+    from manimx.animation import ClippingGroup
+    from manimx.userland import GrowFromCenter
 
     def construct(scene):
         content = Square(name="content")

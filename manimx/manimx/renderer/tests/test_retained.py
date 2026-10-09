@@ -4,18 +4,14 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from manimx.animation.geometry import (
-    arc_points,
-    rectangle_points,
-    regular_polygon_points,
-)
+from manimx.userland.geometry import arc_points, rectangle_points, regular_polygon_points
 from manimx.robjects import new_uid
 from manimx.renderer import RenderConfig, WGPURenderer
 from manimx.renderer.cache import RNodeDataCache
 from manimx.renderer.scene_graph import flatten_scene
 from manimx.renderer.webgpu.retained import RetainedVectors
 
-from manimx import Fill, RClippingGroup, RGroup, RShape2D, Stroke, Transform
+from manimx.robjects import Fill, RClippingGroup, RGroup, RShape2D, Stroke, Transform
 
 CONFIG = RenderConfig(pixel_width=160, pixel_height=90)
 

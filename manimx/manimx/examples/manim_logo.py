@@ -29,7 +29,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ..animation import Circle, Group, Shape2D, Square, Triangle
+from ..animation import Group, Shape2D
+from ..userland import Circle, Square, Triangle
 from ..renderer.config import RenderConfig
 from ..renderer.scene_graph import bounding_box
 

@@ -4,8 +4,9 @@
 import numpy as np
 import pytest
 
-from manimx.animation import RIGHT, Dot, InvalidCue, MonotoneMap, Ramp, Scene, Timeline, UnresolvedEvents
-from manimx.animation.rate_functions import linear
+from manimx.animation import InvalidCue, MonotoneMap, Ramp, Scene, Timeline, UnresolvedEvents
+from manimx.userland import RIGHT, Dot
+from manimx.userland.rate_functions import linear
 from naming import by_name, timeline_roots
 
 

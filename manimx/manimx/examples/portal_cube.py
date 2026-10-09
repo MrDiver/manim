@@ -26,24 +26,9 @@ import math
 
 import numpy as np
 
-from ..animation import (
-    Box,
-    Circle,
-    ClippingGroup,
-    DirectionalLight,
-    Group,
-    Node,
-    ParametricCurve3D,
-    PointLight,
-    Polyline,
-    RegularPolygon,
-    Shape2D,
-    Sphere,
-    SpotLight,
-    Square,
-    Torus,
-)
-from ..animation.geometry import corner_points
+from ..animation import ClippingGroup, DirectionalLight, Group, Node, PointLight, Shape2D, SpotLight
+from ..userland import Box, Circle, ParametricCurve3D, Polyline, RegularPolygon, Sphere, Square, Torus
+from ..userland.geometry import corner_points
 from ..renderer.config import Camera, RenderConfig
 from ..robjects import CapStyle, JointType, PbrMaterial
 from ..utils.color import BLUE, GREEN, ORANGE, PURPLE, RED, WHITE, YELLOW

@@ -2,30 +2,17 @@
 
 __version__ = "0.1.0"
 
-from .robjects import (
-    CapStyle,
-    RClippingGroup,
-    RCurve3D,
-    RDirectionalLight,
-    Fill,
-    RGroup,
-    JointType,
-    RLight,
-    MeshData,
-    PbrMaterial,
-    RPointLight,
-    Quaternion,
-    RNode,
-    RShape2D,
-    RShape3D,
-    RSpotLight,
-    Stroke,
-    Texture,
-    Transform,
-    quaternion_from_axis_angle,
-)
+# What scene code is written with: the core scene side, userland, and the
+# value types nodes take (materials, textures, meshes, stroke styles). Render
+# classes (RShape2D, ...) are snapshots, not authoring API: they stay in
+# manimx.robjects.
+from .animation import *  # noqa: F403
+from .animation import __all__ as _animation_all
 from .renderer import RenderConfig, Renderer, WGPURenderer
+from .robjects import CapStyle, JointType, MeshData, PbrMaterial, Texture
 from .testing import assert_snapshot, visual_test
+from .userland import *  # noqa: F403
+from .userland import __all__ as _userland_all
 
 
 def package_name() -> str:
@@ -33,31 +20,18 @@ def package_name() -> str:
 
 
 __all__ = [
+    *_animation_all,
+    *_userland_all,
     "CapStyle",
-    "RClippingGroup",
-    "RCurve3D",
-    "RDirectionalLight",
-    "Fill",
-    "RGroup",
     "JointType",
-    "RLight",
     "MeshData",
     "PbrMaterial",
-    "RPointLight",
-    "Quaternion",
     "RenderConfig",
-    "RNode",
     "Renderer",
-    "RShape2D",
-    "RShape3D",
-    "RSpotLight",
-    "Stroke",
     "Texture",
-    "Transform",
     "WGPURenderer",
+    "__version__",
     "assert_snapshot",
     "package_name",
-    "quaternion_from_axis_angle",
     "visual_test",
-    "__version__",
 ]

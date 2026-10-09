@@ -19,21 +19,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..animation import (
-    DOWN,
-    LEFT,
-    RIGHT,
-    UP,
-    Circle,
-    Dot,
-    FadeIn,
-    FadeOut,
-    Rectangle,
-    Scene,
-    Simulation,
-)
+from ..animation import Scene, Simulation
+from ..userland import DOWN, LEFT, RIGHT, UP, Circle, Dot, FadeIn, FadeOut, Rectangle
 from ..animation.audio import DEFAULT_SAMPLE_RATE
-from ..animation.rate_functions import there_and_back
+from ..userland.rate_functions import there_and_back
 
 GRAVITY = 9.81
 FLOOR = -3.0

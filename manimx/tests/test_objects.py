@@ -2,30 +2,13 @@ import math
 
 import numpy as np
 import pytest
-from manimx.animation.geometry import (
-    arc_points,
-    corner_points,
-    rectangle_points,
-    regular_polygon_points,
-)
+from manimx.userland.geometry import arc_points, corner_points, rectangle_points, regular_polygon_points
 from manimx.robjects.rshape2d import is_closed
 from manimx.robjects.style import resample, to_rgb_array
 from manimx.utils.color import BLUE, RED
 
-from manimx import (
-    CapStyle,
-    Fill,
-    JointType,
-    Quaternion,
-    RClippingGroup,
-    RGroup,
-    RNode,
-    RShape2D,
-    RShape3D,
-    Stroke,
-    Transform,
-    quaternion_from_axis_angle,
-)
+from manimx import CapStyle, JointType
+from manimx.robjects import Fill, Quaternion, RClippingGroup, RGroup, RNode, RShape2D, RShape3D, Stroke, Transform, quaternion_from_axis_angle
 
 # --- RNode: identity and versioning ------------------------------------
 
@@ -194,7 +177,7 @@ def test_geometry_matches_manim() -> None:
 
 def test_shape3d_versions_mesh_and_material() -> None:
     from manimx import PbrMaterial
-    from manimx.animation.geometry import sphere_mesh
+    from manimx.userland.geometry import sphere_mesh
 
     shape = RShape3D()
     before = shape.version("mesh", "material")

@@ -1,4 +1,4 @@
-"""Shape3D: a lit triangle mesh, and the solids built on it.
+"""Shape3D: a lit triangle mesh.
 
 A :class:`Shape3D` snapshots to an :class:`~manimx.robjects.RShape3D`.
 Every field of the render counterpart is a signal; the material's fields
@@ -34,8 +34,7 @@ hitting while the shape moves, turns, scales or changes its material.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Iterable, Iterator
-from typing import Any
+from collections.abc import Iterable, Iterator
 
 import numpy as np
 
@@ -47,7 +46,6 @@ from ..robjects import (
     Texture,
 )
 from ..utils.color import ParsableManimColor
-from .geometry import box_mesh, sphere_mesh, surface_mesh, torus_mesh
 from .kinds import COLOR, DISCRETE, SCALAR, SignalKind
 from .node import (
     ABS,
@@ -93,7 +91,7 @@ class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
         def signal(field: str, value: object, kind: SignalKind) -> RootSignal:
             return RootSignal(value, kind, name=f"{prefix}.{field}")
 
-        self.mesh = signal("mesh", mesh if mesh is not None else box_mesh(), DISCRETE)
+        self.mesh = signal("mesh", mesh if mesh is not None else _no_mesh(), DISCRETE)
         self.base_color = signal("base_color", _rgb(base.base_color if color is None else color), COLOR)
         self.opacity = signal("opacity", base.opacity if opacity is None else opacity, SCALAR)
         self.metallic = signal("metallic", base.metallic if metallic is None else metallic, SCALAR)
@@ -222,54 +220,13 @@ class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
         )
 
 
-class Box(Shape3D):
-    """An axis-aligned box centered at the origin."""
-
-    def __init__(self, width: float = 2.0, height: float = 2.0, depth: float = 2.0, name: str | None = None, **style: Any) -> None:
-        super().__init__(box_mesh(width, height, depth), name, **style)
-
-
-class Sphere(Shape3D):
-    """A UV sphere around the z axis."""
-
-    def __init__(self, radius: float = 1.0, segments: int = 48, rings: int = 24, name: str | None = None, **style: Any) -> None:
-        super().__init__(sphere_mesh(radius, segments, rings), name, **style)
-
-
-class Torus(Shape3D):
-    """A torus around the z axis."""
-
-    def __init__(
-        self,
-        major_radius: float = 1.0,
-        minor_radius: float = 0.35,
-        segments: int = 64,
-        sides: int = 32,
-        name: str | None = None,
-        **style: Any,
-    ) -> None:
-        super().__init__(torus_mesh(major_radius, minor_radius, segments, sides), name, **style)
-
-
-class ParametricSurface(Shape3D):
-    """The surface through ``function(u, v)`` (a 3D point), sampled on a
-    grid of ``resolution`` cells (see geometry.surface_mesh). Surfaces
-    of the same resolution have corresponding vertices."""
-
-    def __init__(
-        self,
-        function: Callable[[float, float], Any],
-        u_range: tuple[float, float] = (0.0, 1.0),
-        v_range: tuple[float, float] = (0.0, 1.0),
-        resolution: tuple[int, int] = (32, 32),
-        name: str | None = None,
-        **style: Any,
-    ) -> None:
-        super().__init__(surface_mesh(function, u_range, v_range, resolution), name, **style)
+def _no_mesh() -> MeshData:
+    """An empty mesh: nothing to draw until one is set."""
+    return MeshData(np.zeros((0, 3)), np.zeros(0, dtype=np.uint32))
 
 
 def _unit(value: float) -> float:
     return min(1.0, max(0.0, float(value)))
 
 
-__all__ = ["Box", "ParametricSurface", "Shape3D", "Sphere", "Torus"]
+__all__ = ["Shape3D"]

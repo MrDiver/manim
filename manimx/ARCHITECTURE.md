@@ -72,10 +72,10 @@ flowchart LR
 | Package | Contents | Depends on |
 |---|---|---|
 | `manimx.robjects` | `RNode` and its subclasses `RGroup`, `RClippingGroup`, `RBezierPath` (→ `RShape2D`, `RCurve3D`), `RShape3D`, `RLight` (→ `RDirectionalLight`, `RPointLight`, `RSpotLight`); `Transform`, `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`; `new_uid()`, `versioned()` | numpy |
-| `manimx.animation` | `animation.geometry`: every point and mesh generator (`arc_points()`, `corner_points()`, `parametric_points()`, `rectangle_points()`, `regular_polygon_points()`, `box_mesh()`, `sphere_mesh()`, `torus_mesh()`, `surface_mesh()`); `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses (`Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D`, `Light` → `DirectionalLight`, `PointLight`, `SpotLight`; `animation.Camera`), `PositionMixin`, `RotationMixin`, `ScalableMixin`; `Animation` and its subclasses; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound` | robjects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
+| `manimx.animation` (core) | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses (`Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D`, `Light` → `DirectionalLight`, `PointLight`, `SpotLight`; `animation.Camera`), `PositionMixin`, `RotationMixin`, `ScalableMixin`; the `Animation` contract (`Animation`, `SetValue`, `ChangeSignals`/`AnimationBuilder`) and the default rates `linear`, `smooth`; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound` | robjects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
+| `manimx.userland` | everything a project could write on top of the core: shapes (`Circle`, `Dot`, `Square`, `Rectangle`, `RegularPolygon`, `Triangle`, `Polyline`, `ParametricCurve3D`, `Box`, `Sphere`, `Torus`, `ParametricSurface`), animations (`FadeIn`, `FadeOut`, `Rotate`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter`), `rate_functions`, `constants` (`UP`, `PI`, ...), `geometry` (every point and mesh generator), `load_gltf()` | animation, robjects |
 | `manimx.renderer` | `flatten_scene()` → `FlatScene`; `tessellate_fill()`; `RNodeDataCache`; `RenderConfig`, `renderer.Camera`, `ViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `RemoveObjects`, `ClearScene` | robjects |
 | `manimx.renderer.webgpu` | `WGPURenderer`, `FrameComposer`, `RetainedVectors`, `VectorBatch`, `MeshBatch`, `VectorPass`, `MeshPass`, `LightingPass`, `ShadowPass`, `RenderTargets`, `RenderLayers`, `ResourceCache`, `GPUContext` | wgpu |
-| `manimx.io` | `load_gltf()`: a glTF file as a tree of `Group` and `Shape3D` nodes | animation, robjects |
 | `manimx.drivers` | `render()`, `FramePipeline`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation |
 | `manimx.project` | `Project`, `OutputSettings`, `CameraSettings`, `PerformanceSettings`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers |
 | `manimx.cli` | the Typer `app` (`manimx` command), `scaffold`, `ui` | project, drivers |
@@ -270,7 +270,9 @@ classDiagram
 ```
 
 `Group`, `ClippingGroup`, `Camera` and the lights in this diagram are the
-`manimx.animation` classes. The mixins are left out of the diagram: every
+`manimx.animation` classes. `Circle`, `Square`, `Polyline`, `Sphere`, `Box`,
+`ParametricSurface` and `FadeIn` are userland (`manimx.userland`), built on
+the core classes they derive from. The mixins are left out of the diagram: every
 `Node` subclass takes all three, except `Camera` (position and rotation),
 `DirectionalLight` (rotation), `PointLight` (position) and `SpotLight`
 (position and rotation).
@@ -661,7 +663,7 @@ flowchart LR
 | Instance | Created by | Owned by | Lives until | Changes? |
 |---|---|---|---|---|
 | `Node` and its signals | `Scene.construct()` | the `PreparedScene` (`roots`, `tracks`) | the `PreparedScene` | signal values on every evaluation |
-| `MeshData`, `PbrMaterial`, `Texture` | user code, the mesh generators of `animation.geometry` (`box_mesh()`, `surface_mesh()`, ...), `load_gltf()` | shared: a `Shape3D`'s `mesh` signal and constant material, and the `RShape3D` snapshots | as long as anything references them | no (immutable) |
+| `MeshData`, `PbrMaterial`, `Texture` | user code, the mesh generators of `userland.geometry` (`box_mesh()`, `surface_mesh()`, ...), `load_gltf()` | shared: a `Shape3D`'s `mesh` signal and constant material, and the `RShape3D` snapshots | as long as anything references them | no (immutable) |
 | `SceneCompiler` | `Scene.prepare()` | a ContextVar while `construct()` runs | the end of `prepare()` | yes |
 | `PreparedScene` | `Scene.prepare()` (kept in `Scene._prepared`) | one `Clip` | the `Timeline` | only through evaluation |
 | `SignalTrack`, `Placement`, `Entry` | `Scene.play()`, `authoring.change()` | the `PreparedScene` | the `PreparedScene` | `SignalTrack.refresh()` after edits |
@@ -804,8 +806,17 @@ flowchart LR
   prefix on every render tree class, and every tree class in a module
   named after it (`rshape2d.py`, `shape2d.py`). Value types (`Transform`,
   `Fill`, `MeshData`, ...) carry no prefix.
+- Core and userland: everything a project could have written itself on
+  top of the public API is userland (`manimx.userland`: shapes, the
+  built-in animations, rate functions, constants, geometry generators,
+  the glTF loader); everything that would need a change of the animation
+  system or the rendering logic is core (`manimx.animation`,
+  `manimx.robjects`, `manimx.renderer`). The core never imports
+  userland. `manimx` itself exports the authoring API: core scene
+  classes, userland and the value types nodes take; render classes stay
+  in `manimx.robjects`.
 - Everything that generates geometry (points of paths, meshes of solids)
-  lives in `animation.geometry`; the render side has no constructors that
+  lives in `userland.geometry`; the render side has no constructors that
   generate shapes or aim lights. Examples and scenes use the shape classes
   (`Circle`, `Square`, `Polyline`, `Box`, `Sphere`, ...) and the node
   methods (`move_to`, `rotate`, `set_scale`), never render objects.

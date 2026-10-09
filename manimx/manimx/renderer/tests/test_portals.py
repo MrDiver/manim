@@ -4,7 +4,7 @@ import math
 
 import numpy as np
 import pytest
-from manimx.animation.geometry import box_mesh, rectangle_points
+from manimx.userland.geometry import box_mesh, rectangle_points
 from manimx.renderer import RenderConfig, RNodeDataCache, WGPURenderer
 from manimx.renderer.scene_graph import NO_CLIP, flatten_scene
 from manimx.renderer.webgpu.mesh_batch import MeshBatch
@@ -14,16 +14,8 @@ from manimx.robjects import RShape2D
 from manimx.robjects.transform import rotation_towards
 from manimx.utils.color import RED
 
-from manimx import (
-    Fill,
-    PbrMaterial,
-    RClippingGroup,
-    RDirectionalLight,
-    RGroup,
-    RShape3D,
-    Stroke,
-    Transform,
-)
+from manimx import PbrMaterial
+from manimx.robjects import Fill, RClippingGroup, RDirectionalLight, RGroup, RShape3D, Stroke, Transform
 
 
 def _portal(world: RGroup, flip: bool = False, **options: object) -> RClippingGroup:

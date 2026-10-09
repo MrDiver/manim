@@ -13,22 +13,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..animation import (
-    DOWN,
-    LEFT,
-    PI,
-    RIGHT,
-    UP,
-    Circle,
-    FadeIn,
-    Group,
-    Indicate,
-    Scene,
-    Shape2D,
-    Square,
-    Triangle,
-)
-from ..animation.rate_functions import smooth
+from ..animation import Group, Scene, Shape2D
+from ..userland import DOWN, LEFT, PI, RIGHT, UP, Circle, FadeIn, Indicate, Square, Triangle
+from ..userland.rate_functions import smooth
 from ..renderer.config import RenderConfig
 from .manim_logo import (
     BACKGROUND,
