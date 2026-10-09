@@ -17,7 +17,7 @@ scenes, use one camera per scene and switch views.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -66,8 +66,9 @@ class Camera(PositionMixin, RotationMixin, Node):
         field_of_view: float | None = None,
         near: float = 0.1,
         far: float = 100.0,
+        tags: Iterable[str] = (),
     ) -> None:
-        super().__init__(name)
+        super().__init__(name, tags=tags)
         self.position.set(_vector(position))
         self.frame_height = RootSignal(frame_height, FACTOR, name=f"{self.name}.frame_height")
         self.field_of_view = RootSignal(field_of_view or np.pi / 4, SCALAR, name=f"{self.name}.field_of_view")

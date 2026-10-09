@@ -8,8 +8,10 @@ from manimx.animation import (
     UP,
     Camera,
     Circle,
+    ClippingGroup,
     FadeIn,
     FadeOut,
+    Group,
     GrowFromCenter,
     Indicate,
     Node,
@@ -89,3 +91,48 @@ def test_animations_name_the_part_they_need() -> None:
 def test_a_plain_node_has_no_snapshot() -> None:
     with pytest.raises(NotImplementedError):
         Node().snapshot()
+
+
+# --- names and tags ---------------------------------------------------------------
+
+
+def model() -> Group:
+    wheels = [Circle(name=f"wheel-{i}", tags={"wheel", "rubber"}) for i in range(2)]
+    body = Square(name="body", tags="metal")
+    window = ClippingGroup(Square(name="frame"), Circle(name="glass", tags=["glass"]), name="window")
+    return Group(body, Group(*wheels, name="axle", tags=["wheel"]), window, Circle(name="body"), name="car")
+
+
+def test_nodes_have_names_and_tags() -> None:
+    assert Square(name="s", tags=["a", "b"]).tags == frozenset({"a", "b"})
+    assert Square(tags="metal").tags == frozenset({"metal"})  # one tag, not its letters
+    assert Camera(name="cam", tags={"main"}).tags == frozenset({"main"})
+    assert Square().name.startswith("square-") and Square().tags == frozenset()
+    with pytest.raises(TypeError, match="tags must be strings"):
+        Square(tags=[1])
+
+
+def test_find_returns_the_one_node_with_a_name() -> None:
+    car = model()
+    assert car.find("wheel-1").name == "wheel-1"
+    assert car.find("glass") is car.find("window").content  # through clipping groups
+    assert car.find("window").find("frame") is car.find("window").mask
+    with pytest.raises(LookupError, match=r"Group 'car' has no node named 'wheel-3'; did you mean 'wheel-1', 'wheel-0'\?"):
+        car.find("wheel-3")
+    with pytest.raises(LookupError, match=r"Group 'car' has no node named 'zzz'$"):
+        car.find("zzz")
+    with pytest.raises(LookupError, match=r"has 2 nodes named 'body'; use find_all"):
+        car.find("body")
+    with pytest.raises(LookupError, match="no node named 'car'"):  # the group itself is not searched
+        car.find("car")
+
+
+def test_find_all_matches_names_and_all_tags_in_tree_order() -> None:
+    car = model()
+    assert [n.name for n in car.find_all(tags="wheel")] == ["axle", "wheel-0", "wheel-1"]
+    assert [n.name for n in car.find_all(tags=["wheel", "rubber"])] == ["wheel-0", "wheel-1"]
+    assert [n.name for n in car.find_all(name="body")] == ["body", "body"]
+    assert car.find_all(name="body", tags="metal") == [car.find_all(name="body")[0]]
+    assert car.find_all(tags="nothing") == []
+    assert len(car.find_all()) == 8  # every node below the group
+    assert [n.name for n in car.find("window").find_all(tags="glass")] == ["glass"]

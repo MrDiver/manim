@@ -154,6 +154,7 @@ classDiagram
     class Node {
         uid
         name
+        tags
         alpha: RootSignal
         present: RootSignal
         snapshot() RNode
@@ -177,9 +178,11 @@ classDiagram
     }
     class Group {
         children
+        find(name), find_all(name, tags)
     }
     class ClippingGroup {
         mask, content
+        find(name), find_all(name, tags)
     }
     class Camera {
         frame_height
@@ -250,6 +253,12 @@ classDiagram
   rotation. A missing part is the identity in the snapshot's `Transform`.
   Using a missing part raises an error that names the mixin, for example
   `Indicate(camera)` or `camera.scale_by(2)`.
+- **Names and tags are for authoring only.** `Node.name` (meant to be
+  unique, not checked) and `Node.tags` (a set of strings) work like an
+  HTML id and classes: `group.find(name)` returns the one match below the
+  group or raises a `LookupError` with close names, and
+  `group.find_all(name=, tags=)` returns every match in tree order. Neither
+  crosses to the render side; snapshots carry only the `uid`.
 
 - **An `Animation` references its `Node`s** and never copies them.
   `Animation.targets()` names the `RootSignal`s it changes, each with a

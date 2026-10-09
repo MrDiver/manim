@@ -8,7 +8,7 @@ them in a :class:`~manimx.animation.Group` together.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
 import numpy as np
@@ -49,8 +49,9 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         stroke_color: ParsableManimColor | None = None,
         stroke_width: float = 4.0,
         stroke_opacity: float = 1.0,
+        tags: Iterable[str] = (),
     ) -> None:
-        super().__init__(name)
+        super().__init__(name, tags=tags)
         prefix = self.name
         self.points = RootSignal(np.zeros((0, 2)) if len(points) == 0 else points, PATH, name=f"{prefix}.points")
         self.fill_color = RootSignal(_rgb(fill_color or color), COLOR, name=f"{prefix}.fill_color")

@@ -27,8 +27,9 @@ into an animation. Both paths share one definition.
 
 from __future__ import annotations
 
+import difflib
 import functools
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Any
 
 import numpy as np
@@ -63,8 +64,15 @@ def animatable(changes: Callable[..., ChangeList]) -> Callable[..., Any]:
 
 
 class Node:
-    """Something in a scene: identity, an opacity multiplier and presence.
+    """Something in a scene: identity, names, an opacity multiplier and
+    presence.
 
+    * ``uid``: the identity its snapshots carry (render objects have no
+      names; see the render contract).
+    * ``name`` and ``tags``: for finding nodes while composing a scene
+      (``group.find(name)``, ``group.find_all(tags=...)``), like an HTML
+      id and classes. A name is meant to identify one node but is not
+      checked for uniqueness: imported models often repeat names.
     * ``alpha``: an opacity multiplier for fades; it multiplies the
       opacity of the whole subtree.
     * ``present``: whether the node is in the scene; managed by the
@@ -74,9 +82,10 @@ class Node:
     docs).
     """
 
-    def __init__(self, name: str | None = None) -> None:
+    def __init__(self, name: str | None = None, *, tags: Iterable[str] = ()) -> None:
         self.uid = new_uid()
         self.name = name or f"{type(self).__name__.lower()}-{self.uid}"
+        self.tags = _tag_set(tags)
         self.alpha = RootSignal(1.0, SCALAR, name=f"{self.name}.alpha")
         self.present = RootSignal(False, DISCRETE, name=f"{self.name}.present")
 
@@ -241,6 +250,42 @@ def require(node: Node, mixin: type, action: str) -> None:
     if not isinstance(node, mixin):
         part = mixin._part  # type: ignore[attr-defined]
         raise TypeError(f"{action} needs a {part}, but {type(node).__name__} {node.name!r} has none ({mixin.__name__} provides it)")
+
+
+def find(root: Node, name: str) -> Node:
+    """The one node named ``name`` below ``root`` (see Group.find)."""
+    matches = [node for node in _below(root) if node.name == name]
+    if len(matches) == 1:
+        return matches[0]
+    where = f"{type(root).__name__} {root.name!r}"
+    if matches:
+        raise LookupError(f"{where} has {len(matches)} nodes named {name!r}; use find_all(name=...) to get all of them")
+    close = difflib.get_close_matches(name, sorted({node.name for node in _below(root)}), n=3)
+    hint = f"; did you mean {', '.join(repr(c) for c in close)}?" if close else ""
+    raise LookupError(f"{where} has no node named {name!r}{hint}")
+
+
+def find_all(root: Node, name: str | None = None, tags: Iterable[str] = ()) -> list[Node]:
+    """Every node below ``root`` named ``name`` (if given) that has all of
+    ``tags``, in tree order (see Group.find_all)."""
+    wanted = _tag_set(tags)
+    return [node for node in _below(root) if (name is None or node.name == name) and wanted <= node.tags]
+
+
+def _below(root: Node) -> Iterator[Node]:
+    """``root``'s family without ``root`` itself."""
+    family = root.family()
+    next(family)
+    return family
+
+
+def _tag_set(tags: Iterable[str]) -> frozenset[str]:
+    """Tags as a set; a single string is one tag, not its characters."""
+    values = (tags,) if isinstance(tags, str) else tuple(tags)
+    for tag in values:
+        if not isinstance(tag, str):
+            raise TypeError(f"tags must be strings, got {tag!r}")
+    return frozenset(values)
 
 
 def _rgb(color: ParsableManimColor) -> tuple[float, float, float]:

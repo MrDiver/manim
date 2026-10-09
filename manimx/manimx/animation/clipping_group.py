@@ -3,10 +3,10 @@ RClippingGroup."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 
 from ..objects import RClippingGroup, RNode
-from .node import Node, PositionMixin, RotationMixin, ScalableMixin
+from .node import Node, PositionMixin, RotationMixin, ScalableMixin, find, find_all
 from .signals import Signal
 
 
@@ -16,11 +16,21 @@ class ClippingGroup(PositionMixin, RotationMixin, ScalableMixin, Node):
     content). The mask itself is never drawn. Transform and alpha apply to
     both, so scaling the group scales the mask with its content."""
 
-    def __init__(self, mask: Node, content: Node, name: str | None = None, one_sided: bool = False) -> None:
-        super().__init__(name)
+    def __init__(
+        self, mask: Node, content: Node, name: str | None = None, one_sided: bool = False, tags: Iterable[str] = ()
+    ) -> None:
+        super().__init__(name, tags=tags)
         self.mask = mask
         self.content = content
         self.one_sided = one_sided
+
+    def find(self, name: str) -> Node:
+        """The one node named ``name`` in the mask or content (see Group.find)."""
+        return find(self, name)
+
+    def find_all(self, name: str | None = None, tags: Iterable[str] = ()) -> list[Node]:
+        """Every matching node in the mask or content (see Group.find_all)."""
+        return find_all(self, name, tags)
 
     def family(self) -> Iterator[Node]:
         yield self
