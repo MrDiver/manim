@@ -107,7 +107,7 @@ The building blocks:
 | Style | `color=`, `fill_color=`, `fill_opacity=`, `stroke_color=`, `stroke_width=`, `stroke_opacity=`, `stroke_joint=`, `stroke_cap=`, or `set_fill`, `set_stroke`, `set_color`. Colors, opacities and widths take one value or a list: `fill_color=[RED, BLUE]` is a gradient, `stroke_width=[2, 8, 2]` tapers |
 | Changes | `shift`, `move_to`, `rotate`, `scale_by`, `set_scale`, `set_alpha` |
 | Animations | `x.animate.<changes>` (chain several), `FadeIn`, `FadeOut` (both take `shift=`), `Rotate(x, angle)`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter` |
-| Timing | `self.play(..., run_time=2, rate=..., lag_ratio=0.3)`, `self.wait(seconds)` |
+| Timing | `self.play(..., run_time=2, rate=..., lag_ratio=0.3)`, `self.wait(seconds)`, `self.wait_until(scene_time)` (e.g. the next section starts on a beat) |
 | Rate functions | `from manimx.userland.rate_functions import linear, smooth, there_and_back, ease_in_out_cubic, ...` |
 | Directions | `UP`, `DOWN`, `LEFT`, `RIGHT`, `IN`, `OUT`, `ORIGIN`, `UL`, `UR`, `DL`, `DR`, and `PI`, `TAU`, `DEGREES` |
 

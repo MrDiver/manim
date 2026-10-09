@@ -169,6 +169,12 @@ class Scene:
         """Let ``duration`` seconds pass."""
         self._authoring().wait(duration)
 
+    def wait_until(self, t: float) -> None:
+        """Let time pass until ``scene_time`` is ``t``: the next animation
+        starts exactly then, however long the ones before it took (e.g. on
+        a beat of the music). Raises if the scene is already past ``t``."""
+        self._authoring().wait_until(t)
+
     def wait_for(self, event: str) -> None:
         """End the current segment: hold until ``event`` fires, then go on."""
         self._authoring().wait_for(event)
@@ -203,7 +209,7 @@ class Scene:
 
     def _authoring(self) -> SceneCompiler:
         if self._compiler is None:
-            raise RuntimeError("add, remove, play, wait, wait_for and emit can only be used inside construct()")
+            raise RuntimeError("add, remove, play, wait, wait_until, wait_for and emit can only be used inside construct()")
         return self._compiler
 
 
@@ -298,6 +304,17 @@ class SceneCompiler:
         if duration < 0:
             raise ValueError("cannot wait a negative time")
         self.cursor += duration
+
+    def scene_time(self) -> float:
+        """``scene_time`` at the cursor: the closed segments plus the time
+        since the current one started (holds at events do not count)."""
+        return sum(segment.duration for segment in self.segments) + self.cursor - self.segment_start
+
+    def wait_until(self, t: float) -> None:
+        now = self.scene_time()
+        if t < now - 1e-9:
+            raise ValueError(f"cannot wait until scene time {t:g} s: the scene is already at {now:g} s")
+        self.cursor += max(t - now, 0.0)
 
     def wait_for(self, event: str) -> None:
         self._close_segment()

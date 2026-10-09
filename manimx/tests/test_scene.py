@@ -47,6 +47,49 @@ def test_play_places_animations_and_moves_the_cursor() -> None:
     assert position(prepared, 3.5, "square") == (2.0, 0.5, 0.0)
 
 
+def test_wait_until_starts_the_next_animation_at_a_scene_time() -> None:
+    def construct(scene):
+        square = Square(name="square")
+        scene.add(square)
+        scene.play(square.animate.shift(RIGHT), run_time=0.7, rate=linear)
+        scene.wait_until(2.0)  # from 0.7 s, whatever came before
+        scene.play(square.animate.shift(UP), rate=linear)
+        scene.wait_until(3.0)  # already there: no time passes
+
+    prepared = prepare(construct)
+
+    assert prepared.duration == 3.0
+    assert position(prepared, 1.5, "square") == (1.0, 0.0, 0.0)
+    assert position(prepared, 2.5, "square") == (1.0, 0.5, 0.0)
+
+
+def test_wait_until_counts_scene_time_across_holds() -> None:
+    def construct(scene):
+        square = Square(name="square")
+        scene.add(square)
+        scene.wait(1.0)
+        scene.wait_for("go")  # a hold: scene time stands still, compiled time jumps
+        scene.wait_until(1.5)
+        scene.play(square.animate.shift(RIGHT), rate=linear)
+
+    prepared = prepare(construct)
+
+    start = prepared.segments[1].offset  # compiled time of scene time 1.0
+    assert prepared.playing_time == 2.5
+    assert position(prepared, start + 0.5, "square") == (0.0, 0.0, 0.0)
+    assert position(prepared, start + 1.0, "square") == (0.5, 0.0, 0.0)
+
+
+def test_wait_until_a_past_time_is_an_error() -> None:
+    def construct(scene):
+        scene.add(Square(name="square"))
+        scene.wait(2.0)
+        scene.wait_until(1.0)
+
+    with pytest.raises(ValueError, match="already at 2 s"):
+        prepare(construct)
+
+
 def test_axes_animate_independently_and_absolute_overrides() -> None:
     def construct(scene):
         dot = Dot(name="dot")
