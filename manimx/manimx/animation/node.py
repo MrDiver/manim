@@ -202,8 +202,22 @@ class PositionMixin:
         derived signal per axis; the replacement for updaters)."""
         require(other, PositionMixin, f"{type(self).__name__}.follow()")
         for name, axis, delta in zip("xyz", other.position.axes, _vector(offset)):  # type: ignore[attr-defined]
-            setattr(self.position, name, derive(lambda v, d=float(delta): v + d, axis, name=f"{self.name}.position.{name}"))  # type: ignore[attr-defined]
+            setattr(self.position, name, derive(Offset(float(delta)), axis, name=f"{self.name}.position.{name}"))  # type: ignore[attr-defined]
         return self
+
+
+class Offset:
+    """``value + offset``: the function of a :meth:`PositionMixin.follow`
+    axis. A class instead of a lambda, so the core (manimx._core)
+    recognizes it and adds the offset without calling Python."""
+
+    __slots__ = ("offset",)
+
+    def __init__(self, offset: float) -> None:
+        self.offset = offset
+
+    def __call__(self, value: float) -> float:
+        return value + self.offset
 
 
 class RotationMixin:

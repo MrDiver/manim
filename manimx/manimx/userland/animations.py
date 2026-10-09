@@ -16,6 +16,7 @@ import quaternion
 
 from ..animation import Animation, Change, Node, PositionMixin, RootSignal, RotationMixin, ScalableMixin, Target
 from ..animation.authoring import current as authoring_current
+from ..animation.contributions import Contribution, Power, Ramp, Turn
 from ..animation.node import require
 from ..animation.rates import smooth
 from ..animation.signal_tracks import RateFunction
@@ -48,6 +49,11 @@ class FadeIn(Animation):
         offset = self.shift[self.node.position.axes.index(signal)]
         return -offset * (1.0 - alpha)  # arrive at the authored position
 
+    def planned_contribution(self, signal: RootSignal) -> Contribution:
+        if signal is self.node.alpha:
+            return Ramp(1.0)
+        return Ramp(float(-self.shift[self.node.position.axes.index(signal)]), remaining=True)
+
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
 
@@ -75,6 +81,11 @@ class FadeOut(Animation):
         if signal is self.node.alpha:
             return 1.0 - alpha
         return self.shift[self.node.position.axes.index(signal)] * alpha
+
+    def planned_contribution(self, signal: RootSignal) -> Contribution:
+        if signal is self.node.alpha:
+            return Ramp(1.0, remaining=True)
+        return Ramp(float(self.shift[self.node.position.axes.index(signal)]))
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
@@ -104,6 +115,10 @@ class Rotate(Animation):
     def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> quaternion.quaternion:
         return quaternion_from_axis_angle(self.axis, self.angle * alpha)
 
+    def planned_contribution(self, signal: RootSignal) -> Contribution:
+        x, y, z = (float(c) for c in self.axis)
+        return Turn((x, y, z), float(self.angle))
+
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
 
@@ -126,6 +141,9 @@ class Indicate(Animation):
 
     def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
         return float(self.scale_factor**alpha)
+
+    def planned_contribution(self, signal: RootSignal) -> Contribution:
+        return Power(float(self.scale_factor))
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
@@ -150,6 +168,9 @@ class GrowFromCenter(Animation):
     def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
         return self._target[self.node.scale.axes.index(signal)] * alpha
 
+    def planned_contribution(self, signal: RootSignal) -> Contribution:
+        return Ramp(float(self._target[self.node.scale.axes.index(signal)]))
+
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
 
@@ -170,6 +191,9 @@ class ShrinkToCenter(Animation):
 
     def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
         return start_value * (1.0 - alpha)
+
+    def planned_contribution(self, signal: RootSignal) -> Contribution:
+        return Ramp(None, remaining=True)
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)

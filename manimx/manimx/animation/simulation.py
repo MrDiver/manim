@@ -57,6 +57,7 @@ import numpy as np
 from .animations import Animation, Target
 from .audio import DEFAULT_SAMPLE_RATE, Sound
 from .authoring import _active
+from .contributions import Contribution, Keyframes
 from .signal_tracks import Change, linear
 from .signals import RootSignal
 
@@ -155,6 +156,9 @@ class Simulation(Animation):
         if isinstance(start, np.ndarray) and start.shape != end.shape:
             return start if fraction < 1.0 else end  # the path changed its point count: no blending
         return signal.kind.interpolate(start, end, fraction)
+
+    def planned_contribution(self, signal: RootSignal) -> Contribution:
+        return Keyframes(self.run_time, [float(t) for t in self.times], self._keyframes[signal.id][1])
 
     def _keyframe_at(self, alpha: float) -> tuple[int, float]:
         """The keyframe before progress ``alpha`` and how far past it.

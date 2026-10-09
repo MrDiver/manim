@@ -147,6 +147,10 @@ class DerivedSignal(Signal):
         return self._inputs
 
     @property
+    def function(self) -> Callable[..., Any]:
+        return self._function
+
+    @property
     def value(self) -> Any:
         if self._dirty:
             self._recompute()

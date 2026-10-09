@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .contributions import By, Contribution, To
 from .rates import smooth
 from .signal_tracks import Change, RateFunction
 from .signals import RootSignal, Signal
@@ -50,6 +51,12 @@ class Animation:
         ``signal`` at progress ``alpha``; ``start_value`` is the signal's
         value when this animation starts."""
         raise NotImplementedError
+
+    def planned_contribution(self, signal: RootSignal) -> Contribution | None:
+        """:meth:`contribution` for ``signal`` as data (see
+        contributions.py), or None to be called back. Override it together
+        with :meth:`contribution`; both must give the same values."""
+        return None
 
     def nodes(self) -> Sequence[Node]:
         """Nodes that must be in the scene while this animation plays
@@ -89,6 +96,11 @@ class SignalChange:
             return kind.scale(self.value, alpha)
         return kind.interpolate(start_value, kind.validate(self.value), alpha)
 
+    def planned(self) -> Contribution:
+        if self.mode is Change.RELATIVE:
+            return By(self.value)
+        return To(self.signal.kind.validate(self.value))
+
 
 @dataclass(eq=False)
 class ChangeSignals(Animation):
@@ -114,6 +126,9 @@ class ChangeSignals(Animation):
 
     def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
         return self.changes[signal.id].contribution(signal, alpha, start_value)
+
+    def planned_contribution(self, signal: RootSignal) -> Contribution:
+        return self.changes[signal.id].planned()
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
@@ -172,3 +187,6 @@ class SetValue(Animation):
 
     def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
         return self.change.contribution(signal, alpha, start_value)
+
+    def planned_contribution(self, signal: RootSignal) -> Contribution:
+        return self.change.planned()

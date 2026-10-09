@@ -141,8 +141,8 @@ wgpu-py bindings (12%) and the remaining per-pass Python.
 
 | Phase | State |
 |---|---|
-| 0 Crate and build | in progress |
-| 1 Timeline as data | |
+| 0 Crate and build | done |
+| 1 Timeline as data | done: evaluator, ScenePlan, data contributions |
 | 2 Morph and Write | |
 | 3 Core packs 2D | |
 | 4 Core packs 3D | |
