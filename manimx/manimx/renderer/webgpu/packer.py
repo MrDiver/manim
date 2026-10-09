@@ -29,7 +29,7 @@ from ..scene_graph import FlatScene
 from .frame import camera_frame
 from .mesh_batch import MeshBatch
 from .retained import RetainedVectors
-from .shadow_views import ShadowViews, build_shadow_views
+from .shadow_views import ShadowLayers, ShadowViews, build_shadow_views
 from .vector_batch import VectorBatch
 
 CACHE_MAX_AGE = 1024
@@ -68,6 +68,7 @@ class FramePacker:
     def __init__(self, cache: RNodeDataCache | None = None) -> None:
         self.cache = cache if cache is not None else RNodeDataCache()
         self._vectors = RetainedVectors()
+        self._shadow_layers = ShadowLayers()
 
     def pack(self, scene: FlatScene, config: RenderConfig) -> FramePacket:
         if self.cache.next_generation() % CACHE_MAX_AGE == 0:
@@ -78,6 +79,7 @@ class FramePacker:
             meshes = MeshBatch.build(scene, self.cache, config)
             # Fills in each light row's shadow view index.
             shadows = build_shadow_views(scene, meshes.light_items, meshes.lights, self.cache, config)
+            self._shadow_layers.mark(scene, shadows)
         return FramePacket(
             config=config,
             vectors=vectors,

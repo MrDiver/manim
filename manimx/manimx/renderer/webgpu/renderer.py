@@ -96,7 +96,7 @@ class WGPURenderer:
         self._vector_pass.prepare(packet.vectors, targets.mask_layers_view, targets.gbuffer_views[-1], samples > 1, full_upload)
         if meshes is not None:
             self._mesh_pass.prepare(meshes, targets.mask_layers_view)
-            shadows_changed = self._shadow_pass.prepare(packet.shadows, config.shadow_resolution)
+            shadows_changed = self._shadow_pass.prepare(packet.shadows, config.shadow_resolution, all_layers=full_upload)
             self._lighting_pass.prepare(meshes.lights, packet.scope_parents, targets.gbuffer_views, samples, self._shadow_pass, shadows_changed)
 
         own_encoder = encoder is None

@@ -366,6 +366,8 @@ flowchart LR
 |---|---|---|---|
 | derived data (tessellations, stroke topology and points, centers, mesh vertices) | `RNodeDataCache` (owned by `FramePacker`) | (uid, kind) + version | on a new version, after 1024 unused renders, or by command |
 | packed vector records on the GPU | `RetainedVectors` (`retained.py`, owned by `FramePacker`) | (uid, mask role) | when the shape is absent from a render; arenas repacked when garbage outweighs live records |
+| shadow views of a light | `RNodeDataCache` (light uid) | world matrix, light settings, scope bounds, config | when any of them changes |
+| shadow map layers | `ShadowLayers` (`shadow_views.py`) decides, `ShadowPass` keeps the depth | the layer's frame record and its scope's casters (identity, versions, world matrix) | rendered again when the key changes, the maps are recreated, or another packer fed the renderer |
 | texture views, bind groups | `ResourceCache` (`gpu.py`) | texture (weak) / layout + resource identities | with their texture / LRU (512) |
 | render targets and attachments | `RenderTargets` | size, MSAA, mask capacity | on a size change |
 | composers (pipelines, texture pool) | `RenderService.composer(effects)` | effect chain | with the service |

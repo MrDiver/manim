@@ -405,6 +405,38 @@ blur: pack 9.25 ms (shadow views 5.03, vector records 2.28, mesh batch
 ms. The GPU needs 8.15 ms. The next steps cache inside the packer and
 the flattener.
 
+### M. Shadow views cached, unchanged shadow maps skipped
+
+`PortalOrbit` has six shadow-casting lights (three point lights with six
+cube faces each), so every sub-frame built 21 shadow views with small
+numpy operations and rendered 21 depth passes, eight times per frame.
+The lights never move, and shadow maps do not depend on the camera, which
+is what moves.
+
+- **A light's views are cached** in `RNodeDataCache` (by light uid),
+  keyed by its world matrix, its settings (kind, range, cone), the bounds
+  of its scope and the config values a frame record holds. Only the
+  frames' time is written per call.
+- **`scene_bounds()` transforms all boxes in one `einsum`** instead of a
+  matrix product per object.
+- **`ShadowLayers` marks unchanged layers.** A layer's depth depends on
+  its frame record and on its scope's shadow casters. Render nodes are
+  immutable, so an object's identity, its version tokens and its world
+  matrix stand for everything the depth pass reads. The packer holds the
+  previous call's objects so their ids cannot be reused. `ShadowPass`
+  skips unchanged layers, unless the maps were recreated or another
+  packer fed the renderer.
+
+| | fps (blur 8) | fps (no blur) | shadow views | render (GPU encoding) | GPU shadows |
+|---|---|---|---|---|---|
+| before | 49.0 | 287.0 | 5.03 ms | 2.92 ms | 1.06 ms |
+| after | 67.1 | 357.8 | 0.92 ms | 2.22 ms | 0.22 ms |
+
++37%, frames bit-identical. Dropped in the same round: caching the
+linear ambient color (`RenderConfig.ambient_linear` parses a color on
+every render): 66.2 / 67.1 fps with it against 66.5 / 65.1 without, so
+within noise.
+
 ## Where the time goes now
 
 5.89 ms per frame against 13.43 at the start (2.3× faster): `render_layers`

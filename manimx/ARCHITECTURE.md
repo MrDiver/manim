@@ -599,6 +599,8 @@ is uploaded in full.
 | `RetainedVectors.build()` for `RShape2D` and `RCurve3D` | nothing written to its `_Slot` | new world matrix: the 80-byte object entry; new `fill`/`stroke` version: its records in place; new `points` version: records moved, curves and instances rewritten |
 | `RNodeDataCache` (`tessellate_fill()` result, stroke records, center, `RShape3D` vertices) | hit | rebuilt for the new version |
 | `MeshBatch.build()`, `build_shadow_views()` | skipped while the `FlatScene` contains no `RShape3D` | run when an `RShape3D` is present |
+| a light's shadow views (`build_shadow_views()`) | cached in `RNodeDataCache` by its world matrix, settings, scope bounds and config | rebuilt |
+| a shadow map layer (`ShadowLayers.mark()`) | no shadow pass while its view and its scope's casters (identity, versions, world matrix) are unchanged | rendered again |
 | `GrowableBuffer.write()` in `WGPURenderer` | nothing uploaded | only the written record ranges |
 | geometry and lighting passes | skipped without `RShape3D` (G-buffer and lit target cleared once) | run when an `RShape3D` is present |
 | mask, shadow and vector passes | recorded into the `FrameComposer`'s command encoder | same |
@@ -608,6 +610,7 @@ is uploaded in full.
 | Cache | Owner | Key | Lives until |
 |---|---|---|---|
 | `RNodeDataCache` | `FramePacker` | (uid, kind) with a version | replaced on a new version; dropped after 1024 packs unused (`sweep()`), or by `RemoveObjects` / `ClearScene` |
+| `ShadowLayers` keys | `FramePacker` | layer index | the next pack with meshes |
 | `RetainedVectors._Slot` | `FramePacker` | (uid, mask scope) | freed when its `RNode` is missing from a pack; `_Arena`s repacked when garbage outweighs live records |
 | `ResourceCache.view()` | `WGPURenderer` | the texture (weak key) | its texture |
 | `ResourceCache.bind_group()` | `WGPURenderer` | the layout plus the identities of the bound resources | LRU, 512 entries |

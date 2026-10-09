@@ -4,6 +4,10 @@ For every view from shadow_views.py, the casters' depth is rendered into
 one layer of a ``depth32float`` 2D array texture, using the normal mesh and
 vector pipelines with a frame uniform whose "camera" is the light. The
 lighting pass then samples the array (see shaders/shadows.wgsl).
+
+Layers whose views say they are unchanged (``ShadowViews.changed``) keep
+their depth from the previous render and get no pass, unless the maps
+were just recreated or the caller asks for all of them.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from .vector_pass import VectorPass
 # offsets must be multiples of 256 bytes.
 _FRAME_STRIDE = 512
 assert FRAME_DTYPE.itemsize <= _FRAME_STRIDE
+_STRIDED_FRAME = np.dtype({"names": ["frame"], "formats": [FRAME_DTYPE], "itemsize": _FRAME_STRIDE})
 
 
 class ShadowPass:
@@ -40,23 +45,34 @@ class ShadowPass:
         self.maps_view: wgpu.GPUTextureView | None = None
         self._layers: list[wgpu.GPUTextureView] = []
         self._count = 0
+        self._draw_layers: list[int] = []
         self._ensure_maps(1, 1)
 
-    def prepare(self, shadows: ShadowViews, resolution: int) -> bool:
-        """Upload the views; returns True if the map texture was recreated."""
+    def prepare(self, shadows: ShadowViews, resolution: int, all_layers: bool = False) -> bool:
+        """Upload the views; returns True if the map texture was recreated.
+
+        ``all_layers`` renders every layer, also those the views mark
+        unchanged (the maps hold another packer's depth).
+        """
         self._count = len(shadows)
         self._scopes = list(shadows.scopes)
-        frames = np.zeros(max(1, self._count) * _FRAME_STRIDE, np.uint8)
-        for index, frame in enumerate(shadows.frames):
-            frames[index * _FRAME_STRIDE : index * _FRAME_STRIDE + FRAME_DTYPE.itemsize] = np.frombuffer(frame.tobytes(), np.uint8)
+        frames = np.zeros(max(1, self._count), _STRIDED_FRAME)
+        frames["frame"][: self._count] = shadows.frames
         self._frames.upload(frames)
         self.views.upload(shadows.views if self._count else np.zeros(1, SHADOW_VIEW_DTYPE))
         if self._count == 0:
+            self._draw_layers = []
             return False
-        return self._ensure_maps(resolution, self._count)
+        recreated = self._ensure_maps(resolution, self._count)
+        changed = shadows.changed
+        if recreated or all_layers or changed is None:
+            self._draw_layers = list(range(self._count))
+        else:
+            self._draw_layers = [layer for layer in range(self._count) if changed[layer]]
+        return recreated
 
     def draw(self, encoder: wgpu.GPUCommandEncoder, meshes: MeshPass, vectors: VectorPass, profiler: GpuProfiler) -> None:
-        for layer in range(self._count):
+        for layer in self._draw_layers:
             render_pass = encoder.begin_render_pass(
                 color_attachments=[],
                 depth_stencil_attachment={

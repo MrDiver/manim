@@ -1,11 +1,14 @@
-"""Shadows: view assignment, toggles at every level, softness."""
+"""Shadows: view assignment, toggles at every level, softness, and map
+layers skipped while unchanged.
+"""
 
+import dataclasses
 import math
 
 import numpy as np
 import pytest
 from manimx.userland.geometry import box_mesh
-from manimx.renderer import Camera, RenderConfig, RNodeDataCache, RenderService
+from manimx.renderer import Camera, FramePacker, RenderConfig, RNodeDataCache, RenderService
 from manimx.renderer.scene_graph import flatten_scene
 from manimx.renderer.webgpu.mesh_batch import MeshBatch
 from manimx.renderer.webgpu.shadow_views import NO_SHADOW, build_shadow_views
@@ -112,3 +115,42 @@ def test_softness_widens_the_penumbra(renderer: RenderService) -> None:
     hard, soft = edge_profile(0.0), edge_profile(0.4)
     partial = lambda profile: int(np.sum((profile > 0.15 * profile.max()) & (profile < 0.85 * profile.max())))  # noqa: E731
     assert partial(soft) > partial(hard)
+
+
+def _packed_layers(packer: FramePacker, root: RGroup, camera: Camera = CAMERA) -> list[bool]:
+    packet = packer.pack(flatten_scene(root), RenderConfig(pixel_width=160, pixel_height=90, camera=camera))
+    return packet.shadows.changed
+
+
+def test_unchanged_shadow_layers_are_marked() -> None:
+    floor, blocker, sun = _scene().children
+    lamp = RPointLight(transform=Transform(position=(3, 0, 4)))
+    packer = FramePacker()
+    assert _packed_layers(packer, RGroup(children=[floor, blocker, sun, lamp])) == [True] * 7
+
+    # The camera does not matter to shadow maps; the same nodes give the same layers.
+    moved_camera = Camera.look_at((5, -5, 12), (0, 0, 0), field_of_view=math.radians(60))
+    assert _packed_layers(packer, RGroup(children=[floor, blocker, sun, lamp]), moved_camera) == [False] * 7
+
+    # A caster that moves changes every layer of its scope; a light that
+    # moves changes only its own layers.
+    moved = dataclasses.replace(blocker, transform=Transform(position=(1, 0, 2)))
+    assert _packed_layers(packer, RGroup(children=[floor, moved, sun, lamp])) == [True] * 7
+    lamp_moved = dataclasses.replace(lamp, transform=Transform(position=(3, 1, 4)))
+    assert _packed_layers(packer, RGroup(children=[floor, moved, sun, lamp_moved])) == [False] + [True] * 6
+
+
+def test_skipped_shadow_layers_render_like_fresh_ones(renderer: RenderService) -> None:
+    floor, blocker, sun = _scene().children
+    sun = RDirectionalLight(transform=Transform(rotation=rotation_towards((1, 0, -1))), intensity=3.0)
+    moved = dataclasses.replace(blocker, transform=Transform(position=(-1.5, 0, 2)))
+    config = RenderConfig(pixel_width=160, pixel_height=90, camera=CAMERA, ambient_intensity=0.0)
+    other_camera = dataclasses.replace(config, camera=Camera.look_at((2, -6, 10), (0, 0, 0), field_of_view=math.radians(60)))
+    frames = [
+        (RGroup(children=[floor, blocker, sun]), config),
+        (RGroup(children=[floor, blocker, sun]), other_camera),  # layers skipped
+        (RGroup(children=[floor, moved, sun]), config),  # layers rendered again
+        (RGroup(children=[floor, blocker, sun]), config),
+    ]
+    for root, settings in frames:
+        np.testing.assert_array_equal(renderer.render(root, settings), RenderService().render(root, settings))
