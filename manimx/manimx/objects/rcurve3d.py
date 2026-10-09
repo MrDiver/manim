@@ -13,8 +13,7 @@ from .rbezier_path import RBezierPath
 class RCurve3D(RBezierPath):
     """A stroke-only path of cubic Bezier curves in 3D space.
 
-    ``points`` is ``(N, 3)`` in the ``VMobject`` layout (see
-    :class:`RBezierPath`), so the outline of an :class:`RShape2D` lifts to a
+    ``points`` is ``(N, 3)`` in the :class:`RBezierPath` layout, so the outline of an :class:`RShape2D` lifts to a
     curve exactly. The stroke supports everything an ``RShape2D`` stroke does
     (per-point color, opacity and width, joints, caps), but its ribbon always
     faces the camera. Its width is in world units, so under a perspective

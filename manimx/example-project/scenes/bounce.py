@@ -104,4 +104,4 @@ class Bounce(Scene):
 
         self.play(FadeIn(floor), FadeIn(wall), *(FadeIn(ball) for ball in balls), *(FadeIn(r) for r in rings), run_time=0.5)
         self.play(simulation, wall.animate.shift(RIGHT * 4), rate=there_and_back, run_time=6.0)
-        self.play(*(FadeOut(mobject) for mobject in (floor, wall, *balls, *rings)), run_time=0.5)
+        self.play(*(FadeOut(node) for node in (floor, wall, *balls, *rings)), run_time=0.5)

@@ -2,7 +2,7 @@
 
 Section 7 of docs/animation_engine_design.md. manimx ships no physics
 engine. A :class:`Simulation` is a function ``step(dt)`` that changes
-mobjects however it likes (a hand-written integrator, springs,
+nodes however it likes (a hand-written integrator, springs,
 particles, a wrapped engine), plus a step size::
 
     ball = Dot()
@@ -61,7 +61,7 @@ from .signal_tracks import Change, linear
 from .signals import RootSignal
 
 if TYPE_CHECKING:
-    from .mobjects import Mobject
+    from .node import Node
     from .scene import SceneCompiler
 
 DEFAULT_KEYFRAME_RATE = 60.0
@@ -73,8 +73,8 @@ class Simulation(Animation):
     It ends after ``duration`` seconds, or at the first step after which
     ``until()`` returns True (then within ``max_time``, or an error). The
     last step is shortened so the simulation ends exactly at
-    ``duration``. ``objects`` are mobjects the step function changes that
-    are not in the scene yet (they are added); every mobject in the scene
+    ``duration``. ``objects`` are nodes the step function changes that
+    are not in the scene yet (they are added); every node in the scene
     is watched anyway.
     """
 
@@ -86,7 +86,7 @@ class Simulation(Animation):
         until: Callable[[], bool] | None = None,
         max_time: float = 60.0,
         keyframe_rate: float = DEFAULT_KEYFRAME_RATE,
-        objects: Sequence[Mobject] = (),
+        objects: Sequence[Node] = (),
     ) -> None:
         if dt <= 0.0 or keyframe_rate <= 0.0:
             raise ValueError("a simulation needs a positive step and keyframe rate")
@@ -136,7 +136,7 @@ class Simulation(Animation):
 
     # -- the animation contract -----------------------------------------------
 
-    def mobjects(self) -> Sequence[Mobject]:
+    def nodes(self) -> Sequence[Node]:
         return self.objects
 
     def targets(self) -> Sequence[Target]:
@@ -219,9 +219,9 @@ class Simulation(Animation):
         return False
 
 
-def _watched_signals(mobjects: Iterable[Mobject]) -> dict[int, RootSignal]:
+def _watched_signals(nodes: Iterable[Node]) -> dict[int, RootSignal]:
     signals: dict[int, RootSignal] = {}
-    for root in mobjects:
+    for root in nodes:
         for member in root.family():
             for signal in member.signals():
                 if isinstance(signal, RootSignal):

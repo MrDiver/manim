@@ -21,23 +21,13 @@ from .animations import (
     Target,
 )
 from .audio import Sound, SoundEvent, mix, write_wav
-from .cameras import Camera, View
+from .camera import Camera, View
+from .clipping_group import ClippingGroup
 from .constants import DEGREES, DL, DOWN, DR, IN, LEFT, ORIGIN, OUT, PI, RIGHT, TAU, UL, UP, UR
 from .kinds import COLOR, DISCRETE, FACTOR, PATH, ROTATION, SCALAR, SignalKind
-from .mobjects import (
-    Circle,
-    ClippingGroup,
-    Dot,
-    Group,
-    Mobject,
-    Polyline,
-    Rectangle,
-    RegularPolygon,
-    Square,
-    Triangle,
-    VMobject,
-    animatable,
-)
+from .group import Group
+from .node import Node, PositionMixin, RotationMixin, ScalableMixin, animatable
+from .shape2d import Circle, Dot, Polyline, Rectangle, RegularPolygon, Shape2D, Square, Triangle
 from .scene import SEGMENT_GAP, Cue, Emit, PreparedScene, Scene, Segment
 from .simulation import Simulation
 from .signals import DerivedSignal, RootSignal, Signal, TimeSignals, Vector3Signal, derive
@@ -89,20 +79,24 @@ __all__ = [
     "GrowFromCenter",
     "Indicate",
     "InvalidCue",
-    "Mobject",
+    "Node",
     "MonotoneMap",
     "Placement",
     "Polyline",
+    "PositionMixin",
     "PreparedScene",
     "Ramp",
     "Rectangle",
     "RegularPolygon",
     "RootSignal",
+    "RotationMixin",
     "Rotate",
+    "ScalableMixin",
     "Scene",
     "Segment",
     "SegmentTiming",
     "SetValue",
+    "Shape2D",
     "ShrinkToCenter",
     "Signal",
     "SignalChange",
@@ -117,7 +111,6 @@ __all__ = [
     "Timeline",
     "Triangle",
     "UnresolvedEvents",
-    "VMobject",
     "Vector3Signal",
     "View",
     "World",

@@ -201,7 +201,7 @@ per frame (−40%).
   nothing changed at all. The waste is rebuilding and re-uploading every
   object although usually only a few transforms change, which E addresses.
 - **A snapshot cache on the animation side.** The evaluator remembered each
-  mobject's last render object (by version tokens), so `state_at` returned
+  node's last render object (by version tokens), so `state_at` returned
   the same instances, or copies sharing all content, when only the transform
   changed. Alone it measured 148.9 fps (no change). Together with E it
   measured 171.3 fps against 169.8 without it, about 1%, near the noise, for

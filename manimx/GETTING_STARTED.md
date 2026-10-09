@@ -102,7 +102,7 @@ The building blocks:
 
 | | |
 |---|---|
-| Shapes | `Circle`, `Dot`, `Square`, `Rectangle`, `Triangle`, `RegularPolygon`, `Polyline`, `VMobject` (any Bezier path) |
+| Shapes | `Circle`, `Dot`, `Square`, `Rectangle`, `Triangle`, `RegularPolygon`, `Polyline`, `Shape2D` (any Bezier path) |
 | Containers | `Group(a, b, ...)` moves and fades its members together; `ClippingGroup(mask, content)` shows content only inside the mask |
 | Style | `color=`, `fill_color=`, `fill_opacity=`, `stroke_color=`, `stroke_width=`, `stroke_opacity=`, or `set_fill`, `set_stroke`, `set_color` |
 | Changes | `shift`, `move_to`, `rotate`, `scale_by`, `set_scale`, `set_alpha` |

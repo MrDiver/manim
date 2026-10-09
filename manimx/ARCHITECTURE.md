@@ -4,7 +4,7 @@ How manimx works as a whole: which classes exist, who creates and owns their
 instances, how long they live, how data flows from `Scene.construct()` to
 pixels and sound, and why it is built this way. Everything is named as in
 the Python code. Where two classes share a name, the module comes first
-(`animation.Group` is a `Mobject`). Render classes carry an R prefix
+(`animation.Group` is a `Node`). Render classes carry an R prefix
 (`RGroup`, `RShape2D`, ...): an `RGroup` is the snapshot of an
 `animation.Group`.
 
@@ -72,7 +72,7 @@ flowchart LR
 | Package | Contents | Depends on |
 |---|---|---|
 | `manimx.objects` | `RNode` and its subclasses `RGroup`, `RClippingGroup`, `RBezierPath` (→ `RShape2D`, `RCurve3D`), `RShape3D`, `RLight` (→ `RDirectionalLight`, `RPointLight`, `RSpotLight`); `Transform`, `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`; `new_uid()`, `versioned()` | numpy |
-| `manimx.animation` | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Mobject` and its subclasses; `Animation` and its subclasses; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound` | objects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
+| `manimx.animation` | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses, `PositionMixin`, `RotationMixin`, `ScalableMixin`; `Animation` and its subclasses; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound` | objects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
 | `manimx.renderer` | `flatten_scene()` → `FlatScene`; `tessellate_fill()`; `MobjectDataCache`; `RenderConfig`, `renderer.Camera`, `ViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `RemoveObjects`, `ClearScene` | objects |
 | `manimx.renderer.webgpu` | `WGPURenderer`, `FrameComposer`, `RetainedVectors`, `VectorBatch`, `MeshBatch`, `VectorPass`, `MeshPass`, `LightingPass`, `ShadowPass`, `RenderTargets`, `RenderLayers`, `ResourceCache`, `GPUContext` | wgpu |
 | `manimx.drivers` | `render()`, `FramePipeline`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation |
@@ -127,12 +127,12 @@ sequenceDiagram
 
 ### 4.1 Signals
 
-Every animatable property of a `Mobject` is a signal:
+Every animatable property of a `Node` is a signal:
 
 - **`RootSignal`**: holds a value set from outside, by `authoring.change()`,
   by `SignalTrack.value_at()` during evaluation, or by a `Simulation` step.
 - **`DerivedSignal`**: a pure function of other signals, created with
-  `derive()` (and `Mobject.follow()`). It replaces Manim's updaters.
+  `derive()` (and `PositionMixin.follow()`).
 - **`SignalKind`** instances say how values interpolate and combine:
   `SCALAR`, `FACTOR`, `ROTATION` (slerp), `COLOR`, `PATH` (point arrays),
   `DISCRETE`.
@@ -146,26 +146,40 @@ recomputes when it is read. Every signal has a process-unique `id` and a
 `version` that increases exactly when its value changes. Versions drive all
 caching downstream.
 
-### 4.2 `Mobject`, `Animation`, `SignalTrack`
+### 4.2 `Node`, `Animation`, `SignalTrack`
 
 ```mermaid
 classDiagram
     direction LR
-    class Mobject {
+    class Node {
         uid
         name
-        position: Vector3Signal
-        rotation: RootSignal
-        scale: Vector3Signal
         alpha: RootSignal
         present: RootSignal
-        children
         snapshot() RNode
     }
-    class VMobject {
+    class PositionMixin {
+        position: Vector3Signal
+        shift(), move_to(), follow()
+    }
+    class RotationMixin {
+        rotation: RootSignal
+        rotate()
+    }
+    class ScalableMixin {
+        scale: Vector3Signal
+        scale_by(), set_scale()
+    }
+    class Shape2D {
         points: RootSignal
         fill_color, fill_opacity
         stroke_color, stroke_width, stroke_opacity
+    }
+    class Group {
+        children
+    }
+    class ClippingGroup {
+        mask, content
     }
     class Camera {
         frame_height
@@ -173,13 +187,16 @@ classDiagram
         perspective
         render_camera()
     }
-    Mobject <|-- VMobject
-    Mobject <|-- Group
-    Mobject <|-- ClippingGroup
-    Mobject <|-- Camera
-    VMobject <|-- Circle
-    VMobject <|-- Square
-    VMobject <|-- Polyline
+    Node <|-- Shape2D
+    Node <|-- Group
+    Node <|-- ClippingGroup
+    Node <|-- Camera
+    PositionMixin <|-- Shape2D
+    RotationMixin <|-- Shape2D
+    ScalableMixin <|-- Shape2D
+    Shape2D <|-- Circle
+    Shape2D <|-- Square
+    Shape2D <|-- Polyline
 
     class Animation {
         run_time
@@ -215,13 +232,26 @@ classDiagram
     Placement "1" <-- "*" Entry : one per RootSignal
     SignalTrack "1" o-- "*" Entry
     SignalTrack --> RootSignal : sets during evaluation
-    Animation --> Mobject : references (no copies)
+    Animation --> Node : references (no copies)
 ```
 
 `Group`, `ClippingGroup` and `Camera` in this diagram are the
 `manimx.animation` classes.
 
-- **An `Animation` references its `Mobject`s** and never copies them.
+- **The scene tree is parallel to the render tree.** Every `Node` class
+  snapshots to exactly one R class (`Shape2D` → `RShape2D`, `Group` →
+  `RGroup`, `ClippingGroup` → `RClippingGroup`); `Camera` snapshots to
+  nothing. Only `Group` and `ClippingGroup` have children, so `family()`
+  only descends through them.
+- **The transform comes in parts.** `PositionMixin`, `RotationMixin` and
+  `ScalableMixin` each add one signal and the changes that use it, and a
+  class takes the parts that mean something for it: `Group`,
+  `ClippingGroup` and `Shape2D` take all three, `Camera` takes position and
+  rotation. A missing part is the identity in the snapshot's `Transform`.
+  Using a missing part raises an error that names the mixin, for example
+  `Indicate(camera)` or `camera.scale_by(2)`.
+
+- **An `Animation` references its `Node`s** and never copies them.
   `Animation.targets()` names the `RootSignal`s it changes, each with a
   `Change` (`RELATIVE` or `ABSOLUTE`). `Animation.contribution()` is a pure
   function of the progress.
@@ -251,25 +281,25 @@ flowchart TD
         PS --> E1["TimeSignals.set(scene_time, global_time)"]
         E1 --> E2["every SignalTrack: signal.set(value_at(t))"]
         E2 --> E3["DerivedSignals recompute when read"]
-        E3 --> E4["Mobject.snapshot() for every present root"]
+        E3 --> E4["Node.snapshot() for every present root"]
         E4 --> RO["RGroup of RNodes"]
     end
 ```
 
 - **Evaluation sets the `RootSignal`s and reads them back**, so a
-  `PreparedScene`'s `Mobject`s are its evaluation state. That is why one
+  `PreparedScene`'s `Node`s are its evaluation state. That is why one
   `PreparedScene` backs only one `Clip`.
 - **Purity:** the result of `state_at(t)` depends only on `t`.
-- **`Mobject.snapshot()`** builds new `RNode`s on every call
-  (`VMobject` → `RShape2D`, `animation.Group` → `RGroup`,
+- **`Node.snapshot()`** builds new `RNode`s on every call
+  (`Shape2D` → `RShape2D`, `animation.Group` → `RGroup`,
   `animation.ClippingGroup` → `RClippingGroup`, `animation.Camera` →
-  nothing). Each keeps the `Mobject.uid` and carries version tokens from
+  nothing). Each keeps the `Node.uid` and carries version tokens from
   `version_token()` (section 7).
 
 ### 4.4 `Simulation`
 
 A `Simulation` wraps the user's `step(dt)` function, which changes
-`Mobject`s however it likes. `SceneCompiler.play()` bakes it with
+`Node`s however it likes. `SceneCompiler.play()` bakes it with
 `Simulation.bake()`:
 
 - `step` runs at the fixed step `dt` from start to end;
@@ -368,9 +398,9 @@ classDiagram
 - **`World2D` and `World3D`:** every `Clip` has one `Clip.world`.
   `World2D.check_transform()` keeps its clips in the z = 0 plane.
   `Timeline.state_at(t, world)` returns one world's `RGroup`.
-- **`animation.Camera`:** a `Mobject` whose `RootSignal`s are `position`,
+- **`animation.Camera`:** a `Node` whose `RootSignal`s are `position`,
   `rotation`, `frame_height`, `field_of_view` and `perspective`; it is
-  animated like any other `Mobject`. `snapshot()` returns `None`.
+  animated like any other `Node`. `snapshot()` returns `None`.
   `Timeline.camera_at()` evaluates its `Clip` at `Clip.held_time()`, so it
   keeps its first and last placement outside the clip.
   `animation.Camera.render_camera()` returns a `renderer.Camera`.
@@ -385,11 +415,11 @@ classDiagram
 `manimx.animation` to `manimx.renderer`. These rules make every renderer
 cache correct:
 
-1. **`RNode.uid`:** every snapshot of one `Mobject` has the
-   `Mobject.uid`. `new_uid()` never repeats within a process.
+1. **`RNode.uid`:** every snapshot of one `Node` has the
+   `Node.uid`. `new_uid()` never repeats within a process.
 2. **Versions:** fields declared with `versioned()` (`RBezierPath.points`,
    `RBezierPath.stroke`, `RShape2D.fill`, `RShape3D.mesh`) have a token,
-   `RNode.version(name)`. `VMobject.snapshot()` passes tokens from
+   `RNode.version(name)`. `Shape2D.snapshot()` passes tokens from
    `version_token()` of the `RootSignal`s, so equal tokens mean equal
    values. `RNode.transform` is not versioned; it is compared
    directly.
@@ -575,7 +605,7 @@ flowchart LR
 
 | Instance | Created by | Owned by | Lives until | Changes? |
 |---|---|---|---|---|
-| `Mobject` and its signals | `Scene.construct()` | the `PreparedScene` (`roots`, `tracks`) | the `PreparedScene` | signal values on every evaluation |
+| `Node` and its signals | `Scene.construct()` | the `PreparedScene` (`roots`, `tracks`) | the `PreparedScene` | signal values on every evaluation |
 | `SceneCompiler` | `Scene.prepare()` | a ContextVar while `construct()` runs | the end of `prepare()` | yes |
 | `PreparedScene` | `Scene.prepare()` (kept in `Scene._prepared`) | one `Clip` | the `Timeline` | only through evaluation |
 | `SignalTrack`, `Placement`, `Entry` | `Scene.play()`, `authoring.change()` | the `PreparedScene` | the `PreparedScene` | `SignalTrack.refresh()` after edits |
@@ -601,11 +631,11 @@ flowchart LR
   Animations of different properties or axes compose without interfering.
   `DerivedSignal` replaces updaters with pure functions, which keeps
   evaluation deterministic.
-- **An `Animation` references `Mobject`s; it never copies them.**
+- **An `Animation` references `Node`s; it never copies them.**
   `contribution()` is a pure function of progress, and `SignalTrack` holds
   the composition rules.
 - **Direct changes inside `construct()` become `SetValue` at the cursor,
-  and reads (`Mobject.get_center()`) see everything recorded so far.** Code
+  and reads (`PositionMixin.get_center()`) see everything recorded so far.** Code
   reads like Manim but never rewrites the past.
 - **Versions, not hashes.** A version counter costs nothing per frame. A
   revisited time costs one recomputation and is never wrong.
@@ -645,7 +675,7 @@ flowchart LR
 - **No `RShape3D` in a frame, no 3D passes.** Most Manim content is
   `RShape2D`.
 - **`MotionBlur` renders real sub-frames.** Any change blurs correctly,
-  including `animation.Camera` moves and appearing `Mobject`s.
+  including `animation.Camera` moves and appearing `Node`s.
 
 **Drivers**
 
@@ -672,7 +702,7 @@ flowchart LR
 ## 13. State of the work and next steps
 
 **Done:**
-- signals, `Mobject`, `Animation`, `Scene`;
+- signals, `Node`, `Animation`, `Scene`;
 - `Segment`, events, `Cue`, `MonotoneMap`;
 - `World2D`/`World3D`, `Clip` placement, `animation.Camera`, `View`;
 - `Simulation`;
@@ -697,6 +727,13 @@ flowchart LR
    the common errors are known.
 
 **Working conventions:**
+- The scene tree (`Node` and its subclasses) and the render tree (`RNode`
+  and its subclasses) are parallel: one R class per scene class, the R
+  prefix on every render tree class, and every tree class in a module
+  named after it (`rshape2d.py`, `shape2d.py`). Value types (`Transform`,
+  `Fill`, `MeshData`, ...) carry no prefix.
+- Render objects carry no names: names belong to nodes. Identity across
+  snapshots is the `uid`, which tests allocate with `new_uid()` too.
 - Commits are kernel style, with the design decisions in the message and
   no self-attribution. Commit only `manimx/`; `docs/`, the root
   `pyproject.toml` and the root `uv.lock` belong to the user.

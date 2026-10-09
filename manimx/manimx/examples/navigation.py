@@ -32,7 +32,7 @@ from ..animation import (
     ClippingGroup,
     GrowFromCenter,
     Group,
-    Mobject,
+    Node,
     Polyline,
     RootSignal,
     Scene,
@@ -60,27 +60,27 @@ class PulseOut(Animation):
     """A ring that appears, expands to ``scale`` times its size and fades,
     all in one sweep, then leaves the scene."""
 
-    mobject: Mobject
+    node: Node
     scale: float = 1.8
     run_time: float = 1.4
     rate: Any = staticmethod(ease_out_cubic)
 
     def targets(self) -> Sequence[Target]:
-        return [Target(self.mobject.alpha, Change.ABSOLUTE)] + [
-            Target(axis, Change.RELATIVE) for axis in self.mobject.scale.axes[:2]
+        return [Target(self.node.alpha, Change.ABSOLUTE)] + [
+            Target(axis, Change.RELATIVE) for axis in self.node.scale.axes[:2]
         ]
 
     def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
-        if signal is self.mobject.alpha:
+        if signal is self.node.alpha:
             # Appear quickly, then fade out while expanding.
             return min(1.0, alpha * 6.0) * (1.0 - alpha)
         return self.scale**alpha
 
-    def mobjects(self) -> Sequence[Mobject]:
-        return (self.mobject,)
+    def nodes(self) -> Sequence[Node]:
+        return (self.node,)
 
-    def removes(self) -> Sequence[Mobject]:
-        return (self.mobject,)
+    def removes(self) -> Sequence[Node]:
+        return (self.node,)
 
 
 def street_map(length: float = 12.0) -> Group:

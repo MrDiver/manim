@@ -22,7 +22,7 @@ def _no_points() -> np.ndarray:
 
 @dataclass(slots=True, eq=False)
 class RBezierPath(RNode):
-    """Points in Manim's ``VMobject`` layout plus a stroke.
+    """Points of cubic Bezier curves plus a stroke.
 
     ``points`` is ``(N, DIMENSION)`` with four points per cubic Bezier curve
     ``(anchor, handle, handle, anchor)``. A new subpath starts wherever a
@@ -53,10 +53,7 @@ class RBezierPath(RNode):
         closed: bool = False,
         **kwargs: Any,
     ) -> Self:
-        """Polyline through ``corners`` as straight cubic curves.
-
-        Mirrors ``VMobject.set_points_as_corners``.
-        """
+        """Polyline through ``corners`` as straight cubic curves."""
         anchors = np.asarray(corners, dtype=np.float64).reshape(-1, cls.DIMENSION)
         if closed and len(anchors) > 0:
             anchors = np.vstack([anchors, anchors[:1]])

@@ -14,13 +14,13 @@ __all__ = ["POINTS_PER_CURVE", "TOLERANCE_FOR_POINT_EQUALITY", "RShape2D", "is_c
 
 @dataclass(slots=True, eq=False)
 class RShape2D(RBezierPath):
-    """Drawable vector shape, the counterpart of Manim's ``VMobject``.
+    """Drawable vector shape, the snapshot of an animation ``Shape2D``.
 
-    Unlike ``VMobject`` a shape never has submobjects: hierarchy is expressed
-    with :class:`RGroup` and :class:`RClippingGroup`, which draw nothing. Holes
-    and disjoint pieces (e.g. a glyph) are subpaths of a single shape.
+    A shape is a leaf: hierarchy is expressed with :class:`RGroup` and
+    :class:`RClippingGroup`, which draw nothing. Holes and disjoint pieces
+    (e.g. a glyph) are subpaths of a single shape.
 
-    ``points`` is ``(N, 2)`` in the ``VMobject`` layout (see
+    ``points`` is ``(N, 2)`` in the :class:`RBezierPath` layout (see
     :class:`RBezierPath`). Points live in the local XY plane; :attr:`transform`
     places the plane in 3D, and the stroke is a flat ribbon in that plane.
 

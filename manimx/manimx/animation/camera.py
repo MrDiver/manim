@@ -1,6 +1,6 @@
-"""Cameras: mobjects that say where a view looks from (section 8.1).
+"""Cameras: nodes that say where a view looks from (section 8.1).
 
-A :class:`Camera` is a mobject like any other: its placement and lens are
+A :class:`Camera` is a node like any other: its placement and lens are
 signals, so camera movement is animated with the same ``play`` calls,
 rate functions, events and time maps as any content. A scene that only
 moves a camera is a *camera scene*; a camera can also live in a content
@@ -29,7 +29,16 @@ from ..renderer.config import DEFAULT_FRAME_HEIGHT
 from ..renderer.config import Camera as RenderCamera
 from . import authoring
 from .kinds import DISCRETE, FACTOR, SCALAR
-from .mobjects import ABS, REL, ChangeList, Mobject, _vector, animatable
+from .node import (
+    ABS,
+    REL,
+    ChangeList,
+    Node,
+    PositionMixin,
+    RotationMixin,
+    _vector,
+    animatable,
+)
 from .signals import RootSignal, Signal
 
 if TYPE_CHECKING:
@@ -39,7 +48,7 @@ DEFAULT_DISTANCE = 11.0
 """Manim's default camera distance from the z = 0 plane."""
 
 
-class Camera(Mobject):
+class Camera(PositionMixin, RotationMixin, Node):
     """A camera at ``position``, looking along its local -z axis.
 
     * ``frame_height``: world units shown vertically (orthographic), a

@@ -14,7 +14,7 @@
 animations on the scene's local timeline at the current cursor and moves
 the cursor; ``wait`` only moves the cursor. The result is a
 :class:`PreparedScene`: tracks of placed animations per signal, plus the
-mobjects in the order they were added (later ones are drawn on top, as in
+nodes in the order they were added (later ones are drawn on top, as in
 Manim).
 
 Segments: ``wait_for("EVENT")`` ends the current segment; the scene holds
@@ -47,7 +47,7 @@ import numpy as np
 from ..objects import RGroup
 from .animations import Animation, AnimationBuilder, SetValue, SignalChange, as_animation
 from .authoring import _active
-from .mobjects import Mobject
+from .node import Node
 from .signals import RootSignal, Signal, TimeSignals
 from .signal_tracks import Change, Placement, RateFunction, SignalTrack, linear
 from .simulation import Simulation
@@ -122,13 +122,13 @@ class Scene:
 
     # -- authoring API (only inside construct) --------------------------------
 
-    def add(self, *mobjects: Mobject) -> None:
-        """Put mobjects into the scene at the current time."""
-        self._authoring().add(mobjects)
+    def add(self, *nodes: Node) -> None:
+        """Put nodes into the scene at the current time."""
+        self._authoring().add(nodes)
 
-    def remove(self, *mobjects: Mobject) -> None:
-        """Take mobjects out of the scene at the current time."""
-        self._authoring().remove(mobjects)
+    def remove(self, *nodes: Node) -> None:
+        """Take nodes out of the scene at the current time."""
+        self._authoring().remove(nodes)
 
     def play(
         self,
@@ -195,7 +195,7 @@ class SceneCompiler:
         self.cursor = 0.0
         self.order = 0
         self.tracks: dict[int, SignalTrack] = {}
-        self.roots: list[Mobject] = []
+        self.roots: list[Node] = []
         self.present: set[int] = set()
         self.timeline_signals: set[int] = set()
         self.placements: list[Placement] = []
@@ -221,26 +221,26 @@ class SceneCompiler:
 
     # -- authoring operations -------------------------------------------------
 
-    def add(self, mobjects: Sequence[Mobject]) -> None:
-        for mobject in mobjects:
-            if mobject.uid in self.present:
+    def add(self, nodes: Sequence[Node]) -> None:
+        for node in nodes:
+            if node.uid in self.present:
                 continue
-            for member in mobject.family():
+            for member in node.family():
                 self.timeline_signals.update(signal.id for signal in member.signals())
                 # A member already in the scene on its own is drawn through
-                # this mobject from now on; until now it stays on its own.
-                if member is not mobject and member.uid in self.present:
+                # this node from now on; until now it stays on its own.
+                if member is not node and member.uid in self.present:
                     self.remove([member])
-            if mobject not in self.roots:
-                self.roots.append(mobject)
-            self.present.add(mobject.uid)
-            self.record_instant(mobject.present, Change.ABSOLUTE, True)
+            if node not in self.roots:
+                self.roots.append(node)
+            self.present.add(node.uid)
+            self.record_instant(node.present, Change.ABSOLUTE, True)
 
-    def remove(self, mobjects: Sequence[Mobject]) -> None:
-        for mobject in mobjects:
-            if mobject.uid in self.present:
-                self.present.discard(mobject.uid)
-                self.record_instant(mobject.present, Change.ABSOLUTE, False)
+    def remove(self, nodes: Sequence[Node]) -> None:
+        for node in nodes:
+            if node.uid in self.present:
+                self.present.discard(node.uid)
+                self.record_instant(node.present, Change.ABSOLUTE, False)
 
     def play(self, animations: Sequence[Animation], run_time: float | None, rate: RateFunction | None, lag_ratio: float) -> None:
         if not animations:
@@ -255,10 +255,10 @@ class SceneCompiler:
             simulated = isinstance(animation, Simulation)
             duration = animation.run_time if run_time is None or simulated else run_time
             begin = start + index * lag_ratio * duration
-            # Mobjects appear when their own animation begins: a lagged
-            # FadeIn must not show its mobject before its fade starts.
+            # Nodes appear when their own animation begins: a lagged
+            # FadeIn must not show its node before its fade starts.
             self.cursor = begin
-            self.add([m for m in animation.mobjects() if not self._is_inside_present(m)])
+            self.add([m for m in animation.nodes() if not self._is_inside_present(m)])
             if simulated:
                 duration = animation.bake(self, begin)
                 for event, at in animation.events:
@@ -338,10 +338,10 @@ class SceneCompiler:
         playing = sum(segment.duration for segment in self.segments) + max(t - self.segment_start, 0.0)
         self.time.set(scene_time=playing, global_time=playing)
 
-    def _is_inside_present(self, mobject: Mobject) -> bool:
+    def _is_inside_present(self, node: Node) -> bool:
         """Present itself, or part of a present group."""
-        return mobject.uid in self.present or any(
-            mobject in root.family() and root.uid in self.present for root in self.roots
+        return node.uid in self.present or any(
+            node in root.family() and root.uid in self.present for root in self.roots
         )
 
 
@@ -352,7 +352,7 @@ class PreparedScene:
     duration: float
     """End of the last segment on the compiled time axis."""
     tracks: list[SignalTrack]
-    roots: list[Mobject]
+    roots: list[Node]
     time: TimeSignals
     placements: list[Placement] = field(default_factory=list)
     segments: list[Segment] = field(default_factory=list)
@@ -368,11 +368,11 @@ class PreparedScene:
         ``scene_time`` becomes the playing time at ``t`` (frozen inside the
         gaps between segments); ``global_time`` defaults to ``t``. Every
         animated root signal is set to its value at ``t``; derived signals
-        follow by propagation; then the present mobjects are snapshotted in
+        follow by propagation; then the present nodes are snapshotted in
         the order they were added.
         """
         self.evaluate(t, global_time)
-        children = [snapshot for mobject in self.roots if mobject.present.value and (snapshot := mobject.snapshot()) is not None]
+        children = [snapshot for node in self.roots if node.present.value and (snapshot := node.snapshot()) is not None]
         return RGroup(children=children)
 
     def sounds(self) -> list[tuple[float, Sound, float]]:

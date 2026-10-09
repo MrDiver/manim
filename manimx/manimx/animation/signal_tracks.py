@@ -4,7 +4,7 @@
 lanes; see the glossary in docs/animation_engine_design.md.)
 
 Animations are the units on the timeline: objects that reference their
-mobject and are evaluated with a progress ``alpha``. Two small structures
+node and are evaluated with a progress ``alpha``. Two small structures
 connect them to signals:
 
 * a :class:`Placement` is one animation placed on the timeline: the

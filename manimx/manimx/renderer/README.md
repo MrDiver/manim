@@ -8,7 +8,7 @@ processes.
 
 What it draws:
 
-- **RShape2D**: Manim's vector shapes (VMobject layout). Exact curved fills,
+- **RShape2D**: vector shapes (the snapshots of `Shape2D`). Exact curved fills,
   strokes with per-point color, opacity and width, all joint and cap
   styles, painter's order.
 - **RCurve3D**: stroke-only Bezier curves in 3D, always facing the camera,

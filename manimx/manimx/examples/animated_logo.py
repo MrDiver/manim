@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..animation import DOWN, LEFT, PI, RIGHT, UP, Circle, FadeIn, Group, Indicate, Scene, Square, Triangle, VMobject
+from ..animation import DOWN, LEFT, PI, RIGHT, UP, Circle, FadeIn, Group, Indicate, Scene, Shape2D, Square, Triangle
 from ..animation.rate_functions import smooth
 from ..renderer.config import RenderConfig
 from .manim_logo import BACKGROUND, LOGO_BLACK, LOGO_BLUE, LOGO_GREEN, LOGO_RED, M_GLYPH_POINTS, manim_logo
@@ -28,7 +28,7 @@ class AnimatedLogo(Scene):
         circle = Circle(name="circle", color=LOGO_GREEN, fill_opacity=1)
         square = Square(name="square", color=LOGO_BLUE, fill_opacity=1)
         triangle = Triangle(name="triangle", color=LOGO_RED, fill_opacity=1)
-        m = VMobject(np.load(M_GLYPH_POINTS), name="m", color=LOGO_BLACK, fill_opacity=1, stroke_width=0)
+        m = Shape2D(np.load(M_GLYPH_POINTS), name="m", color=LOGO_BLACK, fill_opacity=1, stroke_width=0)
         m.scale_by(7)
 
         # Start spread out in a row, then gather into the logo.

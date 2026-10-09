@@ -43,7 +43,7 @@ from ..objects import Quaternion, Transform, new_uid
 from ..renderer.config import Camera as RenderCamera
 from ..renderer.config import ViewState
 from .audio import DEFAULT_SAMPLE_RATE, Sound, mix
-from .cameras import Camera, View
+from .camera import Camera, View
 from .scene import PreparedScene, Segment
 from .time_map import MonotoneMap
 from .worlds import World, World3D

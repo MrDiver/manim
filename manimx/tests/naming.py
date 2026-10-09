@@ -1,25 +1,25 @@
-"""Find snapshots by the name of the Mobject they were built from.
+"""Find snapshots by the name of the Node they were built from.
 
-Render objects carry no names; names belong to the Mobjects. A snapshot
-keeps its Mobject's uid, so the Mobject tree maps uids back to names.
+Render objects carry no names; names belong to the Nodes. A snapshot
+keeps its Node's uid, so the Node tree maps uids back to names.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 
-from manimx.animation import Mobject, Timeline
+from manimx.animation import Node, Timeline
 from manimx.objects import RNode
 
 
-def by_name(snapshots: Iterable[RNode], roots: Iterable[Mobject]) -> dict[str, RNode]:
-    """``snapshots`` keyed by the names of the Mobjects in ``roots``' families."""
-    names = {mobject.uid: mobject.name for root in roots for mobject in root.family()}
+def by_name(snapshots: Iterable[RNode], roots: Iterable[Node]) -> dict[str, RNode]:
+    """``snapshots`` keyed by the names of the Nodes in ``roots``' families."""
+    names = {node.uid: node.name for root in roots for node in root.family()}
     return {names[snapshot.uid]: snapshot for snapshot in snapshots}
 
 
-def timeline_roots(timeline: Timeline) -> list[Mobject]:
-    """The root Mobjects of every clip's scene."""
+def timeline_roots(timeline: Timeline) -> list[Node]:
+    """The root Nodes of every clip's scene."""
     return [root for clip in timeline.clips for root in clip.scene.roots]
 
 

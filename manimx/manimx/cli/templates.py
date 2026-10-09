@@ -37,7 +37,7 @@ class {cls}(Scene):
 
 SIMULATION_SCENE = '''"""{cls}: a simulation scene.
 
-The step function is the whole simulation: it moves mobjects by ``dt``
+The step function is the whole simulation: it moves nodes by ``dt``
 however you like. It runs once when the scene is prepared and is stored
 as keyframes, so rendering never simulates again. Sounds played inside
 the step start at the simulated time.

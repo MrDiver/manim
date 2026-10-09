@@ -105,7 +105,7 @@ class _Quadratic:
 
 
 def tessellate_fill(points: np.ndarray, tolerance: float = DEFAULT_TOLERANCE) -> FillMesh:
-    """Triangulate a ``VMobject``-layout point array (see :class:`RShape2D`).
+    """Triangulate an :class:`RBezierPath`-layout point array (see :class:`RShape2D`).
 
     Open subpaths are closed with a straight line, like Cairo does when
     filling.

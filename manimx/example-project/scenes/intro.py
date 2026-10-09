@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from manimx.animation import DOWN, LEFT, PI, RIGHT, UP, Circle, FadeIn, FadeOut, Group, Indicate, Rectangle, Scene, Square, Triangle, VMobject
+from manimx.animation import DOWN, LEFT, PI, RIGHT, UP, Circle, FadeIn, FadeOut, Group, Indicate, Rectangle, Scene, Square, Shape2D, Triangle
 from manimx.examples.manim_logo import BACKGROUND, LOGO_BLACK, LOGO_BLUE, LOGO_GREEN, LOGO_RED, M_GLYPH_POINTS, manim_logo
 
 CENTER = -np.array(manim_logo().transform.position)  # the logo's center in Manim's layout
@@ -21,7 +21,7 @@ class Intro(Scene):
         circle = Circle(color=LOGO_GREEN, fill_opacity=1)
         square = Square(color=LOGO_BLUE, fill_opacity=1)
         triangle = Triangle(color=LOGO_RED, fill_opacity=1)
-        m = VMobject(np.load(M_GLYPH_POINTS), color=LOGO_BLACK, fill_opacity=1, stroke_width=0)
+        m = Shape2D(np.load(M_GLYPH_POINTS), color=LOGO_BLACK, fill_opacity=1, stroke_width=0)
         m.scale_by(7)
 
         self.play(FadeIn(card), run_time=0.6)
