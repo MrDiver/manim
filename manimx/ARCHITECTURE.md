@@ -80,7 +80,8 @@ flowchart LR
 | `manimx.drivers` | `render()`, `FramePipeline`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation |
 | `manimx.project` | `Project`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers, settings |
 | `manimx.settings` | `Settings` and its sections (`OutputSettings`, `EffectsSettings`, `LightingSettings`, `PerformanceSettings`), `setting()` | renderer (config, effects) |
-| `manimx.cli` | the Typer `app` (`manimx` command), `scaffold`, `ui` | project, drivers |
+| `manimx.cli` | the Typer `app` (`manimx` command), `scaffold`, `ui` | project, drivers, web |
+| `manimx.web` | `PreviewServer` (standard library HTTP) and its page (`static/`: HTML, CSS, plain JS modules) | animation, drivers, renderer |
 
 `manimx.animation` never touches the GPU, and `manimx.renderer` never sees a
 `RootSignal` or a time: `RNode` trees are the only interface between
@@ -694,9 +695,10 @@ flowchart LR
     P -->|"build_timeline()"| TL["Timeline"]
     P -->|"render_settings()"| RS["RenderSettings"]
     P -->|"source(scene)"| PSrc["ProjectSource"]
-    CLI["cli.app: new, generate scene, remove scene,<br/>list, render, still"] --> P
+    CLI["cli.app: new, generate scene, remove scene,<br/>list, render, still, ui"] --> P
     CLI --> Scaffold["scaffold.create_project(),<br/>scaffold.generate_scene(), templates"]
-    UI["web UI (next)"] -.-> P
+    CLI -->|"manimx ui"| UI["web.PreviewServer<br/>/api/timeline, /api/frame"]
+    UI -->|"Timeline.frame_at(t)"| P
     J -.->|"$schema"| Schema[".manimx/project.schema.json<br/>from project_schema()"]
 ```
 
@@ -719,6 +721,17 @@ flowchart LR
 - **`Project.scene_class()`** imports each scene module on its own, so a
   broken module only fails its own `SceneEntry`. A package of the same name
   from another project is evicted from `sys.modules` first.
+- **`manimx ui`** builds the `Timeline` and serves it with
+  `web.PreviewServer` (the first slice of the web UI: scrubbing only).
+  The page asks for `GET /api/timeline` once (duration, frame rate, size,
+  clips, segments) and then for one `GET /api/frame?t=&w=` at a time,
+  remembering only the newest time it wants while a request is open, so
+  the server never works through outdated times. Frames are rendered
+  under one lock (the `RenderService` is not thread-safe) with the
+  project's settings without motion blur, at the page's width, as JPEG.
+  HTTP/1.1 keeps the connection open between frames. The time is part of
+  the page's URL (`#t=`). A frame of the benchmark project takes 9.7 ms
+  (2D) to 19.7 ms (3D) at 960 pixels, request included.
 - **`cli.ui`** prompts (questionary) only for missing arguments in a
   terminal. A `ProjectError` is printed as a panel with its `hint`. A
   `SceneError` comes with a rich traceback of the user's frames.
@@ -861,8 +874,10 @@ flowchart LR
   baseline.
 
 **Next, in the agreed order:**
-1. **Web UI:** scrubbing preview, editing the `Project`, live presentation
-   with clicks calling `Timeline.fire()`.
+1. **Web UI:** scrubbing preview (first slice done: `manimx ui`), then
+   editing the `Project`, live presentation with clicks calling
+   `Timeline.fire()`. The page is plain JS for now; a framework is
+   reconsidered when editing starts.
 2. **Compositions:** a `View` shown as an image inside a `World2D`, nesting.
 3. **HDR colors for `RShape2D`:** a float vector target and `Bloom` on
    `RenderLayers.vector`, while colors ≤ 1 stay exactly Manim's.

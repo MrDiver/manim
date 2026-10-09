@@ -376,6 +376,41 @@ def still(
         _open(target)
 
 
+# --------------------------------------------------------------------------
+# ui
+# --------------------------------------------------------------------------
+
+
+@app.command("ui")
+def ui_command(
+    port: Annotated[int, typer.Option("--port", "-p", help="Port to serve on (0: any free port).")] = 0,
+    open_: Annotated[bool, typer.Option("--open/--no-open", help="Open the page in the browser.")] = True,
+) -> None:
+    """Preview the timeline in the browser and scrub through it."""
+    import webbrowser
+
+    from ..web import PreviewServer
+
+    project = Project.find()
+    chosen = copy.deepcopy(project.settings)
+    chosen.effects.motion_blur.enabled = False  # one render per frame while scrubbing
+    chosen.output.audio = False
+    timeline = _build(project)
+    try:
+        server = PreviewServer(timeline, project.render_settings(chosen), title=project.name, port=port)
+    except OSError as error:
+        raise ProjectError(f"cannot serve on port {port}: {error.strerror}", hint="pick another one with --port, or 0 for any free port") from None
+    ui.success(f"[bold]{server.url}[/]  [dim]{project.name}: Ctrl+C stops[/]")
+    if open_:
+        webbrowser.open(server.url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.close()
+
+
 def _override(settings: Settings, path: tuple[str, ...], value: Any) -> None:
     """Set a setting from a command line option (if given), checked like manimx.json."""
     if value is not None:

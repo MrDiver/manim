@@ -316,6 +316,19 @@ uv run manimx render --motion-blur 1    # no motion blur (renders averaged per f
 uv run manimx render --shutter-angle 720
 ```
 
+To look at the timeline without rendering a video, preview it in the
+browser:
+
+```sh
+uv run manimx ui                        # opens the preview page; Ctrl+C stops it
+uv run manimx ui --port 8000 --no-open  # a fixed address, without opening a browser
+```
+
+Drag on the timeline to scrub; ← and → step one frame, Shift+← and
+Shift+→ one second, Home and End jump to the ends. The page's address
+keeps the time (`#t=2.5`), so a link opens at the same place. Frames are
+rendered without motion blur, at the size of the page.
+
 Options on the command line override `manimx.json` for that run. Rendering
 keeps several frames queued on the GPU, and with `-w` it spreads over
 processes. Each process prepares the scenes itself, which costs about a
