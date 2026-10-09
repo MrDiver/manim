@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import quaternion
 
-from ..objects import RNode, Transform
+from ..robjects import RNode, Transform
 from ..renderer.config import DEFAULT_FRAME_HEIGHT
 from ..renderer.config import Camera as RenderCamera
 from . import authoring

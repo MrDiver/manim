@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 from manimx.animation.geometry import arc_points, rectangle_points
-from manimx.objects import new_uid
+from manimx.robjects import new_uid
 from manimx.renderer import ClearScene, RemoveObjects, RNodeDataCache
 from manimx.renderer.config import Camera, RenderConfig
 from manimx.renderer.scene_graph import NO_CLIP, bounding_box, flatten, flatten_scene

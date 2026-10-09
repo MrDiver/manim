@@ -30,7 +30,7 @@ from pathlib import Path
 import numpy as np
 
 from ..animation.geometry import arc_points, rectangle_points, regular_polygon_points
-from ..objects import Fill, RGroup, RShape2D, Stroke, Transform
+from ..robjects import Fill, RGroup, RShape2D, Stroke, Transform
 from ..renderer.config import RenderConfig
 from ..renderer.scene_graph import bounding_box
 

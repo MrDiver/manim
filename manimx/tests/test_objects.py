@@ -7,8 +7,8 @@ from manimx.animation.geometry import (
     rectangle_points,
     regular_polygon_points,
 )
-from manimx.objects.rshape2d import is_closed
-from manimx.objects.style import resample, to_rgb_array
+from manimx.robjects.rshape2d import is_closed
+from manimx.robjects.style import resample, to_rgb_array
 from manimx.utils.color import BLUE, RED
 
 from manimx import (
@@ -231,8 +231,8 @@ def test_assert_image_matches_creates_compares_and_reports(tmp_path) -> None:
 
 
 def test_style_and_point_fast_paths_match_the_general_parsers() -> None:
-    from manimx.objects.rbezier_path import _validated_points
-    from manimx.objects.style import to_rgb_array, to_scalar_array
+    from manimx.robjects.rbezier_path import _validated_points
+    from manimx.robjects.style import to_rgb_array, to_scalar_array
 
     triple = np.array([0.25, 0.5, 1.5])  # floats pass through unchanged, even out of [0, 1]
     assert np.array_equal(to_rgb_array(triple), [[0.25, 0.5, 1.5]]) and not to_rgb_array(triple).flags.writeable

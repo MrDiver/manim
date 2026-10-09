@@ -32,7 +32,7 @@ import pygltflib
 import quaternion
 from PIL import Image
 
-from ..objects import RGroup, MeshData, PbrMaterial, RNode, RShape3D, Texture, Transform
+from ..robjects import RGroup, MeshData, PbrMaterial, RNode, RShape3D, Texture, Transform
 from ..utils.color import ManimColor
 
 _COMPONENT_TYPES = {

@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 
-from ..objects import RShape2D
+from ..robjects import RShape2D
 
 
 def arc_points(

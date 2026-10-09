@@ -21,8 +21,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...objects import RDirectionalLight, RPointLight, RShape3D, RSpotLight
-from ...objects.rbezier_path import RBezierPath
+from ...robjects import RDirectionalLight, RPointLight, RShape3D, RSpotLight
+from ...robjects.rbezier_path import RBezierPath
 from ..cache import RNodeDataCache
 from ..config import RenderConfig
 from ..scene_graph import NO_CLIP, FlatScene, LightItem

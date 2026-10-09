@@ -22,7 +22,7 @@ from manimx.animation import (
     ShrinkToCenter,
     Square,
 )
-from manimx.objects import RShape2D
+from manimx.robjects import RShape2D
 
 
 class Bare(Node):

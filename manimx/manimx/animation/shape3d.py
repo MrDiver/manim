@@ -1,7 +1,7 @@
 """Shape3D: a lit triangle mesh, and the solids built on it.
 
-A :class:`Shape3D` snapshots to an :class:`~manimx.objects.RShape3D`. Its
-mesh is one signal holding a :class:`~manimx.objects.MeshData`, and the
+A :class:`Shape3D` snapshots to an :class:`~manimx.robjects.RShape3D`. Its
+mesh is one signal holding a :class:`~manimx.robjects.MeshData`, and the
 factors of its material are signals of their own:
 
 * ``mesh``: DISCRETE. Its version (and with it the ``mesh`` version token
@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-from ..objects import (
+from ..robjects import (
     MeshData,
     PbrMaterial,
     RNode,
@@ -35,7 +35,7 @@ from ..objects import (
     sphere_mesh,
     torus_mesh,
 )
-from ..objects.mesh import surface_mesh
+from ..robjects.mesh import surface_mesh
 from ..utils.color import ParsableManimColor
 from .kinds import COLOR, DISCRETE, SCALAR
 from .node import (
@@ -199,7 +199,7 @@ class Torus(Shape3D):
 
 class ParametricSurface(Shape3D):
     """The surface through ``function(u, v)`` (a 3D point), sampled on a
-    grid of ``resolution`` cells (see objects.mesh.surface_mesh). Surfaces
+    grid of ``resolution`` cells (see robjects.mesh.surface_mesh). Surfaces
     of the same resolution have corresponding vertices."""
 
     def __init__(

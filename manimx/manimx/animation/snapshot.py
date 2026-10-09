@@ -1,4 +1,4 @@
-"""Helpers for building render state (manimx.objects) from signals.
+"""Helpers for building render state (manimx.robjects) from signals.
 
 Section 9 of docs/animation_engine_design.md: every snapshot of a scene
 object reuses the object's ``uid``, and its versioned fields carry tokens

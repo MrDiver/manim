@@ -2,7 +2,7 @@
 
 A :class:`Node` is what scene code creates and animates. Every animatable
 property is a signal, and :meth:`Node.snapshot` turns the current signal
-values into render state (an :class:`~manimx.objects.RNode`) for the
+values into render state (an :class:`~manimx.robjects.RNode`) for the
 renderer. Snapshots reuse the node's ``uid`` and carry version tokens from
 the signals, so renderer caches survive any number of snapshots (section
 9 of the design doc).
@@ -35,8 +35,8 @@ from typing import Any
 import numpy as np
 import quaternion
 
-from ..objects import RNode, Transform, new_uid
-from ..objects.transform import quaternion_from_axis_angle
+from ..robjects import RNode, Transform, new_uid
+from ..robjects.transform import quaternion_from_axis_angle
 from ..utils.color import ManimColor, ParsableManimColor
 from . import authoring
 from .animations import AnimationBuilder

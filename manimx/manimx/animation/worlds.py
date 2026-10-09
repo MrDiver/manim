@@ -23,7 +23,7 @@ from typing import ClassVar
 
 import numpy as np
 
-from ..objects import Transform, new_uid
+from ..robjects import Transform, new_uid
 
 
 @dataclass(eq=False)

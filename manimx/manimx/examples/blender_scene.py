@@ -20,7 +20,7 @@ import math
 import numpy as np
 
 from ..animation.geometry import arc_points, rectangle_points, regular_polygon_points
-from ..objects import (
+from ..robjects import (
     CapStyle,
     Fill,
     JointType,

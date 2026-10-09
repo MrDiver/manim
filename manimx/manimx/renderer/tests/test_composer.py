@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 from manimx.animation.geometry import rectangle_points
-from manimx.objects import RShape2D
+from manimx.robjects import RShape2D
 from manimx.renderer import (
     Bloom,
     FrameComposer,

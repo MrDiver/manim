@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from manimx.animation import Node, Timeline
-from manimx.objects import RNode
+from manimx.robjects import RNode
 
 
 def by_name(snapshots: Iterable[RNode], roots: Iterable[Node]) -> dict[str, RNode]:

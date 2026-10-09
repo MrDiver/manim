@@ -298,7 +298,7 @@ const FAN_VERTICES: u32 = FAN_TRIANGLES * 3u;
 // Keep in sync with STROKE_VERTEX_COUNT in vector_batch.py.
 const STROKE_VERTEX_COUNT: u32 = RIBBON_VERTICES + 2u * FAN_VERTICES;
 
-// Values of manimx.objects.style.JointType / CapStyle.
+// Values of manimx.robjects.style.JointType / CapStyle.
 const JOINT_AUTO: u32 = 0u;
 const JOINT_ROUND: u32 = 1u;
 const JOINT_BEVEL: u32 = 2u;

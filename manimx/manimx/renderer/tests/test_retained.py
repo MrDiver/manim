@@ -9,7 +9,7 @@ from manimx.animation.geometry import (
     rectangle_points,
     regular_polygon_points,
 )
-from manimx.objects import new_uid
+from manimx.robjects import new_uid
 from manimx.renderer import RenderConfig, WGPURenderer
 from manimx.renderer.cache import RNodeDataCache
 from manimx.renderer.scene_graph import flatten_scene

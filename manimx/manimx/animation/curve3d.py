@@ -1,6 +1,6 @@
 """Curve3D: a stroke-only path in 3D space, and the curves built on it.
 
-A :class:`Curve3D` snapshots to an :class:`~manimx.objects.RCurve3D`: cubic
+A :class:`Curve3D` snapshots to an :class:`~manimx.robjects.RCurve3D`: cubic
 Bezier curves whose stroke ribbon always faces the camera. It is a leaf.
 """
 
@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from ..objects import RCurve3D, RNode, Stroke
+from ..robjects import RCurve3D, RNode, Stroke
 from ..utils.color import WHITE, ParsableManimColor
 from .kinds import COLOR, DISCRETE, PATH
 from .node import (

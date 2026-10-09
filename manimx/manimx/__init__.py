@@ -2,7 +2,7 @@
 
 __version__ = "0.1.0"
 
-from .objects import (
+from .robjects import (
     CapStyle,
     RClippingGroup,
     RCurve3D,

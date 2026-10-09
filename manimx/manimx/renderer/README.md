@@ -157,7 +157,7 @@ print(renderer.profiler.read())  # {"shadows": 0.4, "geometry": 0.2, "lighting":
 
 ```mermaid
 flowchart LR
-    subgraph Scene["scene (manimx.objects)"]
+    subgraph Scene["scene (manimx.robjects)"]
         Tree["render object tree<br/>RGroup, RClippingGroup,<br/>RShape2D, RCurve3D, RShape3D, RLight"]
     end
 

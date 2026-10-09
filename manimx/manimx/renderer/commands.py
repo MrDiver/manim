@@ -19,7 +19,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..objects import RClippingGroup, RGroup, RNode
+from ..robjects import RClippingGroup, RGroup, RNode
 
 if TYPE_CHECKING:
     from .cache import RNodeDataCache

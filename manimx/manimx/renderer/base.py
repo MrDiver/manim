@@ -19,7 +19,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from ..objects import RNode
+from ..robjects import RNode
 from .cache import RNodeDataCache
 from .commands import CacheCommand
 from .config import RenderConfig

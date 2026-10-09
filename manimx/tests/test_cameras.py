@@ -5,7 +5,7 @@ import pytest
 
 from manimx.animation import LEFT, RIGHT, Camera, Dot, Scene, Timeline, View, World3D
 from manimx.animation.rate_functions import linear
-from manimx.objects import Transform
+from manimx.robjects import Transform
 
 
 def prepared(construct):

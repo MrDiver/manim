@@ -30,7 +30,7 @@ from dataclasses import dataclass
 import numpy as np
 import wgpu
 
-from ..objects import RNode
+from ..robjects import RNode
 from ..renderer.config import RenderConfig, ViewState
 from ..renderer.webgpu import FrameComposer
 

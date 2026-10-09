@@ -1,6 +1,6 @@
 """Shape2D: a vector shape in its local plane, and the shapes built on it.
 
-A :class:`Shape2D` snapshots to an :class:`~manimx.objects.RShape2D`: a
+A :class:`Shape2D` snapshots to an :class:`~manimx.robjects.RShape2D`: a
 path with fill and stroke. It is a leaf; to attach other nodes to it, put
 them in a :class:`~manimx.animation.Group` together.
 """
@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from ..objects import Fill, RNode, RShape2D, Stroke
+from ..robjects import Fill, RNode, RShape2D, Stroke
 from ..utils.color import WHITE, ParsableManimColor
 from .geometry import arc_points, rectangle_points, regular_polygon_points
 from .kinds import COLOR, DISCRETE, PATH

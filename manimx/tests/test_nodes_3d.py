@@ -32,7 +32,7 @@ from manimx.animation import (
     derive,
 )
 from manimx.animation.rate_functions import linear
-from manimx.objects import (
+from manimx.robjects import (
     MeshData,
     PbrMaterial,
     RCurve3D,
@@ -45,7 +45,7 @@ from manimx.objects import (
     box_mesh,
     sphere_mesh,
 )
-from manimx.objects.mesh import surface_mesh
+from manimx.robjects.mesh import surface_mesh
 from manimx.renderer import RenderConfig, WGPURenderer
 from manimx.renderer.scene_graph import flatten_scene
 

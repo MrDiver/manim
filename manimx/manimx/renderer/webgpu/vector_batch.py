@@ -27,8 +27,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ...objects import RShape2D
-from ...objects.rbezier_path import POINTS_PER_CURVE, TOLERANCE_FOR_POINT_EQUALITY, RBezierPath
+from ...robjects import RShape2D
+from ...robjects.rbezier_path import POINTS_PER_CURVE, TOLERANCE_FOR_POINT_EQUALITY, RBezierPath
 from ..cache import RNodeDataCache
 from ..scene_graph import NO_CLIP, DrawItem, FlatScene
 from ..tessellation import FillMesh, tessellate_fill

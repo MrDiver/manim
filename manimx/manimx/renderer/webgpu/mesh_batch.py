@@ -21,9 +21,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ...objects import RDirectionalLight, PbrMaterial, RPointLight, RShape3D, RSpotLight, Texture
-from ...objects.material import linear_rgb
-from ...objects.mesh import MeshData
+from ...robjects import RDirectionalLight, PbrMaterial, RPointLight, RShape3D, RSpotLight, Texture
+from ...robjects.material import linear_rgb
+from ...robjects.mesh import MeshData
 from ..cache import RNodeDataCache
 from ..config import RenderConfig
 from ..scene_graph import NO_CLIP, FlatScene, LightItem

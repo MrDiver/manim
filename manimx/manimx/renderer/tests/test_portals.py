@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 from manimx.animation.geometry import rectangle_points
-from manimx.objects import RShape2D
+from manimx.robjects import RShape2D
 from manimx.renderer import RenderConfig, RNodeDataCache, WGPURenderer
 from manimx.renderer.scene_graph import NO_CLIP, flatten_scene
 from manimx.renderer.webgpu.mesh_batch import MeshBatch

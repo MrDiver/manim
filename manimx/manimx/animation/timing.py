@@ -38,8 +38,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..objects import RGroup
-from ..objects import Quaternion, Transform, new_uid
+from ..robjects import RGroup
+from ..robjects import Quaternion, Transform, new_uid
 from ..renderer.config import Camera as RenderCamera
 from ..renderer.config import ViewState
 from .audio import DEFAULT_SAMPLE_RATE, Sound, mix

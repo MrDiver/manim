@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import wgpu
 
-from ...objects import RNode, RShape3D
+from ...robjects import RNode, RShape3D
 from ..base import Renderer
 from ..config import RenderConfig
 from ..effects import Effect

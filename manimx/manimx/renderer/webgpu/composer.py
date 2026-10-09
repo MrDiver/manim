@@ -29,7 +29,7 @@ from collections.abc import Callable, Sequence
 import numpy as np
 import wgpu
 
-from ...objects import RNode
+from ...robjects import RNode
 from ..config import RenderConfig, ViewState
 from ..effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap
 from .gpu import COLOR_FORMAT, HDR_FORMAT, GPUContext, ResourceCache, expand_includes

@@ -21,8 +21,8 @@ from collections.abc import Iterable, Iterator, Sequence
 
 import numpy as np
 
-from ..objects import RDirectionalLight, RLight, RNode, RPointLight, RSpotLight
-from ..objects.transform import rotation_towards
+from ..robjects import RDirectionalLight, RLight, RNode, RPointLight, RSpotLight
+from ..robjects.transform import rotation_towards
 from ..utils.color import WHITE, ParsableManimColor
 from . import authoring
 from .kinds import COLOR, DISCRETE, SCALAR

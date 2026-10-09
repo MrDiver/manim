@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 
-from ..objects import RClippingGroup, RNode
+from ..robjects import RClippingGroup, RNode
 from .node import Node, PositionMixin, RotationMixin, ScalableMixin, find, find_all
 from .signals import Signal
 

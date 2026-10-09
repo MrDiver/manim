@@ -8,9 +8,9 @@ from dataclasses import dataclass, field
 import numpy as np
 import quaternion
 
-from ..objects.material import linear_rgb
-from ..objects.rnode import RNode
-from ..objects.transform import Transform
+from ..robjects.material import linear_rgb
+from ..robjects.rnode import RNode
+from ..robjects.transform import Transform
 from ..utils.color import BLACK, WHITE, ManimColor, ParsableManimColor
 
 DEFAULT_FRAME_HEIGHT = 8.0

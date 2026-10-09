@@ -6,7 +6,7 @@ import pytest
 
 from manimx.animation import RIGHT, SEGMENT_GAP, Dot, Scene, Timeline, World2D, World3D
 from manimx.animation.rate_functions import linear
-from manimx.objects import Transform, quaternion_from_axis_angle
+from manimx.robjects import Transform, quaternion_from_axis_angle
 from naming import by_name, clip_names, timeline_roots
 
 

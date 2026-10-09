@@ -15,7 +15,7 @@ import wgpu
 from PIL import Image
 from wgpu.backends.wgpu_native.extras import multi_draw_indexed_indirect
 
-from ...objects import Texture
+from ...robjects import Texture
 from .frame import FRAME_DTYPE
 from .gpu import DEPTH_FORMAT, GBUFFER_FORMATS, SHADOW_FORMAT, GPUContext, GrowableBuffer
 from .mesh_batch import DRAW_INDEXED_DTYPE, MeshBatch, TextureSet

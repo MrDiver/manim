@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import quaternion
 
-from ..objects.transform import quaternion_from_axis_angle
+from ..robjects.transform import quaternion_from_axis_angle
 from .rate_functions import smooth
 from .signals import RootSignal, Signal
 from .authoring import current as authoring_current

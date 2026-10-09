@@ -51,7 +51,7 @@ from typing import Any
 
 import numpy as np
 
-from ..objects import RNode
+from ..robjects import RNode
 from ..renderer.config import RenderConfig, ViewState
 from ..renderer.effects import Effect
 from .sinks import FrameFormat, FrameSink

@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import wgpu
 from manimx.animation.geometry import arc_points
-from manimx.objects import RShape2D, new_uid
+from manimx.robjects import RShape2D, new_uid
 from manimx.renderer import MotionBlur, RenderConfig, RNodeDataCache, WGPURenderer
 from manimx.renderer.webgpu.gpu import ResourceCache
 

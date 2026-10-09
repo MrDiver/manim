@@ -9,7 +9,7 @@ import numpy as np
 import pygltflib
 from PIL import Image
 
-from manimx.objects.mesh import MeshData
+from manimx.robjects.mesh import MeshData
 
 FLOAT, UINT32 = 5126, 5125
 

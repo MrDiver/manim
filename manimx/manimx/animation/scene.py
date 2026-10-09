@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..objects import RGroup
+from ..robjects import RGroup
 from .animations import Animation, AnimationBuilder, SetValue, SignalChange, as_animation
 from .authoring import _active
 from .node import Node

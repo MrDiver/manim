@@ -1,7 +1,7 @@
 """The animation engine: signals, animations and compiled scenes.
 
 See docs/animation_engine_design.md. This package never imports the
-renderer; it produces render state (manimx.objects) that any renderer can
+renderer; it produces render state (manimx.robjects) that any renderer can
 draw.
 """
 
