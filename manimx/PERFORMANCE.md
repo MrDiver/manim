@@ -437,6 +437,26 @@ linear ambient color (`RenderConfig.ambient_linear` parses a color on
 every render): 66.2 / 67.1 fps with it against 66.5 / 65.1 without, so
 within noise.
 
+### N. Transform matrices computed once
+
+`SceneFlattener` called `Transform.matrix()` for every node in every
+sub-frame: a quaternion to matrix conversion and a few small arrays,
+although a `Transform` never changes and snapshots of unchanged nodes
+share theirs (step J). The matrix is now computed on first use and kept
+on the `Transform`, read-only.
+
+| | fps (blur 8) | fps (no blur) | flatten |
+|---|---|---|---|
+| before | 67.1 | 357.8 | 1.73 ms |
+| after (three runs) | 70.3 / 70.9 / 70.6 | 377.3 | 0.69 ms |
+
+About +5%, frames bit-identical. Dropped in the same round: reusing a
+node's world matrix object while the node and its parent's world were
+unchanged (and comparing world matrices by identity in
+`RetainedVectors`). On top of the matrix cache it measured 71.1 / 71.6
+fps against 70.6 / 70.9 without, and flatten 0.64 against 0.70 ms:
+about 1%, within noise, for a cache of every node's world matrix.
+
 ## Where the time goes now
 
 5.89 ms per frame against 13.43 at the start (2.3× faster): `render_layers`

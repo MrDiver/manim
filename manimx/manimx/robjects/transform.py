@@ -47,6 +47,7 @@ class Transform:
     position: Vector3 = (0.0, 0.0, 0.0)
     rotation: Quaternion = field(default_factory=lambda: quaternion.one)
     scale: Vector3 = (1.0, 1.0, 1.0)
+    _matrix: np.ndarray | None = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "position", _vector3(self.position, "position"))
@@ -54,12 +55,19 @@ class Transform:
         object.__setattr__(self, "rotation", _normalized(self.rotation))
 
     def matrix(self) -> np.ndarray:
-        """Homogeneous 4x4 matrix computing ``T @ R @ S``."""
-        result = np.eye(4)
-        result[:3, :3] = quaternion.as_rotation_matrix(self.rotation) * np.asarray(
-            self.scale
-        )
-        result[:3, 3] = self.position
+        """Homogeneous 4x4 matrix computing ``T @ R @ S`` (read-only).
+
+        A transform never changes, so the matrix is computed once and
+        kept: snapshots of an unchanged node share their transform, and
+        every render asks for its matrix again.
+        """
+        result = self._matrix
+        if result is None:
+            result = np.eye(4)
+            result[:3, :3] = quaternion.as_rotation_matrix(self.rotation) * np.asarray(self.scale)
+            result[:3, 3] = self.position
+            result.setflags(write=False)
+            object.__setattr__(self, "_matrix", result)
         return result
 
     def apply(self, points: object) -> np.ndarray:
