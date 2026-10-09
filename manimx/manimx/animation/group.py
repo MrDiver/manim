@@ -36,11 +36,21 @@ class Group(PositionMixin, RotationMixin, ScalableMixin, Node):
             yield from child.family()
 
     def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RNode | None:
+        """Like :meth:`Node.snapshot`, and the children's snapshots are
+        part of the token: a group is reused while its own signals hold
+        and every child returned the same render node as before."""
         if self._hidden():
             return None
-        alphas = (*alphas, self.alpha)
-        children = [snapshot for child in self.children if (snapshot := child.snapshot(alphas)) is not None]
-        return RGroup(children=children, transform=self._transform(), uid=self.uid)
+        inner = (*alphas, self.alpha)
+        children = [snapshot for child in self.children if (snapshot := child.snapshot(inner)) is not None]
+        # The previous snapshot keeps its children alive, so equal ids mean the same objects.
+        token = (self._snapshot_token(alphas), tuple(map(id, children)))
+        last = self._last_snapshot
+        if last is not None and last[0] == token:
+            return last[1]
+        snapshot = RGroup(children=children, transform=self._transform(), uid=self.uid)
+        self._last_snapshot = (token, snapshot)
+        return snapshot
 
 
 __all__ = ["Group"]

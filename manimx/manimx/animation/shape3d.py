@@ -187,7 +187,7 @@ class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
     def set_cast_shadows(self, cast_shadows: bool) -> ChangeList:
         return [(self.cast_shadows, ABS, cast_shadows)]
 
-    def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RNode | None:
+    def _build_snapshot(self, alphas: tuple[Signal, ...]) -> RNode | None:
         if self._hidden():
             return None
         alphas = (*alphas, self.alpha)

@@ -133,7 +133,7 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         """Whether this shape blocks light for lit meshes behind it."""
         return [(self.cast_shadows, ABS, cast_shadows)]
 
-    def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RNode | None:
+    def _build_snapshot(self, alphas: tuple[Signal, ...]) -> RNode | None:
         if self._hidden():
             return None
         alphas = (*alphas, self.alpha)

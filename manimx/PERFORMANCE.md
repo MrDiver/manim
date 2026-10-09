@@ -330,6 +330,34 @@ normal matrices of all meshes are built with one batched inverse.
 
 `example-project` frames are bit-identical.
 
+### J. Whole snapshots reused while nothing changed
+
+Step F reused a `Shape2D`'s `Fill` and `Stroke`, but every snapshot
+still built a new render node, and `Shape3D`, `Curve3D`, lights and
+groups reused nothing. Now `Node.snapshot()` keeps the last render node
+with a token of the versions of all the node's signals and of the alphas
+above it, and returns the same object while the token holds (render
+nodes are immutable). Groups and clipping groups also need every child
+(mask, content) to have returned the same object. Leaf classes build
+through `_build_snapshot()`.
+
+| | fps (blur 8) | fps (no blur) | frame_at |
+|---|---|---|---|
+| benchmark project, before | 44.5 | 266.0 | 5.14 ms |
+| benchmark project, after | 49.2 | 285.2 | 3.10 ms |
+| light-show 2–30 s, before | | 97.9 | 3.9 ms |
+| light-show 2–30 s, after | | 110.4 | 3.0 ms |
+
+Frames are bit-identical. The light-show fireworks (38–44 s) are
+unchanged within noise: every spark changes every frame, so there is
+nothing to reuse and the token is extra work.
+
+Tried and dropped in the same round: skipping the fold of a
+`SignalTrack` before its first and after its last placement (returning
+the base or the final value). `frame_at` did not change measurably
+(3.9 / 14.3 ms before, 4.0 / 16.6 ms after on light-show), and two
+reference frames changed, so it was reverted.
+
 ## Where the time goes now
 
 5.89 ms per frame against 13.43 at the start (2.3× faster): `render_layers`

@@ -59,13 +59,21 @@ class ClippingGroup(PositionMixin, RotationMixin, ScalableMixin, Node):
         yield from self.content.family()
 
     def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RNode | None:
+        """Reused like a Group's: while its own signals hold and the mask
+        and the content returned the same render nodes as before."""
         if self._hidden():
             return None
-        alphas = (*alphas, self.alpha)
-        mask, content = self.mask.snapshot(alphas), self.content.snapshot(alphas)
+        inner = (*alphas, self.alpha)
+        mask, content = self.mask.snapshot(inner), self.content.snapshot(inner)
         if mask is None or content is None:
             return None  # nothing to show through
-        return RClippingGroup(mask=mask, content=content, one_sided=bool(self.one_sided.value), transform=self._transform(), uid=self.uid)
+        token = (self._snapshot_token(alphas), id(mask), id(content))
+        last = self._last_snapshot
+        if last is not None and last[0] == token:
+            return last[1]
+        snapshot = RClippingGroup(mask=mask, content=content, one_sided=bool(self.one_sided.value), transform=self._transform(), uid=self.uid)
+        self._last_snapshot = (token, snapshot)
+        return snapshot
 
 
 __all__ = ["ClippingGroup"]
