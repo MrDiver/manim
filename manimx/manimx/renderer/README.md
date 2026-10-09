@@ -68,13 +68,18 @@ Without `field_of_view` the camera is orthographic and shows
 
 ### 3D: meshes, lights, glTF
 
+Scenes are written with scene nodes (manimx.animation), and their
+snapshots are the render objects below:
+
 ```python
-from manimx import RDirectionalLight, PbrMaterial, RPointLight, RShape3D, RSpotLight, Transform, sphere_mesh
-ball = RShape3D(mesh=sphere_mesh(1.0), material=PbrMaterial("#FC6255", roughness=0.3),
-               transform=Transform(position=(0, 0, 1)))
-sun = RDirectionalLight.aimed((-1, 1, -2), intensity=3.0, size=0.03)  # size: softness
-lamp = RPointLight(color="#58C4DD", intensity=15, transform=Transform(position=(-2, -2, 2)))
-spot = RSpotLight.aimed((0, -4, 6), (0, 0, 0), outer_cone_angle=0.4)
+from manimx.animation import DirectionalLight, PointLight, Sphere, SpotLight
+from manimx.robjects import PbrMaterial
+
+ball = Sphere(1.0, name="ball", material=PbrMaterial("#FC6255", roughness=0.3)).move_to((0, 0, 1))
+sun = DirectionalLight(direction=(-1, 1, -2), intensity=3.0, size=0.03)  # size: softness
+lamp = PointLight(position=(-2, -2, 2), color="#58C4DD", intensity=15)
+spot = SpotLight(position=(0, -4, 6), target=(0, 0, 0), outer_cone_angle=0.4)
+# ball.snapshot() is an RShape3D, sun.snapshot() an RDirectionalLight, ...
 ```
 
 Only `RShape3D` meshes are lit. 2D shapes and curves keep their exact Manim

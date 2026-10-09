@@ -13,10 +13,32 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..animation import DOWN, LEFT, PI, RIGHT, UP, Circle, FadeIn, Group, Indicate, Scene, Shape2D, Square, Triangle
+from ..animation import (
+    DOWN,
+    LEFT,
+    PI,
+    RIGHT,
+    UP,
+    Circle,
+    FadeIn,
+    Group,
+    Indicate,
+    Scene,
+    Shape2D,
+    Square,
+    Triangle,
+)
 from ..animation.rate_functions import smooth
 from ..renderer.config import RenderConfig
-from .manim_logo import BACKGROUND, LOGO_BLACK, LOGO_BLUE, LOGO_GREEN, LOGO_RED, M_GLYPH_POINTS, manim_logo
+from .manim_logo import (
+    BACKGROUND,
+    LOGO_BLACK,
+    LOGO_BLUE,
+    LOGO_GREEN,
+    LOGO_RED,
+    M_GLYPH_POINTS,
+    manim_logo,
+)
 
 # The static logo is centered by shifting its group (Manim's
 # move_to(ORIGIN)); the animated shapes end up in the same place.

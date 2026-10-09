@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from manimx.animation.geometry import (
     arc_points,
+    corner_points,
     rectangle_points,
     regular_polygon_points,
 )
@@ -41,7 +42,7 @@ def test_uids_are_unique() -> None:
 
 
 def test_only_versioned_fields_bump_versions() -> None:
-    shape = RShape2D.from_corners([(0, 0), (1, 0)])
+    shape = RShape2D(points=corner_points([(0, 0), (1, 0)]))
     before = shape.version("points", "fill", "stroke")
 
     shape.transform = shape.transform.translated((1.0, 0.0, 0.0))
@@ -57,7 +58,7 @@ def test_version_rejects_unversioned_field() -> None:
 
 
 def test_shape_points_are_read_only() -> None:
-    shape = RShape2D.from_corners([(0, 0), (1, 0)])
+    shape = RShape2D(points=corner_points([(0, 0), (1, 0)]))
 
     with pytest.raises(ValueError, match="read-only"):
         shape.points[0, 0] = 5.0
@@ -124,10 +125,7 @@ def test_style_lists_resample_over_points() -> None:
 
 
 def test_stroke_per_point_values() -> None:
-    shape = RShape2D.from_corners(
-        [(0, 0), (1, 0), (2, 0)],
-        stroke=Stroke([RED, BLUE], width=[0.0, 8.0], opacity=0.5, joint=[JointType.ROUND, JointType.BEVEL]),
-    )
+    shape = RShape2D(points=corner_points([(0, 0), (1, 0), (2, 0)]), stroke=Stroke([RED, BLUE], width=[0.0, 8.0], opacity=0.5, joint=[JointType.ROUND, JointType.BEVEL]))
 
     rgba = shape.stroke_rgba()
     assert rgba.shape == (8, 4)
@@ -168,14 +166,14 @@ def test_shape2d_validates_points() -> None:
 
 
 def test_from_corners_builds_straight_cubics() -> None:
-    shape = RShape2D.from_corners([(0, 0), (3, 0)])
+    shape = RShape2D(points=corner_points([(0, 0), (3, 0)]))
 
     np.testing.assert_allclose(shape.points, [[0, 0], [1, 0], [2, 0], [3, 0]])
 
 
 def test_subpaths_split_at_gaps() -> None:
-    first = RShape2D.from_corners([(0, 0), (1, 0), (1, 1)], closed=True).points
-    second = RShape2D.from_corners([(5, 5), (6, 5)]).points
+    first = RShape2D(points=corner_points([(0, 0), (1, 0), (1, 1)], closed=True)).points
+    second = RShape2D(points=corner_points([(5, 5), (6, 5)])).points
     shape = RShape2D(points=np.vstack([first, second]))
 
     subpaths = shape.subpaths()
@@ -195,7 +193,8 @@ def test_geometry_matches_manim() -> None:
 
 
 def test_shape3d_versions_mesh_and_material() -> None:
-    from manimx import PbrMaterial, sphere_mesh
+    from manimx import PbrMaterial
+    from manimx.animation.geometry import sphere_mesh
 
     shape = RShape3D()
     before = shape.version("mesh", "material")

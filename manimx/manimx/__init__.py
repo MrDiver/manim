@@ -22,10 +22,7 @@ from .robjects import (
     Stroke,
     Texture,
     Transform,
-    box_mesh,
     quaternion_from_axis_angle,
-    sphere_mesh,
-    torus_mesh,
 )
 from .renderer import RenderConfig, Renderer, WGPURenderer
 from .testing import assert_snapshot, visual_test
@@ -59,11 +56,8 @@ __all__ = [
     "Transform",
     "WGPURenderer",
     "assert_snapshot",
-    "box_mesh",
     "package_name",
     "quaternion_from_axis_angle",
-    "sphere_mesh",
-    "torus_mesh",
     "visual_test",
     "__version__",
 ]

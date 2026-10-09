@@ -22,14 +22,12 @@ import dataclasses
 
 import numpy as np
 import pytest
-
-from manimx import RGroup, RLight
 from manimx.animation import ClippingGroup, Group, Light, Shape3D
-from manimx.examples._nodes import placed
 from manimx.examples.portal_cube import portal_cube, views
 from manimx.renderer import WGPURenderer
 from manimx.renderer.scene_graph import flatten_scene
-from manimx.robjects import Transform
+
+from manimx import RGroup, RLight
 
 SIDES = ["front", "right", "back", "left"]
 WIDTH, HEIGHT = 320, 180
@@ -45,7 +43,7 @@ def renderer() -> WGPURenderer:
 
 def _send_away(node) -> None:
     """Move ``node`` far out of the cube (and out of view)."""
-    placed(node, Transform(position=(0.0, 0.0, -1000.0)))
+    node.move_to((0.0, 0.0, -1000.0))
 
 
 def _render(renderer: WGPURenderer, cube: Group, view: str) -> np.ndarray:

@@ -11,11 +11,17 @@ import math
 
 import numpy as np
 import pytest
-from manimx.animation.geometry import arc_points
+from manimx.animation.geometry import (
+    arc_points,
+    box_mesh,
+    parametric_points,
+    sphere_mesh,
+)
 from manimx.examples.manim_logo import M_GLYPH_POINTS, manim_logo
 from manimx.examples.manim_logo import config as logo_config
 from manimx.renderer import Bloom, Camera, FrameComposer, MotionBlur, RenderConfig
 from manimx.renderer.tessellation import tessellate_fill
+from manimx.robjects.transform import rotation_towards
 from manimx.utils.color import BLUE, RED, YELLOW
 
 from manimx import (
@@ -30,8 +36,6 @@ from manimx import (
     RSpotLight,
     Stroke,
     Transform,
-    box_mesh,
-    sphere_mesh,
 )
 
 FULL_HD = {"pixel_width": 1920, "pixel_height": 1080}
@@ -62,12 +66,7 @@ def glyph_grid(columns: int, rows: int) -> RGroup:
 def helices(count: int) -> RGroup:
     return RGroup(
         children=[
-            RCurve3D.parametric(
-                lambda t, i=i: (math.cos(t) + (i % 10 - 4.5) * 2.2, math.sin(t) + (i // 10 - 2) * 2.2, 0.1 * t),
-                (0.0, 8 * math.pi),
-                128,
-                stroke=Stroke([RED, YELLOW, BLUE], width=[4, 12, 4]),
-            )
+            RCurve3D(points=parametric_points(lambda t, i=i: (math.cos(t) + (i % 10 - 4.5) * 2.2, math.sin(t) + (i // 10 - 2) * 2.2, 0.1 * t), (0.0, 8 * math.pi), 128), stroke=Stroke([RED, YELLOW, BLUE], width=[4, 12, 4]))
             for i in range(count)
         ],
     )
@@ -82,8 +81,8 @@ def lit_scene(spheres: int, shadows: bool = True) -> RGroup:
     ]
     floor = RShape3D(mesh=box_mesh(16, 16, 0.2), material=PbrMaterial("#d0d0d0", roughness=0.9), transform=Transform(position=(0, 0, -0.1)))
     lights = [
-        RDirectionalLight.aimed((0.6, 1.0, -1.2), cast_shadows=shadows),
-        RSpotLight.aimed((-6, -4, 8), (0, 0, 0), intensity=80, outer_cone_angle=0.6, size=0.3, cast_shadows=shadows),
+        RDirectionalLight(transform=Transform(rotation=rotation_towards((0.6, 1.0, -1.2))), cast_shadows=shadows),
+        RSpotLight(transform=Transform(position=(-6, -4, 8), rotation=rotation_towards(tuple(np.subtract((0, 0, 0), (-6, -4, 8))))), intensity=80, outer_cone_angle=0.6, size=0.3, cast_shadows=shadows),
         RPointLight(intensity=8, transform=Transform(position=(2, -2, 2)), cast_shadows=shadows),
     ]
     return RGroup(children=[floor, *balls, *lights])

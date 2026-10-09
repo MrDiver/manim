@@ -29,12 +29,9 @@ from pathlib import Path
 
 import numpy as np
 
-from ..animation.geometry import arc_points, rectangle_points, regular_polygon_points
-from ..animation import Group, Shape2D
-from ..robjects import Transform
+from ..animation import Circle, Group, Shape2D, Square, Triangle
 from ..renderer.config import RenderConfig
 from ..renderer.scene_graph import bounding_box
-from ._nodes import placed
 
 BACKGROUND = "#ece6e2"
 LOGO_GREEN = "#87c2a5"
@@ -45,24 +42,17 @@ LOGO_BLACK = "#343434"
 M_GLYPH_POINTS = Path(__file__).with_name("manim_logo_m.npy")
 
 
-def _colored(color: str) -> dict:
-    """Manim's ``color=..., fill_opacity=1``: same color for fill and stroke."""
-    return {"color": color, "fill_opacity": 1.0}
-
-
 def manim_logo() -> Group:
-    ds_m = placed(
-        Shape2D(np.load(M_GLYPH_POINTS), "m", color=LOGO_BLACK, fill_opacity=1.0, stroke_width=0.0),  # MathTex has no stroke
-        Transform(position=(-2.25, 1.5, 0.0), scale=(7.0, 7.0, 1.0)),
-    )
-    shapes = [
-        placed(Shape2D(regular_polygon_points(3, 1.0), "triangle", **_colored(LOGO_RED)), Transform(position=(1.0, 0.0, 0.0))),
-        placed(Shape2D(rectangle_points(2.0, 2.0), "square", **_colored(LOGO_BLUE)), Transform(position=(0.0, 1.0, 0.0))),
-        placed(Shape2D(arc_points(), "circle", **_colored(LOGO_GREEN)), Transform(position=(-1.0, 0.0, 0.0))),
-        ds_m,
-    ]  # order matters: later shapes are drawn on top
+    """The logo as a node tree: ``"triangle"``, ``"square"``, ``"circle"`` and
+    the glyph ``"m"`` in the group ``"logo"``, centered at the origin."""
+    triangle = Triangle(name="triangle", color=LOGO_RED, fill_opacity=1.0).move_to((1.0, 0.0, 0.0))
+    square = Square(name="square", color=LOGO_BLUE, fill_opacity=1.0).move_to((0.0, 1.0, 0.0))
+    circle = Circle(name="circle", color=LOGO_GREEN, fill_opacity=1.0).move_to((-1.0, 0.0, 0.0))
+    # The blackboard-bold M is a glyph outline, so a plain Shape2D; MathTex has no stroke.
+    m = Shape2D(np.load(M_GLYPH_POINTS), "m", color=LOGO_BLACK, fill_opacity=1.0, stroke_width=0.0)
+    m.move_to((-2.25, 1.5, 0.0)).set_scale((7.0, 7.0, 1.0))
 
-    logo = Group(*shapes, name="logo")
+    logo = Group(triangle, square, circle, m, name="logo")  # later shapes are drawn on top
     # move_to(ORIGIN): shift the group so its bounding box is centered.
     low, high = bounding_box(logo.snapshot())
     logo.shift(-(low + high) / 2)

@@ -124,7 +124,7 @@ def scene_bounds(scene: FlatScene, cache: RNodeDataCache, scope: int = NO_CLIP) 
         obj = item.obj
         if not scene.in_scope(item.clip, scope):
             continue
-        if isinstance(obj, RShape3D):
+        if isinstance(obj, RShape3D) and obj.mesh.vertex_count:
             local = cache.get_or_create(obj.uid, "bounds", obj.version("mesh"), lambda: _box(obj.mesh.positions))
         elif isinstance(obj, RBezierPath) and obj.num_curves:
             local = cache.get_or_create(obj.uid, "bounds", obj.version("points"), lambda: _box(obj.points_3d()))

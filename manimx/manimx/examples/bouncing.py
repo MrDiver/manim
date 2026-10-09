@@ -19,7 +19,19 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..animation import DOWN, LEFT, RIGHT, UP, Circle, Dot, FadeIn, FadeOut, Rectangle, Scene, Simulation
+from ..animation import (
+    DOWN,
+    LEFT,
+    RIGHT,
+    UP,
+    Circle,
+    Dot,
+    FadeIn,
+    FadeOut,
+    Rectangle,
+    Scene,
+    Simulation,
+)
 from ..animation.audio import DEFAULT_SAMPLE_RATE
 from ..animation.rate_functions import there_and_back
 

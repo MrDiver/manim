@@ -19,13 +19,20 @@ import math
 
 import numpy as np
 
-from ..animation import ClippingGroup, Group, Shape2D
-from ..animation.geometry import arc_points, rectangle_points, regular_polygon_points
-from ..robjects import CapStyle, JointType, RShape2D, Transform
+from ..animation import (
+    Circle,
+    ClippingGroup,
+    Group,
+    Polyline,
+    RegularPolygon,
+    Shape2D,
+    Square,
+)
+from ..animation.geometry import corner_points
 from ..renderer.config import Camera, RenderConfig
 from ..renderer.scene_graph import bounding_box
+from ..robjects import CapStyle, JointType
 from ..utils.color import BLUE, GREEN, ORANGE, PURPLE, RED, WHITE, YELLOW
-from ._nodes import placed
 from .manim_logo import manim_logo
 
 BACKGROUND = "#3d3d3d"  # Blender's viewport gray
@@ -61,24 +68,17 @@ def views(pixel_width: int = 1920, pixel_height: int = 1080) -> dict[str, Render
     }
 
 
-def _corners(corners: list[tuple[float, float]]) -> np.ndarray:
-    return RShape2D.from_corners(corners).points
-
-
 def _ground() -> Group:
     """Grid lines and axes on the XY plane, plus the vertical Z axis."""
     coordinates = [c for c in range(-GRID_EXTENT, GRID_EXTENT + 1) if c != 0]
     lines = [((c, -GRID_EXTENT), (c, GRID_EXTENT)) for c in coordinates]
     lines += [((-GRID_EXTENT, c), (GRID_EXTENT, c)) for c in coordinates]
     # One shape, one open subpath per grid line.
-    grid = Shape2D(np.vstack([_corners(line) for line in lines]), "grid", stroke_color=GRID_COLOR, stroke_width=2.0)
+    grid = Shape2D(np.vstack([corner_points(line) for line in lines]), "grid", stroke_color=GRID_COLOR, stroke_width=2.0)
     extent = (-GRID_EXTENT, GRID_EXTENT)
-    x_axis = Shape2D(_corners([(extent[0], 0), (extent[1], 0)]), "x-axis", stroke_color=AXIS_X, stroke_width=3.0)
-    y_axis = Shape2D(_corners([(0, extent[0]), (0, extent[1])]), "y-axis", stroke_color=AXIS_Y, stroke_width=3.0)
-    z_axis = placed(
-        Shape2D(_corners([(0, 0), (0, 8)]), "z-axis", stroke_color=AXIS_Z, stroke_width=3.0),
-        Transform().rotated(math.pi / 2, TO_UPRIGHT),
-    )
+    x_axis = Polyline([(extent[0], 0), (extent[1], 0)], name="x-axis", stroke_color=AXIS_X, stroke_width=3.0)
+    y_axis = Polyline([(0, extent[0]), (0, extent[1])], name="y-axis", stroke_color=AXIS_Y, stroke_width=3.0)
+    z_axis = Polyline([(0, 0), (0, 8)], name="z-axis", stroke_color=AXIS_Z, stroke_width=3.0).rotate(math.pi / 2, TO_UPRIGHT)
     return Group(grid, x_axis, y_axis, z_axis, name="ground")
 
 
@@ -88,46 +88,40 @@ def _upright_logo() -> Group:
     low, high = bounding_box(logo.snapshot())
     height = high[1] - low[1]
     scale = 1.6
-    placement = Transform(position=(0.0, 0.0, scale * height / 2 + 0.2), scale=(scale, scale, scale))
-    return placed(Group(logo, name="upright-logo"), placement.rotated(math.pi / 2, TO_UPRIGHT).rotated(math.radians(30.0), (0, 0, 1)))
+    stand = Group(logo, name="upright-logo").move_to((0.0, 0.0, scale * height / 2 + 0.2)).set_scale(scale)
+    return stand.rotate(math.pi / 2, TO_UPRIGHT).rotate(math.radians(30.0), (0, 0, 1))
 
 
 def _stress_ring() -> Group:
     """Stress-test shapes on a circle around the logo, each oriented differently."""
-    zigzag = Group(
+    zigzags = Group(
         *(
-            placed(
-                Shape2D(
-                    _corners([(-1.0, -0.5), (-0.5, 0.5), (0.0, -0.5), (0.5, 0.5), (1.0, -0.5)]),
-                    f"zigzag-{joint.name.lower()}",
-                    stroke_color=WHITE,
-                    stroke_width=20,
-                    stroke_joint=joint,
-                    stroke_cap=cap,
-                ),
-                Transform(position=(0.0, 1.5 - 1.5 * i, 0.0)),
-            )
+            Polyline(
+                [(-1.0, -0.5), (-0.5, 0.5), (0.0, -0.5), (0.5, 0.5), (1.0, -0.5)],
+                name=f"zigzag-{joint.name.lower()}",
+                stroke_color=WHITE,
+                stroke_width=20,
+                stroke_joint=joint,
+                stroke_cap=cap,
+            ).move_to((0.0, 1.5 - 1.5 * i, 0.0))
             for i, (joint, cap) in enumerate(
                 [(JointType.MITER, CapStyle.BUTT), (JointType.ROUND, CapStyle.ROUND), (JointType.BEVEL, CapStyle.SQUARE)]
             )
         ),
         name="zigzags",
     )
-    rainbow = Shape2D(arc_points(1.4), "rainbow", stroke_color=[RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED], stroke_width=[6, 30, 6, 30, 6])
-    pentagon = Shape2D(regular_polygon_points(5, 1.5), "pentagon", fill_color=[RED, BLUE], fill_opacity=0.7, stroke_color=YELLOW, stroke_width=10, stroke_opacity=0.6)
+    rainbow = Circle(1.4, "rainbow", stroke_color=[RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED], stroke_width=[6, 30, 6, 30, 6])
+    pentagon = RegularPolygon(5, 1.5, "pentagon", fill_color=[RED, BLUE], fill_opacity=0.7, stroke_color=YELLOW, stroke_width=10, stroke_opacity=0.6)
     squares = Group(
-        placed(Shape2D(rectangle_points(2.0, 2.0), "red-square", fill_color=RED, fill_opacity=0.5, stroke_color=WHITE, stroke_width=6), Transform(position=(-0.5, 0.5, 0.0))),
-        placed(Shape2D(rectangle_points(2.0, 2.0), "blue-square", fill_color=BLUE, fill_opacity=0.5, stroke_color=WHITE, stroke_width=6), Transform(position=(0.5, -0.5, 0.0))),
+        Square(2.0, "red-square", fill_color=RED, fill_opacity=0.5, stroke_color=WHITE, stroke_width=6).move_to((-0.5, 0.5, 0.0)),
+        Square(2.0, "blue-square", fill_color=BLUE, fill_opacity=0.5, stroke_color=WHITE, stroke_width=6).move_to((0.5, -0.5, 0.0)),
         name="squares",
     )
     clipped = ClippingGroup(
-        Shape2D(regular_polygon_points(6, 1.5), "hexagon-mask", fill_opacity=1.0, stroke_width=0),
+        RegularPolygon(6, 1.5, "hexagon-mask", fill_opacity=1.0, stroke_width=0),
         Group(
             *(
-                placed(
-                    Shape2D(rectangle_points(0.5, 0.5), f"stripe-{i}", fill_color=color, fill_opacity=1.0, stroke_width=0),
-                    Transform(position=(-1.75 + 0.5 * i, 0.0, 0.0), scale=(1.0, 7.0, 1.0)),
-                )
+                Square(0.5, f"stripe-{i}", fill_color=color, fill_opacity=1.0, stroke_width=0).move_to((-1.75 + 0.5 * i, 0.0, 0.0)).set_scale((1.0, 7.0, 1.0))
                 for i, color in enumerate([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED, ORANGE])
             ),
             name="stripes",
@@ -135,26 +129,25 @@ def _stress_ring() -> Group:
         "clipped",
     )
     mirrored = Group(
-        Shape2D(arc_points(), "green-disc", fill_color=GREEN, fill_opacity=1.0, stroke_color=WHITE, stroke_width=8),
-        Shape2D(rectangle_points(0.8, 0.8), "red-square", fill_color=RED, fill_opacity=1.0, stroke_width=0),
+        Circle(name="green-disc", fill_color=GREEN, fill_opacity=1.0, stroke_color=WHITE, stroke_width=8),
+        Square(0.8, "red-square", fill_color=RED, fill_opacity=1.0, stroke_width=0),
         name="mirrored",
     )
 
-    # (shape, angle on the ring, extra orientation applied before placement)
+    upright = (math.pi / 2, TO_UPRIGHT)
+    # (shape, angle on the ring, height offset, rotations applied in order)
     placements = [
-        (zigzag, 0.0, Transform().rotated(math.pi / 2, TO_UPRIGHT)),
-        (rainbow, 60.0, Transform().rotated(math.pi / 2, TO_UPRIGHT).rotated(math.radians(40), (0, 0, 1))),
-        (pentagon, 120.0, Transform(position=(0.0, 0.0, -1.3))),  # lying flat
-        (squares, 180.0, Transform().rotated(math.radians(60), TO_UPRIGHT)),  # leaning back
-        (clipped, 240.0, Transform().rotated(math.pi / 2, TO_UPRIGHT).rotated(math.radians(-70), (0, 0, 1))),
-        (mirrored, 300.0, Transform().rotated(math.pi / 2, TO_UPRIGHT).rotated(math.pi, (0, 0, 1))),  # back side to the center
+        (zigzags, 0.0, 0.0, [upright]),
+        (rainbow, 60.0, 0.0, [upright, (math.radians(40), (0, 0, 1))]),
+        (pentagon, 120.0, -1.3, []),  # lying flat
+        (squares, 180.0, 0.0, [(math.radians(60), TO_UPRIGHT)]),  # leaning back
+        (clipped, 240.0, 0.0, [upright, (math.radians(-70), (0, 0, 1))]),
+        (mirrored, 300.0, 0.0, [upright, (math.pi, (0, 0, 1))]),  # back side to the center
     ]
     radius = 6.5
-    children = []
-    for shape, degrees, orientation in placements:
+    for shape, degrees, height, rotations in placements:
         angle = math.radians(degrees)
-        position = (radius * math.cos(angle), radius * math.sin(angle), 1.8)
-        children.append(
-            placed(shape, Transform(position=tuple(np.add(position, orientation.position)), rotation=orientation.rotation, scale=orientation.scale))
-        )
-    return Group(*children, name="stress-ring")
+        shape.move_to((radius * math.cos(angle), radius * math.sin(angle), 1.8 + height))
+        for rotation_angle, axis in rotations:
+            shape.rotate(rotation_angle, axis)
+    return Group(*(shape for shape, *_ in placements), name="stress-ring")

@@ -5,8 +5,9 @@ import math
 import numpy as np
 import pytest
 from manimx.animation.geometry import arc_points, rectangle_points
-from manimx.robjects import RShape2D
 from manimx.renderer import RemoveObjects, RenderConfig, Renderer, WGPURenderer
+from manimx.robjects import RShape2D
+from manimx.robjects.transform import rotation_towards
 from manimx.utils.color import BLUE, RED
 
 from manimx import Fill, RClippingGroup, RGroup, Stroke, Transform
@@ -146,10 +147,11 @@ def _brightness(image: np.ndarray, x: float, y: float) -> int:
 
 
 def test_mesh_is_lit_from_the_light_side(renderer: WGPURenderer) -> None:
-    from manimx import PbrMaterial, RDirectionalLight, RShape3D, sphere_mesh
+    from manimx import PbrMaterial, RDirectionalLight, RShape3D
+    from manimx.animation.geometry import sphere_mesh
 
     sphere = RShape3D(mesh=sphere_mesh(2.0), material=PbrMaterial("#FFFFFF", roughness=1.0))
-    light = RDirectionalLight.aimed((1.0, 0.0, 0.0))  # shines towards +x
+    light = RDirectionalLight(transform=Transform(rotation=rotation_towards((1.0, 0.0, 0.0))))  # shines towards +x
 
     image = render(renderer, sphere, light, ambient_intensity=0.0)
 
@@ -158,10 +160,11 @@ def test_mesh_is_lit_from_the_light_side(renderer: WGPURenderer) -> None:
 
 
 def test_spot_light_cone(renderer: WGPURenderer) -> None:
-    from manimx import PbrMaterial, RShape3D, RSpotLight, box_mesh
+    from manimx import PbrMaterial, RShape3D, RSpotLight
+    from manimx.animation.geometry import box_mesh
 
     floor = RShape3D(mesh=box_mesh(8.0, 8.0, 0.1), material=PbrMaterial("#FFFFFF", roughness=1.0))
-    spot = RSpotLight.aimed((0.0, 0.0, 4.0), (0.0, 0.0, 0.0), intensity=40.0, outer_cone_angle=0.3)
+    spot = RSpotLight(transform=Transform(position=(0.0, 0.0, 4.0), rotation=rotation_towards(tuple(np.subtract((0.0, 0.0, 0.0), (0.0, 0.0, 4.0))))), intensity=40.0, outer_cone_angle=0.3)
 
     image = render(renderer, floor, spot, ambient_intensity=0.0)
 
@@ -170,7 +173,8 @@ def test_spot_light_cone(renderer: WGPURenderer) -> None:
 
 
 def test_meshes_and_vectors_share_depth(renderer: WGPURenderer) -> None:
-    from manimx import PbrMaterial, RShape3D, box_mesh
+    from manimx import PbrMaterial, RShape3D
+    from manimx.animation.geometry import box_mesh
 
     wall = RShape3D(mesh=box_mesh(4.0, 4.0, 0.2), material=PbrMaterial("#000000", roughness=1.0))
     behind = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(RED, opacity=1.0), stroke=Stroke(width=0), transform=Transform(position=(0.0, 0.0, -1.0)))
@@ -186,7 +190,8 @@ def test_frames_without_meshes_after_meshes_start_from_empty_3d_layers() -> None
     """Mesh-free frames skip the deferred passes and rely on an empty
     G-buffer and lit layer: a mesh frame in between must not leave its
     depth (hiding shapes) or light behind."""
-    from manimx import PbrMaterial, RShape3D, sphere_mesh
+    from manimx import PbrMaterial, RShape3D
+    from manimx.animation.geometry import sphere_mesh
 
     try:
         reused = WGPURenderer()

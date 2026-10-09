@@ -4,13 +4,14 @@ import math
 
 import numpy as np
 import pytest
-from manimx.animation.geometry import rectangle_points
-from manimx.robjects import RShape2D
+from manimx.animation.geometry import box_mesh, rectangle_points
 from manimx.renderer import RenderConfig, RNodeDataCache, WGPURenderer
 from manimx.renderer.scene_graph import NO_CLIP, flatten_scene
 from manimx.renderer.webgpu.mesh_batch import MeshBatch
 from manimx.renderer.webgpu.shadow_views import build_shadow_views
 from manimx.renderer.webgpu.vector_batch import FLAG_FRONT_ONLY, VectorBatch
+from manimx.robjects import RShape2D
+from manimx.robjects.transform import rotation_towards
 from manimx.utils.color import RED
 
 from manimx import (
@@ -22,7 +23,6 @@ from manimx import (
     RShape3D,
     Stroke,
     Transform,
-    box_mesh,
 )
 
 
@@ -37,8 +37,8 @@ def _world(*children) -> RGroup:
 
 
 def test_scoped_lights_and_scope_membership() -> None:
-    inner_light = RDirectionalLight.aimed((0, 0, -1))
-    outer_light = RDirectionalLight.aimed((0, 0, -1))
+    inner_light = RDirectionalLight(transform=Transform(rotation=rotation_towards((0, 0, -1))))
+    outer_light = RDirectionalLight(transform=Transform(rotation=rotation_towards((0, 0, -1))))
     nested = RClippingGroup(mask=RShape2D(points=rectangle_points(2.0, 2.0)), content=RShape3D())
     scene = flatten_scene(RGroup(children=[outer_light, _portal(_world(inner_light, RShape3D(), nested))]))
 
@@ -58,7 +58,7 @@ def test_one_sided_masks_are_flagged() -> None:
 def test_scoped_shadows_use_only_their_scope() -> None:
     inside = RShape3D(mesh=box_mesh(1, 1, 1))
     outside = RShape3D(mesh=box_mesh(1, 1, 1), transform=Transform(position=(50, 0, 0)))
-    sun = RDirectionalLight.aimed((0, 0, -1))
+    sun = RDirectionalLight(transform=Transform(rotation=rotation_towards((0, 0, -1))))
     scene = flatten_scene(RGroup(children=[outside, _portal(_world(inside, sun))]))
     config = RenderConfig()
     batch = MeshBatch.build(scene, RNodeDataCache(), config)
@@ -97,7 +97,7 @@ def test_scoped_light_only_lights_its_world(renderer: WGPURenderer) -> None:
     def wall(x: float) -> RShape3D:
         return RShape3D(mesh=box_mesh(2, 2, 0.2), material=PbrMaterial("#FFFFFF", roughness=1.0), transform=Transform(position=(x, 0, 0)))
 
-    sun = RDirectionalLight.aimed((0, 0, -1), intensity=3.0)
+    sun = RDirectionalLight(transform=Transform(rotation=rotation_towards((0, 0, -1))), intensity=3.0)
     lit = _portal(_world(wall(0.0), sun))
     root = RGroup(children=[lit, wall(3.0)])
     image = renderer.render(root, RenderConfig(pixel_width=160, pixel_height=90, ambient_intensity=0.0))

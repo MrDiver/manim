@@ -16,7 +16,12 @@ import numpy as np
 from ..robjects import CapStyle, Fill, JointType, RNode, RShape2D, Stroke
 from ..utils.color import WHITE
 from . import style
-from .geometry import arc_points, rectangle_points, regular_polygon_points
+from .geometry import (
+    arc_points,
+    corner_points,
+    rectangle_points,
+    regular_polygon_points,
+)
 from .kinds import COLORS, DISCRETE, PATH, SCALARS
 from .node import (
     ABS,
@@ -199,7 +204,7 @@ class Polyline(Shape2D):
     """Straight segments through ``corners`` (closed into a polygon if asked)."""
 
     def __init__(self, corners: Sequence[Sequence[float]], closed: bool = False, name: str | None = None, **style: Any) -> None:
-        super().__init__(RShape2D.from_corners(corners, closed=closed).points, name, **style)
+        super().__init__(corner_points(corners, closed=closed), name, **style)
 
 
 class Triangle(RegularPolygon):

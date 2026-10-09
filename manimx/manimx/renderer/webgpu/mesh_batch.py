@@ -21,9 +21,17 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ...robjects import RDirectionalLight, PbrMaterial, RPointLight, RShape3D, RSpotLight, Texture
+from ...robjects import (
+    PbrMaterial,
+    RDirectionalLight,
+    RPointLight,
+    RShape3D,
+    RSpotLight,
+    Texture,
+)
 from ...robjects.material import linear_rgb
 from ...robjects.mesh import MeshData
+from ...robjects.transform import Transform, rotation_towards
 from ..cache import RNodeDataCache
 from ..config import RenderConfig
 from ..scene_graph import NO_CLIP, FlatScene, LightItem
@@ -237,5 +245,5 @@ def default_lights(config: RenderConfig) -> list[LightItem]:
     camera = config.camera.transform.matrix()
     right, up, backwards = camera[:3, 0], camera[:3, 1], camera[:3, 2]
     direction = -(1.0 * up - 0.6 * right + 0.8 * backwards)
-    light = RDirectionalLight.aimed(tuple(direction), intensity=3.0)
+    light = RDirectionalLight(transform=Transform(rotation=rotation_towards(tuple(direction))), intensity=3.0)
     return [LightItem(light, light.transform.matrix())]

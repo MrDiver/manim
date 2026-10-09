@@ -45,12 +45,9 @@ from ..robjects import (
     RNode,
     RShape3D,
     Texture,
-    box_mesh,
-    sphere_mesh,
-    torus_mesh,
 )
-from ..robjects.mesh import surface_mesh
 from ..utils.color import ParsableManimColor
+from .geometry import box_mesh, sphere_mesh, surface_mesh, torus_mesh
 from .kinds import COLOR, DISCRETE, SCALAR, SignalKind
 from .node import (
     ABS,
@@ -256,7 +253,7 @@ class Torus(Shape3D):
 
 class ParametricSurface(Shape3D):
     """The surface through ``function(u, v)`` (a 3D point), sampled on a
-    grid of ``resolution`` cells (see robjects.mesh.surface_mesh). Surfaces
+    grid of ``resolution`` cells (see geometry.surface_mesh). Surfaces
     of the same resolution have corresponding vertices."""
 
     def __init__(

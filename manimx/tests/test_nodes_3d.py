@@ -31,7 +31,10 @@ from manimx.animation import (
     Torus,
     derive,
 )
+from manimx.animation.geometry import box_mesh, sphere_mesh, surface_mesh
 from manimx.animation.rate_functions import linear
+from manimx.renderer import RenderConfig, WGPURenderer
+from manimx.renderer.scene_graph import flatten_scene
 from manimx.robjects import (
     MeshData,
     PbrMaterial,
@@ -42,12 +45,7 @@ from manimx.robjects import (
     RShape3D,
     RSpotLight,
     Texture,
-    box_mesh,
-    sphere_mesh,
 )
-from manimx.robjects.mesh import surface_mesh
-from manimx.renderer import RenderConfig, WGPURenderer
-from manimx.renderer.scene_graph import flatten_scene
 
 
 def prepare(construct):

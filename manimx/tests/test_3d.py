@@ -7,6 +7,13 @@ import numpy as np
 import pytest
 from gltf_fixtures import GlbWriter
 from manimx.animation import Group, Rotate, Scene
+from manimx.animation.geometry import (
+    box_mesh,
+    corner_points,
+    parametric_points,
+    sphere_mesh,
+    torus_mesh,
+)
 from manimx.animation.rate_functions import linear
 from manimx.io import load_gltf
 from manimx.renderer import RenderConfig, RNodeDataCache
@@ -18,6 +25,7 @@ from manimx.renderer.webgpu.mesh_batch import (
     MeshBatch,
 )
 from manimx.renderer.webgpu.vector_batch import FLAG_CAMERA_FACING, VectorBatch
+from manimx.robjects.transform import rotation_towards
 
 from manimx import (
     MeshData,
@@ -32,9 +40,6 @@ from manimx import (
     Stroke,
     Texture,
     Transform,
-    box_mesh,
-    sphere_mesh,
-    torus_mesh,
 )
 
 # --- meshes ---------------------------------------------------------------------
@@ -87,9 +92,9 @@ def test_material_converts_colors_to_linear() -> None:
 
 
 def test_lights_point_along_their_local_minus_z() -> None:
-    sun = RDirectionalLight.aimed((1.0, 0.0, 0.0))
-    spot = RSpotLight.aimed((0.0, 0.0, 5.0), (0.0, 0.0, 0.0))
-    down = RDirectionalLight.aimed((0.0, 0.0, 1.0))  # opposite of -z
+    sun = RDirectionalLight(transform=Transform(rotation=rotation_towards((1.0, 0.0, 0.0))))
+    spot = RSpotLight(transform=Transform(position=(0.0, 0.0, 5.0), rotation=rotation_towards(tuple(np.subtract((0.0, 0.0, 0.0), (0.0, 0.0, 5.0))))))
+    down = RDirectionalLight(transform=Transform(rotation=rotation_towards((0.0, 0.0, 1.0))))  # opposite of -z
 
     def direction(light: object) -> np.ndarray:
         return light.transform.matrix()[:3, :3] @ [0.0, 0.0, -1.0]
@@ -100,7 +105,7 @@ def test_lights_point_along_their_local_minus_z() -> None:
     with pytest.raises(ValueError, match="cone"):
         RSpotLight(inner_cone_angle=0.5, outer_cone_angle=0.4)
     with pytest.raises(ValueError, match="zero"):
-        RDirectionalLight.aimed((0.0, 0.0, 0.0))
+        RDirectionalLight(transform=Transform(rotation=rotation_towards((0.0, 0.0, 0.0))))
 
 
 def test_scene_collects_lights_in_world_space() -> None:
@@ -116,9 +121,9 @@ def test_scene_collects_lights_in_world_space() -> None:
 def test_light_records() -> None:
     root = RGroup(
         children=[
-            RDirectionalLight.aimed((0, 0, -1), intensity=2.0),
+            RDirectionalLight(transform=Transform(rotation=rotation_towards((0, 0, -1))), intensity=2.0),
             RPointLight(color="#FF0000", intensity=3.0, range=5.0),
-            RSpotLight.aimed((0, 0, 2), (0, 0, 0), inner_cone_angle=0.1, outer_cone_angle=0.2),
+            RSpotLight(transform=Transform(position=(0, 0, 2), rotation=rotation_towards(tuple(np.subtract((0, 0, 0), (0, 0, 2))))), inner_cone_angle=0.1, outer_cone_angle=0.2),
         ],
     )
 
@@ -171,7 +176,7 @@ def test_meshes_cannot_be_masks() -> None:
 
 
 def test_curve3d_is_a_camera_facing_stroke() -> None:
-    curve = RCurve3D.from_corners([(0, 0, 0), (1, 0, 1), (2, 0, 0)], stroke=Stroke(width=10))
+    curve = RCurve3D(points=corner_points([(0, 0, 0), (1, 0, 1), (2, 0, 0)]), stroke=Stroke(width=10))
 
     batch = VectorBatch.build(flatten_scene(curve), RNodeDataCache(), np.zeros(3))
 
@@ -181,7 +186,7 @@ def test_curve3d_is_a_camera_facing_stroke() -> None:
 
 
 def test_parametric_curve_passes_through_samples() -> None:
-    helix = RCurve3D.parametric(lambda t: (math.cos(t), math.sin(t), t), (0.0, math.tau), samples=16)
+    helix = RCurve3D(points=parametric_points(lambda t: (math.cos(t), math.sin(t), t), (0.0, math.tau), samples=16))
 
     assert helix.num_curves == 16
     np.testing.assert_allclose(helix.points[0], [1, 0, 0])

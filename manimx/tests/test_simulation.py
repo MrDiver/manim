@@ -138,7 +138,7 @@ def test_steps_see_simulated_and_scene_time() -> None:
 
 
 def test_paths_that_change_point_count_switch_between_keyframes() -> None:
-    line = Polyline([(0, 0, 0), (1, 0, 0)], name="line")
+    line = Polyline([(0, 0), (1, 0)], name="line")
 
     def grow(dt):
         end = line.points.value[-1]

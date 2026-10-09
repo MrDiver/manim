@@ -27,21 +27,26 @@ import math
 import numpy as np
 
 from ..animation import (
+    Box,
+    Circle,
     ClippingGroup,
     DirectionalLight,
     Group,
     Node,
     ParametricCurve3D,
     PointLight,
+    Polyline,
+    RegularPolygon,
     Shape2D,
-    Shape3D,
+    Sphere,
     SpotLight,
+    Square,
+    Torus,
 )
-from ..animation.geometry import arc_points, rectangle_points, regular_polygon_points
-from ..robjects import CapStyle, JointType, PbrMaterial, RShape2D, Transform, box_mesh, sphere_mesh, torus_mesh
+from ..animation.geometry import corner_points
 from ..renderer.config import Camera, RenderConfig
+from ..robjects import CapStyle, JointType, PbrMaterial
 from ..utils.color import BLUE, GREEN, ORANGE, PURPLE, RED, WHITE, YELLOW
-from ._nodes import placed
 from .manim_logo import manim_logo
 
 SIZE = 4.0
@@ -98,20 +103,19 @@ def orbit_camera(azimuth: float, elevation: float = 22.0, distance: float = 11.0
 # --------------------------------------------------------------------------
 
 
-def _face(side: str, name: str, **style: object) -> Shape2D:
+def _face(side: str, name: str, **style: object) -> Square:
+    """A side face of the cube, its front facing outwards."""
     normal, (angle, axis) = _SIDES[side]
-    return placed(
-        Shape2D(rectangle_points(SIZE, SIZE), name, **style),  # type: ignore[arg-type]
-        Transform(position=tuple(CENTER + HALF * np.array(normal))).rotated(angle, axis),
-    )
+    face = Square(SIZE, name, **style)  # type: ignore[arg-type]
+    return face.move_to(CENTER + HALF * np.array(normal)).rotate(angle, axis)
 
 
 def _frame() -> Group:
     """Six stroked planes: four open side outlines, a solid lid and base."""
     outline = {"stroke_color": FRAME_COLOR, "stroke_width": 6, "stroke_joint": JointType.MITER}
     sides = [_face(side, f"{side}-edge", fill_opacity=0.0, **outline) for side in _SIDES]
-    lid = placed(Shape2D(rectangle_points(SIZE, SIZE), "lid", fill_color="#2a2a35", fill_opacity=1.0, **outline), Transform(position=(0.0, 0.0, SIZE)))
-    base = placed(Shape2D(rectangle_points(SIZE, SIZE), "base", fill_color="#2a2a35", fill_opacity=1.0, **outline), Transform().rotated(math.pi, (1, 0, 0)))
+    lid = Square(SIZE, "lid", fill_color="#2a2a35", fill_opacity=1.0, **outline).move_to((0.0, 0.0, SIZE))
+    base = Square(SIZE, "base", fill_color="#2a2a35", fill_opacity=1.0, **outline).rotate(math.pi, (1, 0, 0))
     return Group(*sides, lid, base, name="frame")
 
 
@@ -125,23 +129,23 @@ def _room(open_side: str, wall: str, floor: str) -> Group:
     inset = SIZE - 0.04
     thickness = 0.02
     walls = [
-        placed(Shape3D(box_mesh(inset, inset, thickness), "floor", material=PbrMaterial(floor, roughness=0.8), cast_shadows=False), Transform(position=(0.0, 0.0, 0.03))),
-        placed(Shape3D(box_mesh(inset, inset, thickness), "ceiling", material=PbrMaterial(wall, roughness=0.9), cast_shadows=False), Transform(position=(0.0, 0.0, SIZE - 0.03))),
+        Box(inset, inset, thickness, "floor", material=PbrMaterial(floor, roughness=0.8), cast_shadows=False).move_to((0.0, 0.0, 0.03)),
+        Box(inset, inset, thickness, "ceiling", material=PbrMaterial(wall, roughness=0.9), cast_shadows=False).move_to((0.0, 0.0, SIZE - 0.03)),
     ]
     for side, (normal, _) in _SIDES.items():
         if side == open_side:
             continue
-        position = CENTER + (HALF - 0.03) * np.array(normal)
         size = (thickness, inset, inset) if normal[0] else (inset, thickness, inset)
-        walls.append(placed(Shape3D(box_mesh(*size), f"{side}-wall", material=PbrMaterial(wall, roughness=0.9), cast_shadows=False), Transform(position=tuple(position))))
+        wall_box = Box(*size, f"{side}-wall", material=PbrMaterial(wall, roughness=0.9), cast_shadows=False)
+        walls.append(wall_box.move_to(CENTER + (HALF - 0.03) * np.array(normal)))
     return Group(*walls, name=f"{open_side}-room")
 
 
 def _facing(side: str, node: Node, position: tuple[float, float, float]) -> Node:
-    """Stand a flat node up so its front faces out of portal ``side``."""
+    """Stand a flat node up at ``position`` so its front faces out of portal
+    ``side`` (on top of the node's own rotation)."""
     _, (angle, axis) = _SIDES[side]
-    rotation, scale = node.rotation.value, node.scale.value  # type: ignore[attr-defined]
-    return placed(node, Transform(position=position, rotation=rotation, scale=scale).rotated(angle, axis))
+    return node.move_to(position).rotate(angle, axis)  # type: ignore[attr-defined]
 
 
 # --------------------------------------------------------------------------
@@ -150,7 +154,7 @@ def _facing(side: str, node: Node, position: tuple[float, float, float]) -> Node
 
 
 def logo_world() -> Group:
-    logo = placed(manim_logo(), Transform(scale=(0.55, 0.55, 0.55)))
+    logo = manim_logo().set_scale(0.55)
     return Group(
         _room("front", wall="#ece6e2", floor="#d8d0ca"),
         _facing("front", logo, (0.0, 0.6, 2.0)),
@@ -163,15 +167,14 @@ def logo_world() -> Group:
 def mesh_world() -> Group:
     rng = np.random.default_rng(7)
     palette = ["#58C4DD", "#FC6255", "#83C167", "#FFFF00", "#9A72AC"]
-    balls = [
-        placed(
-            Shape3D(sphere_mesh(0.25 + 0.15 * rng.random()), f"ball-{i}", material=PbrMaterial(palette[i % 5], roughness=0.3 + 0.4 * rng.random(), metallic=float(i % 3 == 0))),
-            Transform(position=(rng.uniform(-1.4, 1.4), rng.uniform(-1.4, 1.4), 0.45)),
-        )
-        for i in range(9)
-    ]
-    torus = placed(Shape3D(torus_mesh(0.6, 0.2), "torus", material=PbrMaterial("#d4af37", metallic=1.0, roughness=0.25)), Transform(position=(0.3, 0.2, 1.6)).rotated(1.1, (0, 1, 0)))
-    column = placed(Shape3D(box_mesh(0.5, 0.5, 2.4), "column", material=PbrMaterial("#e8e8e8", roughness=0.6)), Transform(position=(-0.9, 1.1, 1.25)))
+    balls = []
+    for i in range(9):
+        radius = 0.25 + 0.15 * rng.random()
+        material = PbrMaterial(palette[i % 5], roughness=0.3 + 0.4 * rng.random(), metallic=float(i % 3 == 0))
+        position = (rng.uniform(-1.4, 1.4), rng.uniform(-1.4, 1.4), 0.45)
+        balls.append(Sphere(radius, name=f"ball-{i}", material=material).move_to(position))
+    torus = Torus(0.6, 0.2, name="torus", material=PbrMaterial("#d4af37", metallic=1.0, roughness=0.25)).move_to((0.3, 0.2, 1.6)).rotate(1.1, (0, 1, 0))
+    column = Box(0.5, 0.5, 2.4, "column", material=PbrMaterial("#e8e8e8", roughness=0.6)).move_to((-0.9, 1.1, 1.25))
     return Group(
         _room("right", wall="#3a2e3e", floor="#c9b8a8"),
         *balls,
@@ -215,34 +218,32 @@ def curve_world() -> Group:
 
 def grid_world() -> Group:
     lines = [((c, -1.9), (c, 1.9)) for c in np.arange(-1.5, 1.6, 0.5)] + [((-1.9, c), (1.9, c)) for c in np.arange(-1.5, 1.6, 0.5)]
-    grid = placed(
-        Shape2D(np.vstack([RShape2D.from_corners(line).points for line in lines]), "grid", stroke_color="#7a7a7a", stroke_width=2),
-        Transform(position=(0, 0, 0.05)),
-    )
+    # One shape, one open subpath per grid line.
+    grid = Shape2D(np.vstack([corner_points(line) for line in lines]), "grid", stroke_color="#7a7a7a", stroke_width=2).move_to((0, 0, 0.05))
     axes = Group(
-        placed(Shape2D(RShape2D.from_corners([(-1.9, 0), (1.9, 0)]).points, "x-axis", stroke_color="#ff3352", stroke_width=3), Transform(position=(0, 0, 0.06))),
-        placed(Shape2D(RShape2D.from_corners([(0, -1.9), (0, 1.9)]).points, "y-axis", stroke_color="#8bdc00", stroke_width=3), Transform(position=(0, 0, 0.06))),
+        Polyline([(-1.9, 0), (1.9, 0)], name="x-axis", stroke_color="#ff3352", stroke_width=3).move_to((0, 0, 0.06)),
+        Polyline([(0, -1.9), (0, 1.9)], name="y-axis", stroke_color="#8bdc00", stroke_width=3).move_to((0, 0, 0.06)),
         name="axes",
     )
-    zigzag = Shape2D(
-        RShape2D.from_corners([(-0.6, -0.3), (-0.3, 0.3), (0.0, -0.3), (0.3, 0.3), (0.6, -0.3)]).points,
-        "zigzag",
+    zigzag = Polyline(
+        [(-0.6, -0.3), (-0.3, 0.3), (0.0, -0.3), (0.3, 0.3), (0.6, -0.3)],
+        name="zigzag",
         stroke_color=WHITE,
         stroke_width=14,
         stroke_joint=JointType.ROUND,
         stroke_cap=CapStyle.ROUND,
     )
     stripes = [
-        placed(Shape2D(rectangle_points(0.2, 0.2), f"stripe-{i}", fill_color=c, fill_opacity=1.0, stroke_width=0), Transform(position=(-0.7 + 0.2 * i, 0, 0), scale=(1, 7, 1)))
+        Square(0.2, f"stripe-{i}", fill_color=c, fill_opacity=1.0, stroke_width=0).move_to((-0.7 + 0.2 * i, 0, 0)).set_scale((1, 7, 1))
         for i, c in enumerate([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED, ORANGE])
     ]
     hexagon = ClippingGroup(
-        Shape2D(regular_polygon_points(6, 0.6), "hexagon-mask", fill_opacity=1.0, stroke_width=0),
+        RegularPolygon(6, 0.6, "hexagon-mask", fill_opacity=1.0, stroke_width=0),
         Group(*stripes, name="stripes"),
         "hexagon",
     )
-    ring = Shape2D(arc_points(0.5), "ring", stroke_color=[RED, YELLOW, GREEN, BLUE, PURPLE, RED], stroke_width=[4, 16, 4, 16, 4])
-    pentagon = Shape2D(regular_polygon_points(5, 0.5), "pentagon", fill_color=[RED, BLUE], fill_opacity=0.7, stroke_color=YELLOW, stroke_width=6, stroke_opacity=0.6)
+    ring = Circle(0.5, "ring", stroke_color=[RED, YELLOW, GREEN, BLUE, PURPLE, RED], stroke_width=[4, 16, 4, 16, 4])
+    pentagon = RegularPolygon(5, 0.5, "pentagon", fill_color=[RED, BLUE], fill_opacity=0.7, stroke_color=YELLOW, stroke_width=6, stroke_opacity=0.6)
     return Group(
         _room("left", wall="#3d3d3d", floor="#353535"),
         grid,
@@ -250,7 +251,7 @@ def grid_world() -> Group:
         _facing("left", zigzag, (0.0, -1.0, 2.6)),
         _facing("left", hexagon, (0.5, 0.6, 1.4)),
         _facing("left", ring, (-0.6, 0.9, 2.8)),
-        placed(Group(pentagon, name="pentagon-stand"), Transform(position=(-0.4, -0.7, 0.4))),
+        Group(pentagon, name="pentagon-stand").move_to((-0.4, -0.7, 0.4)),
         DirectionalLight("grid-sun", direction=(0.3, 0.5, -1.0), intensity=2.0, tags="light"),
         name="left-world",
     )

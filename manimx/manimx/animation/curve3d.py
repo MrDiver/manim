@@ -15,6 +15,7 @@ import numpy as np
 from ..robjects import CapStyle, JointType, RCurve3D, RNode
 from ..utils.color import WHITE
 from . import style
+from .geometry import parametric_points
 from .kinds import COLORS, DISCRETE, PATH, SCALARS
 from .node import (
     ABS,
@@ -134,7 +135,7 @@ class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
 
 class ParametricCurve3D(Curve3D):
     """A smooth curve through ``function(t)`` (a 3D point) at ``samples``
-    evenly spaced ``t`` in ``t_range`` (see RCurve3D.parametric)."""
+    evenly spaced ``t`` in ``t_range`` (see geometry.parametric_points)."""
 
     def __init__(
         self,
@@ -144,7 +145,7 @@ class ParametricCurve3D(Curve3D):
         name: str | None = None,
         **style: Any,
     ) -> None:
-        super().__init__(RCurve3D.parametric(function, t_range, samples).points, name, **style)
+        super().__init__(parametric_points(function, t_range, samples), name, **style)
 
 
 __all__ = ["Curve3D", "ParametricCurve3D"]

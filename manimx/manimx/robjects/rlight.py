@@ -6,7 +6,9 @@ Manim colors.
 
 The three kinds follow glTF's KHR_lights_punctual. Lights that have a
 direction shine along their local ``-z`` axis (the glTF and Blender
-convention); use the ``aimed`` constructors to point them.
+convention). Scene lights (manimx.animation.light) point them with
+``direction=``, ``target=``, ``point_along()`` and ``point_at()``; a render
+light only holds the resulting rotation in its transform.
 """
 
 from __future__ import annotations
@@ -14,13 +16,9 @@ from __future__ import annotations
 import math
 from collections.abc import Hashable, Mapping
 from dataclasses import dataclass
-from typing import Any, Self
-
-import numpy as np
 
 from ..utils.color import WHITE, ParsableManimColor
 from .rnode import RNode
-from .transform import Transform, rotation_towards
 
 
 @dataclass(slots=True, eq=False)
@@ -54,11 +52,6 @@ class RDirectionalLight(RLight):
     intensity: float = 3.0
     size: float = 0.03  # angular diameter in radians, about 1.7 degrees
 
-    @classmethod
-    def aimed(cls, direction: tuple[float, float, float], **kwargs: Any) -> Self:
-        """A light shining in world ``direction``."""
-        return cls(transform=Transform(rotation=rotation_towards(direction)), **kwargs)
-
 
 @dataclass(slots=True, eq=False)
 class RPointLight(RLight):
@@ -89,15 +82,3 @@ class RSpotLight(RLight):
         RLight.__post_init__(self, versions)
         if not 0.0 <= self.inner_cone_angle < self.outer_cone_angle <= math.pi / 2:
             raise ValueError("cone angles need 0 <= inner < outer <= pi / 2")
-
-    @classmethod
-    def aimed(
-        cls,
-        position: tuple[float, float, float],
-        target: tuple[float, float, float],
-        **kwargs: Any,
-    ) -> Self:
-        """A spot light at ``position`` shining at ``target``."""
-        direction = np.subtract(target, position)
-        rotation = rotation_towards(tuple(direction))
-        return cls(transform=Transform(position=position, rotation=rotation), **kwargs)

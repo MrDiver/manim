@@ -4,8 +4,7 @@ import math
 
 import numpy as np
 import pytest
-from manimx.animation.geometry import arc_points, rectangle_points
-from manimx.robjects import new_uid
+from manimx.animation.geometry import arc_points, corner_points, rectangle_points
 from manimx.renderer import ClearScene, RemoveObjects, RNodeDataCache
 from manimx.renderer.config import Camera, RenderConfig
 from manimx.renderer.scene_graph import NO_CLIP, bounding_box, flatten, flatten_scene
@@ -20,6 +19,7 @@ from manimx.renderer.webgpu.vector_batch import (
     STROKE_WIDTH_SCALE,
     VectorBatch,
 )
+from manimx.robjects import new_uid
 
 from manimx import (
     Fill,
@@ -174,13 +174,13 @@ def test_tessellation_cuts_holes_by_nesting() -> None:
 
 
 def test_tessellation_closes_open_paths() -> None:
-    open_triangle = RShape2D.from_corners([(0, 0), (2, 0), (0, 2)]).points
+    open_triangle = RShape2D(points=corner_points([(0, 0), (2, 0), (0, 2)])).points
 
     assert _filled_area(open_triangle) == pytest.approx(2.0)
 
 
 def test_tessellation_skips_degenerate_paths() -> None:
-    line = RShape2D.from_corners([(0, 0), (1, 0)]).points
+    line = RShape2D(points=corner_points([(0, 0), (1, 0)])).points
 
     assert len(tessellate_fill(line)) == 0
     assert len(tessellate_fill(np.zeros((0, 2)))) == 0
@@ -227,14 +227,14 @@ def test_batch_links_closed_subpaths_into_a_loop() -> None:
 
 
 def test_batch_leaves_open_path_ends_unlinked() -> None:
-    curves = _batch(RShape2D.from_corners([(0, 0), (1, 0), (2, 1)])).stroke_curves
+    curves = _batch(RShape2D(points=corner_points([(0, 0), (1, 0), (2, 1)]))).stroke_curves
 
     assert list(curves["prev_point"]) == [NO_NEIGHBOR, 0]
     assert list(curves["next_point"]) == [4, NO_NEIGHBOR]
 
 
 def test_batch_matches_shared_anchor_styles() -> None:
-    batch = _batch(RShape2D.from_corners([(0, 0), (1, 0), (2, 0)], stroke=Stroke(width=[0.0, 7.0])))
+    batch = _batch(RShape2D(points=corner_points([(0, 0), (1, 0), (2, 0)]), stroke=Stroke(width=[0.0, 7.0])))
     widths = batch.stroke_points["width"]
 
     assert widths[3] == pytest.approx(widths[4])

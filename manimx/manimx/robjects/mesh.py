@@ -1,11 +1,12 @@
-"""Triangle meshes for :class:`RShape3D`, and generators for basic solids."""
+"""Triangle meshes for :class:`RShape3D` (the MeshData value type).
+
+Generators for solids (box, sphere, torus, parametric surfaces) are
+shape definitions and live on the scene side, in manimx.animation.geometry.
+"""
 
 from __future__ import annotations
 
-import math
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 
@@ -105,91 +106,3 @@ def _tangents(positions: np.ndarray, normals: np.ndarray, uvs: np.ndarray, indic
     tangents = np.where(length > 1e-12, tangents / np.maximum(length, 1e-12), fallback)
     handedness = np.where(np.sum(np.cross(n, tangents) * bitangents, axis=1) < 0.0, -1.0, 1.0)
     return np.column_stack([tangents, handedness])
-
-
-# --------------------------------------------------------------------------
-# Generators
-# --------------------------------------------------------------------------
-
-
-def box_mesh(width: float = 2.0, height: float = 2.0, depth: float = 2.0) -> MeshData:
-    """Axis-aligned box centered at the origin with flat faces and UVs."""
-    half = np.array([width, height, depth]) / 2
-    positions, normals, uvs, indices = [], [], [], []
-    for axis in range(3):
-        for sign in (-1.0, 1.0):
-            normal = np.zeros(3)
-            normal[axis] = sign
-            # Cyclic order makes cross(u, v) point along +axis.
-            u_axis, v_axis = (axis + 1) % 3, (axis + 2) % 3
-            if sign < 0:
-                u_axis, v_axis = v_axis, u_axis  # keep counter-clockwise winding
-            base = len(positions)
-            for u, v in ((0, 0), (1, 0), (1, 1), (0, 1)):
-                point = normal * half
-                point[u_axis] = (2 * u - 1) * half[u_axis]
-                point[v_axis] = (2 * v - 1) * half[v_axis]
-                positions.append(point)
-                normals.append(normal)
-                uvs.append((u, 1 - v))
-            indices += [base, base + 1, base + 2, base, base + 2, base + 3]
-    return MeshData(np.array(positions), np.array(indices), np.array(normals), np.array(uvs))
-
-
-def sphere_mesh(radius: float = 1.0, segments: int = 48, rings: int = 24) -> MeshData:
-    """UV sphere around the z axis."""
-    theta = np.linspace(0.0, math.tau, segments + 1)  # around z
-    phi = np.linspace(0.0, math.pi, rings + 1)  # from +z to -z
-    phi_grid, theta_grid = np.meshgrid(phi, theta, indexing="ij")
-    normals = np.stack(
-        [np.sin(phi_grid) * np.cos(theta_grid), np.sin(phi_grid) * np.sin(theta_grid), np.cos(phi_grid)], axis=-1
-    ).reshape(-1, 3)
-    uvs = np.stack([theta_grid / math.tau, phi_grid / math.pi], axis=-1).reshape(-1, 2)
-    return MeshData(normals * radius, _grid_indices(rings, segments), normals, uvs)
-
-
-def torus_mesh(major_radius: float = 1.0, minor_radius: float = 0.35, segments: int = 64, sides: int = 32) -> MeshData:
-    """Torus around the z axis."""
-    u = np.linspace(0.0, math.tau, segments + 1)
-    v = np.linspace(0.0, math.tau, sides + 1)
-    v_grid, u_grid = np.meshgrid(v, u, indexing="ij")
-    center = np.stack([np.cos(u_grid), np.sin(u_grid), np.zeros_like(u_grid)], axis=-1)
-    normals = np.cos(v_grid)[..., None] * center + np.sin(v_grid)[..., None] * np.array([0.0, 0.0, 1.0])
-    positions = major_radius * center + minor_radius * normals
-    uvs = np.stack([u_grid / math.tau, v_grid / math.tau], axis=-1)
-    return MeshData(positions.reshape(-1, 3), _grid_indices(sides, segments, flip=True), normals.reshape(-1, 3), uvs.reshape(-1, 2))
-
-
-def surface_mesh(
-    function: Callable[[float, float], Any],
-    u_range: tuple[float, float] = (0.0, 1.0),
-    v_range: tuple[float, float] = (0.0, 1.0),
-    resolution: tuple[int, int] = (32, 32),
-) -> MeshData:
-    """Parametric surface through ``function(u, v)`` (a 3D point), sampled
-    on a grid of ``resolution`` cells in u and v, with smooth normals and
-    UVs from the normalized parameters.
-
-    Surfaces of the same resolution share their triangles, so their
-    vertices correspond one to one.
-    """
-    columns, rows = resolution
-    if columns < 1 or rows < 1:
-        raise ValueError(f"a surface needs at least one cell per direction, got {resolution}")
-    u = np.linspace(u_range[0], u_range[1], columns + 1)
-    v = np.linspace(v_range[0], v_range[1], rows + 1)
-    positions = np.array([function(float(a), float(b)) for b in v for a in u], dtype=np.float64)
-    if positions.shape != ((columns + 1) * (rows + 1), 3):
-        raise ValueError("the surface function must return a 3D point")
-    v_grid, u_grid = np.meshgrid(np.linspace(0.0, 1.0, rows + 1), np.linspace(0.0, 1.0, columns + 1), indexing="ij")
-    uvs = np.stack([u_grid, v_grid], axis=-1).reshape(-1, 2)
-    return MeshData(positions, _grid_indices(rows, columns, flip=True), uvs=uvs)
-
-
-def _grid_indices(rows: int, columns: int, flip: bool = False) -> np.ndarray:
-    """Two counter-clockwise triangles per cell of a (rows+1) x (columns+1) vertex grid."""
-    row, column = np.meshgrid(np.arange(rows), np.arange(columns), indexing="ij")
-    a = row * (columns + 1) + column
-    b, c, d = a + 1, a + columns + 1, a + columns + 2
-    quads = np.stack([a, c, b, b, c, d], axis=-1) if not flip else np.stack([a, b, c, b, d, c], axis=-1)
-    return quads.reshape(-1)

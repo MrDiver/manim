@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, Self
+from typing import ClassVar
 
 import numpy as np
 
@@ -44,24 +43,6 @@ class RBezierPath(RNode):
         if name == "points":
             value = _validated_points(value, self.DIMENSION)
         RNode.__setattr__(self, name, value)
-
-    @classmethod
-    def from_corners(
-        cls,
-        corners: Sequence[Sequence[float]],
-        *,
-        closed: bool = False,
-        **kwargs: Any,
-    ) -> Self:
-        """Polyline through ``corners`` as straight cubic curves."""
-        anchors = np.asarray(corners, dtype=np.float64).reshape(-1, cls.DIMENSION)
-        if closed and len(anchors) > 0:
-            anchors = np.vstack([anchors, anchors[:1]])
-        starts, ends = anchors[:-1], anchors[1:]
-        curves = np.stack(
-            [starts, (2 * starts + ends) / 3, (starts + 2 * ends) / 3, ends], axis=1
-        )
-        return cls(points=curves.reshape(-1, cls.DIMENSION), **kwargs)
 
     @property
     def num_curves(self) -> int:

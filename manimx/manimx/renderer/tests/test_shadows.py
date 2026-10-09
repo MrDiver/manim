@@ -4,12 +4,22 @@ import math
 
 import numpy as np
 import pytest
-
-from manimx import RDirectionalLight, RGroup, PbrMaterial, RPointLight, RShape3D, RSpotLight, Transform, box_mesh
-from manimx.renderer import Camera, RNodeDataCache, RenderConfig, WGPURenderer
+from manimx.animation.geometry import box_mesh
+from manimx.renderer import Camera, RenderConfig, RNodeDataCache, WGPURenderer
 from manimx.renderer.scene_graph import flatten_scene
 from manimx.renderer.webgpu.mesh_batch import MeshBatch
 from manimx.renderer.webgpu.shadow_views import NO_SHADOW, build_shadow_views
+from manimx.robjects.transform import rotation_towards
+
+from manimx import (
+    PbrMaterial,
+    RDirectionalLight,
+    RGroup,
+    RPointLight,
+    RShape3D,
+    RSpotLight,
+    Transform,
+)
 
 
 def _views(root: RGroup, **config: object):
@@ -22,14 +32,14 @@ def _views(root: RGroup, **config: object):
 
 def _lights() -> list:
     return [
-        RDirectionalLight.aimed((0, 0, -1)),
-        RSpotLight.aimed((0, 0, 5), (0, 0, 0)),
+        RDirectionalLight(transform=Transform(rotation=rotation_towards((0, 0, -1)))),
+        RSpotLight(transform=Transform(position=(0, 0, 5), rotation=rotation_towards(tuple(np.subtract((0, 0, 0), (0, 0, 5)))))),
         RPointLight(transform=Transform(position=(0, 0, 3))),
     ]
 
 
 def test_each_light_kind_gets_its_shadow_views() -> None:
-    views, lights = _views(RGroup(children=[RShape3D(), *_lights()]))
+    views, lights = _views(RGroup(children=[RShape3D(mesh=box_mesh()), *_lights()]))
 
     assert len(views) == 1 + 1 + 6  # directional, spot, six cube faces
     assert list(lights["shadow_view"]) == [0, 1, 2]
@@ -39,10 +49,10 @@ def test_each_light_kind_gets_its_shadow_views() -> None:
 def test_shadow_toggles() -> None:
     lights = _lights()
     lights[1].cast_shadows = False
-    views, rows = _views(RGroup(children=[RShape3D(), *lights]))
+    views, rows = _views(RGroup(children=[RShape3D(mesh=box_mesh()), *lights]))
     assert list(rows["shadow_view"]) == [0, NO_SHADOW, 1]
 
-    views, rows = _views(RGroup(children=[RShape3D(), *_lights()]), shadows=False)
+    views, rows = _views(RGroup(children=[RShape3D(mesh=box_mesh()), *_lights()]), shadows=False)
     assert len(views) == 0 and set(rows["shadow_view"]) == {NO_SHADOW}
 
     views, rows = _views(RGroup(children=_lights()))  # nothing to shadow
@@ -50,7 +60,7 @@ def test_shadow_toggles() -> None:
 
 
 def test_directional_view_covers_the_scene() -> None:
-    root = RGroup(children=[RShape3D(mesh=box_mesh(4, 4, 4)), RDirectionalLight.aimed((1, 1, -1))])
+    root = RGroup(children=[RShape3D(mesh=box_mesh(4, 4, 4)), RDirectionalLight(transform=Transform(rotation=rotation_towards((1, 1, -1))))])
     views, _ = _views(root)
 
     view_projection = views.views["view_projection"][0].T
@@ -70,7 +80,7 @@ def renderer() -> WGPURenderer:
 def _scene(**options: object) -> RGroup:
     floor = RShape3D(mesh=box_mesh(10, 10, 0.2), material=PbrMaterial("#FFFFFF", roughness=1.0), transform=Transform(position=(0, 0, -0.1)))
     blocker = RShape3D(mesh=box_mesh(2, 2, 0.2), material=PbrMaterial("#FFFFFF"), transform=Transform(position=(0, 0, 2)), **options)
-    sun = RDirectionalLight.aimed((0, 0, -1), intensity=3.0)
+    sun = RDirectionalLight(transform=Transform(rotation=rotation_towards((0, 0, -1))), intensity=3.0)
     return RGroup(children=[floor, blocker, sun])
 
 
@@ -92,7 +102,7 @@ def test_blocker_shadows_the_floor(renderer: WGPURenderer) -> None:
     # Seen from above, the blocker hides its own shadow; look just beside it
     # with a light that comes in at an angle instead.
     tilted = _scene()
-    tilted.children[2] = RDirectionalLight.aimed((1, 0, -1), intensity=3.0)
+    tilted.children[2] = RDirectionalLight(transform=Transform(rotation=rotation_towards((1, 0, -1))), intensity=3.0)
     assert _brightness(renderer, tilted, 2.5) < lit_floor / 3
     assert _brightness(renderer, tilted, 2.5, shadows=False) > lit_floor / 2
     no_caster = _scene(cast_shadows=False)
@@ -103,7 +113,7 @@ def test_blocker_shadows_the_floor(renderer: WGPURenderer) -> None:
 def test_softness_widens_the_penumbra(renderer: WGPURenderer) -> None:
     def edge_profile(size: float) -> np.ndarray:
         root = _scene()
-        root.children[2] = RDirectionalLight.aimed((1, 0, -1), intensity=3.0, size=size)
+        root.children[2] = RDirectionalLight(transform=Transform(rotation=rotation_towards((1, 0, -1))), intensity=3.0, size=size)
         return np.array([_brightness(renderer, root, x) for x in np.linspace(1.0, 4.5, 15)])
 
     hard, soft = edge_profile(0.0), edge_profile(0.4)

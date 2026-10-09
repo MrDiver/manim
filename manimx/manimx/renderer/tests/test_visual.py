@@ -16,12 +16,15 @@ import numpy as np
 import pytest
 from manimx.animation.geometry import (
     arc_points,
+    corner_points,
+    parametric_points,
     rectangle_points,
     regular_polygon_points,
 )
 from manimx.examples.manim_logo import config as logo_config
 from manimx.examples.manim_logo import manim_logo
 from manimx.renderer import RenderConfig, WGPURenderer
+from manimx.robjects.transform import rotation_towards
 from manimx.testing import ImageTolerance, assert_image_matches
 from manimx.utils.color import BLUE, GREEN, ORANGE, PURPLE, RED, WHITE, YELLOW
 
@@ -74,11 +77,7 @@ def test_joints_and_caps(renderer: WGPURenderer, update_references: bool) -> Non
         (JointType.AUTO, CapStyle.AUTO),
     ]
     shapes = [
-        RShape2D.from_corners(
-            zigzag,
-            stroke=Stroke(WHITE, width=30, joint=joint, cap=cap),
-            transform=Transform(position=(-4.5 + 3.0 * i, 0.0, 0.0)),
-        )
+        RShape2D(points=corner_points(zigzag), stroke=Stroke(WHITE, width=30, joint=joint, cap=cap), transform=Transform(position=(-4.5 + 3.0 * i, 0.0, 0.0)))
         for i, (joint, cap) in enumerate(styles)
     ]
     image = renderer.render(RGroup(children=shapes), config())
@@ -88,11 +87,7 @@ def test_joints_and_caps(renderer: WGPURenderer, update_references: bool) -> Non
 
 def test_per_point_stroke_styles(renderer: WGPURenderer, update_references: bool) -> None:
     rainbow = RShape2D(points=arc_points(1.5), stroke=Stroke([RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE, RED], width=25), transform=Transform(position=(-3.0, 0.0, 0.0)))
-    taper = RShape2D.from_corners(
-        [(-1.5, -1.0), (0.0, 1.0), (1.5, -1.0)],
-        stroke=Stroke([BLUE, GREEN], width=[2, 60], joint=JointType.ROUND, cap=CapStyle.ROUND),
-        transform=Transform(position=(2.5, 0.0, 0.0)),
-    )
+    taper = RShape2D(points=corner_points([(-1.5, -1.0), (0.0, 1.0), (1.5, -1.0)]), stroke=Stroke([BLUE, GREEN], width=[2, 60], joint=JointType.ROUND, cap=CapStyle.ROUND), transform=Transform(position=(2.5, 0.0, 0.0)))
     image = renderer.render(RGroup(children=[rainbow, taper]), config())
 
     check(image, "per_point_stroke_styles", update_references)
@@ -164,17 +159,8 @@ def _perspective(eye: tuple, target: tuple) -> object:
 def test_meshes_and_lights(renderer: WGPURenderer, update_references: bool) -> None:
     from manimx.examples.blender_scene import _ground
 
-    from manimx import (
-        PbrMaterial,
-        RDirectionalLight,
-        RPointLight,
-        RShape3D,
-        RSpotLight,
-        Texture,
-        box_mesh,
-        sphere_mesh,
-        torus_mesh,
-    )
+    from manimx import PbrMaterial, RDirectionalLight, RPointLight, RShape3D, RSpotLight, Texture
+    from manimx.animation.geometry import box_mesh, sphere_mesh, torus_mesh
 
     i, j = np.indices((64, 64))
     checker = ((i // 8 + j // 8) % 2 * 200 + 40).astype(np.uint8)
@@ -184,8 +170,8 @@ def test_meshes_and_lights(renderer: WGPURenderer, update_references: bool) -> N
         RShape3D(mesh=sphere_mesh(1.2), material=PbrMaterial("#d4af37", metallic=1.0, roughness=0.25), transform=Transform(position=(0, 0, 1.2))),
         RShape3D(mesh=torus_mesh(1.0, 0.4), material=PbrMaterial(BLUE, roughness=0.6), transform=Transform(position=(3, 0, 1.2)).rotated(1.0, (1, 0, 0))),
         RShape3D(mesh=box_mesh(2, 2, 2), material=PbrMaterial(WHITE, base_color_texture=texture), transform=Transform(position=(0, -4, 1)).rotated(0.6, (0, 0, 1))),
-        RSpotLight.aimed((0, -4, 6), (0, -4, 0), color=YELLOW, intensity=60, inner_cone_angle=0.25, outer_cone_angle=0.35),
-        RDirectionalLight.aimed((-1, 1, -2), intensity=2.5),
+        RSpotLight(transform=Transform(position=(0, -4, 6), rotation=rotation_towards(tuple(np.subtract((0, -4, 0), (0, -4, 6))))), color=YELLOW, intensity=60, inner_cone_angle=0.25, outer_cone_angle=0.35),
+        RDirectionalLight(transform=Transform(rotation=rotation_towards((-1, 1, -2))), intensity=2.5),
         RPointLight(color=GREEN, intensity=15, transform=Transform(position=(-3, -2, 2))),
     ]
     scene = RGroup(children=[_ground().snapshot(), *shapes])
@@ -202,15 +188,9 @@ def test_curves_3d(renderer: WGPURenderer, update_references: bool) -> None:
 
     rainbow = [RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE]
     curves = [
-        RCurve3D.parametric(lambda t: (2 * math.cos(t), 2 * math.sin(t), 0.25 * t), (0, 8 * math.pi), 128, stroke=Stroke(rainbow, width=12)),
-        RCurve3D.parametric(
-            lambda t: (math.sin(t) + 2 * math.sin(2 * t), math.cos(t) - 2 * math.cos(2 * t), -math.sin(3 * t)),
-            (0, 2 * math.pi),
-            96,
-            stroke=Stroke([WHITE, BLUE], width=[4, 30, 4]),
-            transform=Transform(position=(7, -2, 3)),
-        ),
-        RCurve3D.from_corners([(0, 0, 0), (1, 0, 2), (2, 0, 0), (3, 1, 2), (4, 2, 0)], stroke=Stroke(YELLOW, width=25, joint=JointType.ROUND, cap=CapStyle.ROUND), transform=Transform(position=(-8, 3, 0))),
+        RCurve3D(points=parametric_points(lambda t: (2 * math.cos(t), 2 * math.sin(t), 0.25 * t), (0, 8 * math.pi), 128), stroke=Stroke(rainbow, width=12)),
+        RCurve3D(points=parametric_points(lambda t: (math.sin(t) + 2 * math.sin(2 * t), math.cos(t) - 2 * math.cos(2 * t), -math.sin(3 * t)), (0, 2 * math.pi), 96), stroke=Stroke([WHITE, BLUE], width=[4, 30, 4]), transform=Transform(position=(7, -2, 3))),
+        RCurve3D(points=corner_points([(0, 0, 0), (1, 0, 2), (2, 0, 0), (3, 1, 2), (4, 2, 0)]), stroke=Stroke(YELLOW, width=25, joint=JointType.ROUND, cap=CapStyle.ROUND), transform=Transform(position=(-8, 3, 0))),
     ]
     scene = RGroup(children=[_ground().snapshot(), *curves])
 
@@ -228,7 +208,8 @@ def test_motion_blur_bloom_and_aces(renderer: WGPURenderer, update_references: b
         ToneMapOperator,
     )
 
-    from manimx import PbrMaterial, RCurve3D, RDirectionalLight, RShape3D, sphere_mesh
+    from manimx import PbrMaterial, RCurve3D, RDirectionalLight, RShape3D
+    from manimx.animation.geometry import sphere_mesh
 
     def scene_at(t: float) -> RGroup:
         spin = RShape2D(points=rectangle_points(2, 2), fill=Fill(BLUE, opacity=1), stroke=Stroke(WHITE, width=6), transform=Transform(position=(-3.5, 0, 0)).rotated(6 * t))
@@ -237,10 +218,8 @@ def test_motion_blur_bloom_and_aces(renderer: WGPURenderer, update_references: b
             RShape3D(mesh=sphere_mesh(0.5), material=PbrMaterial("#202020", emissive=color, emissive_strength=6), transform=Transform(position=(1 + 1.6 * i, -1.5, 0)))
             for i, color in enumerate([YELLOW, "#58C4DD", "#FC6255"])
         ]
-        helix = RCurve3D.parametric(
-            lambda u: (3 + math.cos(u + 4 * t), -0.2 + 0.08 * u, math.sin(u + 4 * t)), (0, 6 * math.pi), 96, stroke=Stroke([YELLOW, RED], width=8)
-        )
-        return RGroup(children=[spin, ball, *glow, helix, RDirectionalLight.aimed((0.3, -0.5, -1))])
+        helix = RCurve3D(points=parametric_points(lambda u: (3 + math.cos(u + 4 * t), -0.2 + 0.08 * u, math.sin(u + 4 * t)), (0, 6 * math.pi), 96), stroke=Stroke([YELLOW, RED], width=8))
+        return RGroup(children=[spin, ball, *glow, helix, RDirectionalLight(transform=Transform(rotation=rotation_towards((0.3, -0.5, -1))))])
 
     composer = FrameComposer(renderer, [MotionBlur(samples=24, shutter=1 / 12), Bloom(intensity=0.25), ToneMap(ToneMapOperator.ACES)])
     image = composer.compose(scene_at, config(background_color="#1e1e1e", time=0.3))
@@ -251,29 +230,19 @@ def test_motion_blur_bloom_and_aces(renderer: WGPURenderer, update_references: b
 def test_shadows(renderer: WGPURenderer, update_references: bool) -> None:
     from manimx.examples.manim_logo import manim_logo
 
-    from manimx import (
-        PbrMaterial,
-        RCurve3D,
-        RDirectionalLight,
-        RPointLight,
-        RShape3D,
-        RSpotLight,
-        box_mesh,
-        sphere_mesh,
-    )
+    from manimx import PbrMaterial, RCurve3D, RDirectionalLight, RPointLight, RShape3D, RSpotLight
+    from manimx.animation.geometry import box_mesh, sphere_mesh
 
-    from manimx.examples._nodes import placed
-
-    logo = placed(manim_logo(), Transform(position=(0, 0.5, 1.8), scale=(0.6, 0.6, 0.6)).rotated(math.pi / 2, (1, 0, 0))).snapshot()
+    logo = manim_logo().move_to((0, 0.5, 1.8)).set_scale(0.6).rotate(math.pi / 2, (1, 0, 0)).snapshot()
     scene = RGroup(
         children=[
             RShape3D(mesh=box_mesh(16, 16, 0.2), material=PbrMaterial("#d0d0d0", roughness=0.9), transform=Transform(position=(0, 0, -0.1))),
             RShape3D(mesh=sphere_mesh(1.0), material=PbrMaterial(RED, roughness=0.4), transform=Transform(position=(-3, 1, 1.0))),
             RShape3D(mesh=box_mesh(0.4, 0.4, 4), material=PbrMaterial(BLUE), transform=Transform(position=(3, 2, 2))),
             logo,
-            RCurve3D.parametric(lambda t: (3 + 0.8 * math.cos(t), -2.5 + 0.8 * math.sin(t), 0.3 + 0.12 * t), (0, 6 * math.pi), 96, stroke=Stroke(YELLOW, width=12)),
-            RDirectionalLight.aimed((0.6, 1.0, -1.2), intensity=2.5),
-            RSpotLight.aimed((-5, -3, 6), (-3, 1, 0), intensity=80, inner_cone_angle=0.35, outer_cone_angle=0.5, color="#ffd9a0", size=0.3),
+            RCurve3D(points=parametric_points(lambda t: (3 + 0.8 * math.cos(t), -2.5 + 0.8 * math.sin(t), 0.3 + 0.12 * t), (0, 6 * math.pi), 96), stroke=Stroke(YELLOW, width=12)),
+            RDirectionalLight(transform=Transform(rotation=rotation_towards((0.6, 1.0, -1.2))), intensity=2.5),
+            RSpotLight(transform=Transform(position=(-5, -3, 6), rotation=rotation_towards(tuple(np.subtract((-3, 1, 0), (-5, -3, 6))))), intensity=80, inner_cone_angle=0.35, outer_cone_angle=0.5, color="#ffd9a0", size=0.3),
             RPointLight(intensity=6, color="#a0c8ff", transform=Transform(position=(1.5, -2.0, 1.2)), size=0.05),
         ],
     )

@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+
 from .material import PbrMaterial
-from .mesh import MeshData, box_mesh
+from .mesh import MeshData
 from .rnode import RNode
 from .versioning import versioned
+
+
+def _no_mesh() -> MeshData:
+    """An empty mesh: nothing to draw until a snapshot sets one."""
+    return MeshData(np.zeros((0, 3)), np.zeros(0, dtype=np.uint32))
 
 
 @dataclass(slots=True, eq=False)
@@ -17,7 +24,7 @@ class RShape3D(RNode):
     (their arrays are read-only).
     """
 
-    mesh: MeshData = versioned(default_factory=box_mesh)
+    mesh: MeshData = versioned(default_factory=_no_mesh)
     material: PbrMaterial = versioned(default_factory=PbrMaterial)
     cast_shadows: bool = True
     """Whether this mesh blocks light (it always receives shadows)."""

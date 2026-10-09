@@ -2,8 +2,7 @@
 
 import numpy as np
 import pytest
-from manimx.animation.geometry import rectangle_points
-from manimx.robjects import RShape2D
+from manimx.animation.geometry import rectangle_points, sphere_mesh
 from manimx.renderer import (
     Bloom,
     FrameComposer,
@@ -14,9 +13,10 @@ from manimx.renderer import (
     ToneMapOperator,
     WGPURenderer,
 )
+from manimx.robjects import RShape2D
 from manimx.utils.color import RED
 
-from manimx import Fill, PbrMaterial, RGroup, RShape3D, Stroke, Transform, sphere_mesh
+from manimx import Fill, PbrMaterial, RGroup, RShape3D, Stroke, Transform
 
 SIZE = {"pixel_width": 160, "pixel_height": 90}  # 11.25 pixels per world unit
 
