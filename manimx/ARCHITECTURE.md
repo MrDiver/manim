@@ -104,7 +104,7 @@ sequenceDiagram
         end
         FC-->>FP: output texture
         FP->>FP: copy to a staging buffer, map asynchronously
-        Note over FP: up to 3 frames in flight;<br/>the oldest is read back when slots run out
+        Note over FP: up to 3 frames in flight,<br/>the oldest is read back when slots run out
         FP-->>D: Future resolves with (H, W, 4) uint8
         D->>W: queue (index, image)
         W->>FF: write in index order (stdin pipe)
