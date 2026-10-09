@@ -6,7 +6,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 
-from .path import RBezierPath
+from .rbezier_path import RBezierPath
 
 
 @dataclass(slots=True, eq=False)

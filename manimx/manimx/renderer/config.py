@@ -9,7 +9,7 @@ import numpy as np
 import quaternion
 
 from ..objects.material import linear_rgb
-from ..objects.render_object import RNode
+from ..objects.rnode import RNode
 from ..objects.transform import Transform
 from ..utils.color import BLACK, WHITE, ManimColor, ParsableManimColor
 

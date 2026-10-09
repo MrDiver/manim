@@ -5,7 +5,7 @@ from typing import ClassVar
 
 import numpy as np
 
-from .path import POINTS_PER_CURVE, TOLERANCE_FOR_POINT_EQUALITY, RBezierPath, is_closed
+from .rbezier_path import POINTS_PER_CURVE, TOLERANCE_FOR_POINT_EQUALITY, RBezierPath, is_closed
 from .style import Fill
 from .versioning import versioned
 

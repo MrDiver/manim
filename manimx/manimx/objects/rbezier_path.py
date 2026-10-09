@@ -8,7 +8,7 @@ from typing import Any, ClassVar, Self
 
 import numpy as np
 
-from .render_object import RNode
+from .rnode import RNode
 from .style import JointType, Stroke
 from .versioning import versioned
 

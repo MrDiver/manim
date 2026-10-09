@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from .shape2d import RShape2D
+from .rshape2d import RShape2D
 
 
 def arc_points(

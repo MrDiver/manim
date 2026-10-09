@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .render_object import RNode
+from .rnode import RNode
 
 
 @dataclass(slots=True, eq=False)

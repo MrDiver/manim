@@ -36,7 +36,7 @@ from dataclasses import dataclass
 import mapbox_earcut
 import numpy as np
 
-from ..objects.shape2d import POINTS_PER_CURVE, TOLERANCE_FOR_POINT_EQUALITY
+from ..objects.rshape2d import POINTS_PER_CURVE, TOLERANCE_FOR_POINT_EQUALITY
 
 DEFAULT_TOLERANCE = 1e-5
 """Max distance between a cubic and its quadratic approximation (local units)."""

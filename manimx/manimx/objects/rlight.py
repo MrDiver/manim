@@ -20,7 +20,7 @@ import numpy as np
 import quaternion
 
 from ..utils.color import WHITE, ParsableManimColor
-from .render_object import RNode
+from .rnode import RNode
 from .transform import Quaternion, Transform
 
 

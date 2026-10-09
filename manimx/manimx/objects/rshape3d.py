@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from .material import PbrMaterial
 from .mesh import MeshData, box_mesh
-from .render_object import RNode
+from .rnode import RNode
 from .versioning import versioned
 
 

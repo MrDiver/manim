@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..objects import RClippingGroup, RGroup, RLight, RNode, RShape2D, RShape3D
-from ..objects.path import RBezierPath
+from ..objects.rbezier_path import RBezierPath
 
 NO_CLIP = -1
 
