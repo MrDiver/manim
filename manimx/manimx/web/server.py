@@ -11,6 +11,14 @@ request, answered by the standard library's HTTP server:
     GET /api/timeline        duration, frame rate, size, clips, segments
     GET /api/frame?t=&w=     the frame at time t, w pixels wide (JPEG; PNG
                              with &format=png, WebP with &format=webp)
+    GET /api/changes?since=  waits until the timeline's version passes
+                             `since` (or 25 s), then answers the version
+                             and the last build error
+
+The timeline can be replaced while serving (:meth:`PreviewServer.replace`,
+used by reload.py when a scene file is saved); every replacement or
+failed rebuild (:meth:`PreviewServer.report`) bumps the version, and the
+page fetches the timeline again.
 
 Design decisions:
 
@@ -52,6 +60,8 @@ from ..drivers.offline import RenderSettings
 from ..renderer import MotionBlur, RenderService
 
 MIN_WIDTH = 16
+CHANGES_TIMEOUT = 25.0
+"""Seconds a /api/changes request waits before answering anyway."""
 FORMATS = {"jpeg": ("JPEG", "image/jpeg"), "png": ("PNG", "image/png"), "webp": ("WEBP", "image/webp")}
 
 
@@ -67,13 +77,17 @@ class PreviewServer:
         port: int = 0,
         service: RenderService | None = None,
     ) -> None:
-        self.timeline = timeline
-        self.settings = settings
         self.title = title
         self._service = service or RenderService.shared()
-        effects = tuple(effect for effect in settings.effects if not isinstance(effect, MotionBlur))
-        self._composer = self._service.composer(effects)
         self._lock = threading.Lock()
+        """Held while rendering or replacing the timeline."""
+        self._changed = threading.Condition()
+        self.version = 0
+        """Bumped by every replace() and report()."""
+        self.error: str | None = None
+        """The last failed rebuild, until the next successful one."""
+        self._closing = False
+        self._use(timeline, settings)
         self._httpd = ThreadingHTTPServer((host, port), partial(_Handler, preview=self))
         self._httpd.daemon_threads = True
         self._serving = False
@@ -97,8 +111,39 @@ class PreviewServer:
         thread.start()
         return thread
 
+    def replace(self, timeline: Timeline, settings: RenderSettings | None = None) -> None:
+        """Show ``timeline`` (and ``settings``) from now on; clears the error."""
+        with self._lock:
+            self._use(timeline, settings or self.settings)
+        self._bump(error=None)
+
+    def report(self, error: str) -> None:
+        """A rebuild failed: keep showing the current timeline, tell the page."""
+        self._bump(error=error)
+
+    def wait_for_change(self, since: int, timeout: float = CHANGES_TIMEOUT) -> tuple[int, str | None]:
+        """Block until :attr:`version` passes ``since`` (or ``timeout``)."""
+        with self._changed:
+            self._changed.wait_for(lambda: self.version > since or self._closing, timeout)
+            return self.version, self.error
+
+    def _use(self, timeline: Timeline, settings: RenderSettings) -> None:
+        self.timeline = timeline
+        self.settings = settings
+        effects = tuple(effect for effect in settings.effects if not isinstance(effect, MotionBlur))
+        self._composer = self._service.composer(effects)
+
+    def _bump(self, error: str | None) -> None:
+        with self._changed:
+            self.version += 1
+            self.error = error
+            self._changed.notify_all()
+
     def close(self) -> None:
         """Stop serving (from another thread) and release the port."""
+        with self._changed:
+            self._closing = True  # open /api/changes requests answer now
+            self._changed.notify_all()
         if self._serving:
             self._httpd.shutdown()  # waits for serve_forever to return
         self._httpd.server_close()
@@ -107,10 +152,16 @@ class PreviewServer:
 
     def timeline_json(self) -> dict[str, Any]:
         """What the page draws: the timeline's length, clips and segments."""
+        with self._lock:  # a Timeline resolves lazily: not while a frame renders
+            return self._describe()
+
+    def _describe(self) -> dict[str, Any]:
         config = self.settings.config
         clips = list(self.timeline.clips)
         return {
             "title": self.title,
+            "version": self.version,
+            "error": self.error,
             "duration": self.timeline.duration,
             "fps": self.settings.fps,
             "width": config.pixel_width,
@@ -131,13 +182,13 @@ class PreviewServer:
         """
         if image_format not in FORMATS:
             raise ValueError(f"unknown image format {image_format!r}; use one of {', '.join(FORMATS)}")
-        config = self.settings.config
-        full_width, full_height = config.pixel_width, config.pixel_height
-        width = full_width if width is None else max(MIN_WIDTH, min(int(width), full_width))
-        height = max(1, round(width * full_height / full_width))
-        time = min(max(float(time), 0.0), self.timeline.duration)
-        frame_config = dataclasses.replace(config, pixel_width=width, pixel_height=height, time=time)
         with self._lock:
+            config = self.settings.config
+            full_width, full_height = config.pixel_width, config.pixel_height
+            width = full_width if width is None else max(MIN_WIDTH, min(int(width), full_width))
+            height = max(1, round(width * full_height / full_width))
+            time = min(max(float(time), 0.0), self.timeline.duration)
+            frame_config = dataclasses.replace(config, pixel_width=width, pixel_height=height, time=time)
             pixels = self._composer.compose(self.timeline.frame_at, frame_config)
         pil_format, _ = FORMATS[image_format]
         image = Image.fromarray(pixels, "RGBA")
@@ -168,6 +219,7 @@ class _Handler(BaseHTTPRequestHandler):
         routes: dict[str, Callable[[dict[str, list[str]]], None]] = {
             "/api/timeline": self._timeline,
             "/api/frame": self._frame,
+            "/api/changes": self._changes,
         }
         route = routes.get(url.path)
         try:
@@ -195,6 +247,10 @@ class _Handler(BaseHTTPRequestHandler):
         if image_format not in FORMATS:
             raise _BadRequest(f"unknown format {image_format!r}")
         self._send(self.preview.frame(time, width, image_format), FORMATS[image_format][1], cache=False)
+
+    def _changes(self, query: dict[str, list[str]]) -> None:
+        version, error = self.preview.wait_for_change(_number(query, "since", int))
+        self._json({"version": version, "error": error})
 
     def _static(self, path: str) -> None:
         name = "index.html" if path in ("", "/") else path.lstrip("/")

@@ -81,7 +81,7 @@ flowchart LR
 | `manimx.project` | `Project`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers, settings |
 | `manimx.settings` | `Settings` and its sections (`OutputSettings`, `EffectsSettings`, `LightingSettings`, `PerformanceSettings`), `setting()` | renderer (config, effects) |
 | `manimx.cli` | the Typer `app` (`manimx` command), `scaffold`, `ui` | project, drivers, web |
-| `manimx.web` | `PreviewServer` (standard library HTTP) and its page (`static/`: HTML, CSS, plain JS modules) | animation, drivers, renderer |
+| `manimx.web` | `PreviewServer` (standard library HTTP), `ProjectReloader` (reload on save) and the page (`static/`: HTML, CSS, plain JS modules) | animation, drivers, renderer, project |
 
 `manimx.animation` never touches the GPU, and `manimx.renderer` never sees a
 `RootSignal` or a time: `RNode` trees are the only interface between
@@ -726,7 +726,18 @@ flowchart LR
   The page asks for `GET /api/timeline` once (duration, frame rate, size,
   clips, segments) and then for one `GET /api/frame?t=&w=` at a time,
   remembering only the newest time it wants while a request is open, so
-  the server never works through outdated times. Frames are rendered
+  the server never works through outdated times. With `--reload` (the
+  default) `ProjectReloader` polls the modification times of
+  `manimx.json` and the project's own `.py` files four times a second;
+  after a change it loads the `Project` again, forgets its modules
+  (`Project.unload_modules()`, which skips hidden folders and
+  site-packages), builds the whole `Timeline` and calls
+  `PreviewServer.replace()`. A failed build keeps the last timeline and
+  calls `PreviewServer.report()`. Both bump `PreviewServer.version`; the
+  page long-polls `GET /api/changes?since=`, fetches the timeline again
+  and shows the time the user chose (clamped while it does not fit), or
+  the error with the user's own frames only. The first build goes through
+  the reloader too, so a broken scene does not stop `manimx ui`. Frames are rendered
   under one lock (the `RenderService` is not thread-safe) with the
   project's settings without motion blur, at the page's width, as JPEG.
   HTTP/1.1 keeps the connection open between frames. The time is part of

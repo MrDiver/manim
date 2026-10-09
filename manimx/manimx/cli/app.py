@@ -11,6 +11,7 @@ from typing import Annotated, Any
 import typer
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, ProgressColumn, SpinnerColumn, Task, TextColumn, TimeRemainingColumn
 from rich.table import Table
+from rich.markup import escape
 from rich.text import Text
 from rich.tree import Tree
 
@@ -385,22 +386,30 @@ def still(
 def ui_command(
     port: Annotated[int, typer.Option("--port", "-p", help="Port to serve on (0: any free port).")] = 0,
     open_: Annotated[bool, typer.Option("--open/--no-open", help="Open the page in the browser.")] = True,
+    reload: Annotated[bool, typer.Option("--reload/--no-reload", help="Rebuild when a scene file or manimx.json is saved.")] = True,
 ) -> None:
     """Preview the timeline in the browser and scrub through it."""
     import webbrowser
 
-    from ..web import PreviewServer
+    from ..web import PreviewServer, ProjectReloader
 
     project = Project.find()
-    chosen = copy.deepcopy(project.settings)
-    chosen.effects.motion_blur.enabled = False  # one render per frame while scrubbing
-    chosen.output.audio = False
-    timeline = _build(project)
+    # With reload, a scene that fails to build is shown in the page (and
+    # fixed by saving) instead of stopping the command.
+    timeline = Timeline() if reload else _build(project)
     try:
-        server = PreviewServer(timeline, project.render_settings(chosen), title=project.name, port=port)
+        server = PreviewServer(timeline, _preview_settings(project), title=project.name, port=port)
     except OSError as error:
         raise ProjectError(f"cannot serve on port {port}: {error.strerror}", hint="pick another one with --port, or 0 for any free port") from None
-    ui.success(f"[bold]{server.url}[/]  [dim]{project.name}: Ctrl+C stops[/]")
+    reloader = ProjectReloader(server, project.root, _preview_settings) if reload else None
+    if reloader is not None:
+        with ui.console.status("Preparing scenes…", spinner="dots"):
+            reloader.reload()
+        if server.error is not None:
+            ui.console.print(f"[yellow]{escape(server.error.splitlines()[0])}[/]  [dim]shown in the page until a save fixes it[/]")
+        reloader.start()
+    watching = "  reloads on save" if reload else ""
+    ui.success(f"[bold]{server.url}[/]  [dim]{project.name}{watching}; Ctrl+C stops[/]")
     if open_:
         webbrowser.open(server.url)
     try:
@@ -408,7 +417,17 @@ def ui_command(
     except KeyboardInterrupt:
         pass
     finally:
+        if reloader is not None:
+            reloader.stop()
         server.close()
+
+
+def _preview_settings(project: Project) -> Any:
+    """The project's render settings for previews: one render per frame."""
+    chosen = copy.deepcopy(project.settings)
+    chosen.effects.motion_blur.enabled = False
+    chosen.output.audio = False
+    return project.render_settings(chosen)
 
 
 def _override(settings: Settings, path: tuple[str, ...], value: Any) -> None:

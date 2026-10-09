@@ -325,7 +325,10 @@ uv run manimx ui --port 8000 --no-open  # a fixed address, without opening a bro
 ```
 
 Drag on the timeline to scrub; ← and → step one frame, Shift+← and
-Shift+→ one second, Home and End jump to the ends. The page's address
+Shift+→ one second, Home and End jump to the ends. Saving a scene or
+`manimx.json` rebuilds the preview at the same time; an error (a typo, a
+failing `construct()`) is shown above the frame until the next save fixes
+it (`--no-reload` turns this off). The page's address
 keeps the time (`#t=2.5`), so a link opens at the same place. Frames are
 rendered without motion blur, at the size of the page.
 

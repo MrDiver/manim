@@ -4,8 +4,13 @@
 // Frames are asked for one at a time. While a request is open, only the
 // newest wanted time is remembered; when the frame arrives, that time is
 // asked for next. So scrubbing never queues outdated frames on the server.
+//
+// Reload on save: /api/changes answers when the server rebuilt the
+// timeline (or failed to); the page then fetches the timeline again and
+// shows the same time, or the build error above the frame.
 
 const elements = {
+  problem: document.getElementById("problem"),
   title: document.getElementById("title"),
   time: document.getElementById("time"),
   frame: document.getElementById("frame"),
@@ -18,7 +23,8 @@ const elements = {
 
 const state = {
   timeline: null, // /api/timeline
-  time: 0,
+  time: 0, // shown, within the timeline
+  intended: 0, // asked for by the user; shown again after a rebuild that makes it fit
   loading: false, // a frame request is open
   wanted: null, // the time to show once it is done
   shownUrl: null,
@@ -92,9 +98,10 @@ function niceStep(duration) {
   return [1, 2, 5, 10].map((m) => m * power).find((step) => step >= raw);
 }
 
-function show(time) {
+function show(time, intended = time) {
   state.time = time;
-  history.replaceState(null, "", `#t=${time.toFixed(3)}`); // a link keeps the place
+  state.intended = intended;
+  history.replaceState(null, "", `#t=${intended.toFixed(3)}`); // a link keeps the place
   elements.playhead.style.left = `${percent(time)}%`;
   elements.time.textContent = `${time.toFixed(2)} s · frame ${Math.round(time * state.timeline.fps)}`;
   if (state.loading) {
@@ -159,18 +166,42 @@ function listen() {
   });
 }
 
-async function start() {
+async function loadTimeline() {
   const response = await fetch("/api/timeline");
   state.timeline = await response.json();
-  const { title, width, height } = state.timeline;
+  const { title, width, height, error } = state.timeline;
   document.title = `${title} · manimx preview`;
   elements.title.textContent = title;
   elements.frame.width = width;
   elements.frame.height = height;
+  elements.problem.textContent = error ?? "";
+  elements.problem.hidden = !error;
   drawTimeline();
+}
+
+/** Wait for the server's rebuilds, forever; show each one at the same time. */
+async function followChanges() {
+  for (;;) {
+    try {
+      const response = await fetch(`/api/changes?since=${state.timeline.version}`);
+      const { version } = await response.json();
+      if (version !== state.timeline.version) {
+        await loadTimeline();
+        show(snap(state.intended), state.intended);
+      }
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 2000)); // the server is gone or restarting
+    }
+  }
+}
+
+async function start() {
+  await loadTimeline();
   listen();
   const linked = Number(new URLSearchParams(location.hash.slice(1)).get("t"));
-  show(snap(Number.isFinite(linked) ? linked : 0));
+  const intended = Number.isFinite(linked) ? linked : 0;
+  show(snap(intended), intended);
+  followChanges();
 }
 
 start();

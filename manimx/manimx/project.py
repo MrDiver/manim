@@ -258,6 +258,28 @@ class Project:
             self.scene_class(scene)  # fail early, before worker processes start
         return ProjectSource(str(self.root), scene)
 
+    def unload_modules(self) -> list[str]:
+        """Forget every imported module that lives in the project's folder,
+        so the next build imports the scenes as they are on disk now (after
+        an edit). Returns the names of the modules forgotten.
+        """
+        mine = [name for name, module in list(sys.modules.items()) if self._owns(getattr(module, "__file__", None))]
+        for name in mine:
+            del sys.modules[name]
+        importlib.invalidate_caches()
+        return mine
+
+    def _owns(self, location: str | None) -> bool:
+        """Whether a module file is the project's own code: inside its
+        folder, but not in a hidden folder (a .venv) or site-packages."""
+        if not location:
+            return False
+        path = Path(location).resolve()
+        if not path.is_relative_to(self.root):
+            return False
+        parts = path.relative_to(self.root).parts[:-1]
+        return not any(part.startswith(".") or part == "site-packages" for part in parts)
+
     def _import(self, module: str) -> Any:
         root = str(self.root)
         top = module.partition(".")[0]

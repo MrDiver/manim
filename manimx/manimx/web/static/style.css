@@ -84,6 +84,15 @@ main {
   white-space: pre-wrap;
 }
 
+#problem {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-left: 4px solid #d9480f;
+  background: var(--surface);
+  font: 12px/1.5 ui-monospace, monospace;
+  white-space: pre-wrap;
+}
+
 #timeline {
   position: relative;
   background: var(--surface);
