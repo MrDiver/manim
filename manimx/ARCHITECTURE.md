@@ -77,7 +77,8 @@ flowchart LR
 | `manimx.renderer` | `flatten_scene()` → `FlatScene`; `tessellate_fill()`; `RNodeDataCache`; `RenderConfig`, `renderer.Camera`, `ViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `RemoveObjects`, `ClearScene` | robjects |
 | `manimx.renderer.webgpu` | `WGPURenderer`, `FrameComposer`, `RetainedVectors`, `VectorBatch`, `MeshBatch`, `VectorPass`, `MeshPass`, `LightingPass`, `ShadowPass`, `RenderTargets`, `RenderLayers`, `ResourceCache`, `GPUContext` | wgpu |
 | `manimx.drivers` | `render()`, `FramePipeline`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation |
-| `manimx.project` | `Project`, `OutputSettings`, `CameraSettings`, `PerformanceSettings`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers |
+| `manimx.project` | `Project`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers, settings |
+| `manimx.settings` | `Settings` and its sections (`OutputSettings`, `EffectsSettings`, `LightingSettings`, `PerformanceSettings`), `setting()` | renderer (config, effects) |
 | `manimx.cli` | the Typer `app` (`manimx` command), `scaffold`, `ui` | project, drivers |
 
 `manimx.animation` never touches the GPU, and `manimx.renderer` never sees a
@@ -630,7 +631,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    J["manimx.json<br/>output, camera, performance,<br/>scenes, timeline"] <-->|"Project.load() / Project.save()"| P["Project<br/>OutputSettings, CameraSettings,<br/>PerformanceSettings, SceneEntry, ClipEntry"]
+    J["manimx.json<br/>output, effects, lighting, performance,<br/>scenes, timeline"] <-->|"Project.load() / Project.save()"| P["Project<br/>Settings, SceneEntry, ClipEntry"]
     P -->|"build_timeline()"| TL["Timeline"]
     P -->|"render_settings()"| RS["RenderSettings"]
     P -->|"source(scene)"| PSrc["ProjectSource"]
@@ -645,9 +646,14 @@ flowchart LR
   `Project.save()`. A `SceneEntry` references a `Scene` subclass by module
   and class.
 - **`Project.load()` is strict.** It rejects unknown keys with a "did you
-  mean" hint and checks types and minimums. `project_schema()` derives the
-  schema from the same dataclasses (`OutputSettings`, `CameraSettings`,
-  `PerformanceSettings`).
+  mean" hint and checks types, limits, choices and colors. Older formats
+  are migrated first (`_MIGRATIONS`).
+- **Every setting is declared once**, with `setting()` in
+  `manimx.settings`: default, description, limits, unit. The JSON schema
+  (`project_schema()`), the `manimx settings` menu and its `--print`
+  output, and the checks all read that declaration.
+  `Settings.render_config()` and `Settings.effects_chain()` turn the
+  settings into the `RenderConfig` and the composer's effects.
 - **`Project.build_timeline()`** prepares every `ClipEntry`'s scene and
   calls `Timeline.add()`. A `ClipEntry` without `start` begins at the
   previous `Clip.end`.

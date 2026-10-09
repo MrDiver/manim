@@ -28,19 +28,23 @@ import importlib
 import json
 import sys
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
 from .animation.scene import PreparedScene, Scene
 from .animation.timing import NEVER, Timeline
-from .renderer.config import RenderConfig
-from .renderer.effects import MotionBlur
+from .settings import OutputSettings, PerformanceSettings, Settings, SettingsError, UnknownSetting
+from .settings import from_json as settings_from_json
+from .settings import schema as settings_schema
+from .settings import to_json as settings_to_json
 
 PROJECT_FILE = "manimx.json"
 SCHEMA_FILE = ".manimx/project.schema.json"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 """Version of the manimx.json format; bumped (with a migration) on breaking changes."""
+SECTIONS = [item.name for item in fields(Settings)]
+"""The settings sections at the top level of manimx.json."""
 
 
 class ProjectError(Exception):
@@ -57,37 +61,6 @@ class SceneError(ProjectError):
     def __init__(self, scene: str, stage: str = "being prepared") -> None:
         super().__init__(f"{scene} failed while it was {stage}")
         self.scene = scene
-
-
-def _setting(default: Any, description: str, minimum: float | None = None) -> Any:
-    """A project setting: its default, and what the schema tells editors."""
-    metadata = {"description": description} if minimum is None else {"description": description, "minimum": minimum}
-    return field(default=default, metadata=metadata)
-
-
-@dataclass
-class OutputSettings:
-    """What the rendered video looks like (``"output"`` in manimx.json)."""
-
-    width: int = _setting(1920, "Video width in pixels.", 1)
-    height: int = _setting(1080, "Video height in pixels.", 1)
-    fps: int = _setting(60, "Frames per second.", 1)
-    background: str = _setting("#0b1020", "Background color, e.g. #0b1020 or BLACK.")
-    motion_blur: int = _setting(8, "Sub-frames averaged per frame; 1 turns motion blur off.", 1)
-    audio: bool = _setting(True, "Include the scenes' sounds.")
-    sample_rate: int = _setting(48_000, "Audio sample rate in Hz.", 8000)
-    directory: str = _setting("renders", "Where renders go, relative to the project.")
-
-
-@dataclass
-class PerformanceSettings:
-    """How rendering uses the machine (``"performance"``); never changes the image."""
-
-    workers: int = _setting(1, "Render processes; more use more CPU cores.", 1)
-    frames_in_flight: int = _setting(3, "Frames queued on the GPU per process.", 1)
-
-
-SECTIONS: dict[str, type] = {"output": OutputSettings, "performance": PerformanceSettings}
 
 
 @dataclass
@@ -113,12 +86,19 @@ class ClipEntry:
 class Project:
     root: Path
     name: str
-    output: OutputSettings = field(default_factory=OutputSettings)
-    performance: PerformanceSettings = field(default_factory=PerformanceSettings)
+    settings: Settings = field(default_factory=Settings)
     scenes: dict[str, SceneEntry] = field(default_factory=dict)
     timeline: list[ClipEntry] = field(default_factory=list)
     events: dict[str, float] = field(default_factory=dict)
     """Event times set by hand (clicks, transcript words come later)."""
+
+    @property
+    def output(self) -> OutputSettings:
+        return self.settings.output
+
+    @property
+    def performance(self) -> PerformanceSettings:
+        return self.settings.performance
 
     # -- files ------------------------------------------------------------------
 
@@ -139,6 +119,8 @@ class Project:
             data = json.loads((root / PROJECT_FILE).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise ProjectError(f"cannot read {root / PROJECT_FILE}: {error}") from error
+        if isinstance(data, dict) and data.get("format") in _MIGRATIONS:
+            data = _MIGRATIONS[data["format"]](data)
         if not isinstance(data, dict) or data.get("format") != FORMAT_VERSION:
             found = data.get("format") if isinstance(data, dict) else None
             raise ProjectError(f"{PROJECT_FILE} has format {found}, this manimx reads format {FORMAT_VERSION}")
@@ -148,7 +130,13 @@ class Project:
         timeline = data.get("timeline", {})
         _check_keys(timeline, ["clips", "events"], "timeline")
         try:
-            sections = {key: _section(kind, data.get(key, {}), key) for key, kind in SECTIONS.items()}
+            settings = settings_from_json({key: data[key] for key in SECTIONS if key in data})
+        except UnknownSetting as error:
+            hint = f'did you mean "{error.close}"?' if error.close else f"known here: {', '.join(error.known)}"
+            raise ProjectError(f"{error} in {PROJECT_FILE}", hint=hint) from None
+        except SettingsError as error:
+            raise ProjectError(str(error)) from None
+        try:
             scenes = {}
             for name, entry in data.get("scenes", {}).items():
                 _check_keys(entry, ["module", "class"], f"scenes.{name}")
@@ -160,14 +148,14 @@ class Project:
             events = {name: float(time) for name, time in timeline.get("events", {}).items()}
         except (KeyError, TypeError, ValueError, AttributeError) as error:
             raise ProjectError(f"invalid {PROJECT_FILE}: {error}") from error
-        return cls(root=root, name=data["name"], scenes=scenes, timeline=clips, events=events, **sections)
+        return cls(root=root, name=data["name"], settings=settings, scenes=scenes, timeline=clips, events=events)
 
     def to_json(self) -> dict[str, Any]:
         return {
             "$schema": f"./{SCHEMA_FILE}",
             "format": FORMAT_VERSION,
             "name": self.name,
-            **{key: asdict(getattr(self, key)) for key in SECTIONS},
+            **settings_to_json(self.settings),
             "scenes": {name: {"module": entry.module, "class": entry.cls} for name, entry in self.scenes.items()},
             "timeline": {"clips": [_clip_json(entry) for entry in self.timeline], "events": dict(self.events)},
         }
@@ -182,24 +170,18 @@ class Project:
 
     # -- rendering --------------------------------------------------------------
 
-    def render_settings(self, output: OutputSettings | None = None) -> Any:
-        """Driver settings from the project's sections (or replacements).
-        Each scene renders through its own camera (``Scene.camera``).
-        """
+    def render_settings(self, settings: Settings | None = None) -> Any:
+        """Driver settings from the project's settings (or replacements).
+        Each scene renders through its own camera (``Scene.camera``)."""
         from .drivers import RenderSettings
 
-        output = output or self.output
-        effects = (MotionBlur(samples=output.motion_blur, shutter=0.5 / output.fps),) if output.motion_blur > 1 else ()
-        config = RenderConfig(
-            pixel_width=output.width,
-            pixel_height=output.height,
-            background_color=output.background,
-        )
+        settings = settings or self.settings
+        output = settings.output
         return RenderSettings(
-            config,
+            settings.render_config(),
             fps=output.fps,
-            effects=effects,
-            in_flight=self.performance.frames_in_flight,
+            effects=settings.effects_chain(),
+            in_flight=settings.performance.frames_in_flight,
             sample_rate=output.sample_rate,
             audio=output.audio,
         )
@@ -328,36 +310,26 @@ def _check_keys(data: Any, allowed: list[str], where: str) -> None:
             )
 
 
-_TYPES: dict[type, tuple[type, ...]] = {int: (int,), float: (int, float), str: (str,), bool: (bool,)}
-_JSON_TYPES = {int: "integer", float: "number", str: "string", bool: "boolean"}
+def _from_format_1(data: dict[str, Any]) -> dict[str, Any]:
+    """Format 1 had the motion blur samples in "output" and a "camera"
+    section (cameras now belong to scenes)."""
+    data = {key: value for key, value in data.items() if key != "camera"}
+    output = data.get("output")
+    if isinstance(output, dict) and isinstance(output.get("motion_blur"), int):
+        output = dict(output)
+        samples = output.pop("motion_blur")
+        data["output"] = output
+        data["effects"] = {"motion_blur": {"enabled": samples > 1, "samples": max(samples, 1)}}
+    return {**data, "format": 2}
 
 
-def _section(kind: type, data: Any, where: str) -> Any:
-    names = [f.name for f in fields(kind)]
-    _check_keys(data, names, where)
-    for item in fields(kind):
-        if item.name not in data:
-            continue
-        expected = type(item.default)
-        value = data[item.name]
-        if isinstance(value, bool) and expected is not bool or not isinstance(value, _TYPES[expected]):
-            raise ProjectError(f'"{where}.{item.name}" must be {_JSON_TYPES[expected]}, got {json.dumps(value)}')
-        if "minimum" in item.metadata and value < item.metadata["minimum"]:
-            raise ProjectError(f'"{where}.{item.name}" must be at least {item.metadata["minimum"]}, got {value}')
-    return kind(**data)
+_MIGRATIONS = {1: _from_format_1}
+"""Format version -> function turning it into the next one."""
 
 
 def project_schema() -> dict[str, Any]:
     """JSON Schema of manimx.json, generated from the settings dataclasses,
     so editors complete and check the file (like angular.json)."""
-
-    def section(kind: type) -> dict[str, Any]:
-        properties = {}
-        for item in fields(kind):
-            entry = {"type": _JSON_TYPES[type(item.default)], "default": item.default, **item.metadata}
-            properties[item.name] = entry
-        return {"type": "object", "description": (kind.__doc__ or "").strip(), "properties": properties, "additionalProperties": False}
-
     number_or_null = {"type": ["number", "null"]}
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -369,7 +341,7 @@ def project_schema() -> dict[str, Any]:
             "$schema": {"type": "string"},
             "format": {"const": FORMAT_VERSION, "description": "Version of this file format."},
             "name": {"type": "string", "description": "Project name; also the default video name."},
-            **{key: section(kind) for key, kind in SECTIONS.items()},
+            **settings_schema()["properties"],
             "scenes": {
                 "type": "object",
                 "description": "Scene registry: name -> module and class (manimx generate scene adds entries).",

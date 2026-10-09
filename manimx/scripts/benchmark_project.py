@@ -20,6 +20,7 @@ bit-identical. Results go to PERFORMANCE.md by hand, one row per step.
 from __future__ import annotations
 
 import argparse
+import copy
 import dataclasses
 import functools
 import time
@@ -107,7 +108,9 @@ def main() -> None:
 
     settings = project.render_settings()
     times = settings.frame_times(timeline.duration)
-    sharp = project.render_settings(dataclasses.replace(project.output, motion_blur=1))
+    sharp_settings = copy.deepcopy(project.settings)
+    sharp_settings.effects.motion_blur.enabled = False
+    sharp = project.render_settings(sharp_settings)
     sharp_wall, _ = render_all(timeline, sharp, times)
 
     spent: dict[str, float] = defaultdict(float)
@@ -115,7 +118,7 @@ def main() -> None:
     wall, _ = render_all(timeline, settings, times)
     count = len(times)
     out = project.output
-    print(f"{out.width}x{out.height}, {count} frames, motion blur {out.motion_blur}: {count / wall:6.1f} fps  {wall / count * 1e3:6.2f} ms/frame")
+    print(f"{out.width}x{out.height}, {count} frames, motion blur {project.settings.motion_blur_samples}: {count / wall:6.1f} fps  {wall / count * 1e3:6.2f} ms/frame")
     print(f"{out.width}x{out.height}, {count} frames, no motion blur: {count / sharp_wall:6.1f} fps  {sharp_wall / count * 1e3:6.2f} ms/frame")
     for label, seconds in sorted(spent.items(), key=lambda item: -item[1]):
         print(f"  {label:<32} {seconds / count * 1e3:6.2f} ms/frame  {seconds / wall * 100:5.1f}%")

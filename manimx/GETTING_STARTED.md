@@ -35,7 +35,7 @@ or use `-y` to take the defaults.
 
 ```
 my-video/
-├── manimx.json                 the project: output settings, scenes, timeline
+├── manimx.json                 the project: settings, scenes, timeline
 ├── .manimx/project.schema.json lets your editor complete and check manimx.json
 ├── pyproject.toml              depends on manimx (this checkout)
 ├── scenes/
@@ -218,21 +218,28 @@ click.
 
 `manimx.json` holds the project's settings in named sections. Your editor
 completes and checks it through the schema, and manimx rejects typos with a
-"did you mean" hint.
+"did you mean" hint. You rarely need to edit it by hand: `manimx settings`
+opens a menu with every setting (see below).
 
 ```json
 {
   "$schema": "./.manimx/project.schema.json",
-  "format": 1,
+  "format": 2,
   "name": "my-video",
   "output": {
     "width": 1920, "height": 1080, "fps": 60,
-    "background": "#0b1020",
-    "motion_blur": 8,
+    "background": "#0b1020", "background_opacity": 1.0,
+    "antialiasing": 4,
     "audio": true, "sample_rate": 48000,
     "directory": "renders"
   },
-  "camera": { "frame_height": 8.0 },
+  "effects": {
+    "motion_blur": { "enabled": true, "samples": 8, "shutter_angle": 180.0 },
+    "bloom": { "enabled": false, "intensity": 0.1, "threshold": 1.0, "knee": 0.5, "radius": 1.0, "levels": 6 },
+    "shadows": { "enabled": true, "softness": 1.0, "samples": 16, "resolution": 2048 },
+    "tone_map": { "operator": "pbr_neutral", "exposure": 1.0 }
+  },
+  "lighting": { "ambient_color": "#ffffff", "ambient_intensity": 0.15, "default_lights": true },
   "performance": { "workers": 1, "frames_in_flight": 3 },
   "scenes": {
     "Intro": { "module": "scenes.intro", "class": "Intro" }
@@ -249,11 +256,45 @@ completes and checks it through the schema, and manimx rejects typos with a
 
 | Setting | Meaning |
 |---|---|
-| `output` | how the video looks: resolution, frame rate, background, motion blur (sub-frames per frame; 1 is off), audio |
-| `camera.frame_height` | world units visible vertically (Manim's default: 8) |
+| `output` | how the video looks: resolution, frame rate, background, antialiasing, audio |
+| `effects.motion_blur` | renders averaged per frame (`samples`) over the exposure. `shutter_angle` is the exposure as a share of a frame: 360 is one frame, 180 half (the film default), 720 two frames, so the smear grows with it. Long exposures need more samples, or they show separate images |
+| `effects.bloom` | glow around bright parts of lit 3D objects |
+| `effects.shadows` | shadows of 3D objects: `softness` (0 is hard), `samples` (smoother edges), `resolution` (sharper detail) |
+| `effects.tone_map` | how lit 3D colors map to the screen (`pbr_neutral`, `aces`, `agx`, `reinhard`, `none`) and their `exposure`. 2D colors always stay exact |
+| `lighting` | ambient light for 3D objects, and a default key light for scenes without lights |
 | `performance` | speed only, never the image: render processes, frames queued on the GPU |
 | `timeline.clips` | clips in order. Without `start` a clip begins when the previous one ends. `layer` draws on top; `cut` keeps only that part of the scene, in seconds |
 | `timeline.events` | times of the events scenes `wait_for` |
+
+The camera is not a project setting: every scene has its own `self.camera`.
+
+### The settings menu
+
+```sh
+uv run manimx settings          # the menu
+uv run manimx settings --print  # every setting with its value and docs, as text
+```
+
+```
+  ▸ Output                                Video size, frame rate, background and files.
+  ▾ Effects                               Motion blur, bloom, shadows and tone mapping.
+      ▾ Motion blur          [on]
+            samples          8            one image every 0.00417 s of the exposure
+›           shutter angle    720°         0.03333 s exposure at 60 fps
+      ▸ Bloom                [off]
+      ▸ Shadows              [on]
+      ▸ Tone map                          Mapping of lit 3D colors to the screen.
+  ▸ Lighting                              Ambient and default light for 3D objects.
+  ▸ Performance                           Processes and GPU queueing.
+
+  Exposure as a share of a frame: 360 is one frame, 180 half (film's default), 720 two frames.
+```
+
+↑/↓ move, →/← open and close sections, space switches an effect (or a
+yes/no value) on and off or steps through choices, enter edits a value, r
+puts it back to its default, s saves to `manimx.json`, q quits. The line
+below the tree describes the selected setting; values are checked as you
+enter them.
 
 ## 9. Render
 
@@ -265,6 +306,11 @@ uv run manimx render -w 4               # four render processes (more CPU cores)
 uv run manimx render --png -o frames    # a PNG sequence (plus audio.wav)
 uv run manimx render --start 2 --end 5  # a part of the timeline
 uv run manimx still -t 2.5              # one frame as a PNG
+uv run manimx render --window           # watch it render instead of writing a file
+uv run manimx render --window --write   # both
+uv run manimx render --open             # open the video when done
+uv run manimx render --motion-blur 1    # no motion blur (renders averaged per frame)
+uv run manimx render --shutter-angle 720
 ```
 
 Options on the command line override `manimx.json` for that run. Rendering

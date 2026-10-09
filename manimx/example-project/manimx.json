@@ -1,16 +1,47 @@
 {
   "$schema": "./.manimx/project.schema.json",
-  "format": 1,
+  "format": 2,
   "name": "example-project",
   "output": {
     "width": 1920,
     "height": 1080,
     "fps": 60,
     "background": "#0b1020",
-    "motion_blur": 8,
+    "background_opacity": 1.0,
+    "antialiasing": 4,
     "audio": true,
     "sample_rate": 48000,
     "directory": "renders"
+  },
+  "effects": {
+    "motion_blur": {
+      "enabled": true,
+      "samples": 8,
+      "shutter_angle": 180.0
+    },
+    "bloom": {
+      "enabled": false,
+      "intensity": 0.1,
+      "threshold": 1.0,
+      "knee": 0.5,
+      "radius": 1.0,
+      "levels": 6
+    },
+    "shadows": {
+      "enabled": true,
+      "softness": 1.0,
+      "samples": 16,
+      "resolution": 2048
+    },
+    "tone_map": {
+      "operator": "pbr_neutral",
+      "exposure": 1.0
+    }
+  },
+  "lighting": {
+    "ambient_color": "#ffffff",
+    "ambient_intensity": 0.15,
+    "default_lights": true
   },
   "performance": {
     "workers": 1,

@@ -38,14 +38,18 @@ def test_help_and_version(capsys) -> None:
 
 def test_new_creates_a_project_with_example_scenes(capsys, project) -> None:
     data = config(project)
-    assert data["format"] == 1 and data["$schema"] == "./.manimx/project.schema.json"
+    assert data["format"] == 2 and data["$schema"] == "./.manimx/project.schema.json"
     assert data["output"]["width"] == 1280 and data["output"]["fps"] == 30 and "camera" not in data
     assert data["performance"] == {"workers": 1, "frames_in_flight": 3}
+    assert data["effects"]["motion_blur"] == {"enabled": True, "samples": 8, "shutter_angle": 180.0}
+    assert data["effects"]["bloom"]["enabled"] is False and data["lighting"]["default_lights"] is True
     assert list(data["scenes"]) == ["Intro", "Bounce"] and [c["scene"] for c in data["timeline"]["clips"]] == ["Intro", "Bounce"]
     schema = json.loads((project / ".manimx" / "project.schema.json").read_text())
     assert schema["properties"]["output"]["properties"]["fps"] == {
         "type": "integer", "default": 60, "description": "Frames per second.", "minimum": 1,
     }  # fmt: skip
+    shadows = schema["properties"]["effects"]["properties"]["shadows"]["properties"]
+    assert shadows["resolution"]["enum"] == [512, 1024, 2048, 4096] and "softer" in shadows["softness"]["description"]
     assert (project / "scenes" / "intro.py").is_file() and (project / "assets").is_dir()
     assert 'manimx = { path = "/opt/manimx", editable = true }' in (project / "pyproject.toml").read_text()
     assert "uv run manimx render --preview" in capsys.readouterr().out
@@ -188,17 +192,17 @@ def test_errors_point_at_the_problem(project, tmp_path, monkeypatch, capsys) -> 
     [
         ("{not json", "cannot read", None),
         ({"format": 99, "name": "x"}, "has format 99", None),
-        ({"format": 1}, '"name" must be a string', None),
-        ({"format": 1, "name": "x", "ouput": {}}, 'unknown setting "ouput"', 'did you mean "output"?'),
-        ({"format": 1, "name": "x", "output": {"fsp": 30}}, 'unknown setting "output.fsp"', 'did you mean "fps"?'),
-        ({"format": 1, "name": "x", "output": {"fps": "60"}}, '"output.fps" must be integer, got "60"', None),
-        ({"format": 1, "name": "x", "output": {"audio": 1}}, '"output.audio" must be boolean', None),
-        ({"format": 1, "name": "x", "output": {"width": True}}, '"output.width" must be integer', None),
-        ({"format": 1, "name": "x", "output": {"width": 0}}, "must be at least 1", None),
-        ({"format": 1, "name": "x", "output": 5}, '"output" must be an object', None),
-        ({"format": 1, "name": "x", "scenes": {"A": {"modul": "a"}}}, 'unknown setting "scenes.A.modul"', None),
-        ({"format": 1, "name": "x", "scenes": {"A": {}}}, "invalid", None),
-        ({"format": 1, "name": "x", "timeline": {"clips": [{"sceen": "A"}]}}, 'unknown setting "timeline.clips[0].sceen"', None),
+        ({"format": 2}, '"name" must be a string', None),
+        ({"format": 2, "name": "x", "ouput": {}}, 'unknown setting "ouput"', 'did you mean "output"?'),
+        ({"format": 2, "name": "x", "output": {"fsp": 30}}, 'unknown setting "output.fsp"', 'did you mean "fps"?'),
+        ({"format": 2, "name": "x", "output": {"fps": "60"}}, '"output.fps" must be integer, got "60"', None),
+        ({"format": 2, "name": "x", "output": {"audio": 1}}, '"output.audio" must be boolean', None),
+        ({"format": 2, "name": "x", "output": {"width": True}}, '"output.width" must be integer', None),
+        ({"format": 2, "name": "x", "output": {"width": 0}}, "must be at least 1", None),
+        ({"format": 2, "name": "x", "output": 5}, '"output" must be an object', None),
+        ({"format": 2, "name": "x", "scenes": {"A": {"modul": "a"}}}, 'unknown setting "scenes.A.modul"', None),
+        ({"format": 2, "name": "x", "scenes": {"A": {}}}, "invalid", None),
+        ({"format": 2, "name": "x", "timeline": {"clips": [{"sceen": "A"}]}}, 'unknown setting "timeline.clips[0].sceen"', None),
     ],
 )
 def test_project_files_are_validated(tmp_path, content, message, hint) -> None:

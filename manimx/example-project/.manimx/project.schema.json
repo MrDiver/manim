@@ -12,7 +12,7 @@
       "type": "string"
     },
     "format": {
-      "const": 1,
+      "const": 2,
       "description": "Version of this file format."
     },
     "name": {
@@ -21,7 +21,7 @@
     },
     "output": {
       "type": "object",
-      "description": "What the rendered video looks like (``\"output\"`` in manimx.json).",
+      "description": "Video size, frame rate, background and files.",
       "properties": {
         "width": {
           "type": "integer",
@@ -46,11 +46,21 @@
           "default": "#0b1020",
           "description": "Background color, e.g. #0b1020 or BLACK."
         },
-        "motion_blur": {
+        "background_opacity": {
+          "type": "number",
+          "default": 1.0,
+          "description": "Background opacity; below 1 needs an output with alpha, e.g. --png.",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "antialiasing": {
           "type": "integer",
-          "default": 8,
-          "description": "Sub-frames averaged per frame; 1 turns motion blur off.",
-          "minimum": 1
+          "default": 4,
+          "description": "Samples per pixel for smooth edges (1: off).",
+          "enum": [
+            1,
+            4
+          ]
         },
         "audio": {
           "type": "boolean",
@@ -60,7 +70,7 @@
         "sample_rate": {
           "type": "integer",
           "default": 48000,
-          "description": "Audio sample rate in Hz.",
+          "description": "Audio sample rate.",
           "minimum": 8000
         },
         "directory": {
@@ -71,9 +81,167 @@
       },
       "additionalProperties": false
     },
+    "effects": {
+      "type": "object",
+      "description": "Motion blur, bloom, shadows and tone mapping.",
+      "properties": {
+        "motion_blur": {
+          "type": "object",
+          "description": "Average renders over the exposure time.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Blur moving things over the exposure time."
+            },
+            "samples": {
+              "type": "integer",
+              "default": 8,
+              "description": "Renders averaged per frame; long exposures need more, or they show separate images.",
+              "minimum": 1
+            },
+            "shutter_angle": {
+              "type": "number",
+              "default": 180.0,
+              "description": "Exposure as a share of a frame: 360 is one frame, 180 half (film's default), 720 two frames.",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        },
+        "bloom": {
+          "type": "object",
+          "description": "Glow around bright lit pixels.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "Add glow around bright lit pixels."
+            },
+            "intensity": {
+              "type": "number",
+              "default": 0.1,
+              "description": "Strength of the glow.",
+              "minimum": 0.0
+            },
+            "threshold": {
+              "type": "number",
+              "default": 1.0,
+              "description": "Brightness above which pixels glow (1: white).",
+              "minimum": 0.0
+            },
+            "knee": {
+              "type": "number",
+              "default": 0.5,
+              "description": "Softness of the threshold: 0 is a hard cut.",
+              "minimum": 0.0
+            },
+            "radius": {
+              "type": "number",
+              "default": 1.0,
+              "description": "Width of the blur filter per level.",
+              "minimum": 0.0
+            },
+            "levels": {
+              "type": "integer",
+              "default": 6,
+              "description": "Mip levels the glow spreads over; more give a wider glow.",
+              "minimum": 1,
+              "maximum": 12
+            }
+          },
+          "additionalProperties": false
+        },
+        "shadows": {
+          "type": "object",
+          "description": "Shadows of 3D objects.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Cast shadows at all."
+            },
+            "softness": {
+              "type": "number",
+              "default": 1.0,
+              "description": "Multiplies every light's size: 0 gives hard shadows, larger is softer.",
+              "minimum": 0.0
+            },
+            "samples": {
+              "type": "integer",
+              "default": 16,
+              "description": "Lookups per shadowed pixel; more give smoother soft edges.",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "resolution": {
+              "type": "integer",
+              "default": 2048,
+              "description": "Width and height of each shadow map; more give sharper detail.",
+              "enum": [
+                512,
+                1024,
+                2048,
+                4096
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "tone_map": {
+          "type": "object",
+          "description": "Mapping of lit 3D colors to the screen.",
+          "properties": {
+            "operator": {
+              "type": "string",
+              "default": "pbr_neutral",
+              "description": "pbr_neutral keeps base colors faithful, aces is filmic, agx is Blender's, reinhard is soft, none clamps.",
+              "enum": [
+                "none",
+                "pbr_neutral",
+                "aces",
+                "agx",
+                "reinhard"
+              ]
+            },
+            "exposure": {
+              "type": "number",
+              "default": 1.0,
+              "description": "Multiplies lit 3D colors before tone mapping.",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "lighting": {
+      "type": "object",
+      "description": "Ambient and default light for 3D objects.",
+      "properties": {
+        "ambient_color": {
+          "type": "string",
+          "default": "#ffffff",
+          "description": "Color of the constant ambient light."
+        },
+        "ambient_intensity": {
+          "type": "number",
+          "default": 0.15,
+          "description": "Strength of the ambient light.",
+          "minimum": 0.0
+        },
+        "default_lights": {
+          "type": "boolean",
+          "default": true,
+          "description": "Add a key light when a scene has 3D objects but no lights."
+        }
+      },
+      "additionalProperties": false
+    },
     "performance": {
       "type": "object",
-      "description": "How rendering uses the machine (``\"performance\"``); never changes the image.",
+      "description": "Processes and GPU queueing.",
       "properties": {
         "workers": {
           "type": "integer",

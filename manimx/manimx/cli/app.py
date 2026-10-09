@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import time
 from pathlib import Path
@@ -16,7 +17,8 @@ from rich.tree import Tree
 import manimx
 
 from ..animation.timing import NEVER, Timeline
-from ..project import OutputSettings, Project, ProjectError
+from ..project import PROJECT_FILE, Project, ProjectError
+from ..settings import OutputSettings, Settings, SettingsError, set_value
 from . import scaffold, templates, ui
 
 app = typer.Typer(
@@ -151,6 +153,35 @@ def remove_scene(
 
 
 # --------------------------------------------------------------------------
+# settings
+# --------------------------------------------------------------------------
+
+
+@app.command("settings")
+def settings_(
+    print_: Annotated[bool, typer.Option("--print", help="Print every setting with its docs instead of the menu.")] = False,
+) -> None:
+    """Change the project's settings in a menu: output, effects (motion blur,
+    bloom, shadows, tone mapping), lighting and performance."""
+    from .settings_menu import SettingsMenu, print_settings, run_menu
+
+    project = Project.find()
+    if print_ or not ui.Interaction.possible():
+        ui.console.print(print_settings(project.settings), markup=False)
+        return
+    menu = SettingsMenu(copy.deepcopy(project.settings), expanded={("effects",)})
+    run_menu(menu)
+    if menu.save and menu.dirty:
+        project.settings = menu.settings
+        project.save()
+        ui.changes([scaffold.Change("update", project.root / PROJECT_FILE, "settings")], project.root)
+    elif menu.save:
+        ui.console.print("[dim]Nothing changed.[/]")
+    else:
+        ui.console.print("[dim]Left without saving.[/]")
+
+
+# --------------------------------------------------------------------------
 # list
 # --------------------------------------------------------------------------
 
@@ -222,7 +253,10 @@ def render(
     width: Annotated[int | None, typer.Option(show_default=False)] = None,
     height: Annotated[int | None, typer.Option(show_default=False)] = None,
     fps: Annotated[int | None, typer.Option(show_default=False)] = None,
-    motion_blur: Annotated[int | None, typer.Option(help="Sub-frames per frame (1: off).", show_default=False)] = None,
+    motion_blur: Annotated[int | None, typer.Option(help="Renders averaged per frame (1: off).", show_default=False)] = None,
+    shutter_angle: Annotated[
+        float | None, typer.Option(help="Exposure in degrees of a frame: 180 half a frame, 720 two frames.", show_default=False)
+    ] = None,
     workers: Annotated[int | None, typer.Option("--workers", "-w", help="Render processes.", show_default=False)] = None,
     start: Annotated[float, typer.Option(help="First second to render.")] = 0.0,
     end: Annotated[float | None, typer.Option(help="Last second to render.", show_default=False)] = None,
@@ -240,15 +274,25 @@ def render(
     if not write and (png or output is not None or open_):
         raise ProjectError("--png, --output and --open need a written file", hint="add --write")
     project = Project.find()
-    overrides: dict[str, Any] = {"width": 960, "height": 540, "fps": 30, "motion_blur": 1} if preview else {}
-    explicit = {"width": width, "height": height, "fps": fps, "motion_blur": motion_blur, "audio": audio}
-    overrides.update({key: value for key, value in explicit.items() if value is not None})
-    options = dataclasses.replace(project.output, **overrides)
+    chosen = copy.deepcopy(project.settings)
+    if preview:
+        chosen.output.width, chosen.output.height, chosen.output.fps = 960, 540, 30
+        chosen.effects.motion_blur.enabled = False
+    _override(chosen, ("output", "width"), width)
+    _override(chosen, ("output", "height"), height)
+    _override(chosen, ("output", "fps"), fps)
+    _override(chosen, ("output", "audio"), audio)
+    _override(chosen, ("effects", "motion_blur", "shutter_angle"), shutter_angle)
+    if motion_blur is not None:
+        _override(chosen, ("effects", "motion_blur", "samples"), motion_blur)
+        chosen.effects.motion_blur.enabled = motion_blur > 1
+    options = chosen.output
     workers = workers or project.performance.workers
-    settings = dataclasses.replace(project.render_settings(options), start=start, end=end)
+    settings = dataclasses.replace(project.render_settings(chosen), start=start, end=end)
 
     what = scene or "timeline"
-    blur = f"motion blur ×{options.motion_blur}" if options.motion_blur > 1 else "no motion blur"
+    samples = chosen.motion_blur_samples
+    blur = f"motion blur ×{samples} · {chosen.effects.motion_blur.shutter_angle:g}°" if samples > 1 else "no motion blur"
     ui.header(project.name, what, f"{options.width}×{options.height}", f"{options.fps} fps", blur, f"{workers} worker{'s' * (workers != 1)}")
     if scene is None:
         source: Any = _build(project)
@@ -310,8 +354,12 @@ def still(
 
     project = Project.find()
     sizes = {key: value for key, value in {"width": width, "height": height}.items() if value is not None}
-    options = dataclasses.replace(project.output, motion_blur=1, audio=False, **sizes)
-    settings = dataclasses.replace(project.render_settings(options), start=at, end=at)
+    chosen = copy.deepcopy(project.settings)
+    chosen.effects.motion_blur.enabled = False
+    chosen.output.audio = False
+    for key, value in sizes.items():
+        _override(chosen, ("output", key), value)
+    settings = dataclasses.replace(project.render_settings(chosen), start=at, end=at)
     with ui.console.status("Preparing…", spinner="dots"):
         source = project.build_timeline() if scene is None else project.prepare(scene)
     if not 0.0 <= at <= source.duration:
@@ -326,6 +374,15 @@ def still(
     ui.success(f"[bold]{_shown(target)}[/]  [dim]{scene or 'timeline'} at {at:g} s[/]")
     if open_:
         _open(target)
+
+
+def _override(settings: Settings, path: tuple[str, ...], value: Any) -> None:
+    """Set a setting from a command line option (if given), checked like manimx.json."""
+    if value is not None:
+        try:
+            set_value(settings, path, value)
+        except SettingsError as error:
+            raise ProjectError(str(error).replace(f'"{".".join(path)}"', f"--{path[-1].replace('_', '-')}")) from None
 
 
 def _open(path: Path) -> None:

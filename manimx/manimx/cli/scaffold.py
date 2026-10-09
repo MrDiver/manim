@@ -15,7 +15,8 @@ from pathlib import Path
 
 import manimx
 
-from ..project import PROJECT_FILE, SCHEMA_FILE, OutputSettings, Project, ProjectError
+from ..project import PROJECT_FILE, SCHEMA_FILE, Project, ProjectError
+from ..settings import OutputSettings, Settings
 from . import templates
 
 
@@ -90,7 +91,7 @@ def create_project(
     write(".gitignore", templates.GITIGNORE)
     write("scenes/__init__.py", templates.SCENES_INIT)
     write("assets/.gitkeep", "")
-    project = Project(directory.resolve(), name, output=output or OutputSettings())
+    project = Project(directory.resolve(), name, settings=Settings(output=output or OutputSettings()))
     project.save()
     changes[:0] = [Change("create", directory / PROJECT_FILE), Change("create", directory / SCHEMA_FILE, "lets editors check manimx.json")]
     if example:
