@@ -312,6 +312,24 @@ change between them) returns it without interpolating.
 (alternating runs: 246.9 / 257.1 fps before, 257.2 / 255.7 after), and
 its frames are bit-identical.
 
+### I. Mesh batch: cached material entries, matrices in one go
+
+`MeshBatch.build()` converted every material's colors (`ManimColor.parse`
+and sRGB to linear) and inverted every normal matrix one mesh at a time,
+in every render. Snapshots build a new `PbrMaterial` each time, so
+nothing was reused. The material entry is now cached per shape and
+material version (equal versions mean equal values), and the model and
+normal matrices of all meshes are built with one batched inverse.
+
+| light-show, no motion blur | ms/render | mesh batch |
+|---|---|---|
+| show (2–30 s), before | 13 | 4.8 ms |
+| show (2–30 s), after | 12 | 2.0 ms |
+| fireworks (38–44 s), before | 31 | 10.9 ms |
+| fireworks (38–44 s), after | 28 | 7.1 ms |
+
+`example-project` frames are bit-identical.
+
 ## Where the time goes now
 
 5.89 ms per frame against 13.43 at the start (2.3× faster): `render_layers`

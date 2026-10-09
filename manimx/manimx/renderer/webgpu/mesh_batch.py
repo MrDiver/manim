@@ -123,7 +123,8 @@ class MeshBatch:
 
     @staticmethod
     def build(scene: FlatScene, cache: RNodeDataCache, config: RenderConfig) -> MeshBatch:
-        objects, vertices, indices, materials, shadow_draws = [], [], [], [], []
+        worlds, object_materials, clips = [], [], []
+        vertices, indices, materials, shadow_draws = [], [], [], []
         material_slots: dict[int, int] = {}
         groups: dict[tuple[int, ...], DrawGroup] = {}
         vertex_count = index_count = 0
@@ -137,33 +138,42 @@ class MeshBatch:
                 shape.uid, "mesh-vertices", shape.version("mesh"), lambda: _interleave(shape.mesh)
             )
             material = shape.material
-            if id(material) not in material_slots:
-                material_slots[id(material)] = len(materials)
-                materials.append(_material_entry(material))
+            # Snapshots build a new PbrMaterial every time; equal versions
+            # mean equal values, so the entry (with its color conversions)
+            # is cached per shape and version.
+            slot_key = id(material)
+            if slot_key not in material_slots:
+                material_slots[slot_key] = len(materials)
+                materials.append(cache.get_or_create(shape.uid, "material-entry", shape.version("material"), lambda: _material_entry(material)))
 
-            entry = np.zeros((), MESH_OBJECT_DTYPE)
-            entry["model"] = item.world.T  # WGSL matrices are column-major
-            normal_matrix = np.eye(4)
-            normal_matrix[:3, :3] = np.linalg.inv(item.world[:3, :3]).T
-            entry["normal_matrix"] = normal_matrix.T
-            entry["material"] = material_slots[id(material)]
-            entry["clip"] = item.clip
+            worlds.append(item.world)
+            object_materials.append(material_slots[slot_key])
+            clips.append(item.clip)
 
             key = tuple(t.uid if t else 0 for t in material.textures)
             group = groups.setdefault(key, DrawGroup(material.textures))
-            draw = (len(shape.mesh.indices), 1, index_count, vertex_count, len(objects))
+            draw = (len(shape.mesh.indices), 1, index_count, vertex_count, len(worlds) - 1)
             group.draws.append(draw)
             if shape.cast_shadows:
                 shadow_draws.append((draw, item.clip))
 
-            objects.append(entry)
             vertices.append(mesh_vertices)
             indices.append(shape.mesh.indices)
             vertex_count += len(mesh_vertices)
             index_count += len(shape.mesh.indices)
 
+        objects = np.zeros(len(worlds), MESH_OBJECT_DTYPE)
+        if worlds:
+            world = np.array(worlds)
+            normal = np.zeros_like(world)
+            normal[:, :3, :3] = np.linalg.inv(world[:, :3, :3]).transpose(0, 2, 1)
+            normal[:, 3, 3] = 1.0
+            objects["model"] = world.transpose(0, 2, 1)  # WGSL matrices are column-major
+            objects["normal_matrix"] = normal.transpose(0, 2, 1)
+            objects["material"] = object_materials
+            objects["clip"] = clips
         return MeshBatch(
-            objects=np.array(objects, dtype=MESH_OBJECT_DTYPE) if objects else np.zeros(0, MESH_OBJECT_DTYPE),
+            objects=objects,
             vertices=np.concatenate(vertices) if vertices else np.zeros(0, MESH_VERTEX_DTYPE),
             indices=np.concatenate(indices) if indices else np.zeros(0, np.uint32),
             materials=np.array(materials, dtype=MATERIAL_DTYPE) if materials else np.zeros(0, MATERIAL_DTYPE),
