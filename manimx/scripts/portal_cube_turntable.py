@@ -15,7 +15,7 @@ import subprocess
 import time
 
 from manimx.examples.portal_cube import BACKGROUND, orbit_camera, portal_cube
-from manimx import Transform
+from manimx.robjects.transform import quaternion_from_axis_angle
 from manimx.renderer import FrameComposer, MotionBlur, RenderConfig, WGPURenderer
 
 
@@ -30,15 +30,15 @@ def main() -> None:
     args = parser.parse_args()
 
     renderer = WGPURenderer()
-    scene = portal_cube()
+    cube = portal_cube()
     composer = FrameComposer(renderer, [MotionBlur(samples=args.blur_samples, shutter=0.5 / args.fps)])
     base = RenderConfig(pixel_width=args.width, pixel_height=args.height, background_color=BACKGROUND)
 
     # Motion blur samples the scene over time, so instead of orbiting the
     # camera we turn the whole scene (lights included) the other way.
     def scene_at(t: float):
-        scene.transform = Transform().rotated(-t / args.seconds * math.tau, (0, 0, 1))
-        return scene
+        cube.rotation.set(quaternion_from_axis_angle((0, 0, 1), -t / args.seconds * math.tau))
+        return cube.snapshot()
 
     frames = round(args.seconds * args.fps)
     ffmpeg = subprocess.Popen(

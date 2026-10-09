@@ -30,9 +30,11 @@ from pathlib import Path
 import numpy as np
 
 from ..animation.geometry import arc_points, rectangle_points, regular_polygon_points
-from ..robjects import Fill, RGroup, RShape2D, Stroke, Transform
+from ..animation import Group, Shape2D
+from ..robjects import Transform
 from ..renderer.config import RenderConfig
 from ..renderer.scene_graph import bounding_box
+from ._nodes import placed
 
 BACKGROUND = "#ece6e2"
 LOGO_GREEN = "#87c2a5"
@@ -45,27 +47,25 @@ M_GLYPH_POINTS = Path(__file__).with_name("manim_logo_m.npy")
 
 def _colored(color: str) -> dict:
     """Manim's ``color=..., fill_opacity=1``: same color for fill and stroke."""
-    return {"fill": Fill(color, opacity=1.0), "stroke": Stroke(color)}
+    return {"color": color, "fill_opacity": 1.0}
 
 
-def manim_logo() -> RGroup:
-    ds_m = RShape2D(
-        points=np.load(M_GLYPH_POINTS),
-        fill=Fill(LOGO_BLACK, opacity=1.0),
-        stroke=Stroke(LOGO_BLACK, width=0.0),  # MathTex has no stroke
-        transform=Transform(position=(-2.25, 1.5, 0.0), scale=(7.0, 7.0, 1.0)),
+def manim_logo() -> Group:
+    ds_m = placed(
+        Shape2D(np.load(M_GLYPH_POINTS), "m", color=LOGO_BLACK, fill_opacity=1.0, stroke_width=0.0),  # MathTex has no stroke
+        Transform(position=(-2.25, 1.5, 0.0), scale=(7.0, 7.0, 1.0)),
     )
     shapes = [
-        RShape2D(points=regular_polygon_points(3, 1.0), transform=Transform(position=(1.0, 0.0, 0.0)), **_colored(LOGO_RED)),
-        RShape2D(points=rectangle_points(2.0, 2.0), transform=Transform(position=(0.0, 1.0, 0.0)), **_colored(LOGO_BLUE)),
-        RShape2D(points=arc_points(), transform=Transform(position=(-1.0, 0.0, 0.0)), **_colored(LOGO_GREEN)),
+        placed(Shape2D(regular_polygon_points(3, 1.0), "triangle", **_colored(LOGO_RED)), Transform(position=(1.0, 0.0, 0.0))),
+        placed(Shape2D(rectangle_points(2.0, 2.0), "square", **_colored(LOGO_BLUE)), Transform(position=(0.0, 1.0, 0.0))),
+        placed(Shape2D(arc_points(), "circle", **_colored(LOGO_GREEN)), Transform(position=(-1.0, 0.0, 0.0))),
         ds_m,
     ]  # order matters: later shapes are drawn on top
 
-    logo = RGroup(children=shapes)
+    logo = Group(*shapes, name="logo")
     # move_to(ORIGIN): shift the group so its bounding box is centered.
-    low, high = bounding_box(logo)
-    logo.transform = logo.transform.translated(-(low + high) / 2)
+    low, high = bounding_box(logo.snapshot())
+    logo.shift(-(low + high) / 2)
     return logo
 
 

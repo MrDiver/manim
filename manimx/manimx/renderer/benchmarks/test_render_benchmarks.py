@@ -93,7 +93,7 @@ def lit_scene(spheres: int, shadows: bool = True) -> RGroup:
 
 
 def test_manim_logo_1080p(measure, renderer) -> None:
-    scene, config = manim_logo(), logo_config()
+    scene, config = manim_logo().snapshot(), logo_config()
     measure(lambda: renderer.render(scene, config))
 
 

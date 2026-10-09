@@ -20,7 +20,7 @@ from .manim_logo import BACKGROUND, LOGO_BLACK, LOGO_BLUE, LOGO_GREEN, LOGO_RED,
 
 # The static logo is centered by shifting its group (Manim's
 # move_to(ORIGIN)); the animated shapes end up in the same place.
-_CENTER = -np.array(manim_logo().transform.position)
+_CENTER = -np.array(manim_logo().position.value)
 
 
 class AnimatedLogo(Scene):

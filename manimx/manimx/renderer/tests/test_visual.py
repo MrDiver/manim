@@ -58,7 +58,7 @@ def check(image: np.ndarray, name: str, update: bool, tolerance: ImageTolerance 
 
 
 def test_manim_logo(renderer: WGPURenderer, update_references: bool) -> None:
-    image = renderer.render(manim_logo(), logo_config(480, 270))
+    image = renderer.render(manim_logo().snapshot(), logo_config(480, 270))
 
     # Looser outlier bound while the reference still comes from Manim, whose
     # edge antialiasing differs slightly from 4x MSAA.
@@ -150,7 +150,7 @@ def test_clipping(renderer: WGPURenderer, update_references: bool) -> None:
 def test_blender_scene(renderer: WGPURenderer, update_references: bool, view: str) -> None:
     from manimx.examples.blender_scene import blender_scene, views
 
-    image = renderer.render(blender_scene(), views(480, 270)[view])
+    image = renderer.render(blender_scene().snapshot(), views(480, 270)[view])
 
     check(image, f"blender_scene_{view}", update_references)
 
@@ -188,7 +188,7 @@ def test_meshes_and_lights(renderer: WGPURenderer, update_references: bool) -> N
         RDirectionalLight.aimed((-1, 1, -2), intensity=2.5),
         RPointLight(color=GREEN, intensity=15, transform=Transform(position=(-3, -2, 2))),
     ]
-    scene = RGroup(children=[_ground(), *shapes])
+    scene = RGroup(children=[_ground().snapshot(), *shapes])
 
     image = renderer.render(scene, config(background_color="#3d3d3d", camera=_perspective((9, -12, 7), (0, -1, 1))))
 
@@ -212,7 +212,7 @@ def test_curves_3d(renderer: WGPURenderer, update_references: bool) -> None:
         ),
         RCurve3D.from_corners([(0, 0, 0), (1, 0, 2), (2, 0, 0), (3, 1, 2), (4, 2, 0)], stroke=Stroke(YELLOW, width=25, joint=JointType.ROUND, cap=CapStyle.ROUND), transform=Transform(position=(-8, 3, 0))),
     ]
-    scene = RGroup(children=[_ground(), *curves])
+    scene = RGroup(children=[_ground().snapshot(), *curves])
 
     image = renderer.render(scene, config(background_color="#3d3d3d", camera=_perspective((14, -14, 10), (0, 0, 2))))
 
@@ -262,8 +262,9 @@ def test_shadows(renderer: WGPURenderer, update_references: bool) -> None:
         sphere_mesh,
     )
 
-    logo = manim_logo()
-    logo.transform = Transform(position=(0, 0.5, 1.8), scale=(0.6, 0.6, 0.6)).rotated(math.pi / 2, (1, 0, 0))
+    from manimx.examples._nodes import placed
+
+    logo = placed(manim_logo(), Transform(position=(0, 0.5, 1.8), scale=(0.6, 0.6, 0.6)).rotated(math.pi / 2, (1, 0, 0))).snapshot()
     scene = RGroup(
         children=[
             RShape3D(mesh=box_mesh(16, 16, 0.2), material=PbrMaterial("#d0d0d0", roughness=0.9), transform=Transform(position=(0, 0, -0.1))),
@@ -286,7 +287,7 @@ def test_shadows(renderer: WGPURenderer, update_references: bool) -> None:
 def test_portal_cube(renderer: WGPURenderer, update_references: bool, view: str) -> None:
     from manimx.examples.portal_cube import portal_cube, views
 
-    image = renderer.render(portal_cube(), views(480, 270)[view])
+    image = renderer.render(portal_cube().snapshot(), views(480, 270)[view])
 
     check(image, f"portal_cube_{view}", update_references)
 

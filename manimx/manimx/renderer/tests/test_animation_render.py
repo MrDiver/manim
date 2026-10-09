@@ -26,7 +26,7 @@ def test_the_animation_ends_exactly_as_the_static_logo(renderer: WGPURenderer) -
     prepared = AnimatedLogo().prepare()
 
     animated = renderer.render(prepared.state_at(prepared.duration), config(480, 270))
-    static = renderer.render(manim_logo(), config(480, 270))
+    static = renderer.render(manim_logo().snapshot(), config(480, 270))
 
     np.testing.assert_array_equal(animated, static)
 

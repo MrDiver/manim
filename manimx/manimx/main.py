@@ -8,7 +8,7 @@ from .renderer import WGPURenderer
 
 def main() -> None:
     """Render Manim's logo scene with the WebGPU renderer and show it."""
-    image = WGPURenderer().render(manim_logo(), config())
+    image = WGPURenderer().render(manim_logo().snapshot(), config())
     Image.fromarray(image).show()
 
 

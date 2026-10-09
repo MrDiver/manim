@@ -23,12 +23,15 @@ import dataclasses
 import numpy as np
 import pytest
 
-from manimx import RClippingGroup, Fill, RGroup, RLight, RShape2D, RShape3D, Stroke, Transform
+from manimx import RGroup, RLight
+from manimx.animation import ClippingGroup, Group, Light, Shape3D
+from manimx.examples._nodes import placed
 from manimx.examples.portal_cube import portal_cube, views
 from manimx.renderer import WGPURenderer
 from manimx.renderer.scene_graph import flatten_scene
+from manimx.robjects import Transform
 
-SIDES = ["front", "right", "back", "left"]  # portal_cube() builds its portals in this order
+SIDES = ["front", "right", "back", "left"]
 WIDTH, HEIGHT = 320, 180
 
 
@@ -40,24 +43,13 @@ def renderer() -> WGPURenderer:
         pytest.skip(f"no usable GPU: {error}")
 
 
-def _world(cube: RGroup, side: str) -> RGroup:
-    """The world shown through ``side``'s portal."""
-    portals = [child for child in cube.children if isinstance(child, RClippingGroup)]
-    return portals[SIDES.index(side)].content
-
-
-def _base(cube: RGroup) -> RShape2D:
-    """The frame's base plane (the frame comes last, the base last in it)."""
-    return cube.children[-1].children[-1]
-
-
 def _send_away(node) -> None:
     """Move ``node`` far out of the cube (and out of view)."""
-    node.transform = Transform(position=(0.0, 0.0, -1000.0))
+    placed(node, Transform(position=(0.0, 0.0, -1000.0)))
 
 
-def _render(renderer: WGPURenderer, scene: RGroup, view: str) -> np.ndarray:
-    return renderer.render(scene, views(WIDTH, HEIGHT)[view]).astype(int)
+def _render(renderer: WGPURenderer, cube: Group, view: str) -> np.ndarray:
+    return renderer.render(cube.snapshot(), views(WIDTH, HEIGHT)[view]).astype(int)
 
 
 def _changed(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -70,21 +62,21 @@ def _changed(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 def test_cube_has_four_one_sided_portals_with_their_own_lights() -> None:
     cube = portal_cube()
-    portals = [child for child in cube.children if isinstance(child, RClippingGroup)]
+    portals = [cube.find(f"{side}-portal") for side in SIDES]
 
-    assert len(portals) == len(SIDES) and all(isinstance(p.content, RGroup) for p in portals)
-    assert all(p.one_sided for p in portals)
-    scene = flatten_scene(cube)
+    assert all(isinstance(p, ClippingGroup) and p.content is cube.find(f"{side}-world") for p, side in zip(portals, SIDES))
+    assert all(p.one_sided.value for p in portals)
+    scene = flatten_scene(cube.snapshot())
     assert sorted({light.clip for light in scene.lights}) == [0, 1, 2, 3]  # every world lit, only by its own lights
     assert all(isinstance(item.light, RLight) for item in scene.lights)
+    assert len(scene.lights) == len(cube.find_all(tags="light"))
 
 
 def test_rooms_do_not_cast_shadows() -> None:
     cube = portal_cube()
-    rooms = [_world(cube, side).children[0] for side in SIDES]  # every world starts with its room
-
-    for room in rooms:
-        assert room.children and all(isinstance(wall, RShape3D) and not wall.cast_shadows for wall in room.children)
+    for side in SIDES:
+        room = cube.find(f"{side}-room")
+        assert room.children and all(isinstance(wall, Shape3D) and not wall.cast_shadows.value for wall in room.children)
 
 
 # --- rendering ------------------------------------------------------------------
@@ -97,11 +89,11 @@ def test_each_face_shows_only_its_own_world(renderer: WGPURenderer, side: str) -
     others_hidden = portal_cube()
     for other in SIDES:
         if other != side:
-            _send_away(_world(others_hidden, other))
+            _send_away(others_hidden.find(f"{other}-world"))
     assert not _changed(full, _render(renderer, others_hidden, side)).any()
 
     own_hidden = portal_cube()
-    _send_away(_world(own_hidden, side))
+    _send_away(own_hidden.find(f"{side}-world"))
     assert _changed(full, _render(renderer, own_hidden, side)).mean() > 0.05  # the face empties
 
 
@@ -110,7 +102,7 @@ def test_two_worlds_meet_at_a_corner_without_overlap(renderer: WGPURenderer) -> 
     regions = {}
     for side in ("front", "right"):
         hidden = portal_cube()
-        _send_away(_world(hidden, side))
+        _send_away(hidden.find(f"{side}-world"))
         regions[side] = _changed(full, _render(renderer, hidden, "front-right"))
     front, right = regions["front"], regions["right"]
 
@@ -127,13 +119,14 @@ def test_two_worlds_meet_at_a_corner_without_overlap(renderer: WGPURenderer) -> 
 def test_lights_stay_in_their_world(renderer: WGPURenderer, own_side: str) -> None:
     full = _render(renderer, portal_cube(), "front-right")
     dark = portal_cube()
-    for light in [node for node in _world(dark, own_side).children if isinstance(node, RLight)]:
-        light.intensity = 0.0
+    for light in dark.find(f"{own_side}-world").find_all(tags="light"):
+        assert isinstance(light, Light)
+        light.intensity.set(0.0)
     changed = _changed(full, _render(renderer, dark, "front-right"))
 
     other_side = "right" if own_side == "front" else "front"
     hidden = portal_cube()
-    _send_away(_world(hidden, other_side))
+    _send_away(hidden.find(f"{other_side}-world"))
     other_world_pixels = _changed(full, _render(renderer, hidden, "front-right"))
     assert changed.mean() > 0.01  # the world got darker
     assert not (changed & other_world_pixels).any()  # the neighbour did not
@@ -146,18 +139,18 @@ def test_base_never_shows_through_the_floors(renderer: WGPURenderer, view: str) 
     through a floor."""
     config = views(WIDTH, HEIGHT)[view]
 
-    def scene(base_fill: float) -> RGroup:
+    def scene(base_fill: float) -> Group:
         cube = portal_cube()
-        base = _base(cube)
-        base.stroke = Stroke(width=0)  # compare the fill alone
-        base.fill = Fill("#2a2a35", opacity=base_fill)
+        base = cube.find("base")
+        base.stroke_width.set(0.0)  # compare the fill alone
+        base.fill_opacity.set(base_fill)
         return cube
 
     changed = _changed(_render(renderer, scene(1.0), view), _render(renderer, scene(0.0), view))
 
     # Where the base may legitimately show: a band along its outline.
-    outline = _base(portal_cube())
-    outline.fill = Fill(opacity=0.0)
-    outline.stroke = Stroke("#FFFFFF", width=40)
-    band = renderer.render(RGroup(children=[outline]), dataclasses.replace(config, background_color="#000000"))[..., 0] > 0
+    outline = portal_cube().find("base")
+    outline.fill_opacity.set(0.0)
+    outline.set_stroke(color="#FFFFFF", width=40)
+    band = renderer.render(RGroup(children=[outline.snapshot()]), dataclasses.replace(config, background_color="#000000"))[..., 0] > 0
     assert not (changed & ~band).any()
