@@ -1,25 +1,29 @@
 # manimx architecture
 
-How manimx works as a whole: which objects exist, who creates and owns them,
-how long they live, how data flows from scene code to pixels and sound, and
-why it is built this way. The renderer's internals (passes, shaders, buffers)
-are in [manimx/renderer/README.md](manimx/renderer/README.md); the animation
-engine's design rationale is in `docs/animation_engine_design.md` (repository
-root); performance work in [PERFORMANCE.md](PERFORMANCE.md); usage in
+How manimx works as a whole: which classes exist, who creates and owns their
+instances, how long they live, how data flows from `Scene.construct()` to
+pixels and sound, and why it is built this way. Everything is named as in
+the Python code. Where two classes share a name, the module comes first
+(`animation.Group` is a `Mobject`, `objects.Group` a `RenderObject`).
+
+More detail: the renderer's internals (passes, shaders, buffers) in
+[manimx/renderer/README.md](manimx/renderer/README.md), the animation
+engine's design rationale in `docs/animation_engine_design.md` (repository
+root), performance work in [PERFORMANCE.md](PERFORMANCE.md), usage in
 [GETTING_STARTED.md](GETTING_STARTED.md).
 
 Contents:
 
 1. [The big picture](#1-the-big-picture)
 2. [Packages](#2-packages)
-3. [From scene code to a video](#3-from-scene-code-to-a-video)
-4. [The animation engine](#4-the-animation-engine)
-5. [Timing: clips, segments, events and time maps](#5-timing-clips-segments-events-and-time-maps)
-6. [Worlds, cameras, views](#6-worlds-cameras-views)
-7. [Render objects: the contract between engine and renderer](#7-render-objects-the-contract-between-engine-and-renderer)
-8. [The renderer service](#8-the-renderer-service)
-9. [Drivers: frames, processes, sinks, audio](#9-drivers-frames-processes-sinks-audio)
-10. [Projects and the CLI](#10-projects-and-the-cli)
+3. [From `Scene.construct()` to a video](#3-from-sceneconstruct-to-a-video)
+4. [The animation package](#4-the-animation-package)
+5. [Timing: `Timeline`, `Clip`, `Segment`, `MonotoneMap`](#5-timing-timeline-clip-segment-monotonemap)
+6. [`World2D`, `World3D`, `animation.Camera`, `View`](#6-world2d-world3d-animationcamera-view)
+7. [`RenderObject`: the contract between both sides](#7-renderobject-the-contract-between-both-sides)
+8. [`WGPURenderer` as a service](#8-wgpurenderer-as-a-service)
+9. [Drivers: `FramePipeline`, processes, `FrameSink`, audio](#9-drivers-framepipeline-processes-framesink-audio)
+10. [`Project` and the CLI](#10-project-and-the-cli)
 11. [Lifetimes at a glance](#11-lifetimes-at-a-glance)
 12. [Design decisions](#12-design-decisions)
 13. [State of the work and next steps](#13-state-of-the-work-and-next-steps)
@@ -30,111 +34,117 @@ Contents:
 
 manimx has two passes:
 
-1. **Compile once.** Scene code (`construct()`) runs once and records what
-   happens when: animations become placements on per-signal tracks,
-   simulations are baked into keyframes, sounds and events are noted per
-   segment. The result is a `PreparedScene`.
-2. **Evaluate anywhere.** `state_at(t)` gives the render state at any time,
-   in any order, in any process, without replaying anything. A renderer turns
-   that state into pixels.
+1. **Compile once.** `Scene.prepare()` runs `Scene.construct()` once and
+   records what happens when:
+   - every `Animation` gets a `Placement` and one `Entry` on the
+     `SignalTrack` of each `RootSignal` it changes;
+   - every `Simulation` is baked into recorded values;
+   - every `Emit`, `Cue` and `SoundEvent` is stored in its `Segment`.
+
+   The result is a `PreparedScene`.
+2. **Evaluate anywhere.** `PreparedScene.state_at(t)` and
+   `Timeline.state_at(t)` return a tree of `RenderObject`s for any time, in
+   any order and in any process, without replaying anything.
+   `WGPURenderer` turns such a tree into pixels.
 
 Everything else follows from this split: random access makes scrubbing,
-retiming, cutting and parallel rendering possible. The renderer is a
-long-lived service that keeps GPU data per object across all calls and only
-patches what changed.
+retiming, cutting and parallel rendering possible. `WGPURenderer` is a
+long-lived service that keeps GPU data per `RenderObject.uid` across all
+calls and only patches what changed.
 
 ```mermaid
 flowchart LR
-    Code["scene code<br/>construct()"] -->|"prepare() — once"| PS["PreparedScene<br/>tracks, segments"]
-    PS --> TL["Timeline<br/>clips, worlds, events"]
+    Code["Scene.construct()"] -->|"Scene.prepare() — once"| PS["PreparedScene<br/>SignalTrack, Segment"]
+    PS --> TL["Timeline<br/>Clip, World2D/World3D, events"]
     Proj["manimx.json"] -->|"Project.build_timeline()"| TL
-    TL -->|"state_at(t) — any t, any order"| RO["render objects<br/>(immutable snapshot)"]
-    RO --> R["WGPURenderer<br/>(process-wide service)"]
-    R --> C["FrameComposer<br/>motion blur, effects"]
-    C --> D["drivers<br/>pipeline, workers"]
-    D --> Out["video / PNG + audio"]
-    TL -->|"audio(start, end)"| D
+    TL -->|"Timeline.state_at(t) — any t, any order"| RO["RenderObject tree<br/>(objects.Group, Shape2D, Shape3D, ...)"]
+    RO --> R["WGPURenderer.shared()"]
+    R --> C["FrameComposer<br/>MotionBlur, Bloom, ToneMap"]
+    C --> D["drivers.render()<br/>FramePipeline, worker processes"]
+    D --> Out["VideoFile / ImageSequence"]
+    TL -->|"Timeline.audio(start, end)"| D
 ```
 
 ## 2. Packages
 
-| Package | Role | Depends on |
+| Package | Contents | Depends on |
 |---|---|---|
-| `manimx.objects` | render objects: `Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D`, lights, materials, `Transform`; uid and versions | numpy |
-| `manimx.animation` | signals, mobjects, animations, scenes, timing, worlds, cameras, simulations, audio | objects; `renderer.config` only for the plain `Camera`/`ViewState` types |
-| `manimx.renderer` | backend-independent: scene graph flattening, tessellation, `MobjectDataCache`, config, effects | objects |
-| `manimx.renderer.webgpu` | the WebGPU backend: `WGPURenderer`, `FrameComposer`, batches, passes, retained vector scene | wgpu |
-| `manimx.drivers` | turn time into frames: `FramePipeline`, `render()`, worker processes, sinks | renderer, animation (for sources) |
-| `manimx.project` | `manimx.json` ↔ `Project` objects ↔ `Timeline` | animation, drivers (settings) |
-| `manimx.cli` | the `manimx` command (Typer, rich, questionary) | project, drivers |
+| `manimx.objects` | `RenderObject` and its subclasses `objects.Group`, `objects.ClippingGroup`, `BezierPath` (→ `Shape2D`, `Curve3D`), `Shape3D`, `Light` (→ `DirectionalLight`, `PointLight`, `SpotLight`); `Transform`, `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`; `new_uid()`, `versioned()` | numpy |
+| `manimx.animation` | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Mobject` and its subclasses; `Animation` and its subclasses; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound` | objects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
+| `manimx.renderer` | `flatten_scene()` → `FlatScene`; `tessellate_fill()`; `MobjectDataCache`; `RenderConfig`, `renderer.Camera`, `ViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `RemoveObjects`, `ClearScene` | objects |
+| `manimx.renderer.webgpu` | `WGPURenderer`, `FrameComposer`, `RetainedVectors`, `VectorBatch`, `MeshBatch`, `VectorPass`, `MeshPass`, `LightingPass`, `ShadowPass`, `RenderTargets`, `RenderLayers`, `ResourceCache`, `GPUContext` | wgpu |
+| `manimx.drivers` | `render()`, `FramePipeline`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation |
+| `manimx.project` | `Project`, `OutputSettings`, `CameraSettings`, `PerformanceSettings`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers |
+| `manimx.cli` | the Typer `app` (`manimx` command), `scaffold`, `ui` | project, drivers |
 
-The animation package never touches the GPU, and the renderer never knows
-about signals or time: render objects are the only interface between them.
+`manimx.animation` never touches the GPU, and `manimx.renderer` never sees a
+`RootSignal` or a time: `RenderObject` trees are the only interface between
+them.
 
-## 3. From scene code to a video
+## 3. From `Scene.construct()` to a video
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant CLI as manimx render
+    participant CLI as cli.app.render
     participant P as Project
     participant S as Scene
     participant TL as Timeline
     participant D as drivers.render
     participant FP as FramePipeline
     participant FC as FrameComposer
-    participant R as WGPURenderer (shared)
-    participant W as writer thread
-    participant FF as ffmpeg
+    participant R as WGPURenderer.shared()
+    participant W as _Writer thread
+    participant FF as ffmpeg (VideoFile)
 
-    CLI->>P: Project.find() (reads manimx.json)
+    CLI->>P: Project.find() reads manimx.json
     P->>S: import scenes.intro, Intro().prepare()
-    S-->>P: PreparedScene (construct ran once)
-    P->>TL: add clips (start after the previous one), cuts, events
-    CLI->>D: render(timeline, VideoFile, settings)
-    D->>TL: audio(first frame, last frame)
-    D->>FF: start, with the audio mix as a temporary WAV
-    loop every frame time t
-        D->>FP: submit(index, t, timeline.state_at)
-        FP->>FC: compose_texture(state_at, config at t)
-        loop every motion-blur sample s
-            FC->>TL: state_at(s): evaluate signals, snapshot mobjects
-            FC->>R: render_layers(tree, config, encoder): patch slots, encode passes
-            FC->>FC: composite lit + vector into the HDR accumulator
+    S-->>P: PreparedScene
+    P->>TL: Timeline.add() per ClipEntry, Clip.cut(), events
+    CLI->>D: render(timeline, VideoFile, RenderSettings)
+    D->>TL: Timeline.audio(first frame, last frame)
+    D->>FF: VideoFile.open(FrameFormat with the audio)
+    loop every time t of RenderSettings.frame_times()
+        D->>FP: FramePipeline.submit(index, t, timeline.state_at)
+        FP->>FC: FrameComposer.compose_texture(state_at, RenderConfig at t)
+        loop every time s of MotionBlur.sample_times(t)
+            FC->>TL: Timeline.state_at(s) returns a RenderObject tree
+            FC->>R: render_layers(tree, RenderConfig, encoder) returns RenderLayers
+            FC->>FC: composite RenderLayers into the HDR accumulator
         end
         FC-->>FP: output texture
-        FP->>FP: copy to a staging buffer, map asynchronously
-        Note over FP: up to 3 frames in flight,<br/>the oldest is read back when slots run out
-        FP-->>D: Future resolves with (H, W, 4) uint8
-        D->>W: queue (index, image)
-        W->>FF: write in index order (stdin pipe)
+        FP->>FP: copy into a staging buffer, map_async
+        Note over FP: up to RenderSettings.in_flight frames in flight
+        FP-->>D: Future with the (H, W, 4) uint8 image
+        D->>W: put(index, image)
+        W->>FF: VideoFile.write in index order
     end
 ```
 
-## 4. The animation engine
+## 4. The animation package
 
 ### 4.1 Signals
 
-Every animatable property is a **signal**:
+Every animatable property of a `Mobject` is a signal:
 
-- **`RootSignal`**: holds a value set from outside, by authoring code,
-  track evaluation or a simulation step.
-- **`DerivedSignal`**: a pure function of other signals; this replaces
-  Manim's updaters (`derive`, `follow`).
-- **Kinds** say how values interpolate and combine: `SCALAR`, `FACTOR`
-  (multiplicative), `ROTATION` (slerp), `COLOR`, `PATH` (point arrays),
+- **`RootSignal`**: holds a value set from outside, by `authoring.change()`,
+  by `SignalTrack.value_at()` during evaluation, or by a `Simulation` step.
+- **`DerivedSignal`**: a pure function of other signals, created with
+  `derive()` (and `Mobject.follow()`). It replaces Manim's updaters.
+- **`SignalKind`** instances say how values interpolate and combine:
+  `SCALAR`, `FACTOR`, `ROTATION` (slerp), `COLOR`, `PATH` (point arrays),
   `DISCRETE`.
-- **`Vector3Signal`**: three scalar roots, one per axis, so animations of
+- **`Vector3Signal`**: three `RootSignal`s `x`, `y`, `z`, so animations of
   different axes never interfere.
-- **`TimeSignals`**: `scene_time` (stands still during holds) and
+- **`TimeSignals`**: `scene_time` (stands still while a `Segment` waits) and
   `global_time` (always runs).
 
-Propagation is push-invalidation with pull-evaluation: setting a root marks
-its dependents dirty, and they recompute when read. Every signal has a
-process-unique `id` and a `version` that increases exactly when its value
-changes. Versions are the basis of all caching downstream.
+Setting a `RootSignal` invalidates its dependents; a `DerivedSignal`
+recomputes when it is read. Every signal has a process-unique `id` and a
+`version` that increases exactly when its value changes. Versions drive all
+caching downstream.
 
-### 4.2 Mobjects, animations, tracks
+### 4.2 `Mobject`, `Animation`, `SignalTrack`
 
 ```mermaid
 classDiagram
@@ -151,7 +161,7 @@ classDiagram
         snapshot() RenderObject
     }
     class VMobject {
-        points: RootSignal PATH
+        points: RootSignal
         fill_color, fill_opacity
         stroke_color, stroke_width, stroke_opacity
     }
@@ -159,6 +169,7 @@ classDiagram
         frame_height
         field_of_view
         perspective
+        render_camera()
     }
     Mobject <|-- VMobject
     Mobject <|-- Group
@@ -188,7 +199,7 @@ classDiagram
     }
     class Entry {
         placement
-        mode
+        mode: Change
         start_value
     }
     class SignalTrack {
@@ -199,79 +210,89 @@ classDiagram
     }
 
     Animation "1" <-- "1" Placement : references
-    Placement "1" <-- "*" Entry : one per touched signal
+    Placement "1" <-- "*" Entry : one per RootSignal
     SignalTrack "1" o-- "*" Entry
-    SignalTrack --> RootSignal : drives
+    SignalTrack --> RootSignal : sets during evaluation
     Animation --> Mobject : references (no copies)
 ```
 
-- **Animations reference their mobjects** and never copy them. An
-  animation declares which signals it touches (`targets()`) and what it
-  contributes at a given progress (`contribution()`, a pure function).
-- **Placements:** `play()` creates one `Placement` per animation, with its
-  start, duration, authoring order and rate function.
-- **Tracks:** each touched root signal gets a `SignalTrack`, which holds one
-  `Entry` per placement. `value_at(t)` folds the entries in authoring order:
-  relative changes add up, absolute ones override, starting from the value
-  the signal had when the animation began.
-- **Direct edits during `construct()`** become instant `SetValue`
-  placements, so `square.shift(RIGHT)` between two plays does not rewrite
-  the square's past (authoring.py).
+`Group`, `ClippingGroup` and `Camera` in this diagram are the
+`manimx.animation` classes.
 
-### 4.3 Compilation and evaluation
+- **An `Animation` references its `Mobject`s** and never copies them.
+  `Animation.targets()` names the `RootSignal`s it changes, each with a
+  `Change` (`RELATIVE` or `ABSOLUTE`). `Animation.contribution()` is a pure
+  function of the progress.
+- **`Scene.play()`** creates one `Placement` per `Animation`, with its start,
+  duration, authoring order and rate function.
+- **Every `RootSignal` an `Animation` changes** gets a `SignalTrack` with
+  one `Entry` per `Placement`. `SignalTrack.value_at(t)` folds the entries in
+  authoring order: `RELATIVE` contributions combine, `ABSOLUTE` ones
+  override, starting from `Entry.start_value`.
+- **A direct call such as `square.shift(RIGHT)` inside `construct()`**
+  becomes a `SetValue` placement at the current cursor
+  (`authoring.change()`), so it does not rewrite the square's past.
+
+### 4.3 `Scene.prepare()` and `PreparedScene.state_at()`
 
 ```mermaid
 flowchart TD
-    subgraph Compile["prepare() — once"]
-        A["Scene.construct()"] -->|"add, play, wait"| SC["SceneCompiler<br/>(active through a ContextVar)"]
-        SC --> T["tracks per root signal"]
-        SC --> SG["segments: offset, duration,<br/>waits_for, emits, cues, sounds"]
-        SC -->|"play(Simulation)"| BK["bake: run step(dt),<br/>record keyframes"]
+    subgraph Compile["Scene.prepare() — once"]
+        A["Scene.construct()"] -->|"add, play, wait, wait_for, emit, cue, play_sound"| SC["SceneCompiler<br/>(active through a ContextVar)"]
+        SC --> T["SignalTrack per RootSignal"]
+        SC --> SG["Segment: offset, duration, waits_for,<br/>emits (Emit), cues (Cue), sounds (SoundEvent)"]
+        SC -->|"play(Simulation)"| BK["Simulation.bake():<br/>run step(dt), record values"]
         BK --> T
     end
     T & SG --> PS["PreparedScene<br/>duration, tracks, roots, segments, time"]
-    subgraph Eval["state_at(t) — any time"]
-        PS --> E1["time signals ← playing time, global time"]
-        E1 --> E2["every track: signal.set(value_at(t))"]
-        E2 --> E3["derived signals recompute on read"]
-        E3 --> E4["mobject.snapshot() for present roots"]
-        E4 --> RO["Group('scene') of render objects"]
+    subgraph Eval["PreparedScene.state_at(t)"]
+        PS --> E1["TimeSignals.set(scene_time, global_time)"]
+        E1 --> E2["every SignalTrack: signal.set(value_at(t))"]
+        E2 --> E3["DerivedSignals recompute when read"]
+        E3 --> E4["Mobject.snapshot() for every present root"]
+        E4 --> RO["objects.Group('scene') of RenderObjects"]
     end
 ```
 
-- **Evaluation sets signals and reads them back.** A prepared scene's
-  mobjects and signals are its evaluation state, which is why one prepared
-  scene can back only one clip.
-- **Purity:** the result of `state_at(t)` depends only on `t`; earlier calls
-  only change which caches hit.
-- **Snapshots** build new render objects every time. They keep the
-  mobject's uid and carry version tokens derived from the signals (section
-  7), so the renderer recognizes unchanged data.
+- **Evaluation sets the `RootSignal`s and reads them back**, so a
+  `PreparedScene`'s `Mobject`s are its evaluation state. That is why one
+  `PreparedScene` backs only one `Clip`.
+- **Purity:** the result of `state_at(t)` depends only on `t`.
+- **`Mobject.snapshot()`** builds new `RenderObject`s on every call
+  (`VMobject` → `Shape2D`, `animation.Group` → `objects.Group`,
+  `animation.ClippingGroup` → `objects.ClippingGroup`, `animation.Camera` →
+  nothing). Each keeps the `Mobject.uid` and carries version tokens from
+  `version_token()` (section 7).
 
-### 4.4 Simulations
+### 4.4 `Simulation`
 
-A `Simulation` is the user's `step(dt)` function, which changes mobjects
-however it likes. It is baked when `play()` places it:
-- it runs at a fixed step from start to end;
-- other animations of the same `play` call are fed in as inputs before
-  every step;
-- every signal the step changes is recorded at `keyframe_rate`.
+A `Simulation` wraps the user's `step(dt)` function, which changes
+`Mobject`s however it likes. `SceneCompiler.play()` bakes it with
+`Simulation.bake()`:
 
-Afterwards it is an ordinary absolute animation that interpolates its
-keyframes. Its `emit` and `play_wave` calls become segment events and
-sounds at the simulated time. There is no built-in physics engine; this is
-deliberate.
+- `step` runs at the fixed step `dt` from start to end;
+- before every step, each `RootSignal` with a `SignalTrack` from the same
+  `play()` call (or earlier) is set to its value at that time;
+- every `RootSignal` the step changes is recorded at `keyframe_rate`, in
+  `Simulation.times` and the recorded values.
 
-### 4.5 Audio
+Afterwards the `Simulation` is an `ABSOLUTE` `Animation` that interpolates
+the recorded values. `Simulation.emit()` and `Simulation.play_wave()` add an
+`Emit` and a `SoundEvent` at the simulated time. There is no built-in physics
+engine; this is deliberate.
 
-A `Sound` is float32 samples, mono or stereo, plus a rate, loaded from a
-file (WAV directly, anything else through ffmpeg) or made from an array.
-`play_sound`/`play_wave` record a `SoundEvent` in the current segment
-without moving the cursor. Mixing happens late, per timeline: each sound
-starts at the global time its scene point is shown and then plays at its own
-speed, so time maps never change pitch.
+### 4.5 `Sound`
 
-## 5. Timing: clips, segments, events and time maps
+A `Sound` holds float32 samples (`(count, 1)` or `(count, 2)`) and a
+`sample_rate`. It comes from `Sound.load()` (WAV directly, anything else
+through ffmpeg) or from an array. `Scene.play_sound()` and
+`Scene.play_wave()` record a `SoundEvent` in the current `Segment` without
+moving the cursor. `Timeline.audio()` (via `Clip.placed_sounds()` and
+`mix()`) starts each `Sound` at the global time its point in the scene is
+shown, then plays it at its own speed, so a `MonotoneMap` never changes its
+pitch.
+
+## 5. Timing: `Timeline`, `Clip`, `Segment`, `MonotoneMap`
 
 ```mermaid
 classDiagram
@@ -279,8 +300,10 @@ classDiagram
     class Timeline {
         clips
         worlds
-        events: name to time
+        events: dict name to time
         live
+        add()
+        fire()
         state_at(t, world)
         view_at(view, t)
         audio(start, end)
@@ -305,9 +328,9 @@ classDiagram
         offset
         duration
         waits_for
-        emits
-        cues
-        sounds
+        emits: Emit[]
+        cues: Cue[]
+        sounds: SoundEvent[]
         play_offset
     }
     Timeline "1" *-- "*" Clip
@@ -318,59 +341,64 @@ classDiagram
     PreparedScene "1" *-- "*" Segment
 ```
 
-- **Segments:** `wait_for(event)` ends a segment. Segments sit on one
-  compiled time axis, separated by a gap that is never shown. The playing
-  time is compiled time without those gaps.
-- **Events:** they come from `Timeline.events` (fixed times, clicks) or from
-  `emit` in any clip. Resolution iterates to a fixed point: each segment
-  starts at its event, or when the previous segment ends if that is later.
-  While editing it is lenient; `resolve()` is strict, and live mode holds on
-  events that have not fired.
-- **Time maps:** each placed segment maps global time to compiled time
-  through a monotone cubic (PCHIP) through knots: the start, every cue whose
-  event is known (so a cue lands exactly on its word), the edges of
-  slow-motion ramps, and the end. Time never runs backwards and speed
-  changes smoothly.
-- **Lazy resolution:** clip edits (`cut`, `slow_motion`, `bind_cue`,
-  `set_scale`, `place`) mark the timeline dirty, and the next query
-  resolves it once.
+- **`Segment`:** `Scene.wait_for(name)` closes a `Segment`. Segments lie on
+  one compiled time axis, separated by `SEGMENT_GAP`, which is never shown.
+  `Segment.play_offset` counts the time without those gaps.
+- **Event names:** they get their times from `Timeline.events`
+  (`Timeline.fire()`) or from an `Emit` in any `Clip`.
+  `Timeline._resolve()` iterates to a fixed point: a `Segment` starts at the
+  time of its `waits_for` event, or when the previous one ends if that is
+  later. While editing, resolution is lenient. `Timeline.resolve()` is
+  strict and raises `UnresolvedEvents` or `InvalidCue`. With
+  `Timeline.live`, unfired events hold.
+- **`MonotoneMap`:** each `SegmentTiming` maps global time to compiled time
+  with a monotone cubic (PCHIP) through these knots:
+  - the start;
+  - every `Cue` whose event is known, so the cue lands exactly on it;
+  - the edges of every `Ramp` (`Clip.slow_motion()`);
+  - the end.
+- **Lazy resolution:** `Clip.cut()`, `Clip.slow_motion()`,
+  `Clip.bind_cue()` and `Clip.set_scale()` mark the `Timeline` dirty, and the
+  next query resolves it once.
 
-## 6. Worlds, cameras, views
+## 6. `World2D`, `World3D`, `animation.Camera`, `View`
 
-- **Worlds:** each clip plays in one world. A `World3D` is a space seen
-  through cameras. A `World2D` is a flat z = 0 canvas for HUDs and
-  compositions, where clips may only move in the plane. `state_at(t, world)`
-  renders one world.
-- **Cameras:** a `Camera` is a mobject with signals for position, rotation,
-  `frame_height` and field of view, animated like anything else (camera
-  scenes). It is never drawn. Outside its clip a camera keeps its first or
-  last placement.
-- **Views:** a `View` pairs a world with a camera. `timeline.view(view)` is
-  a function of time returning a `ViewState(root, camera)`, which the
-  composer uses for every motion-blur sample, so camera moves blur too.
-- **Compositions** (views shown as images inside a `World2D`) come next and
-  are not built yet.
+- **`World2D` and `World3D`:** every `Clip` has one `Clip.world`.
+  `World2D.check_transform()` keeps its clips in the z = 0 plane.
+  `Timeline.state_at(t, world)` returns one world's `objects.Group`.
+- **`animation.Camera`:** a `Mobject` whose `RootSignal`s are `position`,
+  `rotation`, `frame_height`, `field_of_view` and `perspective`; it is
+  animated like any other `Mobject`. `snapshot()` returns `None`.
+  `Timeline.camera_at()` evaluates its `Clip` at `Clip.held_time()`, so it
+  keeps its first and last placement outside the clip.
+  `animation.Camera.render_camera()` returns a `renderer.Camera`.
+- **`View(world, camera)`:** `Timeline.view(view)` is a function of time
+  returning `ViewState(root, camera)`. `FrameComposer` uses
+  `ViewState.camera` for every motion-blur sample.
+- **Showing a `View` inside a `World2D`** (compositions) is not built yet.
 
-## 7. Render objects: the contract between engine and renderer
+## 7. `RenderObject`: the contract between both sides
 
-`manimx.objects` defines the render state, the only thing that crosses from
-the engine to the renderer. These rules make every renderer cache correct:
+`RenderObject` (`manimx.objects`) is the only thing that crosses from
+`manimx.animation` to `manimx.renderer`. These rules make every renderer
+cache correct:
 
-1. **Stable identity:** every snapshot of one mobject has the same `uid`,
-   and uids are never reused within a process.
-2. **Versions:** a field declared with `versioned()` (points, fill, stroke,
-   mesh) has a token. Snapshots set tokens from the signals the field was
-   computed from, so equal tokens promise equal values. Transforms are not
-   versioned; they are compared directly.
-3. **Immutability:** a snapshot is never mutated after it is returned, and
-   versioned arrays are read-only.
-4. **Purity:** `state_at` has no side effects on its result. Caches may
-   speed it up, but never change it.
-5. **Lifecycle:** objects leaving for good can be announced with
-   `RemoveObjects`. Otherwise the renderer's caches age entries out
-   (section 8).
+1. **`RenderObject.uid`:** every snapshot of one `Mobject` has the
+   `Mobject.uid`. `new_uid()` never repeats within a process.
+2. **Versions:** fields declared with `versioned()` (`BezierPath.points`,
+   `BezierPath.stroke`, `Shape2D.fill`, `Shape3D.mesh`) have a token,
+   `RenderObject.version(name)`. `VMobject.snapshot()` passes tokens from
+   `version_token()` of the `RootSignal`s, so equal tokens mean equal
+   values. `RenderObject.transform` is not versioned; it is compared
+   directly.
+3. **Immutability:** a `RenderObject` is never changed after `state_at`
+   returns it, and versioned arrays are read-only.
+4. **Purity:** `state_at` has no side effects on its result.
+5. **Lifecycle:** `renderer.submit(RemoveObjects(...))` drops the data of
+   objects gone for good. Otherwise `MobjectDataCache.sweep()` ages entries
+   out (section 8).
 
-## 8. The renderer service
+## 8. `WGPURenderer` as a service
 
 ```mermaid
 classDiagram
@@ -391,29 +419,30 @@ classDiagram
     class MobjectDataCache {
         entries: uid and kind to version and data
         generation
+        next_generation()
         sweep(max_age)
     }
     class ResourceCache {
-        views: per texture, weak keys
-        bind groups: LRU, 512 entries
+        view(texture)
+        bind_group(layout, resources)
     }
     class RetainedVectors {
-        arenas: objects, instances, fill_vertices,
-        fill_colors, stroke_points, stroke_curves
-        slots: per uid and mask role
-        build(flat scene) VectorBatch
+        arenas: _Arena per buffer
+        slots: _Slot per uid and mask scope
+        build(FlatScene) VectorBatch
     }
     class RenderTargets {
-        G-buffer, depth, lit, vector, masks
+        gbuffer, depth, lit, vector, mask layers
         attachments
     }
     class FrameComposer {
         effects
-        texture pool
-        fullscreen pipelines
+        _TexturePool
+        _Fullscreen
+        compose_texture(scene, config)
     }
     class VectorPass {
-        GPU buffers
+        GrowableBuffer per VectorBatch array
         pipelines
         bind group
     }
@@ -426,241 +455,252 @@ classDiagram
     WGPURenderer *-- MeshPass
     WGPURenderer *-- LightingPass
     WGPURenderer *-- ShadowPass
-    WGPURenderer "1" *-- "*" FrameComposer : per effect chain
+    WGPURenderer "1" *-- "*" FrameComposer : one per effect tuple
     FrameComposer --> ResourceCache : shares
 ```
 
-**One renderer per process.** `WGPURenderer.shared()` creates the device,
-pipelines and caches once. Drivers, the CLI and tests render through it.
-Rendering is single-threaded per renderer.
+**One `WGPURenderer` per process:** `WGPURenderer.shared()` creates the
+`GPUContext`, the pipelines and the caches once. `drivers.render()`, the CLI
+and the tests use it. One thread renders at a time.
 
-**What a render does.** With the per-object data, the work depends on
-what changed:
+**What `WGPURenderer.render_layers()` does:**
 
-| Step | Unchanged objects | Changed objects |
+| Step | `RenderObject` unchanged | `RenderObject` changed |
 |---|---|---|
-| `flatten_scene` | world matrices, painter's order, clip scopes, lights (every render) | same |
-| `RetainedVectors.build` | nothing written (slot keyed by uid and mask role) | new matrix: 80-byte entry; new style: records in place; new points: records moved, curves and instances rewritten |
-| `MobjectDataCache` | hit: tessellation, stroke topology and points, center, mesh vertices | rebuilt for the new version |
-| Upload | nothing | only the written record ranges |
-| 3D stages | skipped entirely while a frame has no meshes (G-buffer and lit layer cleared once) | run |
-| Passes | masks, (shadows, geometry, lighting), vectors, all recorded into the composer's encoder | |
+| `flatten_scene()` → `FlatScene` (`DrawItem`s with world matrices and painter's order, `ClipScope`s, `LightItem`s) | every call | every call |
+| `RetainedVectors.build()` for `Shape2D` and `Curve3D` | nothing written to its `_Slot` | new world matrix: the 80-byte object entry; new `fill`/`stroke` version: its records in place; new `points` version: records moved, curves and instances rewritten |
+| `MobjectDataCache` (`tessellate_fill()` result, stroke records, center, `Shape3D` vertices) | hit | rebuilt for the new version |
+| `GrowableBuffer.write()` | nothing uploaded | only the written record ranges |
+| `MeshBatch.build()`, `build_shadow_views()`, geometry and lighting passes | skipped while the `FlatScene` contains no `Shape3D` (G-buffer and lit target cleared once) | run when a `Shape3D` is present |
+| Mask, shadow and vector passes | recorded into the `FrameComposer`'s command encoder | same |
 
 **Caches and their lifetimes:**
 
 | Cache | Key | Lives until |
 |---|---|---|
-| `MobjectDataCache` | (uid, kind) → (version, data) | replaced on a version change; dropped after 1024 renders unused, or by `RemoveObjects`/`ClearScene` |
-| `RetainedVectors` slots | (uid, mask role) | freed when the shape is absent from a render; arenas repacked when garbage outweighs live records |
-| `ResourceCache` views | per texture (weak key) | with their texture |
-| `ResourceCache` bind groups | layout + identities of the bound resources | LRU, 512 entries |
-| `RenderTargets` | size, MSAA, mask capacity | replaced on a size change |
-| Composers | effect chain | the renderer |
-| Pipelines, shaders | variant | the renderer |
+| `MobjectDataCache` | (uid, kind) with a version | replaced on a new version; dropped after 1024 renders unused (`sweep()`), or by `RemoveObjects` / `ClearScene` |
+| `RetainedVectors._Slot` | (uid, mask scope) | freed when its `RenderObject` is missing from a render; `_Arena`s repacked when garbage outweighs live records |
+| `ResourceCache.view()` | the texture (weak key) | its texture |
+| `ResourceCache.bind_group()` | the layout plus the identities of the bound resources | LRU, 512 entries |
+| `RenderTargets` | size, MSAA samples, mask capacity | the next size change |
+| `FrameComposer` | the tuple of effects | the `WGPURenderer` |
+| pipelines and shader modules | variant | the `WGPURenderer` |
 
-**The frame composer.** Per frame and per motion-blur sample:
-- evaluate the scene at the sample's time;
-- render the layers;
-- apply the lit-stage effects (bloom, shader effects);
-- composite the lit and vector layers over the background into an HDR
-  accumulator, weighted by the sample;
-- record one encoder and submit once per sample.
+**`FrameComposer.compose_texture()`**, for every time of
+`MotionBlur.sample_times(t)` (or just `t`):
+- calls the scene function;
+- calls `WGPURenderer.render_layers()`;
+- applies `Bloom` and `ShaderEffect(stage="lit")` to `RenderLayers.lit`;
+- composites `RenderLayers.lit` and `RenderLayers.vector` over the background
+  into the HDR accumulator, weighted by the sample (`ToneMap` for the lit
+  part);
+- submits one command encoder per sample.
 
-At the end it applies the frame-stage effects and encodes to sRGB in the
+Finally it applies `ShaderEffect(stage="frame")` and encodes to sRGB in the
 output texture.
 
-## 9. Drivers: frames, processes, sinks, audio
+## 9. Drivers: `FramePipeline`, processes, `FrameSink`, audio
 
 ```mermaid
 flowchart LR
-    subgraph Main["main process"]
-        L["load_source(spec)<br/>+ audio mix"] --> Loop
-        Loop["render loop or<br/>result collector"] -->|"queue (bounded)"| Wt["writer thread<br/>reorders for ordered sinks"]
-        Wt --> Sink["sink"]
+    subgraph Main["main process: drivers.render()"]
+        L["load_source(spec) → FrameSource<br/>+ FrameSource.audio()"] --> Loop
+        Loop["_render_here, or the collector<br/>of _render_in_workers"] -->|"queue (bounded)"| Wt["_Writer thread<br/>reorders for ordered sinks"]
+        Wt --> Sink["FrameSink"]
     end
-    Sink -->|stdin| FF["ffmpeg process"]
-    Sink -->|"PNG threads"| Files["frame_00001.png …"]
-    subgraph Workers["worker processes (workers > 1, spawned)"]
-        W1["load_source(spec) again<br/>shared renderer<br/>FramePipeline<br/>chunks of frames"]
+    Sink -->|"VideoFile: stdin pipe"| FF["ffmpeg process"]
+    Sink -->|"ImageSequence: PNG threads"| Files["frame_00000.png …"]
+    subgraph Workers["_worker_main processes (workers > 1, spawn)"]
+        W1["load_source(spec)<br/>WGPURenderer.shared()<br/>FramePipeline<br/>chunks of frame indices"]
     end
-    W1 -->|"shared memory slots<br/>(owned per worker)"| Loop
+    W1 -->|"SharedMemory slots per worker"| Loop
     Loop -->|"free slot ids"| W1
 ```
 
-- **`FramePipeline`:** keeps up to `in_flight` frames on the GPU. Each
-  frame is copied into its own staging buffer and mapped asynchronously.
-  `submit()` returns a `Future`, resolved in submission order.
-- **Workers:** each worker rebuilds the source from its name
-  (`"module:Class"` or a picklable `ProjectSource`). Purity makes the frames
-  identical across processes. Frames come back through shared memory slots
-  owned per worker. A worker renders its frames in increasing order and
-  waits only for its own slots, so in-order writing cannot deadlock.
-- **Sinks:** `VideoFile` (ffmpeg, with the audio mix muxed in the same
-  pass), `ImageSequence` (PNG plus `audio.wav`), `FrameList`. Ordered sinks
-  get frames in index order.
-- **Audio:** the main process mixes exactly the rendered range before
-  rendering starts. Sources without sounds get no audio track.
+- **`FramePipeline`:** keeps up to `in_flight` frames on the GPU, with one
+  staging buffer per frame mapped through `map_async`. `submit()` returns a
+  `concurrent.futures.Future`, completed in submission order.
+- **Worker processes:** each runs `_worker_main`, which rebuilds the source
+  with `load_source()` from a `"module:Class"` string or a `ProjectSource`.
+  Because `state_at` is pure, every process renders identical frames.
+  Frames come back through `SharedMemory` slots owned per worker. A worker
+  renders its frames in increasing order and waits only for its own slots,
+  so in-order writing cannot deadlock.
+- **`FrameSink`s:**
+  - `VideoFile` runs ffmpeg and muxes the audio from `FrameFormat.audio`
+    in the same pass;
+  - `ImageSequence` writes PNG files plus `audio.wav`;
+  - `FrameList` keeps the frames in memory.
 
-## 10. Projects and the CLI
+  Sinks with `ordered = True` get frames in index order.
+- **Audio:** `FrameSource.audio(start, end, sample_rate)` (from
+  `Timeline.audio` or `PreparedScene.audio`) mixes exactly the rendered range
+  before rendering starts. A silent mix means no audio track.
+
+## 10. `Project` and the CLI
 
 ```mermaid
 flowchart LR
-    J["manimx.json<br/>output, camera, performance,<br/>scenes, timeline"] <-->|"load() / save()"| P["Project<br/>OutputSettings, CameraSettings,<br/>PerformanceSettings, SceneEntry, ClipEntry"]
+    J["manimx.json<br/>output, camera, performance,<br/>scenes, timeline"] <-->|"Project.load() / Project.save()"| P["Project<br/>OutputSettings, CameraSettings,<br/>PerformanceSettings, SceneEntry, ClipEntry"]
     P -->|"build_timeline()"| TL["Timeline"]
     P -->|"render_settings()"| RS["RenderSettings"]
-    P -->|"source(scene)"| PSrc["ProjectSource (picklable)"]
-    CLI["manimx new / generate / remove /<br/>list / render / still"] --> P
-    CLI --> Scaffold["scaffold.py: files, templates"]
+    P -->|"source(scene)"| PSrc["ProjectSource"]
+    CLI["cli.app: new, generate scene, remove scene,<br/>list, render, still"] --> P
+    CLI --> Scaffold["scaffold.create_project(),<br/>scaffold.generate_scene(), templates"]
     UI["web UI (next)"] -.-> P
-    J -.->|"$schema"| Schema[".manimx/project.schema.json<br/>generated from the dataclasses"]
+    J -.->|"$schema"| Schema[".manimx/project.schema.json<br/>from project_schema()"]
 ```
 
-- **The object state is the source of truth.** `manimx.json` is its
-  snapshot: code, the CLI and later the web UI edit the same `Project`
-  objects and save them. Scenes stay code; the project references them by
-  module and class.
-- **Loading is strict.** Unknown keys come with a "did you mean" hint, and
-  types and minimums are checked. The schema is generated from the same
-  dataclasses that load the file.
-- **The timeline in the file** is a list of clips in order. A clip without
-  `start` begins when the previous clip ends.
-- **Scene modules are imported one at a time** from the registry, so a
-  broken scene never breaks the others. A package of the same name from
-  another project is evicted from `sys.modules` first.
-- **The CLI** (Typer, rich, questionary) prompts only for missing arguments
-  in a terminal. Errors are panels with a hint, plus a traceback of the
-  user's frames when scene code fails.
+- **`Project` holds the state; `manimx.json` is its snapshot.** Code, the
+  CLI and later the web UI change the same `Project` and call
+  `Project.save()`. A `SceneEntry` references a `Scene` subclass by module
+  and class.
+- **`Project.load()` is strict.** It rejects unknown keys with a "did you
+  mean" hint and checks types and minimums. `project_schema()` derives the
+  schema from the same dataclasses (`OutputSettings`, `CameraSettings`,
+  `PerformanceSettings`).
+- **`Project.build_timeline()`** prepares every `ClipEntry`'s scene and
+  calls `Timeline.add()`. A `ClipEntry` without `start` begins at the
+  previous `Clip.end`.
+- **`Project.scene_class()`** imports each scene module on its own, so a
+  broken module only fails its own `SceneEntry`. A package of the same name
+  from another project is evicted from `sys.modules` first.
+- **`cli.ui`** prompts (questionary) only for missing arguments in a
+  terminal. A `ProjectError` is printed as a panel with its `hint`. A
+  `SceneError` comes with a rich traceback of the user's frames.
 
 ## 11. Lifetimes at a glance
 
-| Object | Created by | Owned by | Lives until | Mutable? |
+| Instance | Created by | Owned by | Lives until | Changes? |
 |---|---|---|---|---|
-| `Mobject` and its signals | scene code in `construct()` | the `PreparedScene` (roots, tracks) | the prepared scene | signal values change on every evaluation |
-| `SceneCompiler` | `Scene.prepare()` | the ContextVar while `construct()` runs | the end of `prepare()` | yes |
-| `PreparedScene` | `Scene.prepare()` (cached in `Scene`) | one `Clip` | the timeline or project build | evaluation state only |
-| `SignalTrack`, `Placement`, `Entry` | `play()` and direct edits | the prepared scene | the prepared scene | `refresh()` after edits |
-| `Segment`, `Emit`, `Cue`, `SoundEvent` | `wait_for`, `emit`, `cue`, `play_sound` | the prepared scene | the prepared scene | no (frozen) |
-| `Timeline`, `Clip`, `World` | code, or `Project.build_timeline()` | the caller, later the session | the caller | yes; edits mark the timeline dirty |
-| `SegmentTiming`, `MonotoneMap` | timeline resolution | the `Clip` | the next resolution | no |
-| Render objects | `state_at` snapshots | the caller of `state_at` | that render | no |
-| `Project` | `Project.load/find`, CLI | the CLI command (later the UI) | the command | yes; `save()` writes it |
-| `WGPURenderer` | `WGPURenderer.shared()` | the process | the process | caches inside |
-| `FrameComposer` | `renderer.composer(effects)` | the renderer | the renderer | texture pool inside |
-| `FramePipeline` | `drivers.render()` | the render call | the call (staging buffers) | yes |
-| Writer thread, worker processes, ffmpeg | `drivers.render()` | the render call | the call | |
+| `Mobject` and its signals | `Scene.construct()` | the `PreparedScene` (`roots`, `tracks`) | the `PreparedScene` | signal values on every evaluation |
+| `SceneCompiler` | `Scene.prepare()` | a ContextVar while `construct()` runs | the end of `prepare()` | yes |
+| `PreparedScene` | `Scene.prepare()` (kept in `Scene._prepared`) | one `Clip` | the `Timeline` | only through evaluation |
+| `SignalTrack`, `Placement`, `Entry` | `Scene.play()`, `authoring.change()` | the `PreparedScene` | the `PreparedScene` | `SignalTrack.refresh()` after edits |
+| `Segment`, `Emit`, `Cue`, `SoundEvent` | `wait_for`, `emit`, `cue`, `play_sound`/`play_wave` | the `PreparedScene` | the `PreparedScene` | no (frozen) |
+| `Timeline`, `Clip`, `World2D`/`World3D` | user code or `Project.build_timeline()` | the caller | the caller | yes; edits mark the `Timeline` dirty |
+| `SegmentTiming`, `MonotoneMap` | `Timeline._resolve()` | the `Clip` | the next resolution | no |
+| `RenderObject` tree | `state_at()` | the caller of `state_at()` | that render | no |
+| `Project` | `Project.load()` / `Project.find()` | the CLI command | the command | yes; `Project.save()` |
+| `WGPURenderer` | `WGPURenderer.shared()` | the process | the process | its caches |
+| `FrameComposer` | `WGPURenderer.composer(effects)` | the `WGPURenderer` | the `WGPURenderer` | its `_TexturePool` |
+| `FramePipeline` | `drivers.render()` | the render call | the call | yes |
+| `_Writer` thread, `_worker_main` processes, ffmpeg | `drivers.render()` | the render call | the call | |
 
 ## 12. Design decisions
 
-The decisions that shape the code, with their reasons.
+**Animation package**
 
-**Animation**
-
-- **Two passes: compile once, evaluate anywhere.** Random access is what
-  makes scrubbing, retiming, cuts, previews, motion blur and parallel
-  workers simple. Replaying from the start on every query would rule them
-  out.
-- **Signals everywhere, one per axis.** Animations on different properties
-  or axes compose without interfering. Derived signals replace updaters with
-  pure functions, which keeps evaluation deterministic.
-- **Animations reference mobjects; no target copies.** An animation is a
-  pure function of progress, placed on the timeline. Composition rules
-  (relative changes add, absolute ones override from the start value) live
-  in the tracks.
-- **Direct edits during `construct()` happen at that moment** (instant
-  placements), and reads return the state after everything recorded so far,
-  so code reads like Manim but never rewrites the past.
-- **Versions, not hashes.** Change counters cost nothing per frame. A
+- **Two passes: `Scene.prepare()` once, `state_at()` anywhere.** Random
+  access is what makes scrubbing, retiming, cuts, previews, `MotionBlur` and
+  worker processes simple. Replaying from the start on every query would
+  rule them out.
+- **A `RootSignal` per property and per axis (`Vector3Signal`).**
+  Animations of different properties or axes compose without interfering.
+  `DerivedSignal` replaces updaters with pure functions, which keeps
+  evaluation deterministic.
+- **An `Animation` references `Mobject`s; it never copies them.**
+  `contribution()` is a pure function of progress, and `SignalTrack` holds
+  the composition rules.
+- **Direct changes inside `construct()` become `SetValue` at the cursor,
+  and reads (`Mobject.get_center()`) see everything recorded so far.** Code
+  reads like Manim but never rewrites the past.
+- **Versions, not hashes.** A version counter costs nothing per frame. A
   revisited time costs one recomputation and is never wrong.
 
 **Timing**
 
-- **Events, holds and cues are names in scene code; times come from the
-  timeline.** Scenes stay reusable, and clicks, transcripts and other clips
-  bind the times.
-- **PCHIP time maps.** They pass exactly through each cue, never run
-  backwards, and change speed smoothly.
-- **Sounds are never retimed.** Slow motion moves sound starts apart, but
-  pitch stays.
+- **`wait_for`, `emit` and `cue` take names; times come from the
+  `Timeline`.** A `Scene` stays reusable: `Timeline.fire()`, an `Emit` in
+  another `Clip`, or (later) transcripts bind the times.
+- **`MonotoneMap` with PCHIP.** It passes exactly through each `Cue`, never
+  runs backwards, and changes speed smoothly.
+- **A `Sound` is never retimed.** `Clip.slow_motion()` moves sound starts
+  apart, but pitch stays.
 
-**Simulations**
+**`Simulation`**
 
-- **Baked, not run live.** Rendering stays random access and parallel. The
-  user writes a step function; there is no engine dependency. Animated
-  objects are inputs, and reactions go through derived signals, events and
-  sounds.
+- **Baked in `Scene.prepare()`, not run during rendering.** `state_at`
+  stays random access and parallel. The user writes `step(dt)`; there is no
+  engine dependency. Animated `RootSignal`s are inputs; `DerivedSignal`,
+  `Emit` and `SoundEvent` carry reactions.
 
-**Render contract**
+**`RenderObject` contract**
 
-- **uid plus version tokens are the only change detection.** The renderer
-  never deep-compares data. Everything from tessellation caches to retained
-  GPU slots uses the same keys.
+- **`uid` plus version tokens are the only change detection.** The renderer
+  never compares data deeply. `MobjectDataCache` and `RetainedVectors` use
+  the same keys.
 
-**Renderer**
+**`WGPURenderer`**
 
-- **The renderer is a process-wide service.** Device, pipelines, buffers,
-  targets, views, bind groups and per-object data survive across calls. That
-  is what makes a long-lived web UI cheap.
-- **Retained vector scene.** Per-object records stay in GPU-mirroring
-  arenas and are patched, with only changed ranges uploaded. The cost per
-  render follows what changed, not the scene size.
-- **Mesh-free frames skip the 3D stages.** Most Manim content is 2D, and the
-  deferred pipeline costs nothing when unused.
-- **Motion blur is exact sub-frame rendering.** Any change blurs correctly,
-  including camera moves and appearing objects.
+- **`WGPURenderer.shared()` is one service per process.** `GPUContext`,
+  pipelines, `GrowableBuffer`s, `RenderTargets`, `ResourceCache` and
+  per-object data survive across calls, which keeps a long-lived web UI
+  cheap.
+- **`RetainedVectors`** keeps records per `_Slot` in `_Arena`s that mirror
+  the GPU buffers, patches them, and uploads only changed ranges. The cost
+  follows what changed, not the size of the `FlatScene`.
+- **No `Shape3D` in a frame, no 3D passes.** Most Manim content is
+  `Shape2D`.
+- **`MotionBlur` renders real sub-frames.** Any change blurs correctly,
+  including `animation.Camera` moves and appearing `Mobject`s.
 
 **Drivers**
 
-- **Pipelined GPU frames, a writer thread, worker processes.** The GPU, the
-  CPU, the encoder and the disk all work at the same time.
-- **Workers rebuild the source from a name.** Purity guarantees identical
-  frames, and spawn is used because GPU devices do not survive fork.
+- **`FramePipeline`, the `_Writer` thread and worker processes run
+  together:** GPU, CPU, ffmpeg and disk all work at the same time.
+- **Workers rebuild the source with `load_source()`.** Purity guarantees
+  identical frames. Spawn instead of fork, because GPU devices do not
+  survive a fork.
 
-**Projects**
+**`Project`**
 
-- **`manimx.json` is a snapshot of `Project` objects.** One API for code,
-  CLI and UI, with no separate intermediate representation and no override
-  layers.
-- **Strict loading with a generated schema.** Typos fail loudly, and editors
-  can check the file.
+- **`manimx.json` is a snapshot of `Project`.** Code, CLI and UI share one
+  API, with no separate intermediate representation and no override files.
+- **`Project.load()` is strict, with a schema from `project_schema()`.**
+  Typos fail loudly, and editors check the file.
 
 **Performance policy**
 
-- **Only measured improvements stay.** Every optimization is benchmarked
-  (`scripts/benchmark_project.py`), checked bit-identical against reference
-  frames, and recorded in PERFORMANCE.md, including what was dropped.
+- **Only measured improvements stay.** Every optimization is measured with
+  `scripts/benchmark_project.py`, checked bit-identical with
+  `--check-reference`, and recorded in PERFORMANCE.md, including what was
+  dropped.
 
 ## 13. State of the work and next steps
 
 **Done:**
-- signals, animations, scenes;
-- segments, events, cues and time maps;
-- worlds, clips, cameras and views;
-- simulations, audio (mono and stereo, files and arrays);
-- the offline driver with workers;
-- projects and the CLI, the example project and GETTING_STARTED.md;
-- performance work: 74.5 → 169.8 fps on the example project, 2.3× faster
-  than the baseline.
+- signals, `Mobject`, `Animation`, `Scene`;
+- `Segment`, events, `Cue`, `MonotoneMap`;
+- `World2D`/`World3D`, `Clip` placement, `animation.Camera`, `View`;
+- `Simulation`;
+- `Sound` (mono and stereo, files and arrays);
+- `drivers.render()` with worker processes;
+- `Project` and the CLI, `example-project/`, GETTING_STARTED.md;
+- performance: 74.5 → 169.8 fps on `example-project/`, 2.3× faster than the
+  baseline.
 
 **Next, in the agreed order:**
-1. **Web UI:** scrubbing preview, editing the timeline on the `Project`
-   objects, live presentation with clicks firing events.
-2. **Compositions:** views shown as images in a `World2D`, nesting.
-3. **HDR colors for 2D:** a float vector layer and bloom on 2D shapes,
-   while colors ≤ 1 stay exactly Manim's.
-4. **Morphing** (`Transform`, path alignment), and Whisper transcripts bound
-   to cues.
+1. **Web UI:** scrubbing preview, editing the `Project`, live presentation
+   with clicks calling `Timeline.fire()`.
+2. **Compositions:** a `View` shown as an image inside a `World2D`, nesting.
+3. **HDR colors for `Shape2D`:** a float vector target and `Bloom` on
+   `RenderLayers.vector`, while colors ≤ 1 stay exactly Manim's.
+4. **Morphing** (a `Transform` animation, path alignment), and Whisper
+   transcripts calling `Clip.bind_cue()`.
 5. **Usability and performance, full time.** The remaining cost is CPU:
-   per-render Python bookkeeping (flatten, slot diff, draw lists) and
-   `state_at`. The GPU needs about 1.7 ms of 5.9 ms per frame.
-6. **miette-style diagnostics**, once the common errors are known.
+   `flatten_scene()`, `RetainedVectors.build()` bookkeeping and `state_at()`.
+   The GPU needs about 1.7 ms of 5.9 ms per frame.
+6. **miette-style diagnostics** for `ProjectError` and `SceneError`, once
+   the common errors are known.
 
 **Working conventions:**
 - Commits are kernel style, with the design decisions in the message and
   no self-attribution. Commit only `manimx/`; `docs/`, the root
-  `pyproject.toml` and the root `uv.lock` belong to the user and stay out
-  of commits.
+  `pyproject.toml` and the root `uv.lock` belong to the user.
 - Tests: `uv run --active pytest` in `manimx/`, with coverage at least 90%.
 - Benchmark: check the power mode, run `scripts/benchmark_project.py
   example-project --check-reference <ref.npz>`, report.
 - Don't run `ruff check` without `--no-fix`: the project config fixes files
   in place.
+- Describe everything with its name from the Python code.
