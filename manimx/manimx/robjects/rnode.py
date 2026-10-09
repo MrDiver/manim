@@ -50,6 +50,20 @@ class RNode:
 
     transform: Transform = field(default_factory=Transform)
     visible: bool = True
+    """Whether flatten() draws this node and its subtree.
+
+    Snapshots never set it: on the scene side, whether a node is drawn at
+    all is decided before a render object exists. ``Node.present`` (set by
+    ``Scene.add``/``remove``, by ``play`` when an animation starts, and by
+    ``FadeOut``/``ShrinkToCenter`` when they end) selects the root nodes
+    that ``PreparedScene.state_at()`` snapshots, and a node that should
+    not be drawn snapshots to nothing (``snapshot()`` returns None, e.g.
+    when scaled to zero). How strongly a node is drawn is its ``alpha``,
+    which multiplies the opacities of its subtree; the renderer skips
+    fills and strokes at opacity 0. A node hidden for a while is therefore
+    faded out (and in again later), not switched off here. The field
+    serves render trees built directly, e.g. in renderer tests.
+    """
     _: KW_ONLY
     uid: int = field(default_factory=new_uid)
     versions: InitVar[Mapping[str, Hashable] | None] = None

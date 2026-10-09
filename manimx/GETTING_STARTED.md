@@ -104,7 +104,7 @@ The building blocks:
 |---|---|
 | Shapes | `Circle`, `Dot`, `Square`, `Rectangle`, `Triangle`, `RegularPolygon`, `Polyline`, `Shape2D` (any Bezier path) |
 | Containers | `Group(a, b, ...)` moves and fades its members together; `ClippingGroup(mask, content)` shows content only inside the mask |
-| Style | `color=`, `fill_color=`, `fill_opacity=`, `stroke_color=`, `stroke_width=`, `stroke_opacity=`, or `set_fill`, `set_stroke`, `set_color` |
+| Style | `color=`, `fill_color=`, `fill_opacity=`, `stroke_color=`, `stroke_width=`, `stroke_opacity=`, `stroke_joint=`, `stroke_cap=`, or `set_fill`, `set_stroke`, `set_color`. Colors, opacities and widths take one value or a list: `fill_color=[RED, BLUE]` is a gradient, `stroke_width=[2, 8, 2]` tapers |
 | Changes | `shift`, `move_to`, `rotate`, `scale_by`, `set_scale`, `set_alpha` |
 | Animations | `x.animate.<changes>` (chain several), `FadeIn`, `FadeOut` (both take `shift=`), `Rotate(x, angle)`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter` |
 | Timing | `self.play(..., run_time=2, rate=..., lag_ratio=0.3)`, `self.wait(seconds)` |

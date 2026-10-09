@@ -176,6 +176,8 @@ classDiagram
         points: RootSignal
         fill_color, fill_opacity
         stroke_color, stroke_width, stroke_opacity
+        stroke_joint, stroke_cap
+        cast_shadows
     }
     class Group {
         children
@@ -183,17 +185,21 @@ classDiagram
     }
     class ClippingGroup {
         mask, content
+        one_sided: RootSignal
         find(name), find_all(name, tags)
     }
     class Curve3D {
         points: RootSignal
         stroke_color, stroke_width, stroke_opacity
+        stroke_joint, stroke_cap
         cast_shadows
     }
     class Shape3D {
         mesh: RootSignal
         base_color, opacity, metallic, roughness
         emissive, emissive_strength
+        normal_scale, occlusion_strength
+        five texture signals
         cast_shadows
     }
     class Light {
@@ -459,8 +465,10 @@ cache correct:
    `RNode.version(name)`. Every `snapshot()` passes tokens from
    `version_token()` of the `RootSignal`s a field is computed from, so
    equal tokens mean equal values:
-   - `Shape2D`: `points` from `points`; `fill` and `stroke` from their
-     color, opacity and width signals plus every `alpha` above;
+   - `Shape2D`: `points` from `points`; `fill` from `fill_color` and
+     `fill_opacity`, `stroke` from the five stroke signals, each plus every
+     `alpha` above. While a token holds, the snapshot reuses its `Fill`
+     and `Stroke` values (PERFORMANCE.md, step F);
    - `Curve3D`: `points` and `stroke` the same way;
    - `Shape3D`: `mesh` from the `mesh` signal (a `DISCRETE` signal holding
      a `MeshData`, whose version changes only when another `MeshData` is
@@ -757,6 +765,14 @@ flowchart LR
 - `Sound` (mono and stereo, files and arrays);
 - `drivers.render()` with worker processes;
 - `Project` and the CLI, `example-project/`, GETTING_STARTED.md;
+- every render field has its signal on the scene class (checked by
+  `tests/test_node_fields.py`): fills and strokes take one value or a
+  list (`COLORS`, `SCALARS`: gradients, tapering widths, which
+  interpolate across lengths), joints and caps are `DISCRETE`, every
+  `PbrMaterial` field of a `Shape3D` is a signal, and
+  `ClippingGroup.one_sided` is one. `RNode.visible` is the exception: a
+  scene node is not drawn by leaving the scene (`present`) or fading out
+  (`alpha`), never through that field;
 - 3D scene nodes: `Curve3D` (`ParametricCurve3D`), `Shape3D` (`Box`,
   `Sphere`, `Torus`, `ParametricSurface`), `DirectionalLight`,
   `PointLight`, `SpotLight`; `cast_shadows` as a `DISCRETE` signal on every

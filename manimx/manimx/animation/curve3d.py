@@ -7,14 +7,15 @@ Bezier curves whose stroke ribbon always faces the camera. It is a leaf.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Any
 
 import numpy as np
 
-from ..robjects import RCurve3D, RNode, Stroke
-from ..utils.color import WHITE, ParsableManimColor
-from .kinds import COLOR, DISCRETE, PATH
+from ..robjects import CapStyle, JointType, RCurve3D, RNode
+from ..utils.color import WHITE
+from . import style
+from .kinds import COLORS, DISCRETE, PATH, SCALARS
 from .node import (
     ABS,
     ChangeList,
@@ -22,54 +23,87 @@ from .node import (
     PositionMixin,
     RotationMixin,
     ScalableMixin,
-    _rgb,
     animatable,
 )
 from .signals import RootSignal, Signal
 from .snapshot import version_token
+from .style import Colors, Scalars
 
 
 class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
     """Points ``(N, 3)`` in the RBezierPath layout (four per cubic curve)
-    with a stroke. The stroke width is in world units."""
+    with a stroke. The stroke width is in world units.
+
+    Every field of its render counterpart is a signal:
+
+    ==================  ========  ==========================================
+    signal              kind      RCurve3D field
+    ==================  ========  ==========================================
+    ``points``          PATH      ``points``
+    ``stroke_color``    COLORS    ``stroke.color`` (one color or a gradient)
+    ``stroke_opacity``  SCALARS   ``stroke.opacity`` (times every ``alpha``)
+    ``stroke_width``    SCALARS   ``stroke.width``
+    ``stroke_joint``    DISCRETE  ``stroke.joint`` (one, or one per curve)
+    ``stroke_cap``      DISCRETE  ``stroke.cap``
+    ``cast_shadows``    DISCRETE  ``cast_shadows``
+    ==================  ========  ==========================================
+    """
 
     def __init__(
         self,
         points: Any = (),
         name: str | None = None,
         *,
-        color: ParsableManimColor = WHITE,
-        stroke_width: float = 0.04,
-        stroke_opacity: float = 1.0,
+        color: Colors = WHITE,
+        stroke_width: Scalars = 0.04,
+        stroke_opacity: Scalars = 1.0,
+        stroke_joint: JointType | Sequence[JointType] = JointType.AUTO,
+        stroke_cap: CapStyle = CapStyle.AUTO,
         cast_shadows: bool = True,
         tags: Iterable[str] = (),
     ) -> None:
         super().__init__(name, tags=tags)
         prefix = self.name
         self.points = RootSignal(np.zeros((0, 3)) if len(points) == 0 else points, PATH, name=f"{prefix}.points")
-        self.stroke_color = RootSignal(_rgb(color), COLOR, name=f"{prefix}.stroke_color")
-        self.stroke_width = RootSignal(stroke_width, name=f"{prefix}.stroke_width")
-        self.stroke_opacity = RootSignal(stroke_opacity, name=f"{prefix}.stroke_opacity")
+        self.stroke_color = RootSignal(style.colors(color), COLORS, name=f"{prefix}.stroke_color")
+        self.stroke_width = RootSignal(stroke_width, SCALARS, name=f"{prefix}.stroke_width")
+        self.stroke_opacity = RootSignal(stroke_opacity, SCALARS, name=f"{prefix}.stroke_opacity")
+        self.stroke_joint = RootSignal(style.joints(stroke_joint), DISCRETE, name=f"{prefix}.stroke_joint")
+        self.stroke_cap = RootSignal(style.cap(stroke_cap), DISCRETE, name=f"{prefix}.stroke_cap")
         self.cast_shadows = RootSignal(cast_shadows, DISCRETE, name=f"{prefix}.cast_shadows")
 
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()
-        yield from (self.points, self.stroke_color, self.stroke_width, self.stroke_opacity, self.cast_shadows)
+        yield from (
+            self.points, self.stroke_color, self.stroke_width, self.stroke_opacity,
+            self.stroke_joint, self.stroke_cap, self.cast_shadows,
+        )  # fmt: skip
 
     @animatable
-    def set_stroke(self, color: ParsableManimColor | None = None, width: float | None = None, opacity: float | None = None) -> ChangeList:
+    def set_stroke(
+        self,
+        color: Colors | None = None,
+        width: Scalars | None = None,
+        opacity: Scalars | None = None,
+        joint: JointType | Sequence[JointType] | None = None,
+        cap: CapStyle | None = None,
+    ) -> ChangeList:
         changes: ChangeList = []
         if color is not None:
-            changes.append((self.stroke_color, ABS, _rgb(color)))
+            changes.append((self.stroke_color, ABS, style.colors(color)))
         if width is not None:
             changes.append((self.stroke_width, ABS, width))
         if opacity is not None:
             changes.append((self.stroke_opacity, ABS, opacity))
+        if joint is not None:
+            changes.append((self.stroke_joint, ABS, style.joints(joint)))
+        if cap is not None:
+            changes.append((self.stroke_cap, ABS, style.cap(cap)))
         return changes
 
     @animatable
-    def set_color(self, color: ParsableManimColor) -> ChangeList:
-        return [(self.stroke_color, ABS, _rgb(color))]
+    def set_color(self, color: Colors) -> ChangeList:
+        return [(self.stroke_color, ABS, style.colors(color))]
 
     @animatable
     def set_cast_shadows(self, cast_shadows: bool) -> ChangeList:
@@ -83,16 +117,17 @@ class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
         return RCurve3D(
             uid=self.uid,
             points=self.points.value,
-            stroke=Stroke(
-                np.array(self.stroke_color.value),
-                opacity=min(1.0, max(0.0, self.stroke_opacity.value * alpha)),
-                width=max(0.0, self.stroke_width.value),
-            ),
+            stroke=style.stroke(
+                self.stroke_color.value, self.stroke_opacity.value, self.stroke_width.value,
+                self.stroke_joint.value, self.stroke_cap.value, alpha,
+            ),  # fmt: skip
             cast_shadows=bool(self.cast_shadows.value),
             transform=self._transform(),
             versions={
                 "points": version_token(self.points),
-                "stroke": version_token(self.stroke_color, self.stroke_width, self.stroke_opacity, *alphas),
+                "stroke": version_token(
+                    self.stroke_color, self.stroke_width, self.stroke_opacity, self.stroke_joint, self.stroke_cap, *alphas
+                ),
             },
         )
 

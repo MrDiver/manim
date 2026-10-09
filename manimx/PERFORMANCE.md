@@ -244,6 +244,33 @@ Result: +14% (149.2 → 169.8 fps). The vector batch drops from 1.88 to
 shape and render is Python bookkeeping: the matrix comparison, the camera
 distance and the draw record.
 
+### F. Reused fill and stroke values
+
+`Shape2D` now carries every field of `Fill` and `Stroke` as a signal:
+lists of colors, opacities and widths (`COLORS`, `SCALARS`), joints and
+caps. Building `Fill` and `Stroke` from those values in every snapshot
+made `state_at` 7% slower (1.28 → 1.37 ms per frame; a `Shape2D` snapshot
+took 10.4 µs).
+
+`Fill` and `Stroke` are immutable values of the signals in their version
+token. A `Shape2D` keeps the last snapshot's token with each value and
+reuses the value while the token holds. Only a change of a style signal or
+an `alpha` above builds a new one; moving shapes never do.
+
+Measured in one session with the battery discharging on an underpowered
+adapter (so absolute numbers are below the table's; stages this step does
+not touch stay put: `render_layers` 2.83 → 2.86 ms, readback 0.82 →
+0.84 ms):
+
+| | fps (blur 8) | state_at ms/frame | Shape2D snapshot |
+|---|---|---|---|
+| all fields, values rebuilt every snapshot | 157.2 | 1.37 | 10.4 µs |
+| values reused while their token holds | 162.0 | 1.13 | 6.1 µs |
+
+Result: `state_at` −18%, also below the 1.28 ms before the new fields.
+Frames are bit-identical. `Curve3D` builds its stroke every snapshot: the
+benchmark has no `Curve3D`, so a reuse there would be unmeasured.
+
 ## Where the time goes now
 
 5.89 ms per frame against 13.43 at the start (2.3× faster): `render_layers`

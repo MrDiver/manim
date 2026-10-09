@@ -133,6 +133,99 @@ class ColorKind(SignalKind):
         return tuple(c * alpha for c in change)
 
 
+def _spread(values: np.ndarray, count: int) -> np.ndarray:
+    """``values`` (K entries along axis 0) spread evenly over ``count``
+    entries by linear interpolation, like the renderer spreads a style
+    list over a path's points (robjects.style.resample)."""
+    if len(values) == count:
+        return values
+    if len(values) == 1:
+        return np.repeat(values, count, axis=0)
+    source = np.linspace(0.0, 1.0, len(values))
+    target = np.linspace(0.0, 1.0, count)
+    if values.ndim == 1:
+        return np.interp(target, source, values)
+    return np.column_stack([np.interp(target, source, channel) for channel in values.T])
+
+
+def _matched(start: np.ndarray, end: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Both lists spread to the longer length, so lists of different
+    lengths interpolate smoothly (a two-color gradient into a five-color
+    one) instead of jumping."""
+    count = max(len(start), len(end))
+    return _spread(start, count), _spread(end, count)
+
+
+def _frozen(array: np.ndarray) -> np.ndarray:
+    array.setflags(write=False)
+    return array
+
+
+class ColorsKind(SignalKind):
+    """One RGB color or a list of them, as a read-only ``(K, 3)`` float
+    array (K >= 1). This is what a Fill or Stroke color holds: a list is
+    spread over the path's points as a gradient. Interpolation is per
+    channel after spreading both lists to the same length; changes add and
+    clamp, like COLOR."""
+
+    name = "colors"
+
+    def validate(self, value: Any) -> np.ndarray:
+        if isinstance(value, np.ndarray) and value.dtype == np.float64 and value.ndim == 2 and not value.flags.writeable:
+            return value  # already validated (e.g. an interpolated value)
+        array = np.array(value, dtype=np.float64)
+        if array.ndim == 1:
+            array = array[None, :]
+        if array.ndim != 2 or array.shape[1] != 3 or len(array) == 0:
+            raise ValueError(f"colors must be one RGB color or a list of them, got shape {array.shape}")
+        return _frozen(array)
+
+    def interpolate(self, start: np.ndarray, end: np.ndarray, alpha: float) -> np.ndarray:
+        start, end = _matched(start, end)
+        return _frozen(start + (end - start) * alpha)
+
+    def combine(self, value: np.ndarray, change: Any) -> np.ndarray:
+        value, change = _matched(value, self.validate(change))
+        return _frozen(np.clip(value + change, 0.0, 1.0))
+
+    def scale(self, change: Any, alpha: float) -> np.ndarray:
+        return _frozen(np.asarray(change, dtype=np.float64) * alpha)
+
+    def equal(self, a: np.ndarray, b: np.ndarray) -> bool:
+        return a is b or (a.shape == b.shape and bool(np.array_equal(a, b)))
+
+
+class ScalarsKind(SignalKind):
+    """One float or a list of them, as a read-only ``(K,)`` float array
+    (K >= 1): opacity and width of a Fill or Stroke, where a list is spread
+    over the path's points (e.g. a tapering width). Interpolation after
+    spreading both lists to the same length; changes add, like SCALAR."""
+
+    name = "scalars"
+
+    def validate(self, value: Any) -> np.ndarray:
+        if isinstance(value, np.ndarray) and value.dtype == np.float64 and value.ndim == 1 and not value.flags.writeable:
+            return value
+        array = np.atleast_1d(np.array(value, dtype=np.float64))
+        if array.ndim != 1 or len(array) == 0:
+            raise ValueError(f"scalars must be one number or a list of them, got shape {array.shape}")
+        return _frozen(array)
+
+    def interpolate(self, start: np.ndarray, end: np.ndarray, alpha: float) -> np.ndarray:
+        start, end = _matched(start, end)
+        return _frozen(start + (end - start) * alpha)
+
+    def combine(self, value: np.ndarray, change: Any) -> np.ndarray:
+        value, change = _matched(value, self.validate(change))
+        return _frozen(value + change)
+
+    def scale(self, change: Any, alpha: float) -> np.ndarray:
+        return _frozen(np.asarray(change, dtype=np.float64) * alpha)
+
+    def equal(self, a: np.ndarray, b: np.ndarray) -> bool:
+        return a is b or (a.shape == b.shape and bool(np.array_equal(a, b)))
+
+
 class PathKind(SignalKind):
     """Point arrays (Shape2D or Curve3D points). Interpolation is point-wise
     and needs equal shapes; aligning different paths (Manim's
@@ -183,5 +276,7 @@ SCALAR = ScalarKind()
 FACTOR = FactorKind()
 ROTATION = RotationKind()
 COLOR = ColorKind()
+COLORS = ColorsKind()
+SCALARS = ScalarsKind()
 PATH = PathKind()
 DISCRETE = DiscreteKind()

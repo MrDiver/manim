@@ -6,8 +6,19 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 
 from ..robjects import RClippingGroup, RNode
-from .node import Node, PositionMixin, RotationMixin, ScalableMixin, find, find_all
-from .signals import Signal
+from .kinds import DISCRETE
+from .node import (
+    ABS,
+    ChangeList,
+    Node,
+    PositionMixin,
+    RotationMixin,
+    ScalableMixin,
+    animatable,
+    find,
+    find_all,
+)
+from .signals import RootSignal, Signal
 
 
 class ClippingGroup(PositionMixin, RotationMixin, ScalableMixin, Node):
@@ -22,7 +33,17 @@ class ClippingGroup(PositionMixin, RotationMixin, ScalableMixin, Node):
         super().__init__(name, tags=tags)
         self.mask = mask
         self.content = content
-        self.one_sided = one_sided
+        self.one_sided = RootSignal(one_sided, DISCRETE, name=f"{self.name}.one_sided")
+        """``RClippingGroup.one_sided``: the mask only counts where its front
+        faces the camera (portals)."""
+
+    def signals(self) -> Iterator[Signal]:
+        yield from super().signals()
+        yield self.one_sided
+
+    @animatable
+    def set_one_sided(self, one_sided: bool) -> ChangeList:
+        return [(self.one_sided, ABS, one_sided)]
 
     def find(self, name: str) -> Node:
         """The one node named ``name`` in the mask or content (see Group.find)."""
@@ -44,7 +65,7 @@ class ClippingGroup(PositionMixin, RotationMixin, ScalableMixin, Node):
         mask, content = self.mask.snapshot(alphas), self.content.snapshot(alphas)
         if mask is None or content is None:
             return None  # nothing to show through
-        return RClippingGroup(mask=mask, content=content, one_sided=self.one_sided, transform=self._transform(), uid=self.uid)
+        return RClippingGroup(mask=mask, content=content, one_sided=bool(self.one_sided.value), transform=self._transform(), uid=self.uid)
 
 
 __all__ = ["ClippingGroup"]

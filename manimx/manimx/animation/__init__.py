@@ -41,7 +41,7 @@ from .constants import (
 )
 from .curve3d import Curve3D, ParametricCurve3D
 from .group import Group
-from .kinds import COLOR, DISCRETE, FACTOR, PATH, ROTATION, SCALAR, SignalKind
+from .kinds import COLOR, COLORS, DISCRETE, FACTOR, PATH, ROTATION, SCALAR, SCALARS, SignalKind
 from .light import DirectionalLight, Light, PointLight, SpotLight
 from .node import Node, PositionMixin, RotationMixin, ScalableMixin, animatable
 from .scene import SEGMENT_GAP, Cue, Emit, PreparedScene, Scene, Segment
@@ -81,6 +81,7 @@ from .worlds import World, World2D, World3D
 
 __all__ = [
     "COLOR",
+    "COLORS",
     "DEGREES",
     "DISCRETE",
     "DL",
@@ -97,6 +98,7 @@ __all__ = [
     "RIGHT",
     "ROTATION",
     "SCALAR",
+    "SCALARS",
     "SEGMENT_GAP",
     "TAU",
     "UL",
