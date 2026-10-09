@@ -271,6 +271,25 @@ Result: `state_at` −18%, also below the 1.28 ms before the new fields.
 Frames are bit-identical. `Curve3D` builds its stroke every snapshot: the
 benchmark has no `Curve3D`, so a reuse there would be unmeasured.
 
+### G. Shadow bounds once per scope
+
+`build_shadow_views()` called `scene_bounds()` for every light: a Python
+loop over every drawn object, transforming its cached box. All lights in
+one clip scope get the same bounds, and lights without shadows did not
+need them at all. Now they are computed once per scope, and only for
+lights that cast shadows.
+
+Measured on `light-show` (nine shadow-casting spots, about 300 meshes in
+the fireworks), 60 renders between 38 and 44 s, no motion blur:
+
+| | ms/render | shadow views |
+|---|---|---|
+| bounds per light | 46 | 12.6 ms |
+| bounds per scope | 36 | 2.1 ms |
+
+`example-project` (one light): 245.5 → 255.2 fps without motion blur,
+frames bit-identical.
+
 ## Where the time goes now
 
 5.89 ms per frame against 13.43 at the start (2.3× faster): `render_layers`

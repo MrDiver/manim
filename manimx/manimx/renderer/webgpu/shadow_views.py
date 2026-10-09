@@ -90,10 +90,15 @@ def build_shadow_views(
         record["params"] = params
         views.append(record)
 
+    bounds_of: dict[int, tuple[np.ndarray, float] | None] = {}  # per scope: every light in it shares the bounds
     for row, item in zip(light_rows, lights):
         light = item.light
-        bounds = scene_bounds(scene, cache, item.clip)
-        if not light.cast_shadows or bounds is None:
+        if not light.cast_shadows:
+            continue
+        if item.clip not in bounds_of:
+            bounds_of[item.clip] = scene_bounds(scene, cache, item.clip)
+        bounds = bounds_of[item.clip]
+        if bounds is None:
             continue
         center, radius = bounds
         scope = item.clip
