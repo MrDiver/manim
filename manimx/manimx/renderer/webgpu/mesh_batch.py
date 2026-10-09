@@ -6,6 +6,12 @@ surface.wgsl and lighting.wgsl):
 * ``objects``    per mesh: model and normal matrix, material, clip layer
 * ``vertices``   all mesh vertices, interleaved (cached per mesh version)
 * ``indices``    all triangle indices, relative to each mesh's first vertex
+
+Vertices and indices are the large arrays and change only with a mesh's
+version, so :class:`RetainedMeshes` keeps them in persistent arrays
+mirroring the GPU buffers, with a range per mesh, and reports the ranges
+it wrote (like retained.py does for vector records). Objects, materials
+and draws are small and rebuilt per frame.
 * ``materials``  material factors, deduplicated by material object
 * ``lights``     all lights in world space (or the default lights); their
                  ``shadow_view`` is filled in by shadow_views.py
@@ -24,8 +30,8 @@ import numpy as np
 from ...robjects import (
     PbrMaterial,
     RDirectionalLight,
-    RPointLight,
     RParticles,
+    RPointLight,
     RShape3D,
     RSpotLight,
     Texture,
@@ -36,6 +42,7 @@ from ...robjects.transform import Transform, rotation_towards
 from ..cache import RNodeDataCache
 from ..config import RenderConfig
 from ..scene_graph import NO_CLIP, FlatScene, LightItem
+from .arena import Arena
 
 MESH_OBJECT_DTYPE = np.dtype(
     [
@@ -104,6 +111,52 @@ class DrawGroup:
     draws: list[tuple[int, int, int, int, int]] = field(default_factory=list)
 
 
+class RetainedMeshes:
+    """Vertices and indices of every mesh, kept across builds.
+
+    A mesh keeps its ranges while its uid is drawn with the same mesh
+    version; a new version is written over its ranges if the sizes fit,
+    else into new ones. Meshes absent from a build free their ranges, and
+    when garbage outweighs the live data everything is packed again.
+    """
+
+    def __init__(self) -> None:
+        self._vertices = Arena(MESH_VERTEX_DTYPE)
+        self._indices = Arena(np.dtype(np.uint32))
+        self._slots: dict[int, tuple[object, int, int, int, int]] = {}
+        """uid -> (mesh version, first vertex, vertex count, first index, index count)."""
+        self._seen: set[int] = set()
+
+    def place(self, shape: RShape3D, vertices: np.ndarray) -> tuple[int, int]:
+        """``(first index, base vertex)`` of ``shape``'s mesh in the arrays."""
+        uid, version = shape.uid, shape.version("mesh")
+        self._seen.add(uid)
+        slot = self._slots.get(uid)
+        if slot is not None and slot[0] == version:
+            return slot[3], slot[1]
+        indices = shape.mesh.indices
+        old = slot or (None, 0, 0, 0, 0)
+        first_vertex = self._vertices.place(vertices, old[1], old[2])
+        first_index = self._indices.place(indices, old[3], old[4])
+        self._slots[uid] = (version, first_vertex, len(vertices), first_index, len(indices))
+        return first_index, first_vertex
+
+    def finish(self) -> tuple[np.ndarray, np.ndarray, dict[str, list[tuple[int, int]] | None]]:
+        """The arrays and their written ranges since the last call (None:
+        upload all); frees the ranges of meshes not placed since then.
+        """
+        for uid in [uid for uid in self._slots if uid not in self._seen]:
+            _, _, vertex_count, _, index_count = self._slots.pop(uid)
+            self._vertices.garbage += vertex_count
+            self._indices.garbage += index_count
+        self._seen = set()
+        dirty = {"vertices": self._vertices.ranges(), "indices": self._indices.ranges()}
+        return self._vertices.view(), self._indices.view(), dirty
+
+    def too_much_garbage(self) -> bool:
+        return any(arena.garbage > max(1 << 16, arena.used // 2) for arena in (self._vertices, self._indices))
+
+
 @dataclass(slots=True)
 class MeshBatch:
     objects: np.ndarray
@@ -116,6 +169,9 @@ class MeshBatch:
     shadow_draws: dict[int, np.ndarray]
     """Per clip scope (NO_CLIP: all), draws of the meshes that cast shadows
     for that scope's lights (texture groups do not matter)."""
+    dirty: dict[str, list[tuple[int, int]] | None] | None = None
+    """Ranges of ``vertices`` and ``indices`` written since the previous
+    batch of the same RetainedMeshes (None: upload all)."""
 
     @property
     def draws(self) -> np.ndarray:
@@ -123,12 +179,17 @@ class MeshBatch:
         return _indexed_args([draw for group in self.groups for draw in group.draws])
 
     @staticmethod
-    def build(scene: FlatScene, cache: RNodeDataCache, config: RenderConfig) -> MeshBatch:
+    def build(scene: FlatScene, cache: RNodeDataCache, config: RenderConfig, geometry: RetainedMeshes | None = None) -> MeshBatch:
+        """Pack the meshes and lights of ``scene``; ``geometry`` keeps
+        vertices and indices from earlier builds (a new one packs all).
+        """
+        if geometry is None:
+            geometry = RetainedMeshes()
         worlds, object_materials, clips = [], [], []  # per object; particles add one block each
-        vertices, indices, materials, shadow_draws = [], [], [], []
+        materials, shadow_draws = [], []
         material_slots: dict[int, int] = {}
         groups: dict[tuple[int, ...], DrawGroup] = {}
-        vertex_count = index_count = object_count = 0
+        object_count = 0
 
         light_items = scene.lights or (default_lights(config) if config.default_lights else [])
         for item in scene.items:
@@ -167,15 +228,11 @@ class MeshBatch:
 
             key = tuple(t.uid if t else 0 for t in material.textures)
             group = groups.setdefault(key, DrawGroup(material.textures))
-            draw = (len(shape.mesh.indices), count, index_count, vertex_count, first_object)
+            first_index, base_vertex = geometry.place(shape, mesh_vertices)
+            draw = (len(shape.mesh.indices), count, first_index, base_vertex, first_object)
             group.draws.append(draw)
             if shape.cast_shadows:
                 shadow_draws.append((draw, item.clip))
-
-            vertices.append(mesh_vertices)
-            indices.append(shape.mesh.indices)
-            vertex_count += len(mesh_vertices)
-            index_count += len(shape.mesh.indices)
 
         objects = np.zeros(object_count, MESH_OBJECT_DTYPE)
         if worlds:
@@ -187,10 +244,11 @@ class MeshBatch:
             objects["normal_matrix"] = normal.transpose(0, 2, 1)
             objects["material"] = np.concatenate(object_materials)
             objects["clip"] = np.concatenate(clips)
+        vertices, indices, dirty = geometry.finish()
         return MeshBatch(
             objects=objects,
-            vertices=np.concatenate(vertices) if vertices else np.zeros(0, MESH_VERTEX_DTYPE),
-            indices=np.concatenate(indices) if indices else np.zeros(0, np.uint32),
+            vertices=vertices,
+            indices=indices,
             materials=np.concatenate(materials) if materials else np.zeros(0, MATERIAL_DTYPE),
             lights=light_array(light_items, config),
             light_items=light_items,
@@ -199,6 +257,7 @@ class MeshBatch:
                 scope: _indexed_args([draw for draw, clip in shadow_draws if scene.in_scope(clip, scope)])
                 for scope in (NO_CLIP, *range(len(scene.clips)))
             },
+            dirty=dirty,
         )
 
 

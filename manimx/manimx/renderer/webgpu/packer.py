@@ -27,7 +27,7 @@ from ..cache import RNodeDataCache
 from ..config import RenderConfig
 from ..scene_graph import FlatScene
 from .frame import camera_frame
-from .mesh_batch import MeshBatch
+from .mesh_batch import MeshBatch, RetainedMeshes
 from .retained import RetainedVectors
 from .shadow_views import ShadowLayers, ShadowViews, build_shadow_views
 from .vector_batch import VectorBatch
@@ -40,9 +40,9 @@ CACHE_MAX_AGE = 1024
 class FramePacket:
     """Everything :class:`~.renderer.WGPURenderer` needs for one render.
 
-    Vector records come with the ranges changed since the previous packet
-    of the same packer (:attr:`source`); a renderer that was last fed by
-    another packer uploads them in full.
+    Vector records, mesh vertices and mesh indices come with the ranges
+    changed since the previous packet of the same packer (:attr:`source`);
+    a renderer that was last fed by another packer uploads them in full.
     """
 
     config: RenderConfig
@@ -68,6 +68,7 @@ class FramePacker:
     def __init__(self, cache: RNodeDataCache | None = None) -> None:
         self.cache = cache if cache is not None else RNodeDataCache()
         self._vectors = RetainedVectors()
+        self._meshes = RetainedMeshes()
         self._shadow_layers = ShadowLayers()
 
     def pack(self, scene: FlatScene, config: RenderConfig) -> FramePacket:
@@ -76,7 +77,9 @@ class FramePacker:
         vectors = self._vectors.build(scene, self.cache, config.camera.position)
         meshes = shadows = None
         if any(isinstance(item.obj, RShape3D) for item in scene.items):
-            meshes = MeshBatch.build(scene, self.cache, config)
+            if self._meshes.too_much_garbage():
+                self._meshes = RetainedMeshes()  # pack everything again
+            meshes = MeshBatch.build(scene, self.cache, config, self._meshes)
             # Fills in each light row's shadow view index.
             shadows = build_shadow_views(scene, meshes.light_items, meshes.lights, self.cache, config)
             self._shadow_layers.mark(scene, shadows)

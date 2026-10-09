@@ -457,6 +457,25 @@ unchanged (and comparing world matrices by identity in
 fps against 70.6 / 70.9 without, and flatten 0.64 against 0.70 ms:
 about 1%, within noise, for a cache of every node's world matrix.
 
+### O. Mesh vertices and indices retained
+
+`MeshBatch.build()` concatenated every mesh's vertices and indices into
+new arrays on every pack, and `MeshPass` uploaded them in full: in
+`PortalOrbit` about 0.96 MB per sub-frame (13,674 vertices, 75,252
+indices), 7.7 MB per frame with motion blur, although the meshes only
+move. `RetainedMeshes` keeps them in arenas mirroring the GPU buffers
+(`Arena`, now shared with `RetainedVectors` in `arena.py`), one range
+per mesh uid, rewritten only for a new mesh version. The batch reports
+the written ranges, and `MeshPass` uploads only those. Objects,
+materials and draws are small and still rebuilt.
+
+| | fps (blur 8) | fps (no blur) | mesh batch | render (GPU encoding) |
+|---|---|---|---|---|
+| before | 70.6 | 377.3 | 1.54 ms | 2.26 ms |
+| after (two runs) | 74.4 / 73.9 | 379.9 / 390.7 | 1.16 ms | 2.00 ms |
+
++5%, frames bit-identical.
+
 ## Where the time goes now
 
 5.89 ms per frame against 13.43 at the start (2.3× faster): `render_layers`

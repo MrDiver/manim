@@ -554,6 +554,7 @@ classDiagram
     RenderService "1" *-- "*" FrameComposer : one per effect tuple
     FramePacker *-- RNodeDataCache
     FramePacker *-- RetainedVectors
+    FramePacker *-- RetainedMeshes
     FramePacker ..> FramePacket : builds
     WGPURenderer ..> FramePacket : reads
     WGPURenderer *-- GPUContext
@@ -599,6 +600,7 @@ is uploaded in full.
 | `RetainedVectors.build()` for `RShape2D` and `RCurve3D` | nothing written to its `_Slot` | new world matrix: the 80-byte object entry; new `fill`/`stroke` version: its records in place; new `points` version: records moved, curves and instances rewritten |
 | `RNodeDataCache` (`tessellate_fill()` result, stroke records, center, `RShape3D` vertices) | hit | rebuilt for the new version |
 | `MeshBatch.build()`, `build_shadow_views()` | skipped while the `FlatScene` contains no `RShape3D` | run when an `RShape3D` is present |
+| `RetainedMeshes` (mesh vertices and indices) | its ranges kept, nothing written | new `mesh` version: written over its ranges if the size fits, else into new ones |
 | a light's shadow views (`build_shadow_views()`) | cached in `RNodeDataCache` by its world matrix, settings, scope bounds and config | rebuilt |
 | a shadow map layer (`ShadowLayers.mark()`) | no shadow pass while its view and its scope's casters (identity, versions, world matrix) are unchanged | rendered again |
 | `GrowableBuffer.write()` in `WGPURenderer` | nothing uploaded | only the written record ranges |
@@ -611,6 +613,7 @@ is uploaded in full.
 |---|---|---|---|
 | `RNodeDataCache` | `FramePacker` | (uid, kind) with a version | replaced on a new version; dropped after 1024 packs unused (`sweep()`), or by `RemoveObjects` / `ClearScene` |
 | `ShadowLayers` keys | `FramePacker` | layer index | the next pack with meshes |
+| `RetainedMeshes` slots | `FramePacker` | uid with the `mesh` version | freed when its `RShape3D` is missing from a pack with meshes; repacked when garbage outweighs live data |
 | `RetainedVectors._Slot` | `FramePacker` | (uid, mask scope) | freed when its `RNode` is missing from a pack; `_Arena`s repacked when garbage outweighs live records |
 | `ResourceCache.view()` | `WGPURenderer` | the texture (weak key) | its texture |
 | `ResourceCache.bind_group()` | `WGPURenderer` | the layout plus the identities of the bound resources | LRU, 512 entries |
@@ -783,8 +786,9 @@ flowchart LR
   pipelines, `GrowableBuffer`s, `RenderTargets`, `ResourceCache` and
   per-object data survive across calls, which keeps a long-lived web UI
   cheap.
-- **`RetainedVectors`** keeps records per `_Slot` in `_Arena`s that mirror
-  the GPU buffers, patches them, and uploads only changed ranges. The cost
+- **`RetainedVectors`** keeps records per `_Slot` in `Arena`s that mirror
+  the GPU buffers, patches them, and uploads only changed ranges.
+  `RetainedMeshes` does the same for mesh vertices and indices. The cost
   follows what changed, not the size of the `FlatScene`.
 - **No `RShape3D` in a frame, no 3D passes.** Most Manim content is
   `RShape2D`.

@@ -1,17 +1,35 @@
-"""The retained vector scene: patched renders must equal fresh renders."""
+"""The retained vector scene and mesh geometry: patched renders must equal
+fresh renders.
+"""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
-from manimx.userland.geometry import arc_points, rectangle_points, regular_polygon_points
-from manimx.robjects import new_uid
-from manimx.renderer import RenderConfig, RenderService
+from manimx.renderer import Camera, RenderConfig, RenderService
 from manimx.renderer.cache import RNodeDataCache
 from manimx.renderer.scene_graph import flatten_scene
 from manimx.renderer.webgpu.retained import RetainedVectors
-
-from manimx.robjects import Fill, RClippingGroup, RGroup, RShape2D, Stroke, Transform
+from manimx.robjects import (
+    Fill,
+    PbrMaterial,
+    RClippingGroup,
+    RDirectionalLight,
+    RGroup,
+    RShape2D,
+    RShape3D,
+    Stroke,
+    Transform,
+    new_uid,
+)
+from manimx.robjects.transform import rotation_towards
+from manimx.userland.geometry import (
+    arc_points,
+    box_mesh,
+    rectangle_points,
+    regular_polygon_points,
+    sphere_mesh,
+)
 
 CONFIG = RenderConfig(pixel_width=160, pixel_height=90)
 
@@ -82,3 +100,44 @@ def test_garbage_is_repacked() -> None:
     for _ in range(1, 400):  # every frame a new shape replaces the last: its ranges become garbage
         retained.build(flatten_scene(RGroup(children=[shape(circle, new_uid())])), cache, np.zeros(3))
     assert retained.arenas["stroke_points"].used < 4096 + 400 and len(retained.slots) == 1
+
+
+def mesh(make, uid, x=0.0):
+    return RShape3D(
+        mesh=make(), uid=uid, material=PbrMaterial("#e07a5f"), transform=Transform(position=(x, 0.0, 0.0)),
+        versions={"mesh": (uid, make.__name__)},
+    )  # fmt: skip
+
+
+def small_box():
+    return box_mesh(1.0, 1.0, 1.0)
+
+
+def ball():
+    return sphere_mesh(0.8)
+
+
+def test_patched_meshes_render_like_fresh_ones(renderer: RenderService) -> None:
+    config = RenderConfig(pixel_width=160, pixel_height=90, camera=Camera.look_at((0, -8, 4), (0, 0, 0)))
+    sun = RDirectionalLight(transform=Transform(rotation=rotation_towards((1, 1, -1))))
+    sequence = [
+        [mesh(small_box, A, -2), mesh(ball, B, 2)],
+        [mesh(small_box, A, -1), mesh(ball, B, 2)],  # one moves: geometry kept
+        [mesh(ball, A, -1), mesh(ball, B, 2)],  # new mesh with another size
+        [mesh(ball, B, 2)],  # one leaves
+        [mesh(ball, B, 2), mesh(small_box, C, 0)],  # one arrives
+        [mesh(small_box, C, 0), mesh(ball, B, 1)],  # order swaps
+    ]
+    for index, children in enumerate(sequence):
+        root = RGroup(children=[*children, sun])
+        np.testing.assert_array_equal(renderer.render(root, config), RenderService().render(root, config), err_msg=f"frame {index}")
+
+
+def test_unchanged_meshes_write_no_geometry() -> None:
+    from manimx.renderer.webgpu.mesh_batch import MeshBatch, RetainedMeshes
+
+    geometry, cache = RetainedMeshes(), RNodeDataCache()
+    first = MeshBatch.build(flatten_scene(RGroup(children=[mesh(small_box, A), mesh(ball, B, 2)])), cache, CONFIG, geometry)
+    moved = MeshBatch.build(flatten_scene(RGroup(children=[mesh(small_box, A, 1), mesh(ball, B, 2)])), cache, CONFIG, geometry)
+    assert first.dirty == {"vertices": None, "indices": None}  # new arrays: upload all
+    assert moved.dirty == {"vertices": [], "indices": []}

@@ -37,6 +37,7 @@ from ...robjects.rbezier_path import RBezierPath
 from ..cache import RNodeDataCache
 from ..scene_graph import NO_CLIP, DrawItem, FlatScene
 from ..tessellation import tessellate_fill
+from .arena import Arena
 from .vector_batch import (
     FILL_VERTEX_DTYPE,
     FLAG_CAMERA_FACING,
@@ -64,55 +65,6 @@ ARENAS = {
     "stroke_points": STROKE_POINT_DTYPE,
     "stroke_curves": STROKE_CURVE_DTYPE,
 }
-
-
-class _Arena:
-    """A growable record array mirroring one GPU buffer, with the record
-    ranges written since the last upload."""
-
-    def __init__(self, dtype: np.dtype) -> None:
-        self.dtype = dtype  # a subarray dtype (4 floats) must be kept as given
-        self.data = np.zeros(256, dtype)
-        self.used = 0
-        self.garbage = 0
-        self.dirty: list[tuple[int, int]] = []
-        self.reallocated = True
-
-    def allocate(self, count: int) -> int:
-        start = self.used
-        if start + count > len(self.data):
-            grown = np.zeros(max(2 * len(self.data), start + count), self.dtype)
-            grown[:start] = self.data[:start]
-            self.data = grown
-            self.reallocated = True
-        self.used += count
-        return start
-
-    def write(self, start: int, records: np.ndarray) -> None:
-        self.data[start : start + len(records)] = records
-        self.dirty.append((start, start + len(records)))
-
-    def touch(self, start: int, stop: int) -> None:
-        self.dirty.append((start, stop))
-
-    def view(self) -> np.ndarray:
-        return self.data[: self.used]
-
-    def ranges(self) -> list[tuple[int, int]] | None:
-        """Merged dirty ranges since the last call, or None for "upload
-        everything" (after a reallocation)."""
-        if self.reallocated:
-            self.reallocated = False
-            self.dirty = []
-            return None
-        merged: list[tuple[int, int]] = []
-        for start, stop in sorted(self.dirty):
-            if merged and start <= merged[-1][1]:
-                merged[-1] = (merged[-1][0], max(merged[-1][1], stop))
-            else:
-                merged.append((start, stop))
-        self.dirty = []
-        return merged
 
 
 @dataclass(eq=False)
@@ -145,7 +97,7 @@ class _Slot:
 class RetainedVectors:
     """Persistent vector records of one renderer, see the module docs."""
 
-    arenas: dict[str, _Arena] = field(default_factory=lambda: {name: _Arena(dtype) for name, dtype in ARENAS.items()})
+    arenas: dict[str, Arena] = field(default_factory=lambda: {name: Arena(dtype) for name, dtype in ARENAS.items()})
     slots: dict[tuple[int, int], _Slot] = field(default_factory=dict)
     free_objects: list[int] = field(default_factory=list)
 
@@ -288,16 +240,7 @@ class RetainedVectors:
         return self.arenas[arena].allocate(count)
 
     def _place(self, arena: str, records: np.ndarray, old_first: int, old_count: int) -> int:
-        """Write ``records`` over the old range if they fit exactly, else into
-        a new range (the old one becomes garbage)."""
-        target = self.arenas[arena]
-        if old_count == len(records) and old_count > 0:
-            target.write(old_first, records)
-            return old_first
-        target.garbage += old_count
-        first = target.allocate(len(records))
-        target.write(first, records)
-        return first
+        return self.arenas[arena].place(records, old_first, old_count)
 
     def _release_geometry(self, slot: _Slot) -> None:
         """New points: everything built from them is rebuilt (in place when

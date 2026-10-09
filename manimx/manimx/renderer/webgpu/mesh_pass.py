@@ -17,7 +17,13 @@ from wgpu.backends.wgpu_native.extras import multi_draw_indexed_indirect
 
 from ...robjects import Texture
 from .frame import FRAME_DTYPE
-from .gpu import DEPTH_FORMAT, GBUFFER_FORMATS, SHADOW_FORMAT, GPUContext, GrowableBuffer
+from .gpu import (
+    DEPTH_FORMAT,
+    GBUFFER_FORMATS,
+    SHADOW_FORMAT,
+    GPUContext,
+    GrowableBuffer,
+)
 from .mesh_batch import DRAW_INDEXED_DTYPE, MeshBatch, TextureSet
 
 _STORAGE = wgpu.BufferUsage.STORAGE
@@ -66,12 +72,17 @@ class MeshPass:
 
     # -- per frame ----------------------------------------------------------
 
-    def prepare(self, batch: MeshBatch, mask_layers: wgpu.GPUTextureView) -> None:
-        """Upload the frame's meshes and their materials."""
+    def prepare(self, batch: MeshBatch, mask_layers: wgpu.GPUTextureView, full_upload: bool = False) -> None:
+        """Upload the frame's meshes and their materials.
+
+        Vertices and indices are written in the ranges the batch reports
+        (all of them with ``full_upload``, for buffers holding another
+        packer's data); objects and materials always in full.
+        """
         grown = False
         for name, buffer in self._buffers.items():
-            grown |= buffer.upload(getattr(batch, name))
-        self._indices.upload(batch.indices)
+            grown |= self._write(buffer, batch, name, full_upload)
+        self._write(self._indices, batch, "indices", full_upload)
         # Material groups' draws first, then the shadow casters per scope.
         self._indirect.upload(np.concatenate([batch.draws, *batch.shadow_draws.values()]))
         self._shadows, first = {}, len(batch.draws)
@@ -101,6 +112,12 @@ class MeshPass:
         # Forget textures and bind groups no longer used by any mesh.
         self._textures = {k: v for k, v in self._textures.items() if k in used_textures}
         self._material_groups = {k: v for k, v in self._material_groups.items() if k in used_groups}
+
+    @staticmethod
+    def _write(buffer: GrowableBuffer, batch: MeshBatch, name: str, full_upload: bool) -> bool:
+        data = getattr(batch, name)
+        ranges = None if full_upload or batch.dirty is None else batch.dirty.get(name)
+        return buffer.upload(data) if ranges is None else buffer.write(data, ranges)
 
     def draw(self, render_pass: wgpu.GPURenderPassEncoder, sample_count: int) -> None:
         if not self._draw_groups:

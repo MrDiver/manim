@@ -365,6 +365,7 @@ flowchart LR
 | What | Kept by | Key | Dropped |
 |---|---|---|---|
 | derived data (tessellations, stroke topology and points, centers, mesh vertices) | `RNodeDataCache` (owned by `FramePacker`) | (uid, kind) + version | on a new version, after 1024 unused renders, or by command |
+| mesh vertices and indices on the GPU | `RetainedMeshes` (`mesh_batch.py`, owned by `FramePacker`) | uid + mesh version | when the mesh is absent from a pack with meshes; repacked when garbage outweighs live data |
 | packed vector records on the GPU | `RetainedVectors` (`retained.py`, owned by `FramePacker`) | (uid, mask role) | when the shape is absent from a render; arenas repacked when garbage outweighs live records |
 | shadow views of a light | `RNodeDataCache` (light uid) | world matrix, light settings, scope bounds, config | when any of them changes |
 | shadow map layers | `ShadowLayers` (`shadow_views.py`) decides, `ShadowPass` keeps the depth | the layer's frame record and its scope's casters (identity, versions, world matrix) | rendered again when the key changes, the maps are recreated, or another packer fed the renderer |
@@ -395,6 +396,7 @@ than a stale cache.
 | `webgpu/composer.py` | `FrameComposer`: sub-frames, effects, compositing |
 | `webgpu/vector_batch.py`, `vector_pass.py` | 2D shapes and curves: record layout, draw lists, the pass |
 | `webgpu/retained.py` | `RetainedVectors`: per-object slots in persistent arenas, patched per render |
+| `webgpu/arena.py` | `Arena`: growable record arrays mirroring GPU buffers, with written ranges |
 | `webgpu/mesh_batch.py`, `mesh_pass.py` | meshes, materials, lights (geometry pass) |
 | `webgpu/lighting_pass.py` | deferred lighting |
 | `webgpu/shadow_views.py`, `shadow_pass.py` | shadow map views and rendering |
