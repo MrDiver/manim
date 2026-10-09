@@ -74,12 +74,15 @@ def render_all(timeline, settings, times, profile: bool = False) -> tuple[float,
 
 
 def reference_frames(project: Project, timeline) -> np.ndarray:
-    output = dataclasses.replace(project.output, width=320, height=180)
-    settings = project.render_settings(output)
+    small = copy.deepcopy(project.settings)
+    small.output.width, small.output.height = 320, 180
+    settings = project.render_settings(small)
     times = np.linspace(0, timeline.duration, 48)
     renderer_ = WGPURenderer()
     composer = FrameComposer(renderer_, settings.effects)
-    return np.stack([composer.compose(timeline.frame_at, dataclasses.replace(settings.config, time=float(t))) for t in times])
+    frames = np.stack([composer.compose(timeline.frame_at, dataclasses.replace(settings.config, time=float(t))) for t in times])
+    renderer_.context.device.destroy()  # the adapter refuses a fourth device while this one is alive
+    return frames
 
 
 def main() -> None:
