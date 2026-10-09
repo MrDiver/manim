@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, replace
 from typing import TypeAlias
 
@@ -81,6 +82,23 @@ class Transform:
     def scaled(self, factor: float | object) -> Transform:
         factors = np.broadcast_to(np.asarray(factor, dtype=np.float64), (3,))
         return replace(self, scale=tuple(np.asarray(self.scale) * factors))
+
+
+def rotation_towards(direction: tuple[float, float, float]) -> Quaternion:
+    """Rotation turning local ``-z`` onto ``direction`` (shortest arc)."""
+    target = np.asarray(direction, dtype=np.float64)
+    length = np.linalg.norm(target)
+    if length == 0.0:
+        raise ValueError("direction must not be zero")
+    target /= length
+    forward = np.array([0.0, 0.0, -1.0])
+    axis = np.cross(forward, target)
+    cosine = float(np.dot(forward, target))
+    if np.linalg.norm(axis) < 1e-9:
+        # Already aligned, or exactly opposite: turn half way around x.
+        return quaternion.one if cosine > 0 else quaternion.quaternion(0.0, 1.0, 0.0, 0.0)
+    angle = math.atan2(float(np.linalg.norm(axis)), cosine)
+    return quaternion.from_rotation_vector(axis / np.linalg.norm(axis) * angle)
 
 
 def apply_matrix(matrix: np.ndarray, points: np.ndarray) -> np.ndarray:

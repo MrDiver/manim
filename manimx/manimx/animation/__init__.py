@@ -23,18 +23,60 @@ from .animations import (
 from .audio import Sound, SoundEvent, mix, write_wav
 from .camera import Camera, View
 from .clipping_group import ClippingGroup
-from .constants import DEGREES, DL, DOWN, DR, IN, LEFT, ORIGIN, OUT, PI, RIGHT, TAU, UL, UP, UR
-from .kinds import COLOR, DISCRETE, FACTOR, PATH, ROTATION, SCALAR, SignalKind
+from .constants import (
+    DEGREES,
+    DL,
+    DOWN,
+    DR,
+    IN,
+    LEFT,
+    ORIGIN,
+    OUT,
+    PI,
+    RIGHT,
+    TAU,
+    UL,
+    UP,
+    UR,
+)
+from .curve3d import Curve3D, ParametricCurve3D
 from .group import Group
+from .kinds import COLOR, DISCRETE, FACTOR, PATH, ROTATION, SCALAR, SignalKind
+from .light import DirectionalLight, Light, PointLight, SpotLight
 from .node import Node, PositionMixin, RotationMixin, ScalableMixin, animatable
-from .shape2d import Circle, Dot, Polyline, Rectangle, RegularPolygon, Shape2D, Square, Triangle
 from .scene import SEGMENT_GAP, Cue, Emit, PreparedScene, Scene, Segment
+from .shape2d import (
+    Circle,
+    Dot,
+    Polyline,
+    Rectangle,
+    RegularPolygon,
+    Shape2D,
+    Square,
+    Triangle,
+)
+from .shape3d import Box, ParametricSurface, Shape3D, Sphere, Torus
+from .signal_tracks import Change, Entry, Placement, SignalTrack
+from .signals import (
+    DerivedSignal,
+    RootSignal,
+    Signal,
+    TimeSignals,
+    Vector3Signal,
+    derive,
+)
 from .simulation import Simulation
-from .signals import DerivedSignal, RootSignal, Signal, TimeSignals, Vector3Signal, derive
 from .snapshot import version_token
 from .time_map import MonotoneMap
-from .timing import NEVER, Clip, InvalidCue, Ramp, SegmentTiming, Timeline, UnresolvedEvents
-from .signal_tracks import Change, Entry, Placement, SignalTrack
+from .timing import (
+    NEVER,
+    Clip,
+    InvalidCue,
+    Ramp,
+    SegmentTiming,
+    Timeline,
+    UnresolvedEvents,
+)
 from .worlds import World, World2D, World3D
 
 __all__ = [
@@ -62,6 +104,7 @@ __all__ = [
     "UR",
     "Animation",
     "AnimationBuilder",
+    "Box",
     "Camera",
     "Change",
     "ChangeSignals",
@@ -69,7 +112,9 @@ __all__ = [
     "Clip",
     "ClippingGroup",
     "Cue",
+    "Curve3D",
     "DerivedSignal",
+    "DirectionalLight",
     "Dot",
     "Emit",
     "Entry",
@@ -79,9 +124,13 @@ __all__ = [
     "GrowFromCenter",
     "Indicate",
     "InvalidCue",
-    "Node",
+    "Light",
     "MonotoneMap",
+    "Node",
+    "ParametricCurve3D",
+    "ParametricSurface",
     "Placement",
+    "PointLight",
     "Polyline",
     "PositionMixin",
     "PreparedScene",
@@ -89,14 +138,15 @@ __all__ = [
     "Rectangle",
     "RegularPolygon",
     "RootSignal",
-    "RotationMixin",
     "Rotate",
+    "RotationMixin",
     "ScalableMixin",
     "Scene",
     "Segment",
     "SegmentTiming",
     "SetValue",
     "Shape2D",
+    "Shape3D",
     "ShrinkToCenter",
     "Signal",
     "SignalChange",
@@ -105,10 +155,13 @@ __all__ = [
     "Simulation",
     "Sound",
     "SoundEvent",
+    "Sphere",
+    "SpotLight",
     "Square",
     "Target",
     "TimeSignals",
     "Timeline",
+    "Torus",
     "Triangle",
     "UnresolvedEvents",
     "Vector3Signal",

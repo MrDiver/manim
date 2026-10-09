@@ -16,7 +16,7 @@ import numpy as np
 from ..objects import Fill, RNode, RShape2D, Stroke
 from ..objects.geometry import arc_points, rectangle, regular_polygon
 from ..utils.color import WHITE, ParsableManimColor
-from .kinds import COLOR, PATH
+from .kinds import COLOR, DISCRETE, PATH
 from .node import (
     ABS,
     ChangeList,
@@ -49,6 +49,7 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         stroke_color: ParsableManimColor | None = None,
         stroke_width: float = 4.0,
         stroke_opacity: float = 1.0,
+        cast_shadows: bool = True,
         tags: Iterable[str] = (),
     ) -> None:
         super().__init__(name, tags=tags)
@@ -59,10 +60,11 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         self.stroke_color = RootSignal(_rgb(stroke_color or color), COLOR, name=f"{prefix}.stroke_color")
         self.stroke_width = RootSignal(stroke_width, name=f"{prefix}.stroke_width")
         self.stroke_opacity = RootSignal(stroke_opacity, name=f"{prefix}.stroke_opacity")
+        self.cast_shadows = RootSignal(cast_shadows, DISCRETE, name=f"{prefix}.cast_shadows")
 
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()
-        yield from (self.points, self.fill_color, self.fill_opacity, self.stroke_color, self.stroke_width, self.stroke_opacity)
+        yield from (self.points, self.fill_color, self.fill_opacity, self.stroke_color, self.stroke_width, self.stroke_opacity, self.cast_shadows)
 
     @animatable
     def set_fill(self, color: ParsableManimColor | None = None, opacity: float | None = None) -> ChangeList:
@@ -88,6 +90,11 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
     def set_color(self, color: ParsableManimColor) -> ChangeList:
         return [(self.fill_color, ABS, _rgb(color)), (self.stroke_color, ABS, _rgb(color))]
 
+    @animatable
+    def set_cast_shadows(self, cast_shadows: bool) -> ChangeList:
+        """Whether this shape blocks light for lit meshes behind it."""
+        return [(self.cast_shadows, ABS, cast_shadows)]
+
     def snapshot(self, alphas: tuple[Signal, ...] = ()) -> RNode | None:
         if self._hidden():
             return None
@@ -102,6 +109,7 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
                 opacity=min(1.0, max(0.0, self.stroke_opacity.value * alpha)),
                 width=max(0.0, self.stroke_width.value),
             ),
+            cast_shadows=bool(self.cast_shadows.value),
             transform=self._transform(),
             versions={
                 "points": version_token(self.points),

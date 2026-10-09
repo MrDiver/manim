@@ -40,7 +40,7 @@ def test_transform_parts_come_from_the_mixins() -> None:
     snapshot = square.snapshot()
     assert isinstance(snapshot, RShape2D) and snapshot.uid == square.uid
     assert snapshot.transform.position == (0.0, 1.0, 0.0) and snapshot.transform.scale == (2.0, 2.0, 2.0)
-    assert len(list(square.signals())) == 2 + 3 + 1 + 3 + 6  # node, position, rotation, scale, shape
+    assert len(list(square.signals())) == 2 + 3 + 1 + 3 + 7  # node, position, rotation, scale, shape
 
 
 def test_a_missing_part_is_the_identity_and_has_no_signals() -> None:

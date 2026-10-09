@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -156,6 +158,32 @@ def torus_mesh(major_radius: float = 1.0, minor_radius: float = 0.35, segments: 
     positions = major_radius * center + minor_radius * normals
     uvs = np.stack([u_grid / math.tau, v_grid / math.tau], axis=-1)
     return MeshData(positions.reshape(-1, 3), _grid_indices(sides, segments, flip=True), normals.reshape(-1, 3), uvs.reshape(-1, 2))
+
+
+def surface_mesh(
+    function: Callable[[float, float], Any],
+    u_range: tuple[float, float] = (0.0, 1.0),
+    v_range: tuple[float, float] = (0.0, 1.0),
+    resolution: tuple[int, int] = (32, 32),
+) -> MeshData:
+    """Parametric surface through ``function(u, v)`` (a 3D point), sampled
+    on a grid of ``resolution`` cells in u and v, with smooth normals and
+    UVs from the normalized parameters.
+
+    Surfaces of the same resolution share their triangles, so their
+    vertices correspond one to one.
+    """
+    columns, rows = resolution
+    if columns < 1 or rows < 1:
+        raise ValueError(f"a surface needs at least one cell per direction, got {resolution}")
+    u = np.linspace(u_range[0], u_range[1], columns + 1)
+    v = np.linspace(v_range[0], v_range[1], rows + 1)
+    positions = np.array([function(float(a), float(b)) for b in v for a in u], dtype=np.float64)
+    if positions.shape != ((columns + 1) * (rows + 1), 3):
+        raise ValueError("the surface function must return a 3D point")
+    v_grid, u_grid = np.meshgrid(np.linspace(0.0, 1.0, rows + 1), np.linspace(0.0, 1.0, columns + 1), indexing="ij")
+    uvs = np.stack([u_grid, v_grid], axis=-1).reshape(-1, 2)
+    return MeshData(positions, _grid_indices(rows, columns, flip=True), uvs=uvs)
 
 
 def _grid_indices(rows: int, columns: int, flip: bool = False) -> np.ndarray:

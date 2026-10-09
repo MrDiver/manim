@@ -17,11 +17,10 @@ from dataclasses import dataclass
 from typing import Any, Self
 
 import numpy as np
-import quaternion
 
 from ..utils.color import WHITE, ParsableManimColor
 from .rnode import RNode
-from .transform import Quaternion, Transform
+from .transform import Transform, rotation_towards
 
 
 @dataclass(slots=True, eq=False)
@@ -58,7 +57,7 @@ class RDirectionalLight(RLight):
     @classmethod
     def aimed(cls, direction: tuple[float, float, float], **kwargs: Any) -> Self:
         """A light shining in world ``direction``."""
-        return cls(transform=Transform(rotation=_rotation_towards(direction)), **kwargs)
+        return cls(transform=Transform(rotation=rotation_towards(direction)), **kwargs)
 
 
 @dataclass(slots=True, eq=False)
@@ -100,22 +99,5 @@ class RSpotLight(RLight):
     ) -> Self:
         """A spot light at ``position`` shining at ``target``."""
         direction = np.subtract(target, position)
-        rotation = _rotation_towards(tuple(direction))
+        rotation = rotation_towards(tuple(direction))
         return cls(transform=Transform(position=position, rotation=rotation), **kwargs)
-
-
-def _rotation_towards(direction: tuple[float, float, float]) -> Quaternion:
-    """Rotation turning local ``-z`` onto ``direction`` (shortest arc)."""
-    target = np.asarray(direction, dtype=np.float64)
-    length = np.linalg.norm(target)
-    if length == 0.0:
-        raise ValueError("light direction must not be zero")
-    target /= length
-    forward = np.array([0.0, 0.0, -1.0])
-    axis = np.cross(forward, target)
-    cosine = float(np.dot(forward, target))
-    if np.linalg.norm(axis) < 1e-9:
-        # Already aligned, or exactly opposite: turn half way around x.
-        return quaternion.one if cosine > 0 else quaternion.quaternion(0.0, 1.0, 0.0, 0.0)
-    angle = math.atan2(float(np.linalg.norm(axis)), cosine)
-    return quaternion.from_rotation_vector(axis / np.linalg.norm(axis) * angle)

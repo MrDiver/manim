@@ -72,7 +72,7 @@ flowchart LR
 | Package | Contents | Depends on |
 |---|---|---|
 | `manimx.objects` | `RNode` and its subclasses `RGroup`, `RClippingGroup`, `RBezierPath` (→ `RShape2D`, `RCurve3D`), `RShape3D`, `RLight` (→ `RDirectionalLight`, `RPointLight`, `RSpotLight`); `Transform`, `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`; `new_uid()`, `versioned()` | numpy |
-| `manimx.animation` | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses, `PositionMixin`, `RotationMixin`, `ScalableMixin`; `Animation` and its subclasses; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound` | objects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
+| `manimx.animation` | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses (`Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D`, `Light` → `DirectionalLight`, `PointLight`, `SpotLight`; `animation.Camera`), `PositionMixin`, `RotationMixin`, `ScalableMixin`; `Animation` and its subclasses; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound` | objects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
 | `manimx.renderer` | `flatten_scene()` → `FlatScene`; `tessellate_fill()`; `RNodeDataCache`; `RenderConfig`, `renderer.Camera`, `ViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `RemoveObjects`, `ClearScene` | objects |
 | `manimx.renderer.webgpu` | `WGPURenderer`, `FrameComposer`, `RetainedVectors`, `VectorBatch`, `MeshBatch`, `VectorPass`, `MeshPass`, `LightingPass`, `ShadowPass`, `RenderTargets`, `RenderLayers`, `ResourceCache`, `GPUContext` | wgpu |
 | `manimx.drivers` | `render()`, `FramePipeline`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation |
@@ -184,6 +184,21 @@ classDiagram
         mask, content
         find(name), find_all(name, tags)
     }
+    class Curve3D {
+        points: RootSignal
+        stroke_color, stroke_width, stroke_opacity
+        cast_shadows
+    }
+    class Shape3D {
+        mesh: RootSignal
+        base_color, opacity, metallic, roughness
+        emissive, emissive_strength
+        cast_shadows
+    }
+    class Light {
+        color, intensity, size
+        cast_shadows
+    }
     class Camera {
         frame_height
         field_of_view
@@ -200,6 +215,15 @@ classDiagram
     Shape2D <|-- Circle
     Shape2D <|-- Square
     Shape2D <|-- Polyline
+    Node <|-- Curve3D
+    Node <|-- Shape3D
+    Node <|-- Light
+    Shape3D <|-- Sphere
+    Shape3D <|-- Box
+    Shape3D <|-- ParametricSurface
+    Light <|-- DirectionalLight
+    Light <|-- PointLight
+    Light <|-- SpotLight
 
     class Animation {
         run_time
@@ -238,13 +262,17 @@ classDiagram
     Animation --> Node : references (no copies)
 ```
 
-`Group`, `ClippingGroup` and `Camera` in this diagram are the
-`manimx.animation` classes.
+`Group`, `ClippingGroup`, `Camera` and the lights in this diagram are the
+`manimx.animation` classes. The mixins are left out of the diagram: every
+`Node` subclass takes all three, except `Camera` (position and rotation),
+`DirectionalLight` (rotation), `PointLight` (position) and `SpotLight`
+(position and rotation).
 
 - **The scene tree is parallel to the render tree.** Every `Node` class
-  snapshots to exactly one R class (`Shape2D` → `RShape2D`, `Group` →
-  `RGroup`, `ClippingGroup` → `RClippingGroup`); `Camera` snapshots to
-  nothing. Only `Group` and `ClippingGroup` have children, so `family()`
+  snapshots to exactly one R class (`Shape2D` → `RShape2D`, `Curve3D` →
+  `RCurve3D`, `Shape3D` → `RShape3D`, `DirectionalLight` →
+  `RDirectionalLight` and so on, `Group` → `RGroup`, `ClippingGroup` →
+  `RClippingGroup`); `Camera` snapshots to nothing. Only `Group` and `ClippingGroup` have children, so `family()`
   only descends through them.
 - **The transform comes in parts.** `PositionMixin`, `RotationMixin` and
   `ScalableMixin` each add one signal and the changes that use it, and a
@@ -300,8 +328,7 @@ flowchart TD
   `PreparedScene` backs only one `Clip`.
 - **Purity:** the result of `state_at(t)` depends only on `t`.
 - **`Node.snapshot()`** builds new `RNode`s on every call
-  (`Shape2D` → `RShape2D`, `animation.Group` → `RGroup`,
-  `animation.ClippingGroup` → `RClippingGroup`, `animation.Camera` →
+  (one R class per class, see section 4.2; `animation.Camera` →
   nothing). Each keeps the `Node.uid` and carries version tokens from
   `version_token()` (section 7).
 
@@ -428,10 +455,20 @@ cache correct:
    `Node.uid`. `new_uid()` never repeats within a process.
 2. **Versions:** fields declared with `versioned()` (`RBezierPath.points`,
    `RBezierPath.stroke`, `RShape2D.fill`, `RShape3D.mesh`) have a token,
-   `RNode.version(name)`. `Shape2D.snapshot()` passes tokens from
-   `version_token()` of the `RootSignal`s, so equal tokens mean equal
-   values. `RNode.transform` is not versioned; it is compared
-   directly.
+   `RNode.version(name)`. Every `snapshot()` passes tokens from
+   `version_token()` of the `RootSignal`s a field is computed from, so
+   equal tokens mean equal values:
+   - `Shape2D`: `points` from `points`; `fill` and `stroke` from their
+     color, opacity and width signals plus every `alpha` above;
+   - `Curve3D`: `points` and `stroke` the same way;
+   - `Shape3D`: `mesh` from the `mesh` signal (a `DISCRETE` signal holding
+     a `MeshData`, whose version changes only when another `MeshData` is
+     set); `material` from the six factor signals plus every `alpha`.
+     Moving, turning or scaling a `Shape3D` therefore keeps both tokens,
+     and `MeshBatch` keeps its interleaved vertices;
+   - lights have no versioned fields.
+
+   `RNode.transform` is not versioned; it is compared directly.
 3. **Immutability:** an `RNode` is never changed after `state_at`
    returns it, and versioned arrays are read-only.
 4. **Purity:** `state_at` has no side effects on its result.
@@ -615,6 +652,7 @@ flowchart LR
 | Instance | Created by | Owned by | Lives until | Changes? |
 |---|---|---|---|---|
 | `Node` and its signals | `Scene.construct()` | the `PreparedScene` (`roots`, `tracks`) | the `PreparedScene` | signal values on every evaluation |
+| `MeshData`, `PbrMaterial`, `Texture` | user code, mesh helpers (`box_mesh()`, `surface_mesh()`, ...), `load_gltf()` | shared: a `Shape3D`'s `mesh` signal and constant material, and the `RShape3D` snapshots | as long as anything references them | no (immutable) |
 | `SceneCompiler` | `Scene.prepare()` | a ContextVar while `construct()` runs | the end of `prepare()` | yes |
 | `PreparedScene` | `Scene.prepare()` (kept in `Scene._prepared`) | one `Clip` | the `Timeline` | only through evaluation |
 | `SignalTrack`, `Placement`, `Entry` | `Scene.play()`, `authoring.change()` | the `PreparedScene` | the `PreparedScene` | `SignalTrack.refresh()` after edits |
@@ -718,6 +756,11 @@ flowchart LR
 - `Sound` (mono and stereo, files and arrays);
 - `drivers.render()` with worker processes;
 - `Project` and the CLI, `example-project/`, GETTING_STARTED.md;
+- 3D scene nodes: `Curve3D` (`ParametricCurve3D`), `Shape3D` (`Box`,
+  `Sphere`, `Torus`, `ParametricSurface`), `DirectionalLight`,
+  `PointLight`, `SpotLight`; `cast_shadows` as a `DISCRETE` signal on every
+  leaf. Known gap: the deferred mesh pass ignores `PbrMaterial.opacity`,
+  so fading a `Shape3D` (its `alpha` or `opacity`) does not show yet;
 - performance: 74.5 → 169.8 fps on `example-project/`, 2.3× faster than the
   baseline.
 
