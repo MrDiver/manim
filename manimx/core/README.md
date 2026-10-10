@@ -28,7 +28,19 @@ Python first, then the module.
 | `contribution.rs` | what one animation does to one signal at a progress | `Animation.contribution()`, animation/contributions.py |
 | `rates.rs` | rate functions | animation/rates.py |
 | `value.rs` | signal values and the operations of their kinds | animation/kinds.py |
-| `quat.rs` | quaternion arithmetic as numpy-quaternion does it | numpy-quaternion |
+| `graph.rs` | `SceneGraph`: nodes, nesting, which slot feeds which field; flattening to drawable leaves | `Node.snapshot()`, `SceneFlattener` (renderer/scene_graph.py) |
+| `packer.rs` | `Packer`: a scene graph and a `FrameState` in, the records of a packet out | `FramePacker` (renderer/webgpu/packer.py), wrapped by `CorePacker` (core_packer.py) |
+| `vectors.rs` | retained records of `Shape2D` and `Curve3D` | `RetainedVectors` (renderer/webgpu/retained.py) |
+| `meshes.rs` | records of `Shape3D` and `Particles` | `MeshBatch`, `RetainedMeshes` (mesh_batch.py) |
+| `lights.rs` | light records, the default light | `light_array`, `default_lights` (mesh_batch.py) |
+| `shadows.rs` | shadow views, scene bounds, which shadow layers changed | shadow_views.py, `frame_data` (frame.py) |
+| `arena.rs` | growable record arrays mirroring GPU buffers, in numpy byte arrays | `Arena` (renderer/webgpu/arena.py) |
+| `records.rs` | the GPU record structs (bytemuck) | the dtypes of vector_batch.py, mesh_batch.py, frame.py |
+| `callbacks.rs` | the Python functions called once per version | renderer/core_callbacks.py |
+
+Math is [glam](https://docs.rs/glam) (`DMat4`, `DQuat`, `DVec3` in f64,
+converted to f32 only when a record is written); records are `#[repr(C)]`
+structs written with [bytemuck](https://docs.rs/bytemuck).
 
 ## Rules
 

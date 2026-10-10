@@ -7,7 +7,8 @@
 
 use pyo3::prelude::*;
 
-use crate::quat;
+use glam::{DQuat, DVec3};
+
 use crate::value::{Kind, Value};
 
 pub enum Contribution {
@@ -67,9 +68,10 @@ impl Contribution {
                 }))
             }
             Contribution::Power { base } => Ok(Value::Scalar(base.powf(alpha))),
-            Contribution::Turn { axis, angle } => {
-                Ok(Value::Quat(quat::from_axis_angle(*axis, angle * alpha)))
-            }
+            Contribution::Turn { axis, angle } => Ok(Value::Quat(DQuat::from_axis_angle(
+                DVec3::from(*axis).normalize(),
+                angle * alpha,
+            ))),
             Contribution::Keyframes(keyframes) => keyframes.at(py, kind, alpha),
             Contribution::Python { animation, signal } => {
                 let result = animation

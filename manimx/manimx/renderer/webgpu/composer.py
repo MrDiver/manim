@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import wgpu
 
+from ...robjects.planned_frame import PlannedFrame
 from ...robjects import RClippingGroup, RGroup, RNode
 from ..config import Camera, Frame, RenderConfig, ViewState
 from ..effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap
@@ -272,6 +273,8 @@ class _TreeKeys:
     def _node(self, node: RNode | None) -> object:
         if node is None:
             return None
+        if isinstance(node, PlannedFrame):
+            return ("planned", id(node.graph), node.key)  # the graph is held by its plan
         entry = self._current.get(id(node)) or self._previous.get(id(node))
         if entry is None or entry[0] is not node:
             placement = (node.transform, node.alpha, node.visible)

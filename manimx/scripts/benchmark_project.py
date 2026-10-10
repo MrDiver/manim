@@ -3,6 +3,7 @@
     uv run python scripts/benchmark_project.py tests/projects/benchmark
     uv run python scripts/benchmark_project.py tests/projects/benchmark --save-reference /tmp/ref.npz
     uv run python scripts/benchmark_project.py tests/projects/benchmark --check-reference /tmp/ref.npz
+    uv run python scripts/benchmark_project.py tests/projects/benchmark --core
 
 Renders the project's timeline in one process with the project's output
 settings (and once without motion blur), and prints:
@@ -14,7 +15,9 @@ settings (and once without motion blur), and prints:
 
 ``--save-reference`` / ``--check-reference`` store or compare a set of
 small frames across the timeline, so optimizations can be checked to be
-bit-identical. Results go to PERFORMANCE.md by hand, one row per step.
+bit-identical. ``--core`` renders the timeline's frames through the core
+(PlannedTimeline, see CORE.md) instead of RNode trees. Results go to
+PERFORMANCE.md by hand, one row per step.
 """
 
 from __future__ import annotations
@@ -27,16 +30,18 @@ import time
 from collections import defaultdict
 
 import numpy as np
-from manimx.animation import timing
+from manimx.animation import plan, timing
 from manimx.drivers.pipeline import FramePipeline
 from manimx.project import Project
 from manimx.renderer import FrameComposer, RenderService, SceneFlattener
 from manimx.renderer.webgpu import composer as composer_module
-from manimx.renderer.webgpu import mesh_batch, packer, renderer, retained
+from manimx.renderer.webgpu import core_packer, mesh_batch, packer, renderer, retained
 
 # Stages of the render chain and their parts (indented).
 STAGES = [
     (timing.Timeline, "frame_at", "frame_at (evaluate + snapshot)"),
+    (plan.PlannedTimeline, "frame_at", "frame_at (core: evaluate)"),
+    (core_packer.CorePacker, "pack", "pack (core: flatten + pack)"),
     (SceneFlattener, "flatten", "flatten"),
     (packer.FramePacker, "pack", "pack (all)"),
     (retained.RetainedVectors, "build", "  vector records (retained)"),
@@ -93,11 +98,14 @@ def main() -> None:
     parser.add_argument("project")
     parser.add_argument("--save-reference")
     parser.add_argument("--check-reference")
+    parser.add_argument("--core", action="store_true", help="render through the core (PlannedTimeline)")
     args = parser.parse_args()
 
     project = Project.load(args.project)
     started = time.perf_counter()
     timeline = project.build_timeline()
+    if args.core:
+        timeline = plan.PlannedTimeline(timeline)
     print(f"prepare: {time.perf_counter() - started:.2f} s")
 
     if args.save_reference or args.check_reference:

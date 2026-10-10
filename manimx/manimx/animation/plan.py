@@ -27,10 +27,18 @@ compared value by value (tests/test_plan.py).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 from .. import _core
+from ..renderer.config import Camera as RenderCamera
+from ..renderer.config import ViewState
+from ..robjects import Transform
+from ..robjects.planned_frame import PlannedFrame
+from .clipping_group import ClippingGroup
 from .contributions import By, Contribution, Keyframes, Power, Ramp, To, Turn
+from .curve3d import Curve3D
+from .group import Group
 from .kinds import (
     ArrayKind,
     ColorKind,
@@ -43,9 +51,13 @@ from .kinds import (
     ScalarsKind,
     SignalKind,
 )
-from .node import Offset
+from .light import DirectionalLight, PointLight, SpotLight
+from .node import Node, Offset, PositionMixin, RotationMixin, ScalableMixin
+from .particles import Particles
 from .rates import linear, smooth
 from .scene import PreparedScene
+from .shape2d import Shape2D
+from .shape3d import Shape3D
 from .signal_tracks import Change, Entry, RateFunction, SignalTrack
 from .signals import DerivedSignal, Signal
 
@@ -84,6 +96,10 @@ class ScenePlan:
         for signal in self._signals:
             if isinstance(signal, DerivedSignal):
                 self.evaluator.add_derived(self.slot(signal), [self.slot(i) for i in signal.inputs], _derivation(signal))
+        self.graph = self._scene_graph()
+        """The core's scene graph, or None when a node is of a class the
+        core cannot draw (its scene is then drawn from snapshots)."""
+        self._render_slots = sorted({self._slots[s.id] for root in scene.roots for node in root.family() for s in node.signals()})
 
     @property
     def signals(self) -> list[Signal]:
@@ -107,6 +123,49 @@ class ScenePlan:
         """Increases exactly when the value of ``signal`` changes."""
         return self.evaluator.version(self.slot(signal))
 
+    def frame_at(self, t: float, global_time: float | None = None) -> ViewState:
+        """The view at compiled time ``t``: a :class:`PlannedFrame` and the
+        scene's camera (what ``PreparedScene.frame_at`` returns as a tree).
+        """
+        self.evaluate(t, global_time)
+        state = self.evaluator.state()
+        return ViewState(PlannedFrame(self.graph, state, state.key(self._render_slots)), self._camera(state))
+
+    def _camera(self, state: Any) -> RenderCamera:
+        """``Camera.render_camera()`` with the values of ``state``."""
+        camera = self.scene.camera
+        value = lambda signal: state.value(self.slot(signal))  # noqa: E731
+        return RenderCamera(
+            transform=Transform(position=tuple(value(axis) for axis in camera.position.axes), rotation=value(camera.rotation)),
+            frame_height=value(camera.frame_height),
+            field_of_view=value(camera.field_of_view) if value(camera.perspective) else None,
+            near=camera.near,
+            far=camera.far,
+        )
+
+    def _scene_graph(self) -> Any:
+        nodes: list[Node] = []
+        index: dict[int, int] = {}
+        for root in self.scene.roots:
+            for node in root.family():
+                if id(node) not in index:
+                    index[id(node)] = len(nodes)
+                    nodes.append(node)
+        described = []
+        for node in nodes:
+            kind = _node_kind(node)
+            if kind is None:
+                return None
+            children: list[Node] = []
+            if isinstance(node, Group):
+                children = node.children
+            elif isinstance(node, ClippingGroup):
+                children = [node.mask, node.content]
+            fields = {name: self.slot(signal) for name, signal in _node_fields(node)}
+            described.append((kind, node.uid, fields, [index[id(child)] for child in children]))
+        roots = [(index[id(root)], self.slot(root.present)) for root in self.scene.roots]
+        return _core.SceneGraph(described, roots)
+
     def _add_signal(self, signal: Signal) -> None:
         if signal.id in self._slots:
             return
@@ -115,6 +174,98 @@ class ScenePlan:
                 self._add_signal(source)  # inputs first: dependency order
         self._slots[signal.id] = len(self._signals)
         self._signals.append(signal)
+
+
+class PlannedTimeline:
+    """A :class:`~.timing.Timeline` whose frames come from the core.
+
+    ``frame_at(t)`` returns the same views as ``Timeline.frame_at(t)``,
+    each with a :class:`PlannedFrame` instead of a tree. A clip whose
+    scene has a node the core cannot draw falls back to its snapshot.
+    Everything else (duration, audio, events) is the timeline's.
+    """
+
+    def __init__(self, timeline: Any) -> None:
+        self.timeline = timeline
+        self._plans: dict[int, ScenePlan] = {}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.timeline, name)
+
+    def plan(self, scene: PreparedScene) -> ScenePlan:
+        plan = self._plans.get(id(scene))
+        if plan is None or plan.scene is not scene:
+            plan = self._plans[id(scene)] = ScenePlan(scene)
+        return plan
+
+    def frame_at(self, t: float) -> tuple[ViewState, ...]:
+        """Like ``Timeline.frame_at``: one view per active clip, in layer order."""
+        timeline = self.timeline
+        timeline._ensure_resolved()
+        views = []
+        for clip in sorted(timeline.clips, key=lambda clip: clip.layer):  # stable
+            compiled = clip.compiled_time(t)
+            if compiled is None:
+                continue
+            plan = self.plan(clip.scene)
+            if plan.graph is None:
+                state = clip.scene.state_at(compiled, global_time=t)
+                views.append(ViewState(clip._group(state.children), clip.scene.camera.render_camera()))
+            else:
+                views.append(plan.frame_at(compiled, global_time=t))
+        return tuple(views)
+
+
+_NODE_KINDS: tuple[tuple[type, str, str], ...] = (
+    (Group, "group", "snapshot"),
+    (ClippingGroup, "clipping_group", "snapshot"),
+    (Particles, "particles", "_build_snapshot"),
+    (Shape3D, "shape3d", "_build_snapshot"),
+    (Shape2D, "shape2d", "_build_snapshot"),
+    (Curve3D, "curve3d", "_build_snapshot"),
+    (DirectionalLight, "directional_light", "_render_fields"),
+    (PointLight, "point_light", "_render_fields"),
+    (SpotLight, "spot_light", "_render_fields"),
+)
+"""Node classes the core draws: a subclass counts only while it keeps the
+method that turns the class into render state."""
+
+_FIELDS: dict[str, tuple[str, ...]] = {
+    "group": (),
+    "clipping_group": ("one_sided",),
+    "shape2d": ("points", "fill_color", "fill_opacity", "stroke_color", "stroke_opacity", "stroke_width", "stroke_joint", "stroke_cap", "cast_shadows"),
+    "curve3d": ("points", "stroke_color", "stroke_opacity", "stroke_width", "stroke_joint", "stroke_cap", "cast_shadows"),
+    "shape3d": (
+        "mesh", "base_color", "opacity", "metallic", "roughness", "emissive", "emissive_strength", "normal_scale",
+        "occlusion_strength", "base_color_texture", "metallic_roughness_texture", "normal_texture",
+        "occlusion_texture", "emissive_texture", "cast_shadows",
+    ),  # fmt: skip
+    "directional_light": ("color", "intensity", "size", "cast_shadows"),
+    "point_light": ("color", "intensity", "size", "cast_shadows", "range"),
+    "spot_light": ("color", "intensity", "size", "cast_shadows", "range", "inner_cone_angle", "outer_cone_angle"),
+}
+_FIELDS["particles"] = (*_FIELDS["shape3d"], "positions", "rotations", "scales", "colors")
+
+
+def _node_kind(node: Node) -> str | None:
+    for cls, kind, method in _NODE_KINDS:
+        if isinstance(node, cls):
+            return kind if getattr(type(node), method) is getattr(cls, method) else None
+    return None
+
+
+def _node_fields(node: Node) -> Iterator[tuple[str, Signal]]:
+    """``(field name, signal)`` of everything the core reads from ``node``."""
+    yield "alpha", node.alpha
+    yield "present", node.present
+    if isinstance(node, PositionMixin):
+        yield from ((f"position.{name}", axis) for name, axis in zip("xyz", node.position.axes, strict=True))
+    if isinstance(node, RotationMixin):
+        yield "rotation", node.rotation
+    if isinstance(node, ScalableMixin):
+        yield from ((f"scale.{name}", axis) for name, axis in zip("xyz", node.scale.axes, strict=True))
+    for name in _FIELDS[_node_kind(node) or "group"]:
+        yield name, getattr(node, name)
 
 
 def _readable_signals(scene: PreparedScene) -> list[Signal]:

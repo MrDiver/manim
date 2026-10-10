@@ -143,9 +143,9 @@ wgpu-py bindings (12%) and the remaining per-pass Python.
 |---|---|
 | 0 Crate and build | done |
 | 1 Timeline as data | done: evaluator, ScenePlan, data contributions |
-| 2 Morph and Write | |
-| 3 Core packs 2D | |
-| 4 Core packs 3D | |
-| 5 Switch over | |
+| 2 Morph and Write | next |
+| 3 Core packs 2D | done: graph, retained vector records |
+| 4 Core packs 3D | done: meshes, particles, lights, shadow views and layers |
+| 5 Switch over | `PlannedTimeline` and `--core` in the benchmark; default still the RNode path |
 | 6 Renderer in Rust | |
 | 7 Later | |

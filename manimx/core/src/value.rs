@@ -9,7 +9,7 @@ use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 
-use crate::quat::{self, Quat};
+use glam::DQuat;
 
 /// A ``SignalKind``. Kinds the core does not know keep their Python
 /// object, and their values are Python objects the kind operates on.
@@ -69,7 +69,7 @@ impl Array {
 #[derive(Clone)]
 pub enum Value {
     Scalar(f64),
-    Quat(Quat),
+    Quat(DQuat),
     /// A COLOR: 3 or 4 channels.
     Tuple(Arc<Vec<f64>>),
     Array(Arc<Array>),
@@ -88,7 +88,7 @@ impl Value {
         }
     }
 
-    fn quat(&self) -> PyResult<Quat> {
+    pub fn quat(&self) -> PyResult<DQuat> {
         match self {
             Value::Quat(q) => Ok(*q),
             _ => Err(type_error("rotation", "a non-quaternion value")),
@@ -160,8 +160,9 @@ impl Kind {
         Ok(match self {
             Kind::Scalar | Kind::Factor => Value::Scalar(object.extract::<f64>()?),
             Kind::Rotation => {
+                // numpy-quaternion components are (w, x, y, z).
                 let c: Vec<f64> = object.getattr("components")?.extract()?;
-                Value::Quat([c[0], c[1], c[2], c[3]])
+                Value::Quat(DQuat::from_xyzw(c[1], c[2], c[3], c[0]))
             }
             Kind::Color => Value::Tuple(Arc::new(object.extract::<Vec<f64>>()?)),
             Kind::Colors | Kind::Scalars | Kind::Path | Kind::Array => {
@@ -179,7 +180,7 @@ impl Kind {
             Value::Quat(q) => py
                 .import("quaternion")?
                 .getattr("quaternion")?
-                .call1((q[0], q[1], q[2], q[3]))?
+                .call1((q.w, q.x, q.y, q.z))?
                 .unbind(),
             Value::Tuple(t) => PyTuple::new(py, t.iter())?.into_any().unbind(),
             Value::Array(a) => {
@@ -199,12 +200,12 @@ impl Kind {
     pub fn validate(&self, py: Python<'_>, value: Value) -> PyResult<Value> {
         Ok(match (self, value) {
             (Kind::Rotation, Value::Quat(q)) => {
-                if q == [0.0; 4] {
+                if q.length_squared() == 0.0 {
                     return Err(PyValueError::new_err(
                         "rotation quaternion must not be zero",
                     ));
                 }
-                Value::Quat(quat::normalized(q))
+                Value::Quat(q.normalize())
             }
             (Kind::Colors, Value::Array(a)) if a.shape.len() == 1 => {
                 Value::Array(Arc::new(Array {
@@ -236,10 +237,10 @@ impl Kind {
             }
             Kind::Rotation => {
                 let (s, mut e) = (start.quat()?, end.quat()?);
-                if s[0] * e[0] + s[1] * e[1] + s[2] * e[2] + s[3] * e[3] < 0.0 {
-                    e = quat::negated(e); // q and -q are the same rotation: take the short way
+                if s.dot(e) < 0.0 {
+                    e = -e; // q and -q are the same rotation: take the short way
                 }
-                Value::Quat(quat::slerp_evaluate(s, e, alpha))
+                Value::Quat(s.slerp(e, alpha))
             }
             Kind::Color => {
                 let (s, e) = (start.tuple()?, end.tuple()?);
@@ -291,7 +292,7 @@ impl Kind {
         Ok(match self {
             Kind::Scalar => Value::Scalar(value.scalar()? + change.scalar()?),
             Kind::Factor => Value::Scalar(value.scalar()? * change.scalar()?),
-            Kind::Rotation => Value::Quat(quat::multiply(change.quat()?, value.quat()?)),
+            Kind::Rotation => Value::Quat(change.quat()? * value.quat()?),
             Kind::Color => {
                 let (v, c) = (value.tuple()?, change.tuple()?);
                 Value::Tuple(Arc::new(
@@ -342,7 +343,7 @@ impl Kind {
                 }
                 Value::Scalar(c.powf(alpha))
             }
-            Kind::Rotation => self.interpolate(py, &Value::Quat(quat::ONE), change, alpha)?,
+            Kind::Rotation => self.interpolate(py, &Value::Quat(DQuat::IDENTITY), change, alpha)?,
             Kind::Color => Value::Tuple(Arc::new(
                 change.tuple()?.iter().map(|c| c * alpha).collect(),
             )),

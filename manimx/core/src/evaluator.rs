@@ -13,6 +13,8 @@
 //! change.
 
 use pyo3::exceptions::PyValueError;
+use std::sync::Arc;
+
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
@@ -21,9 +23,9 @@ use crate::rates::Rate;
 use crate::track::{Entry, Track};
 use crate::value::{Kind, Value};
 
-/// One signal: its kind, current value and version.
+/// One signal's current value and version (its kind is in
+/// `Evaluator::kinds`, shared with every `FrameState`).
 struct Slot {
-    kind: Kind,
     value: Value,
     version: u64,
     /// The value as a Python object, made on first request after a change.
@@ -48,6 +50,7 @@ struct Derived {
 
 #[pyclass(module = "manimx._core")]
 pub struct Evaluator {
+    kinds: Arc<Vec<Kind>>,
     slots: Vec<Slot>,
     tracks: Vec<Track>,
     /// In dependency order: inputs before the signals computed from them.
@@ -71,18 +74,20 @@ impl Evaluator {
         if kinds.len() != values.len() {
             return Err(PyValueError::new_err("one kind per value"));
         }
+        let kinds: Vec<Kind> = kinds
+            .into_iter()
+            .map(|(code, kind)| Kind::from_code(&code, kind))
+            .collect();
         let mut slots = Vec::with_capacity(kinds.len());
-        for ((code, kind), value) in kinds.into_iter().zip(values) {
-            let kind = Kind::from_code(&code, kind);
-            let value = kind.value_from_py(&value)?;
+        for (kind, value) in kinds.iter().zip(values) {
             slots.push(Slot {
-                kind,
-                value,
+                value: kind.value_from_py(&value)?,
                 version: 1,
                 value_py: None,
             });
         }
         Ok(Evaluator {
+            kinds: Arc::new(kinds),
             slots,
             tracks: Vec::new(),
             derived: Vec::new(),
@@ -100,7 +105,7 @@ impl Evaluator {
         base: Bound<'_, PyAny>,
         entries: Vec<Bound<'_, PyTuple>>,
     ) -> PyResult<()> {
-        let kind = &self.slots[slot].kind;
+        let kind = &self.kinds[slot];
         let base = kind.value_from_py(&base)?;
         let mut parsed = Vec::with_capacity(entries.len());
         for entry in entries {
@@ -162,8 +167,8 @@ impl Evaluator {
         for index in 0..self.tracks.len() {
             let track = &self.tracks[index];
             let slot = track.slot;
-            let value = track.value_at(py, &self.slots[slot].kind, t)?;
-            let value = self.slots[slot].kind.validate(py, value)?;
+            let value = track.value_at(py, &self.kinds[slot], t)?;
+            let value = self.kinds[slot].validate(py, value)?;
             self.set(py, slot, value)?;
         }
         for index in 0..self.derived.len() {
@@ -172,11 +177,21 @@ impl Evaluator {
         Ok(())
     }
 
+    /// The values of every slot right now, kept while the evaluator moves
+    /// on to other times (motion blur evaluates every sub-frame first).
+    fn state(&self) -> FrameState {
+        FrameState {
+            kinds: self.kinds.clone(),
+            values: Arc::new(self.slots.iter().map(|slot| slot.value.clone()).collect()),
+            versions: Arc::new(self.slots.iter().map(|slot| slot.version).collect()),
+        }
+    }
+
     /// The value of signal `slot`, as the Python signal holds it.
     fn value(&mut self, py: Python<'_>, slot: usize) -> PyResult<Py<PyAny>> {
         let entry = &mut self.slots[slot];
         if entry.value_py.is_none() {
-            entry.value_py = Some(entry.kind.value_to_py(py, &entry.value)?);
+            entry.value_py = Some(self.kinds[slot].value_to_py(py, &entry.value)?);
         }
         Ok(entry.value_py.as_ref().unwrap().clone_ref(py))
     }
@@ -196,7 +211,7 @@ impl Evaluator {
     /// Store `value` in `slot` unless it equals the current one.
     fn set(&mut self, py: Python<'_>, slot: usize, value: Value) -> PyResult<()> {
         let entry = &mut self.slots[slot];
-        if entry.kind.equal(py, &entry.value, &value)? {
+        if self.kinds[slot].equal(py, &entry.value, &value)? {
             return Ok(());
         }
         entry.value = value;
@@ -227,10 +242,10 @@ impl Evaluator {
                     .map(|&input| self.value(py, input))
                     .collect::<PyResult<Vec<_>>>()?;
                 let result = function.bind(py).call1(PyTuple::new(py, arguments)?)?;
-                self.slots[slot].kind.value_from_py(&result)?
+                self.kinds[slot].value_from_py(&result)?
             }
         };
-        let value = self.slots[slot].kind.validate(py, value)?;
+        let value = self.kinds[slot].validate(py, value)?;
         self.set(py, slot, value)?;
         self.derived[index].seen = versions;
         Ok(())
@@ -294,4 +309,30 @@ fn parse_contribution(kind: &Kind, contribution: &Bound<'_, PyTuple>) -> PyResul
             )))
         }
     })
+}
+
+/// The values and versions of all slots at one time: what a frame shows.
+/// Cheap to keep: values are shared with the evaluator, not copied.
+#[pyclass(module = "manimx._core", frozen)]
+pub struct FrameState {
+    pub kinds: Arc<Vec<Kind>>,
+    pub values: Arc<Vec<Value>>,
+    pub versions: Arc<Vec<u64>>,
+}
+
+#[pymethods]
+impl FrameState {
+    /// Versions of the given slots as bytes: equal bytes promise equal
+    /// values (a key for holding frames).
+    /// The value of `slot`, as the Python signal holds it.
+    fn value(&self, py: Python<'_>, slot: usize) -> PyResult<Py<PyAny>> {
+        self.kinds[slot].value_to_py(py, &self.values[slot])
+    }
+
+    fn key(&self, slots: Vec<usize>) -> Vec<u8> {
+        slots
+            .iter()
+            .flat_map(|&slot| self.versions[slot].to_le_bytes())
+            .collect()
+    }
 }

@@ -25,12 +25,14 @@ from collections.abc import Sequence
 import numpy as np
 import wgpu
 
+from ...robjects.planned_frame import PlannedFrame
 from ...robjects import RNode
 from ..base import Renderer
 from ..config import Frame, RenderConfig
 from ..effects import Effect
 from ..scene_graph import SceneFlattener
 from .composer import FrameComposer
+from .core_packer import CorePacker
 from .gpu import GPUContext
 from .packer import FramePacker
 from .renderer import WGPURenderer
@@ -61,6 +63,8 @@ class RenderService(Renderer):
         super().__init__()
         self.flattener = SceneFlattener()
         self.packer = FramePacker(self.cache)
+        self.core_packer = CorePacker()
+        """Packs PlannedFrames (frames of the core, see CORE.md)."""
         self.renderer = WGPURenderer(context, profile)
         self._composers: dict[tuple[Effect, ...], FrameComposer] = {}
 
@@ -80,6 +84,9 @@ class RenderService(Renderer):
             composer = self._composers[key] = FrameComposer(self, key)
         return composer
 
-    def render_layers(self, root: RNode, config: RenderConfig, encoder: wgpu.GPUCommandEncoder | None = None) -> RenderLayers:
-        """Run ``root`` through flattener, packer and renderer."""
+    def render_layers(self, root: RNode | PlannedFrame, config: RenderConfig, encoder: wgpu.GPUCommandEncoder | None = None) -> RenderLayers:
+        """Run ``root`` through flattener, packer and renderer; a
+        PlannedFrame is flattened and packed by the core instead."""
+        if isinstance(root, PlannedFrame):
+            return self.renderer.render_layers(self.core_packer.pack(root, config), encoder)
         return self.renderer.render_layers(self.packer.pack(self.flattener.flatten(root), config), encoder)

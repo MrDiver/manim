@@ -557,6 +557,35 @@ first of a still stretch, so it measured 70.4 against 69.0 fps (one run
 each, within noise), and it changed four reference frames by 1 of 255
 (one render against eight summed in a 16-bit float accumulator).
 
+### R. The core evaluates and packs (CORE.md, phases 1 to 4)
+
+Frames come from `PlannedTimeline` (`--core`): the core (Rust,
+`manimx._core`) evaluates every signal of a scene, flattens its scene
+graph and packs the vector and mesh records, lights and shadow views
+itself. No `RNode` tree, `FlatScene` or per-object Python per sub-frame;
+Python is only called for user functions (`derive()`, unknown rates,
+animations without a data form) and, once per version, for records built
+from geometry (triangulated fills, stroke curves, interleaved meshes,
+material entries). `WGPURenderer` renders the same packets.
+
+Power profile `balanced`, both paths measured in the same session:
+
+| | fps (blur 8) | fps (no blur) | evaluate | flatten + pack |
+|---|---|---|---|---|
+| RNode path | 74.3 | 322.2 | 2.34 ms | 6.03 ms |
+| core | 105.8 | 415.3 | 1.10 ms | 1.40 ms |
+
++42% with motion blur, +29% without. The 48 reference frames are
+identical, and so is every frame compared across the benchmark,
+example-project and light-show (tests/test_core_render.py compares
+pixels of every example scene, a scene with every node type, motion blur
+and the projects). light-show, seconds 10 to 12 at 1920×1080 with motion
+blur 8: 59.7 ms per frame on the RNode path, 25.0 ms on the core, which
+is near its 19 ms of GPU work.
+
+What remains per frame on the benchmark is mostly outside the core:
+`render` (the wgpu-py calls, 2.16 ms), `composite` and the readback.
+
 ## Where the time goes now
 
 Benchmark project with `PortalOrbit`, after steps L to O: 48.6 to about
