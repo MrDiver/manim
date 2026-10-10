@@ -19,14 +19,16 @@ import numpy as np
 import wgpu
 from wgpu.backends.wgpu_native.extras import multi_draw_indirect
 
+from ..scene_graph import NO_CLIP
 from .frame import FRAME_DTYPE
 from .gpu import (
     COLOR_FORMAT,
     DEPTH_FORMAT,
     HDR_FORMAT,
-    SHADOW_FORMAT,
     GPUContext,
     GrowableBuffer,
+    ShadowStencil,
+    shadow_depth_stencil,
 )
 from .vector_batch import DRAW_INDIRECT_DTYPE, VectorBatch
 
@@ -58,7 +60,8 @@ class Role(Enum):
     MASK = "mask"
     """Clip mask pass: blending, no depth buffer."""
     SHADOW = "shadow"
-    """Shadow map pass: depth only, seen from a light."""
+    """Shadow map pass: depth only, seen from a light (stencil variants by
+    ShadowStencil)."""
 
 
 class VectorPass:
@@ -91,7 +94,8 @@ class VectorPass:
         self._opaque = (0, 0)
         self._transparent = (0, 0)
         self._masks: list[tuple[int, int]] = []
-        self._shadows: dict[int, tuple[int, int]] = {}
+        self._shadows: dict[tuple[int, int], tuple[int, int]] = {}
+        """(first, count) of each (light scope, clip scope) run of casters."""
         self._shadow_groups: dict[tuple[int, int], wgpu.GPUBindGroup] = {}
 
     # -- per frame ----------------------------------------------------------
@@ -130,7 +134,7 @@ class VectorPass:
             ranges.append((first, len(draws)))
             first += len(draws)
         self._opaque, self._transparent = ranges[:2]
-        self._shadows = dict(zip(shadow_scopes, ranges[2 : 2 + len(shadow_scopes)]))
+        self._shadows = shadow_runs(shadow_scopes, ranges[2 : 2 + len(shadow_scopes)], batch.shadow_clips)
         self._masks = ranges[2 + len(shadow_scopes) :]
 
         camera_views = camera_views or self._camera_views or self._empty_camera_views()
@@ -151,18 +155,36 @@ class VectorPass:
         self._draw(render_pass, Role.OPAQUE, sample_count, self._opaque)
         self._draw(render_pass, Role.TRANSPARENT, sample_count, self._transparent)
 
-    def draw_shadow(self, render_pass: wgpu.GPURenderPassEncoder, frames: wgpu.GPUBuffer, offset: int, scope: int) -> None:
-        """Draw the depth of ``scope``'s shadow casters, seen from the frame at ``offset``."""
+    def shadow_clips(self, scope: int) -> list[int]:
+        """The clip scopes of light scope ``scope``'s shadow casters."""
+        return [clip for light_scope, clip in self._shadows if light_scope == scope]
+
+    def draw_shadow(self, render_pass: wgpu.GPURenderPassEncoder, frames: wgpu.GPUBuffer, offset: int, scope: int, clip: int, clipped: bool) -> None:
+        """Draw the depth of light scope ``scope``'s casters in clip scope
+        ``clip``, seen from the frame at ``offset`` (``clipped``: where the
+        stencil equals the reference)."""
+        self._use_shadow_frame(render_pass, frames, offset)
+        stencil = ShadowStencil.CLIPPED if clipped else ShadowStencil.NONE
+        self._draw(render_pass, (Role.SHADOW, stencil), 1, self._shadows.get((scope, clip), (0, 0)))
+
+    def draw_shadow_mask(self, render_pass: wgpu.GPURenderPassEncoder, frames: wgpu.GPUBuffer, offset: int, clip: int, inner: bool) -> None:
+        """Draw clip scope ``clip``'s mask into the stencil, seen from the
+        frame at ``offset``: the reference where it covers, or (``inner``)
+        one more where it covers the reference."""
+        self._use_shadow_frame(render_pass, frames, offset)
+        stencil = ShadowStencil.INNER_MASK if inner else ShadowStencil.MASK
+        self._draw(render_pass, (Role.SHADOW, stencil), 1, self._masks[clip])
+
+    def _use_shadow_frame(self, render_pass: wgpu.GPURenderPassEncoder, frames: wgpu.GPUBuffer, offset: int) -> None:
         key = (id(frames), offset)
         if key not in self._shadow_groups:
             self._shadow_groups[key] = self._create_bind_group(frames, offset)
         render_pass.set_bind_group(0, self._shadow_groups[key])
-        self._draw(render_pass, Role.SHADOW, 1, self._shadows.get(scope, (0, 0)))
 
     def _draw(
         self,
         render_pass: wgpu.GPURenderPassEncoder,
-        role: Role,
+        role: Role | tuple[Role, ShadowStencil],
         sample_count: int,
         draws: tuple[int, int],
     ) -> None:
@@ -179,10 +201,13 @@ class VectorPass:
 
     # -- setup --------------------------------------------------------------
 
-    def _pipeline(self, role: Role, sample_count: int) -> wgpu.GPURenderPipeline:
+    def _pipeline(self, role: Role | tuple[Role, ShadowStencil], sample_count: int) -> wgpu.GPURenderPipeline:
         key = (role, sample_count)
         if key not in self._pipelines:
-            self._pipelines[key] = self._create_pipeline(role, sample_count)
+            if isinstance(role, tuple):
+                self._pipelines[key] = self._create_shadow_pipeline(role[1])
+            else:
+                self._pipelines[key] = self._create_pipeline(role, sample_count)
         return self._pipelines[key]
 
     def _create_pipeline(self, role: Role, sample_count: int) -> wgpu.GPURenderPipeline:
@@ -191,8 +216,6 @@ class VectorPass:
         if role is not Role.OPAQUE:
             target["blend"] = _ALPHA_BLEND
         depth_stencil = None
-        if role is Role.SHADOW:
-            return self._create_shadow_pipeline()
         if role is not Role.MASK:
             depth_stencil = {
                 "format": DEPTH_FORMAT,
@@ -217,19 +240,14 @@ class VectorPass:
             fragment={"module": self._shader, "entry_point": entry_point, "targets": [target]},
         )
 
-    def _create_shadow_pipeline(self) -> wgpu.GPURenderPipeline:
+    def _create_shadow_pipeline(self, stencil: ShadowStencil) -> wgpu.GPURenderPipeline:
         device = self._context.device
         return device.create_render_pipeline(
-            label="vector shadow",
+            label=f"vector shadow {stencil.value}",
             layout=device.create_pipeline_layout(bind_group_layouts=[self._layout]),
             vertex={"module": self._shader, "entry_point": "vs_main", "buffers": []},
             primitive={"topology": wgpu.PrimitiveTopology.triangle_list, "cull_mode": wgpu.CullMode.none},
-            depth_stencil={
-                "format": SHADOW_FORMAT,
-                "depth_write_enabled": True,
-                "depth_compare": wgpu.CompareFunction.less,
-                "depth_bias_slope_scale": 1.5,
-            },
+            depth_stencil=shadow_depth_stencil(stencil),
             fragment={"module": self._shader, "entry_point": "fs_shadow", "targets": []},
         )
 
@@ -312,3 +330,14 @@ class VectorPass:
         entries.append({"binding": 3 + len(buffers), "resource": self._camera_views})
         entries.append({"binding": 4 + len(buffers), "resource": self._camera_view_sampler})
         return self._context.device.create_bind_group(layout=self._layout, entries=entries)
+
+
+def shadow_runs(scopes: list[int], ranges: list[tuple[int, int]], clips: dict[int, list[tuple[int, int]]]) -> dict[tuple[int, int], tuple[int, int]]:
+    """(first, count) per (light scope, clip scope) of shadow casters: each
+    light scope's range split into its runs of equal clip scopes."""
+    runs: dict[tuple[int, int], tuple[int, int]] = {}
+    for scope, (first, count) in zip(scopes, ranges, strict=True):
+        for clip, run in clips.get(scope, [(NO_CLIP, count)] if count else []):
+            runs[(scope, clip)] = (first, run)
+            first += run
+    return runs

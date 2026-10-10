@@ -130,3 +130,39 @@ def test_unchanged_planned_frames_are_held(service: RenderService) -> None:
     assert composer.held
     composer.compose(lambda t: (plan.frame_at(t),), dataclasses.replace(CONFIG, time=0.5))
     assert not composer.held
+
+
+class ClippedShadow(Scene):
+    """Four circles on the sides of a square window, so four half circles
+    show, lit at an angle above a floor."""
+
+    def construct(self) -> None:
+        floor = Shape3D(box_mesh(14.0, 8.0, 0.2), "floor", color="#ffffff", roughness=1.0).move_to((0.0, 0.0, -0.1))
+        circles = Group(*(Circle(radius=0.5, color="#FC6255", fill_opacity=1.0).move_to(side) for side in [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0)]))
+        window = ClippingGroup(Square(side_length=2.0, fill_opacity=1.0), circles, "window")
+        window.move_to((0.0, 0.0, 2.0))
+        sun = DirectionalLight(direction=(0.5, 0.0, -1.0), intensity=3.0)  # shadows land 1 unit right
+        self.add(floor, window, sun)
+        self.wait()
+
+
+def test_clipped_casters_cast_the_shadow_of_what_their_masks_let_through(service: RenderService) -> None:
+    scene = ClippedShadow().prepare()
+    plan = ScenePlan(scene)
+    assert_same_pixels(service, scene.frame_at, lambda t: (plan.frame_at(t),), [0.5])
+
+    image = service.composer().compose(scene.frame_at, dataclasses.replace(CONFIG, time=0.5)).astype(float)
+    width, height = CONFIG.pixel_width, CONFIG.pixel_height
+
+    def floor(x: float, y: float) -> float:
+        frame_width = 8.0 * width / height
+        column, row = round((x / frame_width + 0.5) * width), round((0.5 - y / 8.0) * height)
+        return float(image[row, column, :3].mean())
+
+    lit = floor(5.0, 2.5)
+    # The right circle's inner half (x from 0.5 to 1) shades x from 1.5 to 2;
+    # its outer half, cut by the window, casts no shadow (x from 2 to 2.5).
+    assert floor(1.75, 0.0) < 0.6 * lit
+    assert floor(2.25, 0.0) > 0.9 * lit
+    # The top circle's outer half (y above 1) is cut too.
+    assert floor(1.0, 1.25) > 0.9 * lit

@@ -211,6 +211,7 @@ impl Renderer {
                 &mut self.profiler,
                 &targets.mask_layers_view,
                 mesh_depth,
+                &packet.scope_parents,
             );
         }
 

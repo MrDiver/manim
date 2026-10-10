@@ -6,6 +6,7 @@ import re
 import weakref
 from collections import OrderedDict
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 import numpy as np
@@ -16,7 +17,8 @@ SHADER_DIRECTORY = Path(__file__).parent / "shaders"
 COLOR_FORMAT = wgpu.TextureFormat.rgba8unorm
 """Colors are stored and blended in sRGB values, like Manim's Cairo renderer."""
 DEPTH_FORMAT = wgpu.TextureFormat.depth32float
-SHADOW_FORMAT = wgpu.TextureFormat.depth32float
+SHADOW_FORMAT = wgpu.TextureFormat.depth32float_stencil8
+"""Shadow maps: depth, and a stencil for the masks of clipped casters."""
 HDR_FORMAT = wgpu.TextureFormat.rgba16float
 """Linear radiance of lit meshes, before tone mapping."""
 GBUFFER_FORMATS = (
@@ -27,8 +29,47 @@ GBUFFER_FORMATS = (
 )
 """Color targets of the G-buffer, see shaders/gbuffer.wgsl."""
 
-REQUIRED_FEATURES = ("indirect-first-instance",)
-"""``first_instance`` in indirect draws selects the per-draw instance records."""
+class ShadowStencil(Enum):
+    """How a shadow pass draw uses the stencil of the shadow map, which
+    holds the masks of clip scopes (see shadow_pass.py)."""
+
+    NONE = "none"
+    """An unclipped caster: depth only, the stencil is ignored."""
+    CLIPPED = "clipped"
+    """A clipped caster: only where the stencil equals the reference (its
+    clip scope's masks)."""
+    MASK = "mask"
+    """The outermost mask of a clip scope: writes the reference, no depth."""
+    INNER_MASK = "inner mask"
+    """A nested mask: where the stencil equals the reference (the masks
+    around it), counts it up by one; no depth."""
+
+
+def shadow_depth_stencil(stencil: ShadowStencil) -> dict:
+    """The depth-stencil state of a shadow pass pipeline."""
+    compare, pass_op = {
+        ShadowStencil.NONE: (wgpu.CompareFunction.always, wgpu.StencilOperation.keep),
+        ShadowStencil.CLIPPED: (wgpu.CompareFunction.equal, wgpu.StencilOperation.keep),
+        ShadowStencil.MASK: (wgpu.CompareFunction.always, wgpu.StencilOperation.replace),
+        ShadowStencil.INNER_MASK: (wgpu.CompareFunction.equal, wgpu.StencilOperation.increment_clamp),
+    }[stencil]
+    face = {"compare": compare, "fail_op": wgpu.StencilOperation.keep, "depth_fail_op": wgpu.StencilOperation.keep, "pass_op": pass_op}
+    mask = stencil in (ShadowStencil.MASK, ShadowStencil.INNER_MASK)
+    return {
+        "format": SHADOW_FORMAT,
+        "depth_write_enabled": not mask,
+        "depth_compare": wgpu.CompareFunction.always if mask else wgpu.CompareFunction.less,
+        "stencil_front": face,
+        "stencil_back": face,
+        "stencil_read_mask": 0xFF,
+        "stencil_write_mask": 0xFF,
+        "depth_bias_slope_scale": 0.0 if mask else 1.5,
+    }
+
+
+REQUIRED_FEATURES = ("indirect-first-instance", "depth32float-stencil8")
+"""``first_instance`` in indirect draws selects the per-draw instance
+records; shadow maps have a stencil (SHADOW_FORMAT)."""
 OPTIONAL_FEATURES = ("timestamp-query",)
 """Used when available: GPU pass timings for the profiler."""
 

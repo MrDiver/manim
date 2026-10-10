@@ -58,6 +58,7 @@ from .vector_batch import (
     _draw_args,
     _fill_vertices,
     _StrokeTopology,
+    shadow_fields,
     view_depth,
 )
 
@@ -296,10 +297,7 @@ class RetainedVectors:
             opaque_draws=_draw_args(opaque),
             transparent_draws=_draw_args(transparent),
             mask_draws=masks,
-            shadow_draws={
-                scope: _draw_args([d for d in frame if d.casts_shadow and scene.in_scope(d.clip, scope)])
-                for scope in (NO_CLIP, *range(scope_count))
-            },
+            **shadow_fields(scene, frame),
             dirty={name: arena.ranges() for name, arena in arenas.items()},
         )
 

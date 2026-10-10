@@ -12,7 +12,8 @@ use std::collections::HashMap;
 
 use super::buffer::{GrowableBuffer, Records};
 use super::camera_views::CameraViewTexture;
-use super::context::{Gpu, COLOR_FORMAT, DEPTH_FORMAT, SHADOW_FORMAT};
+use super::context::{shadow_depth_stencil, Gpu, ShadowStencil, COLOR_FORMAT, DEPTH_FORMAT};
+use crate::graph::ShadowList;
 use crate::records::Frame;
 
 /// Bytes of one indirect draw (`DrawIndirectArgs`).
@@ -25,8 +26,9 @@ pub struct VectorData<'a> {
     pub opaque: &'a [u8],
     pub transparent: &'a [u8],
     pub masks: &'a [Vec<u8>],
-    /// Per clip scope (NO_CLIP first), the shadow casters' draws.
-    pub shadows: &'a [(i32, Vec<u8>)],
+    /// Per light scope (NO_CLIP first), the shadow casters' draws sorted
+    /// by clip scope, and their runs.
+    pub shadows: &'a [ShadowList<u8>],
 }
 
 /// What a pipeline variant is used for (`Role`).
@@ -39,7 +41,7 @@ enum Role {
     /// Clip mask pass: blending, no depth buffer.
     Mask,
     /// Shadow map pass: depth only, seen from a light.
-    Shadow,
+    Shadow(ShadowStencil),
 }
 
 /// "Over" blending of premultiplied colors; in mask passes the alpha
@@ -60,7 +62,8 @@ pub struct VectorPass {
     opaque: (u64, u32),
     transparent: (u64, u32),
     masks: Vec<(u64, u32)>,
-    shadows: HashMap<i32, (u64, u32)>,
+    /// (first, count) of each (light scope, clip scope) run of casters.
+    shadows: HashMap<(i32, i32), (u64, u32)>,
     shadow_groups: HashMap<u64, wgpu::BindGroup>,
     /// The pictures of the frame's camera views.
     pub camera_views: CameraViewTexture,
@@ -126,7 +129,7 @@ impl VectorPass {
         }
 
         let mut lists: Vec<&[u8]> = vec![data.opaque, data.transparent];
-        lists.extend(data.shadows.iter().map(|(_, draws)| draws.as_slice()));
+        lists.extend(data.shadows.iter().map(|(_, draws, _)| draws.as_slice()));
         lists.extend(data.masks.iter().map(|draws| draws.as_slice()));
         self.indirect
             .upload(&gpu.device, &gpu.queue, &lists.concat());
@@ -140,12 +143,12 @@ impl VectorPass {
         self.opaque = ranges[0];
         self.transparent = ranges[1];
         let shadow_count = data.shadows.len();
-        self.shadows = data
-            .shadows
-            .iter()
-            .zip(&ranges[2..2 + shadow_count])
-            .map(|((scope, _), range)| (*scope, *range))
-            .collect();
+        self.shadows = shadow_runs(
+            data.shadows
+                .iter()
+                .zip(&ranges[2..2 + shadow_count])
+                .map(|((scope, _, runs), range)| (*scope, *range, runs.as_slice())),
+        );
         self.masks = ranges[2 + shadow_count..].to_vec();
 
         if grown
@@ -184,8 +187,18 @@ impl VectorPass {
         self.draw(gpu, pass, Role::Transparent, sample_count, transparent);
     }
 
-    /// Draw the depth of `scope`'s shadow casters, seen from the frame at
-    /// `offset` of `frames`.
+    /// The clip scopes of light scope `scope`'s shadow casters.
+    pub fn shadow_clips(&self, scope: i32) -> Vec<i32> {
+        self.shadows
+            .keys()
+            .filter(|(light_scope, _)| *light_scope == scope)
+            .map(|(_, clip)| *clip)
+            .collect()
+    }
+
+    /// Draw the depth of light scope `scope`'s casters in clip scope
+    /// `clip`, seen from the frame at `offset` of `frames` (`clipped`: where
+    /// the stencil equals the reference).
     #[allow(clippy::too_many_arguments)]
     pub fn draw_shadow(
         &mut self,
@@ -193,7 +206,50 @@ impl VectorPass {
         pass: &mut wgpu::RenderPass,
         frames: &wgpu::Buffer,
         offset: u64,
-        scope: i32,
+        (scope, clip, clipped): (i32, i32, bool),
+        mask_layers: &wgpu::TextureView,
+        mesh_depth: &wgpu::TextureView,
+    ) {
+        self.use_shadow_frame(gpu, pass, frames, offset, mask_layers, mesh_depth);
+        let stencil = if clipped {
+            ShadowStencil::Clipped
+        } else {
+            ShadowStencil::None
+        };
+        let draws = self.shadows.get(&(scope, clip)).copied().unwrap_or((0, 0));
+        self.draw(gpu, pass, Role::Shadow(stencil), 1, draws);
+    }
+
+    /// Draw clip scope `clip`'s mask into the stencil, seen from the frame
+    /// at `offset`: the reference where it covers, or (`inner`) one more
+    /// where it covers the reference.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_shadow_mask(
+        &mut self,
+        gpu: &Gpu,
+        pass: &mut wgpu::RenderPass,
+        frames: &wgpu::Buffer,
+        offset: u64,
+        (clip, inner): (i32, bool),
+        mask_layers: &wgpu::TextureView,
+        mesh_depth: &wgpu::TextureView,
+    ) {
+        self.use_shadow_frame(gpu, pass, frames, offset, mask_layers, mesh_depth);
+        let stencil = if inner {
+            ShadowStencil::InnerMask
+        } else {
+            ShadowStencil::Mask
+        };
+        let draws = self.masks[clip as usize];
+        self.draw(gpu, pass, Role::Shadow(stencil), 1, draws);
+    }
+
+    fn use_shadow_frame(
+        &mut self,
+        gpu: &Gpu,
+        pass: &mut wgpu::RenderPass,
+        frames: &wgpu::Buffer,
+        offset: u64,
         mask_layers: &wgpu::TextureView,
         mesh_depth: &wgpu::TextureView,
     ) {
@@ -202,8 +258,6 @@ impl VectorPass {
             self.shadow_groups.insert(offset, group);
         }
         pass.set_bind_group(0, self.shadow_groups.get(&offset), &[]);
-        let draws = self.shadows.get(&scope).copied().unwrap_or((0, 0));
-        self.draw(gpu, pass, Role::Shadow, 1, draws);
     }
 
     /// The shadow bind groups refer to the shadow frames buffer: forget
@@ -248,21 +302,7 @@ impl VectorPass {
                 immediate_size: 0,
             });
         let (depth_stencil, entry_point, targets) = match role {
-            Role::Shadow => (
-                Some(wgpu::DepthStencilState {
-                    format: SHADOW_FORMAT,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(wgpu::CompareFunction::Less),
-                    stencil: Default::default(),
-                    bias: wgpu::DepthBiasState {
-                        constant: 0,
-                        slope_scale: 1.5,
-                        clamp: 0.0,
-                    },
-                }),
-                "fs_shadow",
-                vec![],
-            ),
+            Role::Shadow(stencil) => (Some(shadow_depth_stencil(stencil)), "fs_shadow", vec![]),
             Role::Mask => (None, "fs_mask", vec![Some(color_target(true))]),
             // Transparent draws also write depth: with the strict "less"
             // test an object never blends over itself (where its stroke
@@ -454,4 +494,20 @@ fn color_target(blend: bool) -> wgpu::ColorTargetState {
         blend: blend.then_some(ALPHA_BLEND),
         write_mask: wgpu::ColorWrites::ALL,
     }
+}
+
+/// (first, count) per (light scope, clip scope) of shadow casters: each
+/// light scope's range split into its runs of equal clip scopes
+/// (`shadow_runs`).
+pub fn shadow_runs<'a>(
+    lists: impl Iterator<Item = (i32, (u64, u32), &'a [(i32, u32)])>,
+) -> HashMap<(i32, i32), (u64, u32)> {
+    let mut runs = HashMap::new();
+    for (scope, (mut first, _), clips) in lists {
+        for &(clip, count) in clips {
+            runs.insert((scope, clip), (first, count));
+            first += count as u64;
+        }
+    }
+    runs
 }

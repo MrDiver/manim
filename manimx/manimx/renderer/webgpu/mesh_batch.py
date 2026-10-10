@@ -42,7 +42,7 @@ from ...robjects.mesh import MeshData
 from ...robjects.transform import Transform, rotation_towards
 from ..cache import RNodeDataCache
 from ..config import RenderConfig
-from ..scene_graph import NO_CLIP, FlatScene, LightItem
+from ..scene_graph import FlatScene, LightItem
 from .arena import Arena
 
 MESH_OBJECT_DTYPE = np.dtype(
@@ -171,7 +171,11 @@ class MeshBatch:
     groups: list[DrawGroup]
     shadow_draws: dict[int, np.ndarray]
     """Per clip scope (NO_CLIP: all), draws of the meshes that cast shadows
-    for that scope's lights (texture groups do not matter)."""
+    for that scope's lights (texture groups do not matter), sorted by their
+    own clip scope."""
+    shadow_clips: dict[int, list[tuple[int, int]]] = field(default_factory=dict)
+    """Per entry of ``shadow_draws``, its runs ``(clip scope, count)``
+    (FlatScene.shadow_lists)."""
     dirty: dict[str, list[tuple[int, int]] | None] | None = None
     """Ranges of ``vertices`` and ``indices`` written since the previous
     batch of the same RetainedMeshes (None: upload all)."""
@@ -256,6 +260,7 @@ class MeshBatch:
             objects["material"] = np.concatenate(object_materials)
             objects["clip"] = np.concatenate(clips)
         vertices, indices, dirty = geometry.finish()
+        casters, runs = scene.shadow_lists(shadow_draws)
         return MeshBatch(
             objects=objects,
             vertices=vertices,
@@ -264,10 +269,8 @@ class MeshBatch:
             lights=light_array(light_items, config),
             light_items=light_items,
             groups=list(groups.values()),
-            shadow_draws={
-                scope: _indexed_args([draw for draw, clip in shadow_draws if scene.in_scope(clip, scope)])
-                for scope in (NO_CLIP, *range(len(scene.clips)))
-            },
+            shadow_draws={scope: _indexed_args(draws) for scope, draws in casters.items()},
+            shadow_clips=runs,
             dirty=dirty,
         )
 

@@ -16,8 +16,10 @@ use std::collections::{HashMap, HashSet};
 use pyo3::prelude::*;
 
 use super::buffer::{GrowableBuffer, Records};
-use super::context::{Gpu, DEPTH_FORMAT, GBUFFER_FORMATS, SHADOW_FORMAT};
+use super::context::{shadow_depth_stencil, Gpu, ShadowStencil, DEPTH_FORMAT, GBUFFER_FORMATS};
+use super::vector_pass::shadow_runs;
 use crate::callbacks::bytes_of;
+use crate::graph::ShadowList;
 use crate::meshes::DrawGroup;
 use crate::records::{DrawIndexed, Frame};
 
@@ -35,8 +37,9 @@ pub struct MeshData<'a> {
     pub vertices: Records<'a>,
     pub indices: Records<'a>,
     pub groups: &'a [DrawGroup],
-    /// Per clip scope (NO_CLIP first), the shadow casters' draws.
-    pub shadow_draws: &'a [(i32, Vec<DrawIndexed>)],
+    /// Per light scope (NO_CLIP first), the shadow casters' draws sorted by
+    /// clip scope, and their runs.
+    pub shadow_draws: &'a [ShadowList<DrawIndexed>],
 }
 
 pub struct MeshPass {
@@ -57,12 +60,13 @@ pub struct MeshPass {
     pipelines: HashMap<(u32, u64), wgpu::RenderPipeline>,
     /// mesh.wgsl with each surface shader's code, by shader uid.
     surface_shaders: HashMap<u64, wgpu::ShaderModule>,
-    shadow_pipeline: Option<wgpu::RenderPipeline>,
+    shadow_pipelines: HashMap<ShadowStencil, wgpu::RenderPipeline>,
     scene_group: Option<wgpu::BindGroup>,
     targets_generation: u64,
     /// (material group key, surface shader uid, first draw, draw count) per group.
     draw_groups: Vec<(Vec<u64>, u64, u64, u32)>,
-    shadows: HashMap<i32, (u64, u32)>,
+    /// (first, count) of each (light scope, clip scope) run of casters.
+    shadows: HashMap<(i32, i32), (u64, u32)>,
     shadow_groups: HashMap<u64, wgpu::BindGroup>,
 }
 
@@ -100,7 +104,7 @@ impl MeshPass {
             material_groups: HashMap::new(),
             pipelines: HashMap::new(),
             surface_shaders: HashMap::new(),
-            shadow_pipeline: None,
+            shadow_pipelines: HashMap::new(),
             scene_group: None,
             targets_generation: u64::MAX,
             draw_groups: Vec::new(),
@@ -134,13 +138,17 @@ impl MeshPass {
             .iter()
             .flat_map(|group| group.draws.iter().copied())
             .collect();
-        let mut first = draws.len() as u64;
-        self.shadows.clear();
-        for (scope, casters) in data.shadow_draws {
-            self.shadows.insert(*scope, (first, casters.len() as u32));
-            first += casters.len() as u64;
+        let mut ranges = Vec::with_capacity(data.shadow_draws.len());
+        for (_, casters, _) in data.shadow_draws {
+            ranges.push((draws.len() as u64, casters.len() as u32));
             draws.extend(casters);
         }
+        self.shadows = shadow_runs(
+            data.shadow_draws
+                .iter()
+                .zip(ranges)
+                .map(|((scope, _, runs), range)| (*scope, range, runs.as_slice())),
+        );
         self.indirect
             .upload(device, queue, bytemuck::cast_slice(&draws));
         if grown || self.scene_group.is_none() || targets_generation != self.targets_generation {
@@ -247,18 +255,28 @@ impl MeshPass {
         }
     }
 
-    /// Draw the depth of `scope`'s shadow-casting meshes, seen from the
-    /// frame at `offset` of `frames`.
+    /// The clip scopes of light scope `scope`'s shadow-casting meshes.
+    pub fn shadow_clips(&self, scope: i32) -> Vec<i32> {
+        self.shadows
+            .keys()
+            .filter(|(light_scope, _)| *light_scope == scope)
+            .map(|(_, clip)| *clip)
+            .collect()
+    }
+
+    /// Draw the depth of light scope `scope`'s shadow-casting meshes in
+    /// clip scope `clip`, seen from the frame at `offset` of `frames`
+    /// (`clipped`: where the stencil equals the reference).
     pub fn draw_shadow(
         &mut self,
         gpu: &Gpu,
         pass: &mut wgpu::RenderPass,
         frames: &wgpu::Buffer,
         offset: u64,
-        scope: i32,
+        (scope, clip, clipped): (i32, i32, bool),
         mask_layers: &wgpu::TextureView,
     ) {
-        let Some(&(first, count)) = self.shadows.get(&scope) else {
+        let Some(&(first, count)) = self.shadows.get(&(scope, clip)) else {
             return;
         };
         if count == 0 {
@@ -268,10 +286,16 @@ impl MeshPass {
             let group = self.create_scene_group(gpu, frames, offset, mask_layers);
             self.shadow_groups.insert(offset, group);
         }
-        if self.shadow_pipeline.is_none() {
-            self.shadow_pipeline = Some(self.create_shadow_pipeline(gpu));
+        let stencil = if clipped {
+            ShadowStencil::Clipped
+        } else {
+            ShadowStencil::None
+        };
+        if !self.shadow_pipelines.contains_key(&stencil) {
+            let pipeline = self.create_shadow_pipeline(gpu, stencil);
+            self.shadow_pipelines.insert(stencil, pipeline);
         }
-        pass.set_pipeline(self.shadow_pipeline.as_ref().unwrap());
+        pass.set_pipeline(&self.shadow_pipelines[&stencil]);
         pass.set_bind_group(0, self.shadow_groups.get(&offset), &[]);
         pass.set_index_buffer(self.indices.buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.multi_draw_indexed_indirect(&self.indirect.buffer, first * DRAW_SIZE, count);
@@ -338,7 +362,7 @@ impl MeshPass {
             })
     }
 
-    fn create_shadow_pipeline(&self, gpu: &Gpu) -> wgpu::RenderPipeline {
+    fn create_shadow_pipeline(&self, gpu: &Gpu, stencil: ShadowStencil) -> wgpu::RenderPipeline {
         let layout = gpu
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -361,17 +385,7 @@ impl MeshPass {
                     cull_mode: None,
                     ..Default::default()
                 },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: SHADOW_FORMAT,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(wgpu::CompareFunction::Less),
-                    stencil: Default::default(),
-                    bias: wgpu::DepthBiasState {
-                        constant: 0,
-                        slope_scale: 1.5,
-                        clamp: 0.0,
-                    },
-                }),
+                depth_stencil: Some(shadow_depth_stencil(stencil)),
                 multisample: Default::default(),
                 fragment: Some(wgpu::FragmentState {
                     module: &self.shader,

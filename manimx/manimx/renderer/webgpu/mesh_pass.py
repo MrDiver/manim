@@ -21,11 +21,13 @@ from .frame import FRAME_DTYPE
 from .gpu import (
     DEPTH_FORMAT,
     GBUFFER_FORMATS,
-    SHADOW_FORMAT,
     GPUContext,
     GrowableBuffer,
+    ShadowStencil,
+    shadow_depth_stencil,
 )
 from .mesh_batch import DRAW_INDEXED_DTYPE, MeshBatch, TextureSet
+from .vector_pass import shadow_runs
 
 _STORAGE = wgpu.BufferUsage.STORAGE
 
@@ -69,9 +71,10 @@ class MeshPass:
         self._scene_group: wgpu.GPUBindGroup | None = None
         self._mask_layers: wgpu.GPUTextureView | None = None
         self._draw_groups: list[tuple[wgpu.GPUBindGroup, SurfaceShader | None, int, int]] = []
-        self._shadows: dict[int, tuple[int, int]] = {}
+        self._shadows: dict[tuple[int, int], tuple[int, int]] = {}
+        """(first, count) of each (light scope, clip scope) run of casters."""
         self._shadow_groups: dict[tuple[int, int], wgpu.GPUBindGroup] = {}
-        self._shadow_pipeline: wgpu.GPURenderPipeline | None = None
+        self._shadow_pipelines: dict[ShadowStencil, wgpu.GPURenderPipeline] = {}
 
     # -- per frame ----------------------------------------------------------
 
@@ -88,10 +91,11 @@ class MeshPass:
         self._write(self._indices, batch, "indices", full_upload)
         # Material groups' draws first, then the shadow casters per scope.
         self._indirect.upload(np.concatenate([batch.draws, *batch.shadow_draws.values()]))
-        self._shadows, first = {}, len(batch.draws)
-        for scope, draws in batch.shadow_draws.items():
-            self._shadows[scope] = (first, len(draws))
+        ranges, first = [], len(batch.draws)
+        for draws in batch.shadow_draws.values():
+            ranges.append((first, len(draws)))
             first += len(draws)
+        self._shadows = shadow_runs(list(batch.shadow_draws), ranges, batch.shadow_clips)
         if grown or self._scene_group is None or mask_layers is not self._mask_layers:
             self._mask_layers = mask_layers
             self._scene_group = self._create_scene_group(self._frame_uniform, 0)
@@ -146,38 +150,39 @@ class MeshPass:
                 count=count,
             )
 
-    def draw_shadow(self, render_pass: wgpu.GPURenderPassEncoder, frames: wgpu.GPUBuffer, offset: int, scope: int) -> None:
-        """Draw the depth of ``scope``'s shadow-casting meshes, seen from the frame at ``offset``."""
-        first, count = self._shadows.get(scope, (0, 0))
+    def shadow_clips(self, scope: int) -> list[int]:
+        """The clip scopes of light scope ``scope``'s shadow-casting meshes."""
+        return [clip for light_scope, clip in self._shadows if light_scope == scope]
+
+    def draw_shadow(self, render_pass: wgpu.GPURenderPassEncoder, frames: wgpu.GPUBuffer, offset: int, scope: int, clip: int, clipped: bool) -> None:
+        """Draw the depth of light scope ``scope``'s shadow-casting meshes in
+        clip scope ``clip``, seen from the frame at ``offset`` (``clipped``:
+        where the stencil equals the reference)."""
+        first, count = self._shadows.get((scope, clip), (0, 0))
         if count == 0:
             return
         key = (id(frames), offset)
         if key not in self._shadow_groups:
             self._shadow_groups[key] = self._create_scene_group(frames, offset)
-        render_pass.set_pipeline(self._get_shadow_pipeline())
+        render_pass.set_pipeline(self._get_shadow_pipeline(ShadowStencil.CLIPPED if clipped else ShadowStencil.NONE))
         render_pass.set_bind_group(0, self._shadow_groups[key])
         render_pass.set_index_buffer(self._indices.buffer, wgpu.IndexFormat.uint32)
         multi_draw_indexed_indirect(
             render_pass, self._indirect.buffer, offset=first * DRAW_INDEXED_DTYPE.itemsize, count=count
         )
 
-    def _get_shadow_pipeline(self) -> wgpu.GPURenderPipeline:
-        if self._shadow_pipeline is None:
+    def _get_shadow_pipeline(self, stencil: ShadowStencil) -> wgpu.GPURenderPipeline:
+        if stencil not in self._shadow_pipelines:
             device = self._context.device
-            self._shadow_pipeline = device.create_render_pipeline(
-                label="mesh shadow",
+            self._shadow_pipelines[stencil] = device.create_render_pipeline(
+                label=f"mesh shadow {stencil.value}",
                 layout=device.create_pipeline_layout(bind_group_layouts=[self._scene_layout]),
                 vertex={"module": self._shader, "entry_point": "vs_main", "buffers": []},
                 primitive={"topology": wgpu.PrimitiveTopology.triangle_list, "cull_mode": wgpu.CullMode.none},
-                depth_stencil={
-                    "format": SHADOW_FORMAT,
-                    "depth_write_enabled": True,
-                    "depth_compare": wgpu.CompareFunction.less,
-                    "depth_bias_slope_scale": 1.5,
-                },
+                depth_stencil=shadow_depth_stencil(stencil),
                 fragment={"module": self._shader, "entry_point": "fs_shadow", "targets": []},
             )
-        return self._shadow_pipeline
+        return self._shadow_pipelines[stencil]
 
     # -- textures -----------------------------------------------------------
 

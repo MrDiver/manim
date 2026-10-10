@@ -13,7 +13,8 @@ use pyo3::PyResult;
 
 pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-pub const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// Shadow maps: depth, and a stencil for the masks of clipped casters.
+pub const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32FloatStencil8;
 /// Linear radiance of lit meshes, before tone mapping.
 pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// Color targets of the G-buffer (see shaders/gbuffer.wgsl).
@@ -23,6 +24,55 @@ pub const GBUFFER_FORMATS: [wgpu::TextureFormat; 4] = [
     wgpu::TextureFormat::Rgba16Float,    // emissive radiance, metallic
     wgpu::TextureFormat::R16Float,       // clip scope (selects the lights), -1 for none
 ];
+
+/// How a shadow pass draw uses the stencil of the shadow map, which holds
+/// the masks of clip scopes (`ShadowStencil`, see shadow_pass.rs).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ShadowStencil {
+    /// An unclipped caster: depth only, the stencil is ignored.
+    None,
+    /// A clipped caster: only where the stencil equals the reference.
+    Clipped,
+    /// The outermost mask of a clip scope: writes the reference, no depth.
+    Mask,
+    /// A nested mask: where the stencil equals the reference, counts it up
+    /// by one; no depth.
+    InnerMask,
+}
+
+/// The depth-stencil state of a shadow pass pipeline (`shadow_depth_stencil`).
+pub fn shadow_depth_stencil(stencil: ShadowStencil) -> wgpu::DepthStencilState {
+    use wgpu::{CompareFunction as Compare, StencilOperation as Op};
+    let (compare, pass_op) = match stencil {
+        ShadowStencil::None => (Compare::Always, Op::Keep),
+        ShadowStencil::Clipped => (Compare::Equal, Op::Keep),
+        ShadowStencil::Mask => (Compare::Always, Op::Replace),
+        ShadowStencil::InnerMask => (Compare::Equal, Op::IncrementClamp),
+    };
+    let face = wgpu::StencilFaceState {
+        compare,
+        fail_op: Op::Keep,
+        depth_fail_op: Op::Keep,
+        pass_op,
+    };
+    let mask = matches!(stencil, ShadowStencil::Mask | ShadowStencil::InnerMask);
+    wgpu::DepthStencilState {
+        format: SHADOW_FORMAT,
+        depth_write_enabled: Some(!mask),
+        depth_compare: Some(if mask { Compare::Always } else { Compare::Less }),
+        stencil: wgpu::StencilState {
+            front: face,
+            back: face,
+            read_mask: 0xFF,
+            write_mask: 0xFF,
+        },
+        bias: wgpu::DepthBiasState {
+            constant: 0,
+            slope_scale: if mask { 0.0 } else { 1.5 },
+            clamp: 0.0,
+        },
+    }
+}
 
 pub struct Gpu {
     pub device: wgpu::Device,
@@ -58,10 +108,13 @@ impl Gpu {
             ..Default::default()
         }))
         .map_err(|error| PyRuntimeError::new_err(format!("no GPU adapter: {error}")))?;
-        let required = wgpu::Features::INDIRECT_FIRST_INSTANCE;
+        // first_instance in indirect draws selects the per-draw instance
+        // records; shadow maps have a stencil (SHADOW_FORMAT).
+        let required =
+            wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::DEPTH32FLOAT_STENCIL8;
         if !adapter.features().contains(required) {
             return Err(PyRuntimeError::new_err(
-                "GPU adapter lacks indirect-first-instance",
+                "GPU adapter lacks indirect-first-instance or depth32float-stencil8",
             ));
         }
         let timestamps = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);

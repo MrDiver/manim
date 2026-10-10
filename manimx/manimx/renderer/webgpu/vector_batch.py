@@ -156,7 +156,11 @@ class VectorBatch:
     """Per clip scope, the draws that render its mask (painter's order)."""
     shadow_draws: dict[int, np.ndarray]
     """Per clip scope (NO_CLIP: all), the draws of shapes and curves that
-    cast shadows for lights of that scope. Masks never cast shadows."""
+    cast shadows for lights of that scope, sorted by their own clip scope.
+    Masks never cast shadows."""
+    shadow_clips: dict[int, list[tuple[int, int]]] = field(default_factory=dict)
+    """Per entry of ``shadow_draws``, its runs ``(clip scope, count)``
+    (FlatScene.shadow_lists)."""
     dirty: dict[str, list[tuple[int, int]] | None] | None = None
     """Per buffer, the record ranges changed since the last upload (None:
     upload all of it). None for a batch built from scratch."""
@@ -332,11 +336,14 @@ class _BatchBuilder:
             opaque_draws=_draw_args(opaque),
             transparent_draws=_draw_args(transparent),
             mask_draws=masks,
-            shadow_draws={
-                scope: _draw_args([d for d in frame if d.casts_shadow and scene.in_scope(d.clip, scope)])
-                for scope in (NO_CLIP, *range(scope_count))
-            },
+            **shadow_fields(scene, frame),
         )
+
+
+def shadow_fields(scene: FlatScene, frame: list[_Draw]) -> dict[str, dict]:
+    """``shadow_draws`` and ``shadow_clips`` of a VectorBatch."""
+    draws, runs = scene.shadow_lists([(d, d.clip) for d in frame if d.casts_shadow])
+    return {"shadow_draws": {scope: _draw_args(chosen) for scope, chosen in draws.items()}, "shadow_clips": runs}
 
 
 def view_depth(world_to_view: np.ndarray, world_point: np.ndarray) -> float:

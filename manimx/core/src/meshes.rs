@@ -14,7 +14,7 @@ use pyo3::prelude::*;
 
 use crate::arena::Arena;
 use crate::callbacks::{bytes_of, Callbacks};
-use crate::graph::{FlatScene, MeshFields, NodeData, SceneGraph, Values, NO_CLIP};
+use crate::graph::{FlatScene, MeshFields, NodeData, SceneGraph, ShadowList, Values};
 use crate::records::{self, DrawIndexed, Material, MeshObject};
 
 /// A mesh as the renderer needs it, built once per mesh version.
@@ -50,8 +50,9 @@ pub struct MeshOutput {
     pub objects: Vec<MeshObject>,
     pub materials: Vec<Material>,
     pub groups: Vec<DrawGroup>,
-    /// Per clip scope (NO_CLIP first), the draws of shadow-casting meshes.
-    pub shadow_draws: Vec<(i32, Vec<DrawIndexed>)>,
+    /// Per light scope (NO_CLIP first), the shadow-casting meshes' draws
+    /// sorted by clip scope, and their runs (`FlatScene::shadow_lists`).
+    pub shadow_draws: Vec<ShadowList<DrawIndexed>>,
 }
 
 pub struct MeshPacker {
@@ -309,23 +310,11 @@ impl MeshPacker {
             }
         }
         self.finish();
-        let scopes = std::iter::once(NO_CLIP).chain(0..scene.clips.len() as i32);
         Ok(MeshOutput {
             objects,
             materials,
             groups: groups.into_iter().map(|(_, group)| group).collect(),
-            shadow_draws: scopes
-                .map(|scope| {
-                    (
-                        scope,
-                        shadow_draws
-                            .iter()
-                            .filter(|(_, clip)| scene.in_scope(*clip, scope))
-                            .map(|(draw, _)| *draw)
-                            .collect(),
-                    )
-                })
-                .collect(),
+            shadow_draws: scene.shadow_lists(&shadow_draws),
         })
     }
 }

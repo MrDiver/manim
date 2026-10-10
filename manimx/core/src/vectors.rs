@@ -14,7 +14,9 @@ use pyo3::prelude::*;
 
 use crate::arena::Arena;
 use crate::callbacks::{bytes_of, Callbacks};
-use crate::graph::{DrawItem, FlatScene, Node, NodeData, PathFields, SceneGraph, Values, NO_CLIP};
+use crate::graph::{
+    DrawItem, FlatScene, Node, NodeData, PathFields, SceneGraph, ShadowList, Values, NO_CLIP,
+};
 use crate::records::{self, DrawIndirect, Instance, Object, StrokeCurve};
 use crate::tessellation::tessellate_fill;
 use glam::{DMat4, DVec2, DVec3};
@@ -102,8 +104,9 @@ pub struct VectorDraws {
     pub opaque: Vec<u8>,
     pub transparent: Vec<u8>,
     pub masks: Vec<Vec<u8>>,
-    /// Per clip scope, NO_CLIP first.
-    pub shadows: Vec<(i32, Vec<u8>)>,
+    /// Per light scope (NO_CLIP first), the casters sorted by clip scope
+    /// and their runs (`FlatScene::shadow_lists`).
+    pub shadows: Vec<ShadowList<u8>>,
 }
 
 pub struct VectorPacker {
@@ -518,14 +521,15 @@ fn batch(scene: &FlatScene, draws: Vec<Draw>) -> VectorDraws {
             draw_bytes(mask.iter().map(|d| d.args))
         })
         .collect();
-    let shadows = std::iter::once(NO_CLIP)
-        .chain(0..scene.clips.len() as i32)
-        .map(|scope| {
-            let casters = frame
-                .iter()
-                .filter(|d| d.casts_shadow && scene.in_scope(d.clip, scope));
-            (scope, draw_bytes(casters.map(|d| d.args)))
-        })
+    let casters: Vec<(DrawIndirect, i32)> = frame
+        .iter()
+        .filter(|d| d.casts_shadow)
+        .map(|d| (d.args, d.clip))
+        .collect();
+    let shadows = scene
+        .shadow_lists(&casters)
+        .into_iter()
+        .map(|(scope, draws, runs)| (scope, draw_bytes(draws), runs))
         .collect();
     VectorDraws {
         opaque: draw_bytes(opaque),

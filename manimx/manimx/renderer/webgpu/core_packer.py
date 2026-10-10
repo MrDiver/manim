@@ -69,7 +69,8 @@ class CorePacker:
                 opaque_draws=_records(vectors["opaque_draws"], DRAW_INDIRECT_DTYPE),
                 transparent_draws=_records(vectors["transparent_draws"], DRAW_INDIRECT_DTYPE),
                 mask_draws=[_records(draws, DRAW_INDIRECT_DTYPE) for draws in vectors["mask_draws"]],
-                shadow_draws={scope: _records(draws, DRAW_INDIRECT_DTYPE) for scope, draws in vectors["shadow_draws"]},
+                shadow_draws={scope: _records(draws, DRAW_INDIRECT_DTYPE) for scope, draws, _ in vectors["shadow_draws"]},
+                shadow_clips={scope: [tuple(run) for run in runs] for scope, _, runs in vectors["shadow_draws"]},
                 dirty=vectors["dirty"],
             ),
             meshes=None if meshes is None else _mesh_batch(meshes),
@@ -121,7 +122,8 @@ def _mesh_batch(meshes: dict) -> MeshBatch:
             DrawGroup(textures, surface_shader, list(map(tuple, _records(draws, DRAW_INDEXED_DTYPE).tolist())))
             for textures, surface_shader, draws in meshes["groups"]
         ],
-        shadow_draws={scope: _records(draws, DRAW_INDEXED_DTYPE) for scope, draws in meshes["shadow_draws"]},
+        shadow_draws={scope: _records(draws, DRAW_INDEXED_DTYPE) for scope, draws, _ in meshes["shadow_draws"]},
+        shadow_clips={scope: [tuple(run) for run in runs] for scope, _, runs in meshes["shadow_draws"]},
         dirty=meshes["dirty"],
     )
 

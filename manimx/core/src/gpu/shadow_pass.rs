@@ -4,18 +4,31 @@
 //!
 //! Layers whose views say they are unchanged keep their depth from the
 //! previous render and get no pass, unless the maps were just made again.
+//!
+//! Casters inside clipping groups cast only the shadow of what their masks
+//! let through, as seen from the light: before a clip scope's casters, the
+//! masks between the light and them are drawn into the stencil, outermost
+//! first. (A light limited to a clip scope is inside it, and so are the
+//! casters it lights: that scope's mask, and those around it, do not apply.) The outermost writes a
+//! reference value, each nested one counts it up where the masks around it
+//! are; the casters then draw where the stencil holds the last value.
+//! References only grow within a layer, so values left by earlier clip
+//! scopes never match.
 
 use super::buffer::GrowableBuffer;
 use super::context::{Gpu, SHADOW_FORMAT};
 use super::mesh_pass::MeshPass;
 use super::profiler::GpuProfiler;
 use super::vector_pass::VectorPass;
+use crate::graph::NO_CLIP;
 use crate::records::{Frame, ShadowView};
 use crate::shadows::ShadowViews;
 
 /// Frames of the shadow views share one uniform buffer; bind group offsets
 /// must be multiples of 256 bytes.
 const FRAME_STRIDE: usize = 512;
+/// The largest stencil value (8 bits).
+const STENCIL_MAX: u32 = 255;
 
 pub struct ShadowPass {
     frames: GrowableBuffer,
@@ -93,43 +106,107 @@ impl ShadowPass {
         profiler: &mut GpuProfiler,
         mask_layers: &wgpu::TextureView,
         mesh_depth: &wgpu::TextureView,
+        scope_parents: &[i32],
     ) {
+        let frames = &self.frames.buffer;
         for &layer in &self.draw_layers {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("shadows"),
-                color_attachments: &[],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.layers[layer],
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: profiler.pass_timing("shadows"),
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+            let mut pass = self.begin(encoder, layer, profiler, true);
             let offset = (layer * FRAME_STRIDE) as u64;
             let scope = self.scopes[layer];
-            meshes.draw_shadow(
-                gpu,
-                &mut pass,
-                &self.frames.buffer,
-                offset,
-                scope,
-                mask_layers,
-            );
-            vectors.draw_shadow(
-                gpu,
-                &mut pass,
-                &self.frames.buffer,
-                offset,
-                scope,
-                mask_layers,
-                mesh_depth,
-            );
+            let mut clips = meshes.shadow_clips(scope);
+            clips.extend(vectors.shadow_clips(scope));
+            clips.sort();
+            clips.dedup();
+            let mut reference = 0u32;
+            let around_light = mask_chain(scope, scope_parents).len();
+            for clip in clips {
+                // The light is inside its own clip scope and the ones around
+                // it: only the masks between it and the casters cut them.
+                let chain = mask_chain(clip, scope_parents).split_off(around_light);
+                if !chain.is_empty() {
+                    if reference + chain.len() as u32 > STENCIL_MAX {
+                        // Out of stencil values: start the layer's stencil over.
+                        drop(pass);
+                        pass = self.begin(encoder, layer, profiler, false);
+                        reference = 0;
+                    }
+                    reference += 1;
+                    pass.set_stencil_reference(reference);
+                    vectors.draw_shadow_mask(
+                        gpu,
+                        &mut pass,
+                        frames,
+                        offset,
+                        (chain[0], false),
+                        mask_layers,
+                        mesh_depth,
+                    );
+                    for &inner in &chain[1..] {
+                        pass.set_stencil_reference(reference);
+                        vectors.draw_shadow_mask(
+                            gpu,
+                            &mut pass,
+                            frames,
+                            offset,
+                            (inner, true),
+                            mask_layers,
+                            mesh_depth,
+                        );
+                        reference += 1;
+                    }
+                    pass.set_stencil_reference(reference);
+                }
+                let clipped = !chain.is_empty();
+                meshes.draw_shadow(
+                    gpu,
+                    &mut pass,
+                    frames,
+                    offset,
+                    (scope, clip, clipped),
+                    mask_layers,
+                );
+                vectors.draw_shadow(
+                    gpu,
+                    &mut pass,
+                    frames,
+                    offset,
+                    (scope, clip, clipped),
+                    mask_layers,
+                    mesh_depth,
+                );
+            }
         }
+    }
+
+    fn begin<'e>(
+        &self,
+        encoder: &'e mut wgpu::CommandEncoder,
+        layer: usize,
+        profiler: &mut GpuProfiler,
+        clear_depth: bool,
+    ) -> wgpu::RenderPass<'e> {
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("shadows"),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.layers[layer],
+                depth_ops: Some(wgpu::Operations {
+                    load: if clear_depth {
+                        wgpu::LoadOp::Clear(1.0)
+                    } else {
+                        wgpu::LoadOp::Load
+                    },
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(0),
+                    store: wgpu::StoreOp::Discard,
+                }),
+            }),
+            timestamp_writes: profiler.pass_timing("shadows"),
+            occlusion_query_set: None,
+            multiview_mask: None,
+        })
     }
 
     fn ensure_maps(&mut self, gpu: &Gpu, resolution: u32, layers: u32) -> bool {
@@ -163,8 +240,10 @@ fn create_maps(
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
+    // The lighting pass samples the depth; the stencil only serves the passes.
     let view = maps.create_view(&wgpu::TextureViewDescriptor {
         dimension: Some(wgpu::TextureViewDimension::D2Array),
+        aspect: wgpu::TextureAspect::DepthOnly,
         ..Default::default()
     });
     let layer_views = (0..layers)
@@ -178,4 +257,15 @@ fn create_maps(
         })
         .collect();
     (maps, view, layer_views)
+}
+
+/// The clip scopes `clip` is inside, outermost first (with `clip`).
+fn mask_chain(mut clip: i32, scope_parents: &[i32]) -> Vec<i32> {
+    let mut chain = Vec::new();
+    while clip != NO_CLIP {
+        chain.push(clip);
+        clip = scope_parents[clip as usize];
+    }
+    chain.reverse();
+    chain
 }

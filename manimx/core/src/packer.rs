@@ -223,7 +223,7 @@ impl Packer {
                 draws
                     .shadows
                     .iter()
-                    .map(|(scope, d)| (*scope, d.as_slice())),
+                    .map(|(scope, d, runs)| (*scope, d.as_slice(), runs.as_slice())),
             )?,
         )?;
         vectors.set_item("dirty", dirty)?;
@@ -268,7 +268,7 @@ impl Packer {
                 output
                     .shadow_draws
                     .iter()
-                    .map(|(scope, d)| (*scope, bytemuck::cast_slice(d))),
+                    .map(|(scope, d, runs)| (*scope, bytemuck::cast_slice(d), runs.as_slice())),
             )?,
         )?;
         let mesh_dirty = PyDict::new(py);
@@ -303,13 +303,14 @@ impl Packer {
     }
 }
 
+/// `(light scope, draw bytes, clip runs)` per light scope, for Python.
 fn shadow_list<'py, 'a>(
     py: Python<'py>,
-    draws: impl Iterator<Item = (i32, &'a [u8])>,
+    draws: impl Iterator<Item = (i32, &'a [u8], &'a [(i32, u32)])>,
 ) -> PyResult<Bound<'py, PyList>> {
     let list = PyList::empty(py);
-    for (scope, bytes) in draws {
-        list.append((scope, PyBytes::new(py, bytes)))?;
+    for (scope, bytes, runs) in draws {
+        list.append((scope, PyBytes::new(py, bytes), runs.to_vec()))?;
     }
     Ok(list)
 }

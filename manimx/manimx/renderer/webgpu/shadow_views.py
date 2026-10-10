@@ -298,12 +298,15 @@ class ShadowLayers:
 
 
 def _casters(scene: FlatScene, scope: int, held: list[object]) -> Hashable:
-    """Identity, versions and world matrix of every shadow caster in ``scope``."""
+    """Identity, versions and world matrix of every shadow caster in ``scope``,
+    and of the mask shapes that clip them (they shape the shadow too)."""
     key = []
+    masks: set[int] = set()
     for item in scene.items:
         obj = item.obj
         if not obj.cast_shadows or not scene.in_scope(item.clip, scope):
             continue
+        masks.update(scene.mask_chain(item.clip))
         held.append(obj)
         part: tuple = (id(obj), _versions(obj), item.world.tobytes())
         if isinstance(obj, RParticles):
@@ -312,6 +315,10 @@ def _casters(scene: FlatScene, scope: int, held: list[object]) -> Hashable:
             held.extend(arrays)
             part += tuple(map(id, arrays))
         key.append(part)
+    for clip in sorted(masks):
+        for item in scene.clips[clip].mask:
+            held.append(item.obj)
+            key.append((id(item.obj), _versions(item.obj), item.world.tobytes()))
     return tuple(key)
 
 

@@ -20,6 +20,7 @@ ignored, since masks only contribute alpha).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TypeVar
 
 import numpy as np
 
@@ -65,6 +66,8 @@ class LightItem:
     """Product of the ``alpha`` of the light and its ancestors (>= 0);
     multiplies its intensity."""
 
+T = TypeVar("T")
+
 
 @dataclass(slots=True, eq=False)
 class FlatScene:
@@ -83,6 +86,35 @@ class FlatScene:
             if clip == NO_CLIP:
                 return False
             clip = self.clips[clip].parent
+
+    def shadow_lists(self, casters: list[tuple[T, int]]) -> tuple[dict[int, list[T]], dict[int, list[tuple[int, int]]]]:
+        """The shadow casters ``(draw, clip)`` of each light scope (NO_CLIP
+        first, then every clip scope): the draws, sorted by clip scope
+        (unclipped first), and the runs ``(clip, count)`` of equal clip
+        scopes among them. A shadow pass draws a clipped run where the
+        masks of its clip scope let it (see shadow_pass.py)."""
+        draws: dict[int, list[T]] = {}
+        runs: dict[int, list[tuple[int, int]]] = {}
+        for scope in (NO_CLIP, *range(len(self.clips))):
+            chosen = sorted((pair for pair in casters if self.in_scope(pair[1], scope)), key=lambda pair: pair[1])
+            draws[scope] = [draw for draw, _ in chosen]
+            scope_runs: list[tuple[int, int]] = []
+            for _, clip in chosen:
+                if scope_runs and scope_runs[-1][0] == clip:
+                    scope_runs[-1] = (clip, scope_runs[-1][1] + 1)
+                else:
+                    scope_runs.append((clip, 1))
+            runs[scope] = scope_runs
+        return draws, runs
+
+    def mask_chain(self, clip: int) -> list[int]:
+        """The clip scopes whose masks a point in ``clip`` must be inside,
+        outermost first."""
+        chain = []
+        while clip != NO_CLIP:
+            chain.append(clip)
+            clip = self.clips[clip].parent
+        return chain[::-1]
 
 
 class SceneFlattener:

@@ -126,7 +126,52 @@ pub struct FlatScene {
     pub lights: Vec<LightItem>,
 }
 
+/// The shadow casters of one light scope (`FlatScene.shadow_lists`): the
+/// scope, its casters sorted by clip scope (unclipped first) and the runs
+/// `(clip scope, count)` of equal clip scopes among them.
+pub type ShadowList<T> = (i32, Vec<T>, Vec<(i32, u32)>);
+
 impl FlatScene {
+    /// The shadow casters `(draw, clip)` of each light scope, NO_CLIP first
+    /// (`FlatScene.shadow_lists`).
+    pub fn shadow_lists<T: Copy>(&self, casters: &[(T, i32)]) -> Vec<ShadowList<T>> {
+        std::iter::once(NO_CLIP)
+            .chain(0..self.clips.len() as i32)
+            .map(|scope| {
+                let mut chosen: Vec<(T, i32)> = casters
+                    .iter()
+                    .copied()
+                    .filter(|(_, clip)| self.in_scope(*clip, scope))
+                    .collect();
+                chosen.sort_by_key(|(_, clip)| *clip); // stable: painter's order within a clip scope
+                let mut runs: Vec<(i32, u32)> = Vec::new();
+                for (_, clip) in &chosen {
+                    match runs.last_mut() {
+                        Some((last, count)) if last == clip => *count += 1,
+                        _ => runs.push((*clip, 1)),
+                    }
+                }
+                (
+                    scope,
+                    chosen.into_iter().map(|(draw, _)| draw).collect(),
+                    runs,
+                )
+            })
+            .collect()
+    }
+
+    /// The clip scopes whose masks a point in `clip` must be inside,
+    /// outermost first (`FlatScene.mask_chain`).
+    pub fn mask_chain(&self, mut clip: i32) -> Vec<i32> {
+        let mut chain = Vec::new();
+        while clip != NO_CLIP {
+            chain.push(clip);
+            clip = self.clips[clip as usize].parent;
+        }
+        chain.reverse();
+        chain
+    }
+
     /// Whether something in clip scope `clip` belongs to `scope` (the scope
     /// itself or one nested in it); everything is in NO_CLIP.
     pub fn in_scope(&self, mut clip: i32, scope: i32) -> bool {

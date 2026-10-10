@@ -11,7 +11,7 @@ use glam::{DMat4, DVec3, DVec4};
 use pyo3::prelude::*;
 
 use crate::callbacks::{bytes_of, Callbacks};
-use crate::graph::{FlatScene, LightType, NodeData, SceneGraph, Values};
+use crate::graph::{DrawItem, FlatScene, LightType, NodeData, SceneGraph, Values};
 use crate::lights::LightSource;
 use crate::meshes::MeshPacker;
 use crate::records::{self, Frame, Light, ShadowView};
@@ -425,6 +425,14 @@ fn caster_key(
     scope: i32,
 ) -> PyResult<Vec<u64>> {
     let mut key = Vec::new();
+    // The masks that clip the casters shape the shadow too.
+    let mut masks = std::collections::BTreeSet::new();
+    let add = |key: &mut Vec<u64>, item: &DrawItem| {
+        let node = &graph.nodes[item.node];
+        key.push(node.uid);
+        key.extend(node.slots.iter().map(|&slot| values.state.versions[slot]));
+        key.extend(item.world.to_cols_array().iter().map(|v| v.to_bits()));
+    };
     for item in &scene.items {
         let node = &graph.nodes[item.node];
         let cast_shadows = match &node.data {
@@ -435,9 +443,13 @@ fn caster_key(
         if !values.truthy(cast_shadows)? || !scene.in_scope(item.clip, scope) {
             continue;
         }
-        key.push(node.uid);
-        key.extend(node.slots.iter().map(|&slot| values.state.versions[slot]));
-        key.extend(item.world.to_cols_array().iter().map(|v| v.to_bits()));
+        masks.extend(scene.mask_chain(item.clip));
+        add(&mut key, item);
+    }
+    for clip in masks {
+        for item in &scene.clips[clip as usize].mask {
+            add(&mut key, item);
+        }
     }
     Ok(key)
 }
