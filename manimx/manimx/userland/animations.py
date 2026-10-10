@@ -40,7 +40,6 @@ from ..animation.contributions import (
     evaluate,
 )
 from ..animation.node import require
-from ..animation.paths import POINTS_PER_CURVE
 from ..animation.rates import linear, smooth
 from ..animation.signal_tracks import RateFunction
 from ..robjects import Transform
@@ -266,13 +265,16 @@ class _PlannedAnimation(Animation):
 class Morph(_PlannedAnimation):
     """Turn ``source`` into ``target`` (Manim's ``ReplacementTransform``).
 
-    The paths of their shapes (``Shape2D`` and ``Curve3D``, paired in tree
-    order) are aligned once, when the animation is created, and then
+    The paths of their shapes (``Shape2D`` and ``Curve3D``, in tree order)
+    are paired evenly, as Manim pairs submobjects: with more shapes on one
+    side, each shape of the other side stands for several in a row. A
+    pair's paths are aligned once, when the animation is created, and then
     interpolated point by point together with their colors, opacities and
-    widths. Where one side has more shapes, the extra ones grow from (or
-    shrink into) the other side's center. When the morph ends, ``target``
-    takes ``source``'s place in the scene; it looks exactly like the
-    morphed source, so the switch does not show.
+    widths. A target shape that shares its source with an earlier one
+    starts as a copy of that source; a source shape that shares its
+    target with an earlier one ends as a copy of that target. When the
+    morph ends, ``target`` takes ``source``'s place in the scene; it looks
+    exactly like the morphed source, so the switch does not show.
     """
 
     source: Node
@@ -286,43 +288,88 @@ class Morph(_PlannedAnimation):
         if not sources or not targets:
             raise ValueError("Morph needs a Shape2D or Curve3D (or a group of them) on both sides")
         worlds = {**_world_matrices(self.source), **_world_matrices(self.target)}
-        source_center, target_center = _center(sources, worlds), _center(targets, worlds)
-        for index in range(max(len(sources), len(targets))):
-            source = sources[index] if index < len(sources) else None
-            target = targets[index] if index < len(targets) else None
-            if source is not None and target is not None:
-                self._morph_pair(source, target, worlds)
-            elif source is not None:
-                self._shrink(source, target_center, worlds)
-            else:
-                self._grow(target, source_center, worlds)  # type: ignore[arg-type]
+        paired: set[int] = set()
+        if len(targets) >= len(sources):
+            for index, target in enumerate(targets):
+                source = sources[index * len(sources) // len(targets)]
+                if id(source) in paired:
+                    self._move(target, source, target, worlds)  # a copy of the source turns into it
+                else:
+                    paired.add(id(source))
+                    self._morph_pair(source, target, worlds)
+        else:
+            for index, source in enumerate(sources):
+                target = targets[index * len(targets) // len(sources)]
+                if id(target) in paired:
+                    self._move(source, source, target, worlds)  # it ends as a copy of the target
+                else:
+                    paired.add(id(target))
+                    self._morph_pair(source, target, worlds)
 
     def _morph_pair(self, source: Node, target: Node, worlds: dict[int, np.ndarray]) -> None:
-        here = _points(source)
-        there = _in_space_of(_points(target), worlds[id(target)], worlds[id(source)], here.shape[1])
-        start, end = align_paths(here, there)
-        self._between(source.points, start, end)
-        for name in _STYLE_SIGNALS:
-            if hasattr(source, name) and hasattr(target, name):
-                self._between(getattr(source, name), authoring_current(getattr(source, name)), authoring_current(getattr(target, name)))
+        self._move(source, source, target, worlds)
         # The target stays hidden until it replaces the source at the end.
         self._between(target.alpha, 0.0, authoring_current(target.alpha), 1.0, 1.0)
 
-    def _shrink(self, source: Node, center: np.ndarray, worlds: dict[int, np.ndarray]) -> None:
-        here = _points(source)
-        point = _in_space_of(center[None], np.eye(4), worlds[id(source)], here.shape[1])
-        self._between(source.points, here, np.repeat(point, len(here), axis=0))
-
-    def _grow(self, target: Node, center: np.ndarray, worlds: dict[int, np.ndarray]) -> None:
-        there = _points(target)
-        point = _in_space_of(center[None], np.eye(4), worlds[id(target)], there.shape[1])
-        self._between(target.points, np.repeat(point, len(there), axis=0), there)
+    def _move(self, moving: Node, start: Node, end: Node, worlds: dict[int, np.ndarray]) -> None:
+        """Animate ``moving``'s path and style from those of ``start`` to
+        those of ``end`` (``moving`` is one of them)."""
+        here = _in_space_of(_points(start), worlds[id(start)], worlds[id(moving)], _points(moving).shape[1])
+        there = _in_space_of(_points(end), worlds[id(end)], worlds[id(moving)], _points(moving).shape[1])
+        first, last = align_paths(here, there)
+        self._between(moving.points, first, last)
+        for name in _STYLE_SIGNALS:
+            if hasattr(start, name) and hasattr(end, name) and hasattr(moving, name):
+                self._between(getattr(moving, name), authoring_current(getattr(start, name)), authoring_current(getattr(end, name)))
 
     def nodes(self) -> Sequence[Node]:
         return (self.source, self.target)
 
     def removes(self) -> Sequence[Node]:
         return (self.source,)
+
+
+@dataclass(eq=False)
+class MorphMatching(Morph):
+    """Turn ``source`` into ``target`` keeping what they share (Manim's
+    ``TransformMatchingShapes``): shapes that look the same on both sides
+    (the same path up to where it is, e.g. the same glyph of a formula)
+    move to their new place; the others fade out in the first half and in
+    in the second, so the two never pile up. Pairs are found in tree
+    order, each shape used once.
+    """
+
+    tolerance: float = 1e-3
+    """How far (world units) points may differ for shapes to match."""
+
+    def __post_init__(self) -> None:
+        self._plan()
+        sources, targets = _drawn_paths(self.source), _drawn_paths(self.target)
+        if not sources or not targets:
+            raise ValueError("MorphMatching needs a Shape2D or Curve3D (or a group of them) on both sides")
+        worlds = {**_world_matrices(self.source), **_world_matrices(self.target)}
+        free = [(target, self._relative_points(target, worlds)) for target in targets]
+        matched: set[int] = set()
+        for source in sources:
+            points = self._relative_points(source, worlds)
+            target = next((t for t, other in free if id(t) not in matched and self._same(points, other)), None)
+            if target is not None:
+                matched.add(id(target))
+                self._morph_pair(source, target, worlds)
+            else:
+                self._between(source.alpha, authoring_current(source.alpha), 0.0, 0.0, 0.5)
+        for target in targets:
+            if id(target) not in matched:
+                self._between(target.alpha, 0.0, authoring_current(target.alpha), 0.5, 1.0)
+
+    @staticmethod
+    def _relative_points(path: Node, worlds: dict[int, np.ndarray]) -> np.ndarray:
+        """The path's points in world space, relative to their lowest corner."""
+        points = _in_space_of(_points(path), worlds[id(path)], np.eye(4), 3)
+        return points - points.min(axis=0) if len(points) else points
+
+    def _same(self, points: np.ndarray, other: np.ndarray) -> bool:
+        return points.shape == other.shape and len(points) > 0 and bool(np.abs(points - other).max() <= self.tolerance)
 
 
 @dataclass(eq=False)
@@ -507,12 +554,6 @@ def _ancestors(node: Node) -> list[Node]:
     return []
 
 
-def _center(paths: list[Node], worlds: dict[int, np.ndarray]) -> np.ndarray:
-    """The center of the box around the anchors of ``paths``, in world space."""
-    anchors = np.concatenate([_in_space_of(_points(path)[::POINTS_PER_CURVE], worlds[id(path)], np.eye(4), 3) for path in paths if len(_points(path))])
-    return (anchors.min(axis=0) + anchors.max(axis=0)) / 2
-
-
 def _in_space_of(points: np.ndarray, from_world: np.ndarray, to_world: np.ndarray, dimension: int) -> np.ndarray:
     """``points`` of a node with world matrix ``from_world`` in the local
     space of a node with ``to_world`` (2D paths lie in z = 0).
@@ -530,6 +571,7 @@ __all__ = [
     "GrowFromCenter",
     "Indicate",
     "Morph",
+    "MorphMatching",
     "Rotate",
     "ShrinkToCenter",
     "Uncreate",

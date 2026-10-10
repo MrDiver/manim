@@ -9,7 +9,7 @@ or extended without touching how animation and rendering work.
 """
 
 from . import geometry, rate_functions
-from .animations import Create, DrawBorderThenFill, FadeIn, FadeOut, GrowFromCenter, Indicate, Morph, Rotate, ShrinkToCenter, Uncreate, Write
+from .animations import Create, DrawBorderThenFill, FadeIn, FadeOut, GrowFromCenter, Indicate, Morph, MorphMatching, Rotate, ShrinkToCenter, Uncreate, Write
 from .constants import DEGREES, DL, DOWN, DR, IN, LEFT, ORIGIN, OUT, PI, RIGHT, TAU, UL, UP, UR
 from .curves3d import ParametricCurve3D
 from .gltf import load_gltf
@@ -43,6 +43,7 @@ __all__ = [
     "GrowFromCenter",
     "Indicate",
     "Morph",
+    "MorphMatching",
     "ParametricCurve3D",
     "ParametricSurface",
     "Polyline",

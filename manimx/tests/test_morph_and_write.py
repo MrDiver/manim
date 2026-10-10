@@ -8,13 +8,17 @@ from manimx.animation import Group, Scene
 from manimx.animation.paths import partial_curve, partial_path
 from manimx.robjects import RShape2D
 from manimx.userland import (
+    DOWN,
+    LEFT,
     RIGHT,
     UP,
     Circle,
     Create,
     DrawBorderThenFill,
     Morph,
+    MorphMatching,
     Square,
+    Triangle,
     Uncreate,
     Write,
 )
@@ -101,14 +105,31 @@ def test_morph_turns_the_source_into_the_target_and_swaps_them_at_the_end() -> N
     assert np.allclose(corners.min(axis=0), [1.0, -1.0], atol=1e-6) and np.allclose(corners.max(axis=0), [3.0, 1.0], atol=1e-6)
 
 
-def test_morph_grows_and_shrinks_extra_shapes() -> None:
+def _world_box(node: RShape2D) -> tuple[np.ndarray, np.ndarray]:
+    points = np.asarray(node.points) + np.asarray(node.transform.position)[:2]
+    return points.min(axis=0), points.max(axis=0)
+
+
+def test_extra_shapes_start_and_end_as_copies() -> None:
+    """Shapes are paired evenly: an extra target starts as a copy of its
+    source, an extra source ends as a copy of its target."""
     one = Group(Square(), name="one")
     three = Group(Square(), Circle().shift(RIGHT * 3), Circle().shift(UP * 3), name="three")
     prepared = prepare(lambda s: (s.add(one), s.play(Morph(one, three))))
-    start = prepared.state_at(0.0).children
-    grown = [child for group in start for child in getattr(group, "children", [])]
-    extra = [node for node in grown if node.uid in {three.children[1].uid, three.children[2].uid}]
-    assert extra and all(np.ptp(node.points, axis=0).max() < 1e-9 for node in extra)  # a point at first
+    shown = [child for group in prepared.state_at(0.0).children for child in getattr(group, "children", [])]
+    extra = [node for node in shown if node.uid in {three.children[1].uid, three.children[2].uid}]
+    assert len(extra) == 2
+    for node in extra:  # where the square is, not a point
+        low, high = _world_box(node)
+        assert np.allclose(low, [-1.0, -1.0], atol=1e-6) and np.allclose(high, [1.0, 1.0], atol=1e-6)
+
+    many = Group(Square(), Circle().shift(RIGHT * 3), name="many")
+    single = Group(Square(side_length=1.0).shift(UP * 2), name="single")
+    prepared = prepare(lambda s: (s.add(many), s.play(Morph(many, single))))
+    group = next(child for child in prepared.state_at(0.999).children if child.uid == many.uid)
+    for node in group.children:  # both end on the one target
+        low, high = _world_box(node)
+        assert np.allclose(low, [-0.5, 1.5], atol=1e-2) and np.allclose(high, [0.5, 2.5], atol=1e-2)
 
     with pytest.raises(ValueError, match="Morph needs"):
         Morph(Group(), Square())
@@ -144,3 +165,26 @@ def test_write_draws_the_outline_then_fills_with_manims_timing() -> None:
     assert 0.0 < late.fill.opacity[0] < 1.0 and len(late.points) == 16
     (end,) = shapes(prepared, 2.0)
     assert end.fill.opacity[0] == 1.0 and end.stroke.width[0] == 0.0
+
+
+def test_morph_matching_moves_equal_shapes_and_fades_the_rest() -> None:
+    kept = Square().shift(LEFT * 2)
+    gone = Circle().shift(RIGHT * 2)
+    source = Group(kept, gone, name="source")
+    moved = Square().shift(UP * 2)
+    new = Triangle().shift(DOWN * 2)
+    target = Group(new, moved, name="target")
+    prepared = prepare(lambda s: (s.add(source), s.play(MorphMatching(source, target), run_time=2)))
+
+    def shown(t: float) -> dict[int, RShape2D]:
+        return {child.uid: child for group in prepared.state_at(t).children for child in getattr(group, "children", [])}
+
+    halfway = shown(1.0)
+    low, high = _world_box(halfway[kept.uid])
+    assert np.allclose((low + high) / 2, [-1.0, 1.0], atol=1e-6)  # halfway to its match, the same shape
+    assert np.allclose(high - low, [2.0, 2.0], atol=1e-6)
+    assert 0.0 < shown(0.5)[gone.uid].alpha < 1.0 and 0.0 < shown(1.5)[new.uid].alpha < 1.0  # out first, then in
+    assert halfway[gone.uid].alpha == 0.0 and halfway[new.uid].alpha == 0.0
+    assert moved.uid not in halfway or halfway[moved.uid].alpha == 0.0  # replaced at the end
+    with pytest.raises(ValueError, match="MorphMatching needs"):
+        MorphMatching(Group(), Square())
