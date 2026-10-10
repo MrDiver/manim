@@ -42,6 +42,14 @@ from .constants import (
 )
 from .curves3d import ParametricCurve3D
 from .gltf import load_gltf
+from .graphs import (
+    Axes,
+    FunctionGraph,
+    NumberLine,
+    NumberPlane,
+    ParametricFunction,
+    Value,
+)
 from .lines import (
     Angle,
     ArcBetweenPoints,
@@ -109,6 +117,7 @@ __all__ = [
     "Arc",
     "ArcBetweenPoints",
     "Arrow",
+    "Axes",
     "BackgroundRectangle",
     "Box",
     "Brace",
@@ -127,13 +136,17 @@ __all__ = [
     "Ellipse",
     "FadeIn",
     "FadeOut",
+    "FunctionGraph",
     "GrowFromCenter",
     "Indicate",
     "Line",
     "Morph",
     "MorphMatching",
     "MoveAlongPath",
+    "NumberLine",
+    "NumberPlane",
     "ParametricCurve3D",
+    "ParametricFunction",
     "ParametricSurface",
     "Polygon",
     "Polyline",
@@ -154,6 +167,7 @@ __all__ = [
     "TypstMath",
     "Uncreate",
     "Underline",
+    "Value",
     "Vector",
     "Write",
     "bounds",

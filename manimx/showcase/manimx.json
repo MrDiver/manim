@@ -104,6 +104,10 @@
     "Marks": {
       "module": "scenes.marks",
       "class": "Marks"
+    },
+    "Graphs": {
+      "module": "scenes.graphs",
+      "class": "Graphs"
     }
   },
   "timeline": {
@@ -146,6 +150,9 @@
       },
       {
         "scene": "Marks"
+      },
+      {
+        "scene": "Graphs"
       },
       {
         "scene": "LowerThird",
