@@ -290,8 +290,11 @@ class Project:
             # Another project's package of the same name (e.g. "scenes").
             for name in [name for name in sys.modules if name == top or name.startswith(top + ".")]:
                 del sys.modules[name]
-        if root not in sys.path:
-            sys.path.insert(0, root)
+        # First on the path, also when it is there already: a project loaded
+        # in between put its own folder in front.
+        if root in sys.path:
+            sys.path.remove(root)
+        sys.path.insert(0, root)
         importlib.invalidate_caches()
         try:
             return importlib.import_module(module)

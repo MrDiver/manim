@@ -3,6 +3,7 @@
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -270,3 +271,13 @@ def test_missing_arguments_are_asked_for_in_a_terminal(tmp_path, monkeypatch, ca
     monkeypatch.setattr(Question, "ask", lambda self: None)  # Ctrl+C in a prompt
     assert main(["g", "scene"]) == 130
     assert "Cancelled" in capsys.readouterr().err
+
+
+def test_projects_with_the_same_package_name_load_in_turns() -> None:
+    from manimx.project import Project
+
+    root = Path(__file__).resolve().parents[1]
+    first, second = root / "example-project", root / "tests" / "projects" / "benchmark"
+    for folder in (first, second, first):  # both name their package "scenes"
+        Project.load(folder).build_timeline()
+        assert Path(sys.modules["scenes"].__file__).resolve().is_relative_to(folder.resolve())
