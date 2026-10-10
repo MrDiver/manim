@@ -25,7 +25,7 @@ use crate::vectors::VectorPacker;
 /// Packs after which per-node data unused since is dropped (`CACHE_MAX_AGE`).
 const CACHE_MAX_AGE: u64 = 1024;
 
-#[pyclass(module = "manimx._core", unsendable)]
+#[pyclass(module = "manimx._core")]
 pub struct Packer {
     callbacks: Callbacks,
     vectors: VectorPacker,

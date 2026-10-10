@@ -212,3 +212,19 @@ def test_held_frames_repeat_the_image_before_them(renderer: RenderService) -> No
     assert held == [False, True, True, False, True, False]
     for future, shape in zip(futures, shown, strict=True):
         np.testing.assert_array_equal(future.result(), FrameComposer(renderer).compose(RGroup(children=[shape]), config(64, 36)))
+
+
+def test_sources_render_through_the_core_unless_turned_off() -> None:
+    from manimx.drivers.offline import load_source
+    from manimx.robjects.planned_frame import PlannedFrame
+    from manimx.userland import Square
+
+    class Still(Scene):
+        def construct(self) -> None:
+            self.add(Square())
+            self.wait()
+
+    (core_view,) = load_source(Still).state_at(0.5)
+    (snapshot_view,) = load_source(Still, core=False).state_at(0.5)
+    assert isinstance(core_view.root, PlannedFrame)
+    assert not isinstance(snapshot_view.root, PlannedFrame)

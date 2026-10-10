@@ -27,7 +27,7 @@ compared value by value (tests/test_plan.py).
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from .. import _core
@@ -268,6 +268,21 @@ def _node_fields(node: Node) -> Iterator[tuple[str, Signal]]:
         yield name, getattr(node, name)
 
 
+def planned_frames(source: Any) -> Callable[[float], tuple[ViewState, ...]] | None:
+    """``frame_at`` of a timeline or prepared scene, through the core; None
+    for anything else, and for a prepared scene the core cannot draw.
+    """
+    from .timing import Timeline
+
+    if isinstance(source, Timeline):
+        return PlannedTimeline(source).frame_at
+    if isinstance(source, PreparedScene):
+        plan = ScenePlan(source)
+        if plan.graph is not None:
+            return lambda t: (plan.frame_at(t),)
+    return None
+
+
 def _readable_signals(scene: PreparedScene) -> list[Signal]:
     """Every signal evaluation sets or a snapshot reads."""
     signals: list[Signal] = [scene.time.scene_time, scene.time.global_time]
@@ -328,4 +343,4 @@ def _derivation(signal: DerivedSignal) -> tuple:
     return ("python", function)
 
 
-__all__ = ["ScenePlan"]
+__all__ = ["PlannedTimeline", "ScenePlan", "planned_frames"]

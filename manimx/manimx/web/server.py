@@ -55,6 +55,7 @@ from urllib.parse import parse_qs, urlparse
 
 from PIL import Image
 
+from ..animation.plan import planned_frames
 from ..animation.timing import NEVER, Timeline
 from ..drivers.offline import RenderSettings
 from ..renderer import MotionBlur, RenderService
@@ -130,6 +131,7 @@ class PreviewServer:
     def _use(self, timeline: Timeline, settings: RenderSettings) -> None:
         self.timeline = timeline
         self.settings = settings
+        self._frame_at = (planned_frames(timeline) if settings.core else None) or timeline.frame_at
         effects = tuple(effect for effect in settings.effects if not isinstance(effect, MotionBlur))
         self._composer = self._service.composer(effects)
 
@@ -189,7 +191,7 @@ class PreviewServer:
             height = max(1, round(width * full_height / full_width))
             time = min(max(float(time), 0.0), self.timeline.duration)
             frame_config = dataclasses.replace(config, pixel_width=width, pixel_height=height, time=time)
-            pixels = self._composer.compose(self.timeline.frame_at, frame_config)
+            pixels = self._composer.compose(self._frame_at, frame_config)
         pil_format, _ = FORMATS[image_format]
         image = Image.fromarray(pixels, "RGBA")
         if pil_format == "JPEG":

@@ -182,6 +182,7 @@ class Project:
             fps=output.fps,
             effects=settings.effects_chain(),
             in_flight=settings.performance.frames_in_flight,
+            core=settings.performance.core,
             sample_rate=output.sample_rate,
             audio=output.audio,
         )

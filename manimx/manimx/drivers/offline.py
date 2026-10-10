@@ -86,6 +86,9 @@ class RenderSettings:
     sample_rate: int = 48_000
     audio: bool = True
     """Pass the source's sounds to the sink (if it has any)."""
+    core: bool = True
+    """Evaluate and pack timelines and prepared scenes in the core
+    (CORE.md); False renders them from RNode snapshots."""
 
     def frame_times(self, duration: float) -> list[float]:
         end = duration if self.end is None else self.end
@@ -103,9 +106,13 @@ class RenderStats:
         return self.frames / self.seconds if self.seconds > 0 else math.inf
 
 
-def load_source(spec: Any) -> FrameSource:
+def load_source(spec: Any, core: bool = True) -> FrameSource:
     """A :class:`FrameSource` from ``"module:attr"``, a Scene class, a
-    factory, or an object with ``duration`` and ``state_at``."""
+    factory, or an object with ``duration`` and ``state_at``. With
+    ``core``, a timeline's or prepared scene's frames come from the core
+    (:func:`~manimx.animation.plan.planned_frames`).
+    """
+    from ..animation.plan import planned_frames
     from ..animation.scene import Scene
 
     target = spec
@@ -123,7 +130,7 @@ def load_source(spec: Any) -> FrameSource:
     if hasattr(target, "state_at") and hasattr(target, "duration"):
         audio = getattr(target, "audio", None)
         # A timeline or prepared scene renders through its cameras.
-        frame_at = getattr(target, "frame_at", target.state_at)
+        frame_at = (planned_frames(target) if core else None) or getattr(target, "frame_at", target.state_at)
         return FrameSource(frame_at, target.duration, audio if callable(audio) else None)
     raise TypeError(f"cannot render {target!r}: it needs duration and state_at")
 
@@ -149,7 +156,7 @@ def render(
     settings = settings or RenderSettings()
     started = time.perf_counter()
     if workers <= 1:
-        count = _render_here(load_source(source), sink, settings, progress)
+        count = _render_here(load_source(source, settings.core), sink, settings, progress)
     else:
         count = _render_in_workers(source, sink, settings, workers, progress)
     return RenderStats(count, time.perf_counter() - started)
@@ -346,7 +353,7 @@ def _worker_main(
         from ..renderer.webgpu import RenderService
         from .pipeline import FramePipeline
 
-        source = load_source(spec)
+        source = load_source(spec, settings.core)
         times = settings.frame_times(source.duration)
         pipeline = FramePipeline(RenderService.shared().composer(settings.effects), settings.config, settings.in_flight)
 

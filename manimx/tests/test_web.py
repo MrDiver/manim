@@ -98,7 +98,7 @@ def test_bad_requests_and_failing_scenes_answer_with_errors(server, monkeypatch)
     def broken(t: float):
         raise RuntimeError("the scene broke")
 
-    monkeypatch.setattr(server.timeline, "frame_at", broken)
+    monkeypatch.setattr(server, "_frame_at", broken)  # the core's frames, or the timeline's
     status, _, body = get(server, "/api/frame?t=1")
     assert status == 500 and json.loads(body) == {"error": "RuntimeError: the scene broke"}
 

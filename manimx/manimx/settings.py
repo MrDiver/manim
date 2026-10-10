@@ -173,6 +173,7 @@ class PerformanceSettings:
 
     workers: int = setting(1, "Render processes; more use more CPU cores.", minimum=1)
     frames_in_flight: int = setting(3, "Frames queued on the GPU per process.", minimum=1)
+    core: bool = setting(True, "Evaluate and pack frames in the native core; off: the Python reference path (same pixels, slower).")
 
 
 @dataclass
