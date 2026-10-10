@@ -6,9 +6,8 @@ transform on the way to them. So a rectangle around a formula stays
 around it while the formula moves, grows or changes shape.
 
 Bounds are in the space of the marked node's parent: put a mark next to
-the node it marks (in the same group, or both in the scene). The family
-is the one when the mark is made; nodes added to a group later are not
-counted. No mark picks a color.
+the node it marks (in the same group, or both in the scene). Children
+added to a group later count too. No mark picks a color.
 """
 
 from __future__ import annotations
@@ -39,25 +38,45 @@ from .shapes2d import Brace, _Side
 def bounds(node: Node) -> DerivedSignal:
     """The bounding box ``[[min x, min y, min z], [max x, max y, max z]]``
     of the paths under ``node`` (Shape2D and Curve3D), in its parent's
-    space, as an ARRAY signal that follows them (all zeros if none)."""
-    layout: list[tuple[int, tuple[str, ...], bool]] = []
-    inputs: list[Signal] = []
-    index: dict[int, int] = {}
+    space, as an ARRAY signal that follows them (all zeros if none).
+    Children added to a group under ``node`` later count too: the signal
+    rebinds its inputs when the family changes."""
+    signal = DerivedSignal(_Bounds(()), (), ARRAY, name=f"{node.name}.bounds")
+    _FamilyBounds(node, signal).rebind()
+    return signal
 
-    def visit(member: Node, parent: int) -> None:
-        parts = tuple(part for part, mixin in (("position", PositionMixin), ("rotation", RotationMixin), ("scale", ScalableMixin)) if isinstance(member, mixin))
-        for part in parts:
-            inputs.extend(getattr(member, part).axes if part != "rotation" else (member.rotation,))  # type: ignore[attr-defined]
-        is_path = isinstance(member, (Shape2D, Curve3D))
-        if is_path:
-            inputs.append(member.points)  # type: ignore[attr-defined]
-        index[id(member)] = len(layout)
-        layout.append((parent, parts, is_path))
-        for child in _children(member):
-            visit(child, index[id(member)])
 
-    visit(node, -1)
-    return DerivedSignal(_Bounds(tuple(layout)), tuple(inputs), ARRAY, name=f"{node.name}.bounds")
+class _FamilyBounds:
+    """Keeps a bounds signal's inputs those of ``node``'s current family:
+    rebinds it, and listens to every group in the family for additions."""
+
+    __slots__ = ("node", "signal", "listening")
+
+    def __init__(self, node: Node, signal: DerivedSignal) -> None:
+        self.node, self.signal = node, signal
+        self.listening: set[int] = set()
+
+    def rebind(self, _group: Group | None = None) -> None:
+        layout: list[tuple[int, tuple[str, ...], bool]] = []
+        inputs: list[Signal] = []
+
+        def visit(member: Node, parent: int) -> None:
+            parts = tuple(part for part, mixin in (("position", PositionMixin), ("rotation", RotationMixin), ("scale", ScalableMixin)) if isinstance(member, mixin))
+            for part in parts:
+                inputs.extend(getattr(member, part).axes if part != "rotation" else (member.rotation,))  # type: ignore[attr-defined]
+            is_path = isinstance(member, (Shape2D, Curve3D))
+            if is_path:
+                inputs.append(member.points)  # type: ignore[attr-defined]
+            if isinstance(member, Group) and id(member) not in self.listening:
+                self.listening.add(id(member))
+                member.on_structure_change(self.rebind)
+            here = len(layout)
+            layout.append((parent, parts, is_path))
+            for child in _children(member):
+                visit(child, here)
+
+        visit(self.node, -1)
+        self.signal.rebind(_Bounds(tuple(layout)), tuple(inputs))
 
 
 def edge(node: Node, direction: Sequence[float]) -> DerivedSignal:

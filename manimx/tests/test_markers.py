@@ -65,3 +65,14 @@ def test_a_brace_label_sits_under_a_formula() -> None:
     brace_box = box(braced.brace.points.value)
     assert brace_box[1, 1] < low[1] and brace_box[0, 0] == pytest.approx(low[0])
     assert label.position.y.value < brace_box[0, 1]
+
+
+def test_bounds_follow_children_added_later() -> None:
+    inner = Group(Circle(1.0))
+    outer = Group(inner)
+    around = SurroundingRectangle(outer, buff=0.0)
+    inner.add(Circle(0.5).shift(RIGHT * 3))
+    outer.add(Group(Circle(0.5).shift(DOWN * 3)))
+    np.testing.assert_allclose(box(around.points.value), [[-1.0, -3.5], [3.5, 1.0]], atol=1e-9)
+    prepare(lambda s: s.add(outer, around)).evaluate(0.0)  # the plan sees the final inputs
+    np.testing.assert_allclose(box(around.points.value), [[-1.0, -3.5], [3.5, 1.0]], atol=1e-9)
