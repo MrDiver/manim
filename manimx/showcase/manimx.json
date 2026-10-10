@@ -92,6 +92,10 @@
     "LowerThird": {
       "module": "scenes.lower_third",
       "class": "LowerThird"
+    },
+    "Paths": {
+      "module": "scenes.paths",
+      "class": "Paths"
     }
   },
   "timeline": {
@@ -125,6 +129,9 @@
       },
       {
         "scene": "Measures"
+      },
+      {
+        "scene": "Paths"
       },
       {
         "scene": "LowerThird",

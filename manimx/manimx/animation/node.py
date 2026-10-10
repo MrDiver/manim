@@ -41,6 +41,7 @@ from ..utils.color import ManimColor, ParsableManimColor
 from . import authoring
 from .animations import AnimationBuilder
 from .kinds import DISCRETE, FACTOR, ROTATION, SCALAR
+from .paths import PointSignal
 from .signal_tracks import Change
 from .signals import RootSignal, Signal, Vector3Signal, derive
 
@@ -197,11 +198,17 @@ class PositionMixin:
     def move_to(self, point: Sequence[float]) -> ChangeList:
         return [(axis, ABS, float(component)) for axis, component in zip(self.position.axes, _vector(point))]
 
-    def follow(self, other: Node, offset: Sequence[float] = (0.0, 0.0, 0.0)) -> PositionMixin:
+    def follow(self, other: Node | PointSignal, offset: Sequence[float] = (0.0, 0.0, 0.0)) -> PositionMixin:
         """Keep this node at ``other``'s position plus ``offset`` (a
-        derived signal per axis; the replacement for updaters)."""
-        require(other, PositionMixin, f"{type(self).__name__}.follow()")
-        for name, axis, delta in zip("xyz", other.position.axes, _vector(offset)):  # type: ignore[attr-defined]
+        derived signal per axis; the replacement for updaters). ``other``
+        is a node or a point that follows signals, such as
+        ``shape.point_at(0.5)``."""
+        if isinstance(other, PointSignal):
+            axes = other.axes
+        else:
+            require(other, PositionMixin, f"{type(self).__name__}.follow()")
+            axes = other.position.axes  # type: ignore[attr-defined]
+        for name, axis, delta in zip("xyz", axes, _vector(offset), strict=True):
             setattr(self.position, name, derive(Offset(float(delta)), axis, name=f"{self.name}.position.{name}"))  # type: ignore[attr-defined]
         return self
 

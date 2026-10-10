@@ -24,7 +24,7 @@ from .node import (
     ScalableMixin,
     animatable,
 )
-from .paths import drawn_part
+from .paths import PointSignal, drawn_part, point_signal
 from .signals import RootSignal, Signal
 from .snapshot import version_token
 from .style import Colors, Scalars
@@ -75,6 +75,15 @@ class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
         self.stroke_joint = RootSignal(style.joints(stroke_joint), DISCRETE, name=f"{prefix}.stroke_joint")
         self.stroke_cap = RootSignal(style.cap(stroke_cap), DISCRETE, name=f"{prefix}.stroke_cap")
         self.cast_shadows = RootSignal(cast_shadows, DISCRETE, name=f"{prefix}.cast_shadows")
+
+    def point_at(self, proportion: float | Signal, by_length: bool = True) -> PointSignal:
+        """The point ``proportion`` (0 to 1, or a SCALAR signal) of the way
+        along ``points``, in the parent's space, following the path, its
+        position, scale and rotation: ``dot.follow(shape.point_at(0.25))``.
+        With ``by_length`` equal steps are equally far apart along the
+        path; else each curve gets an equal share (see paths.point_at).
+        It is of the whole path, not only the part drawn."""
+        return point_signal(self, proportion, by_length)
 
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()

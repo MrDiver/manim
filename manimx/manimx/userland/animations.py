@@ -40,6 +40,7 @@ from ..animation.contributions import (
     evaluate,
 )
 from ..animation.node import require
+from ..animation.paths import point_at
 from ..animation.rates import linear, smooth
 from ..animation.signal_tracks import RateFunction
 from ..robjects import Transform
@@ -394,6 +395,42 @@ class MorphMatching(Morph[MorphTarget]):
 
 
 @dataclass(eq=False)
+class MoveAlongPath(Animation):
+    """Move a node along ``path`` from its start to its end (Manim's
+    ``MoveAlongPath``): the node's position goes through the path's
+    points. ``by_length`` as in :meth:`Shape2D.point_at`. The path is
+    taken where and as it is when the animation is created; to keep to a
+    path that changes, follow ``path.point_at(proportion)`` instead.
+    """
+
+    node: Node
+    path: Node
+    by_length: bool = True
+    run_time: float = 1.0
+    rate: RateFunction = smooth
+
+    def __post_init__(self) -> None:
+        require(self.node, PositionMixin, "MoveAlongPath")
+        if not isinstance(self.path, (Shape2D, Curve3D)):
+            raise TypeError(f"MoveAlongPath needs a Shape2D or Curve3D path, got {type(self.path).__name__}")
+        node_world = _world_matrices(self.node)[id(self.node)]
+        parent = node_world @ np.linalg.inv(_local_matrix(self.node))
+        self._points = _in_space_of(_points(self.path), _world_matrices(self.path)[id(self.path)], parent, 3)
+        self._last: tuple[float, np.ndarray] | None = None
+
+    def targets(self) -> Sequence[Target]:
+        return [Target(axis, Change.ABSOLUTE) for axis in self.node.position.axes]
+
+    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
+        if self._last is None or self._last[0] != alpha:  # the three axes ask for the same point
+            self._last = (alpha, point_at(self._points, alpha, self.by_length))
+        return float(self._last[1][self.node.position.axes.index(signal)])
+
+    def nodes(self) -> Sequence[Node]:
+        return (self.node,)
+
+
+@dataclass(eq=False)
 class Create(_PlannedAnimation):
     """Draw a node's paths from their start (Manim's ``Create``): the
     shapes of a group one after another, each overlapping the previous by
@@ -613,6 +650,7 @@ def _in_space_of(points: np.ndarray, from_world: np.ndarray, to_world: np.ndarra
 
 __all__ = [
     "Create",
+    "MoveAlongPath",
     "DrawBorderThenFill",
     "FadeIn",
     "FadeOut",

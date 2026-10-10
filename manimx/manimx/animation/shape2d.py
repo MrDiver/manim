@@ -26,7 +26,7 @@ from .node import (
     ScalableMixin,
     animatable,
 )
-from .paths import drawn_part
+from .paths import PointSignal, drawn_part, point_signal
 from .signals import DerivedSignal, RootSignal, Signal
 from .snapshot import version_token
 from .style import Colors, Scalars
@@ -101,6 +101,15 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         itself can no longer be changed directly."""
         self.points = DerivedSignal(function, parameters, PATH, name=f"{self.name}.points")
         self.draw_start, self.draw_end, self.drawn_points = drawn_part(self.points, self.name)
+
+    def point_at(self, proportion: float | Signal, by_length: bool = True) -> PointSignal:
+        """The point ``proportion`` (0 to 1, or a SCALAR signal) of the way
+        along ``points``, in the parent's space, following the path, its
+        position, scale and rotation: ``dot.follow(shape.point_at(0.25))``.
+        With ``by_length`` equal steps are equally far apart along the
+        path; else each curve gets an equal share (see paths.point_at).
+        It is of the whole path, not only the part drawn."""
+        return point_signal(self, proportion, by_length)
 
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()
