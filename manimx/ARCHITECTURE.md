@@ -8,7 +8,9 @@ the Python code. Where two classes share a name, the module comes first
 (`RGroup`, `RShape2D`, ...): an `RGroup` is the snapshot of an
 `animation.Group`.
 
-More detail: the renderer's internals (passes, shaders, buffers) in
+More detail: the native core (Rust) in [CORE.md](CORE.md) and
+[core/README.md](core/README.md), the renderer's internals (passes,
+shaders, buffers) in
 [manimx/renderer/README.md](manimx/renderer/README.md), the animation
 engine's design rationale in `docs/animation_engine_design.md` (repository
 root), performance work in [PERFORMANCE.md](PERFORMANCE.md), usage in
@@ -24,11 +26,12 @@ Contents:
 6. [`World2D`, `World3D`, `animation.Camera`, `View`](#6-world2d-world3d-animationcamera-view)
 7. [`RNode`: the contract between both sides](#7-rnode-the-contract-between-both-sides)
 8. [The render chain and `RenderService`](#8-the-render-chain-and-renderservice)
-9. [Drivers: `FramePipeline`, processes, `FrameSink`, audio](#9-drivers-framepipeline-processes-framesink-audio)
-10. [`Project` and the CLI](#10-project-and-the-cli)
-11. [Lifetimes at a glance](#11-lifetimes-at-a-glance)
-12. [Design decisions](#12-design-decisions)
-13. [State of the work and next steps](#13-state-of-the-work-and-next-steps)
+9. [The core: `manimx._core`](#9-the-core-manimx_core)
+10. [Drivers: `FramePipeline`, processes, `FrameSink`, audio](#10-drivers-framepipeline-processes-framesink-audio)
+11. [`Project` and the CLI](#11-project-and-the-cli)
+12. [Lifetimes at a glance](#12-lifetimes-at-a-glance)
+13. [Design decisions](#13-design-decisions)
+14. [State of the work and next steps](#14-state-of-the-work-and-next-steps)
 
 ---
 
@@ -55,6 +58,19 @@ retiming, cutting and parallel rendering possible. `RenderService` is a
 long-lived service that keeps GPU data per `RNode.uid` across all
 calls and only patches what changed.
 
+The second pass has two implementations that give the same pixels:
+
+- **The core** (`manimx._core`, Rust; section 9), the default: a
+  `ScenePlan` hands the prepared scene to the core as data once; per
+  frame the core evaluates every signal, flattens the scene graph, packs
+  the GPU records and renders, composites and reads back, without
+  `RNode` trees and without per-object Python. Python runs per frame only
+  where the user wrote per-frame Python (`derive()` functions, custom
+  animations, unknown rate functions).
+- **The reference path** in Python (`RNode` trees through the render
+  chain of section 8): the definition of what a frame shows, used by the
+  tests, by `manimx ui` for drawing, and with `performance.core` off.
+
 ```mermaid
 flowchart LR
     Code["Scene.construct()"] -->|"Scene.prepare() — once"| PS["PreparedScene<br/>SignalTrack, Segment"]
@@ -66,26 +82,29 @@ flowchart LR
     C --> D["drivers.render()<br/>FramePipeline, worker processes"]
     D --> Out["VideoFile / ImageSequence"]
     TL -->|"Timeline.audio(start, end)"| D
+    TL -->|"PlannedTimeline.frame_at(t) — the default"| Core["manimx._core<br/>Evaluator, SceneGraph, Packer,<br/>FrameRenderer"]
+    Core --> D
 ```
 
 ## 2. Packages
 
 | Package | Contents | Depends on |
 |---|---|---|
-| `manimx.robjects` | `RNode` and its subclasses `RGroup`, `RClippingGroup`, `RBezierPath` (→ `RShape2D`, `RCurve3D`), `RShape3D` (→ `RParticles`), `RLight` (→ `RDirectionalLight`, `RPointLight`, `RSpotLight`); `Transform`, `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`; `new_uid()`, `versioned()` | numpy |
-| `manimx.animation` (core) | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses (`Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D` (→ `Particles`), `Light` → `DirectionalLight`, `PointLight`, `SpotLight`; `animation.Camera`), `PositionMixin`, `RotationMixin`, `ScalableMixin`; the `Animation` contract (`Animation`, `SetValue`, `ChangeSignals`/`AnimationBuilder`) and the default rates `linear`, `smooth`; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound` | robjects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
-| `manimx.userland` | everything a project could write on top of the core: shapes (`Circle`, `Dot`, `Square`, `Rectangle`, `RegularPolygon`, `Triangle`, `Polyline`, `ParametricCurve3D`, `Box`, `Sphere`, `Torus`, `ParametricSurface`), animations (`FadeIn`, `FadeOut`, `Rotate`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter`), `rate_functions`, `constants` (`UP`, `PI`, ...), `geometry` (every point and mesh generator), `load_gltf()` | animation, robjects |
-| `manimx.renderer` | `SceneFlattener` → `FlatScene`; `tessellate_fill()`; `RNodeDataCache`; `RenderConfig`, `renderer.Camera`, `ViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `RemoveObjects`, `ClearScene` | robjects |
-| `manimx.renderer.webgpu` | `RenderService`, `FramePacker` → `FramePacket`, `WGPURenderer`, `FrameComposer`, `RetainedVectors`, `VectorBatch`, `MeshBatch`, `VectorPass`, `MeshPass`, `LightingPass`, `ShadowPass`, `RenderTargets`, `RenderLayers`, `ResourceCache`, `GPUContext` | wgpu |
-| `manimx.drivers` | `render()`, `FramePipeline`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation |
+| `manimx._core` | the native core (Rust, PyO3; `core/`): `Evaluator`, `FrameState`, `SceneGraph`, `Packer`, `FrameRenderer` (section 9) | numpy; calls back into animation and renderer for user functions and records built once per version |
+| `manimx.robjects` | `RNode` and its subclasses `RGroup`, `RClippingGroup`, `RBezierPath` (→ `RShape2D`, `RCurve3D`), `RShape3D` (→ `RParticles`), `RLight` (→ `RDirectionalLight`, `RPointLight`, `RSpotLight`); `Transform`, `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`; `new_uid()`, `versioned()`; `PlannedFrame` (a frame of the core) | numpy |
+| `manimx.animation` (core) | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses (`Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D` (→ `Particles`), `Light` → `DirectionalLight`, `PointLight`, `SpotLight`; `animation.Camera`), `PositionMixin`, `RotationMixin`, `ScalableMixin`; the `Animation` contract (`Animation`, `SetValue`, `ChangeSignals`/`AnimationBuilder`) and the default rates `linear`, `smooth`; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound`; contributions as data (`contributions.py`: `To`, `By`, `Ramp`, `Power`, `Turn`, `Keyframes`, `Between`, `Partial`), `paths.partial_path()`, `ScenePlan`, `PlannedTimeline`, `PlannedScene`, `planned_frames()` | robjects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
+| `manimx.userland` | everything a project could write on top of the core: shapes (`Circle`, `Dot`, `Square`, `Rectangle`, `RegularPolygon`, `Triangle`, `Polyline`, `ParametricCurve3D`, `Box`, `Sphere`, `Torus`, `ParametricSurface`), animations (`FadeIn`, `FadeOut`, `Rotate`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter`, `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`), `rate_functions`, `constants` (`UP`, `PI`, ...), `geometry` (every point and mesh generator, `align_paths()`), `load_gltf()` | animation, robjects |
+| `manimx.renderer` | `SceneFlattener` → `FlatScene`; `tessellate_fill()`; `RNodeDataCache`; `RenderConfig`, `renderer.Camera`, `ViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `RemoveObjects`, `ClearScene`; `core_callbacks` (records the core asks Python for) | robjects |
+| `manimx.renderer.webgpu` | `RenderService`, `FramePacker` → `FramePacket`, `WGPURenderer`, `FrameComposer`, `RetainedVectors`, `VectorBatch`, `MeshBatch`, `VectorPass`, `MeshPass`, `LightingPass`, `ShadowPass`, `RenderTargets`, `RenderLayers`, `ResourceCache`, `GPUContext`; `CorePacker` (the core's packer for the Python renderer) | wgpu |
+| `manimx.drivers` | `render()`, `FramePipeline`, `CoreFramePipeline`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation |
 | `manimx.project` | `Project`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers, settings |
 | `manimx.settings` | `Settings` and its sections (`OutputSettings`, `EffectsSettings`, `LightingSettings`, `PerformanceSettings`), `setting()` | renderer (config, effects) |
 | `manimx.cli` | the Typer `app` (`manimx` command), `scaffold`, `ui` | project, drivers, web |
 | `manimx.web` | `PreviewServer` (standard library HTTP), `ProjectReloader` (reload on save) and the page (`static/`: HTML, CSS, plain JS modules) | animation, drivers, renderer, project |
 
 `manimx.animation` never touches the GPU, and `manimx.renderer` never sees a
-`RootSignal` or a time: `RNode` trees are the only interface between
-them.
+`RootSignal` or a time: `RNode` trees and `PlannedFrame`s (both in
+`manimx.robjects`) are the only interface between them.
 
 ## 3. From `Scene.construct()` to a video
 
@@ -649,7 +668,74 @@ Otherwise, for every sub-frame it
 Finally it applies `ShaderEffect(stage="frame")` and encodes to sRGB in the
 output texture.
 
-## 9. Drivers: `FramePipeline`, processes, `FrameSink`, audio
+## 9. The core: `manimx._core`
+
+A Rust extension module (`core/`, built with maturin; CORE.md has the plan
+and the phases, core/README.md maps every module to the Python it ports).
+It takes over the second pass:
+
+```mermaid
+flowchart LR
+    PS["PreparedScene"] -->|"ScenePlan — once"| Plan["Evaluator (signals, tracks,<br/>derived signals)<br/>SceneGraph (nodes, slots)"]
+    Plan -->|"evaluate(t) → FrameState"| PF["PlannedFrame<br/>(graph, state, key)"]
+    PF -->|"Packer.pack_frame()"| Pk["Packet + arenas"]
+    Pk -->|"Renderer (gpu/)"| L["lit + vector layers"]
+    L -->|"Composer"| F["frame → staging buffer"]
+```
+
+- **`ScenePlan`** (animation/plan.py) puts every signal a prepared scene
+  can read into slots and gives the core:
+  - every `SignalTrack` with its entries. A contribution is data when the
+    animation describes it (`Animation.planned_contribution()` returns a
+    value of contributions.py), else the core calls `contribution()`
+    back. Rates are data for `linear` and `smooth`, else called back;
+  - every `DerivedSignal`: `follow()` offsets (`Offset`) are data, other
+    functions are called back with the input values;
+  - the `SceneGraph`: every node of the scene with its class, children
+    and slots. A node of a class whose render state the core does not
+    know (a subclass overriding `_build_snapshot`) makes the plan's graph
+    None, and that clip is drawn from snapshots.
+- **`Evaluator.evaluate(t, scene_time, global_time)`** sets every slot like
+  `PreparedScene.evaluate()` sets the signals; a slot's version increases
+  exactly when its value changes. `Evaluator.state()` returns a
+  `FrameState`: the values and versions at that time, shared, not copied,
+  so all sub-frames of a frame can be evaluated before any is rendered.
+- **`PlannedTimeline`** (and `PlannedScene`) have `frame_at(t)` like the
+  `Timeline`: one `ViewState` per active clip whose root is a
+  `PlannedFrame` (graph, state, and a key: the versions of every slot a
+  node reads). `planned_frames()` makes one for a timeline or prepared
+  scene.
+- **`Packer`** flattens the graph with a state (`SceneGraph.flatten`: world
+  matrices, alphas, clip scopes, lights) and packs the records of a
+  `FramePacket`: retained vector records (`vectors.rs`, `RetainedVectors`),
+  meshes, materials and particles (`meshes.rs`), lights, shadow views,
+  bounds and changed shadow layers. Records built from geometry or style
+  alone (triangulated fills, stroke curves, interleaved meshes, material
+  entries, linear light colors, texture mips) come from the reference
+  functions in `renderer/core_callbacks.py`, once per version of their
+  signals. `CorePacker` wraps the result for the Python renderer.
+- **`FrameRenderer`** (gpu/) is the Python renderer and composer ported
+  to wgpu with the same WGSL, read from the Python package: passes,
+  render targets, bloom, shader effects, tone mapping, finalize, and a
+  ring of staging buffers. `CoreFramePipeline` (drivers/core_pipeline.py)
+  drives it with `FramePipeline`'s interface; it holds frames whose views
+  have the keys of the frame before. One wgpu device per process.
+
+**Equal results.** Every operation the core ports computes in the same
+order as the Python it ports; tests/test_plan.py compares every signal
+(within 1e-12), tests/test_core_render.py and tests/test_core_pipeline.py
+compare pixels (bit-identical), across the example scenes, a scene with
+every node type, every built-in animation, motion blur, bloom, shader
+effects, several views and empty frames.
+
+**When it is used.** `RenderSettings.core` (the project setting
+`performance.core`, on by default): `load_source()` takes a source's
+frames from `planned_frames()`, and `drivers.render()` (and its workers)
+renders with `CoreFramePipeline` when every frame comes from the core
+(`FrameSource.core`). `manimx ui` takes its frames from the core and
+draws them with the Python renderer (frames at the page's width).
+
+## 10. Drivers: `FramePipeline`, processes, `FrameSink`, audio
 
 ```mermaid
 flowchart LR
@@ -670,6 +756,8 @@ flowchart LR
 - **`FramePipeline`:** keeps up to `in_flight` frames on the GPU, with one
   staging buffer per frame mapped through `map_async`. `submit()` returns a
   `concurrent.futures.Future`, completed in submission order.
+  `CoreFramePipeline` does the same on the core (section 9); `_pipeline()`
+  picks it when `FrameSource.core` is set.
 - **Worker processes:** each runs `_worker_main`, which rebuilds the source
   with `load_source()` from a `"module:Class"` string or a `ProjectSource`.
   Because `state_at` is pure, every process renders identical frames.
@@ -687,7 +775,7 @@ flowchart LR
   `Timeline.audio` or `PreparedScene.audio`) mixes exactly the rendered range
   before rendering starts. A silent mix means no audio track.
 
-## 10. `Project` and the CLI
+## 11. `Project` and the CLI
 
 ```mermaid
 flowchart LR
@@ -747,7 +835,7 @@ flowchart LR
   terminal. A `ProjectError` is printed as a panel with its `hint`. A
   `SceneError` comes with a rich traceback of the user's frames.
 
-## 11. Lifetimes at a glance
+## 12. Lifetimes at a glance
 
 | Instance | Created by | Owned by | Lives until | Changes? |
 |---|---|---|---|---|
@@ -765,9 +853,13 @@ flowchart LR
 | `FramePacket` | `FramePacker.pack()` | the `RenderService` | one render | no |
 | `FrameComposer` | `RenderService.composer(effects)` | the `RenderService` | the `RenderService` | its `_TexturePool` |
 | `FramePipeline` | `drivers.render()` | the render call | the call | yes |
+| `ScenePlan` (its `Evaluator` and `SceneGraph`) | `PlannedTimeline.plan()`, `planned_frames()` | the `PlannedTimeline` or `PlannedScene` | its `PreparedScene` | slot values on every evaluation |
+| `FrameState`, `PlannedFrame` | `ScenePlan.frame_at()` | the caller | that render | no |
+| `CoreFramePipeline` (its `FrameRenderer` with `Packer`) | `drivers.render()` | the render call | the call | its arenas, caches, GPU resources |
+| the core's wgpu device (`Gpu::shared`) | the first `FrameRenderer` | the process | the process | |
 | `_Writer` thread, `_worker_main` processes, ffmpeg | `drivers.render()` | the render call | the call | |
 
-## 12. Design decisions
+## 13. Design decisions
 
 **Animation package**
 
@@ -848,6 +940,23 @@ flowchart LR
 - **`Project.load()` is strict, with a schema from `project_schema()`.**
   Typos fail loudly, and editors check the file.
 
+**The core**
+
+- **The timeline as data, evaluated in Rust; user Python called back.**
+  Per-object Python per sub-frame was the cost (light-show: 70 ms of CPU
+  against 19 ms of GPU per frame). Python stays per frame only where the
+  user wrote per-frame Python.
+- **The Python path stays the reference.** The core ports it operation
+  by operation; tests compare values and pixels, and `performance.core`
+  turns the core off. Bugs found by the comparison are fixed in the
+  reference too (particle material indices).
+- **Records that change rarely come from Python.** Built once per
+  version by the reference functions, they are identical, and porting
+  them (earcut, strokes, meshes) brings little until they change often.
+- **Morph replaces its source** (`ReplacementTransform`) instead of
+  changing children: the scene structure stays fixed after `construct()`,
+  which the core relies on.
+
 **Performance policy**
 
 - **Only measured improvements stay.** Every optimization is measured with
@@ -855,7 +964,7 @@ flowchart LR
   `--check-reference`, and recorded in PERFORMANCE.md, including what was
   dropped.
 
-## 13. State of the work and next steps
+## 14. State of the work and next steps
 
 **Done:**
 - signals, `Node`, `Animation`, `Scene`;
@@ -881,8 +990,14 @@ flowchart LR
 - `load_gltf()` builds a node tree: one `Group` per glTF node, one
   `Shape3D` per primitive, glTF names as node names, material names as
   `material:<name>` tags;
-- performance: 74.5 → 169.8 fps on `example-project/`, 2.3× faster than the
-  baseline.
+- performance (PERFORMANCE.md): on the benchmark project 48.6 fps at
+  the start of the render-chain work, 74 with the reference path
+  optimized, 123.5 with the core (604 without motion blur), within 1.2
+  times its GPU time; light-show 70 to 23 ms per frame (GPU 19);
+- the core (CORE.md phases 0 to 6): signals, scene graph, packing and
+  rendering in Rust, the default for renders;
+- `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`;
+- `manimx ui` with reload on save.
 
 **Next, in the agreed order:**
 1. **Web UI:** scrubbing preview (first slice done: `manimx ui`), then
@@ -892,11 +1007,12 @@ flowchart LR
 2. **Compositions:** a `View` shown as an image inside a `World2D`, nesting.
 3. **HDR colors for `RShape2D`:** a float vector target and `Bloom` on
    `RenderLayers.vector`, while colors ≤ 1 stay exactly Manim's.
-4. **Morphing** (a `Morph` animation, path alignment), and Whisper
-   transcripts calling `Clip.bind_cue()`.
-5. **Usability and performance, full time.** The remaining cost is CPU:
-   `SceneFlattener.flatten()`, `RetainedVectors.build()` bookkeeping and `state_at()`.
-   The GPU needs about 1.7 ms of 5.9 ms per frame.
+4. **Whisper transcripts** calling `Clip.bind_cue()`; Typst and LaTeX
+   producing `Group`s of `Shape2D` (they get `Write` and `Morph`).
+5. **Performance:** frames are now near GPU-bound; the lighting pass
+   dominates (deferred vs forward renderer is a parked question).
+   CORE.md phase 7 lists the rest (sub-frames in one submission,
+   parallel frames, hardware encoding, WASM for `manimx ui`).
 6. **miette-style diagnostics** for `ProjectError` and `SceneError`, once
    the common errors are known.
 
@@ -926,8 +1042,15 @@ flowchart LR
   no self-attribution. Commit only `manimx/`; `docs/`, the root
   `pyproject.toml` and the root `uv.lock` belong to the user.
 - Tests: `uv run --active pytest` in `manimx/`, with coverage at least 90%.
+- The core: `maturin develop --release` in `manimx/` (with the
+  environment manimx is installed in active) after every change to
+  `core/`; `cargo clippy --release` in `core/` stays clean. Rust code is
+  written to be read by someone who has never seen it: one concept per
+  module, a module doc naming the Python it ports, names from the Python
+  code.
 - Benchmark: check the power mode, run `scripts/benchmark_project.py
-  tests/projects/benchmark --check-reference <ref.npz>`, report.
+  tests/projects/benchmark --check-reference <ref.npz>` (add `--core` for
+  the core), report.
 - Don't run `ruff check` without `--no-fix`: the project config fixes files
   in place.
 - Describe everything with its name from the Python code.
