@@ -76,6 +76,10 @@
     "Shaders": {
       "module": "scenes.shaders",
       "class": "Shaders"
+    },
+    "Focus": {
+      "module": "scenes.focus",
+      "class": "Focus"
     }
   },
   "timeline": {

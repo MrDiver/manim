@@ -20,7 +20,7 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 
-use super::composer::{Blend, Bloom, Composer, CompositeTarget, Effect, ShaderEffect};
+use super::composer::{Blend, Bloom, Composer, CompositeTarget, DepthOfField, Effect, ShaderEffect};
 use super::context::{Gpu, COLOR_FORMAT, HDR_FORMAT};
 use super::renderer::{Renderer, TargetSettings};
 use crate::evaluator::FrameState;
@@ -340,10 +340,17 @@ impl FrameRenderer {
                 // The Frame record holds the camera and every config value a
                 // pack reads, except whether the default light is on.
                 key.push(parse_settings(&view.get_item(3)?)?.default_lights as u8);
+                // The lens is not part of the Frame record.
+                let (focus_distance, aperture) = lens(&view.get_item(3)?)?;
+                key.extend(focus_distance.to_le_bytes());
+                key.extend(aperture.to_le_bytes());
                 for camera_view in view.get_item(5)?.cast::<PyList>()?.iter() {
                     let mut frame = frame_record(&camera_view.get_item(1)?)?;
                     frame.time = 0.0;
                     key.extend(bytemuck::bytes_of(&frame));
+                    let (focus_distance, aperture) = lens(&camera_view.get_item(0)?)?;
+                    key.extend(focus_distance.to_le_bytes());
+                    key.extend(aperture.to_le_bytes());
                 }
             }
         }
@@ -381,6 +388,7 @@ impl FrameRenderer {
             target,
             self.background,
             &mut self.renderer.profiler,
+            None,
         )
     }
 
@@ -458,6 +466,7 @@ impl FrameRenderer {
             encoder,
         )?;
         let (lit, vector) = (targets.lit.clone(), targets.vector.clone());
+        let depths = (targets.depth_view.clone(), targets.vector_depth_view.clone());
         let frame_uniform = self.renderer.frame_uniform().clone();
         let lit = self.composer.lit_effects(
             &self.gpu,
@@ -466,6 +475,16 @@ impl FrameRenderer {
             &frame_uniform,
             &mut self.renderer.profiler,
         )?;
+        let (focus_distance, aperture) = lens(config)?;
+        let depth_of_field = (aperture > 0.0).then_some(DepthOfField {
+            focus_distance,
+            aperture,
+            mesh_depth: &depths.0,
+            vector_depth: &depths.1,
+            samples: self.settings.samples,
+            frame_uniform: &frame_uniform,
+            size: (self.settings.width, self.settings.height),
+        });
         self.composer.composite(
             &self.gpu,
             encoder,
@@ -474,6 +493,7 @@ impl FrameRenderer {
             target,
             self.background,
             &mut self.renderer.profiler,
+            depth_of_field,
         )
     }
 
@@ -521,6 +541,11 @@ impl FrameRenderer {
         self.ready.push_back((frame.index, image));
         Ok(())
     }
+}
+
+/// The camera's focus distance and aperture in a `config_values()` tuple.
+fn lens(config: &Bound<'_, PyAny>) -> PyResult<(f32, f32)> {
+    Ok((config.get_item(13)?.extract()?, config.get_item(14)?.extract()?))
 }
 
 fn frame_record(bytes: &Bound<'_, PyAny>) -> PyResult<Frame> {

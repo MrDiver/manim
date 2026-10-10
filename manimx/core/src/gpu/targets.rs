@@ -19,7 +19,7 @@ pub struct RenderTargets {
     pub mask_capacity: u32,
     pub gbuffer_views: Vec<wgpu::TextureView>,
     pub depth_view: wgpu::TextureView,
-    vector_depth_view: wgpu::TextureView,
+    pub vector_depth_view: wgpu::TextureView,
     pub lit: wgpu::Texture,
     pub vector: wgpu::Texture,
     lit_view: wgpu::TextureView,
@@ -88,11 +88,12 @@ impl RenderTargets {
         ));
         // The vector pass orders shapes with biased depth in its own buffer
         // and tests against the meshes' depth (above) explicitly.
+        // Sampled by the depth of field (with the meshes' depth).
         let vector_depth_view = view(&texture(
             "vector depth",
             DEPTH_FORMAT,
             samples,
-            ATTACHMENT,
+            ATTACHMENT | SAMPLED,
             1,
         ));
 

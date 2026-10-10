@@ -25,6 +25,11 @@ class Camera:
     ``field_of_view=None`` gives Manim's default orthographic camera, which
     shows exactly ``frame_height`` world units vertically. A vertical field of
     view in radians switches to a perspective projection.
+
+    Depth of field: things ``focus_distance`` away along the view axis are
+    sharp; ``aperture`` is the blur of something infinitely far, as a
+    fraction of the image height (0: everything sharp; see
+    depth_of_field.wgsl).
     """
 
     transform: Transform = field(
@@ -34,6 +39,8 @@ class Camera:
     field_of_view: float | None = None
     near: float = 0.1
     far: float = 100.0
+    focus_distance: float = 11.0
+    aperture: float = 0.0
 
     @classmethod
     def look_at(

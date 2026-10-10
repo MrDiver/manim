@@ -34,6 +34,29 @@ struct CompositeParams {
     _pad: [f32; 2],
 }
 
+/// `DepthOfFieldParams` (depth_of_field.wgsl).
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct DepthOfFieldParams {
+    focus_distance: f32,
+    aperture: f32,
+    weight: f32,
+    _pad: f32,
+}
+
+/// What the depth of field of one view needs besides its image: the
+/// camera's lens, the view's depth buffers and its Frame uniform.
+pub struct DepthOfField<'a> {
+    pub focus_distance: f32,
+    pub aperture: f32,
+    pub mesh_depth: &'a wgpu::TextureView,
+    pub vector_depth: &'a wgpu::TextureView,
+    /// Samples per pixel of the depth buffers.
+    pub samples: u32,
+    pub frame_uniform: &'a wgpu::Buffer,
+    pub size: (u32, u32),
+}
+
 /// `BLOOM_PARAMS_DTYPE` (bloom.wgsl).
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -150,13 +173,23 @@ impl TexturePool {
     }
 }
 
+/// Which fullscreen shader to run.
+pub struct FullscreenPass<'a> {
+    pub shader: &'a str,
+    pub entry_point: &'static str,
+    /// For a pass that reads the frame's depth buffers: their samples per
+    /// pixel (the shader is written for 4, multisampled; see
+    /// depth_of_field.wgsl).
+    pub depth_samples: Option<u32>,
+}
+
+/// Shader, entry point, target format, blend and depth samples of a pipeline.
+type PipelineKey = (String, &'static str, wgpu::TextureFormat, Blend, Option<u32>);
+
 /// Fullscreen-triangle passes; pipelines are kept per shader, entry
 /// point, target format and blend (`_Fullscreen`).
 pub struct Fullscreen {
-    pipelines: HashMap<
-        (String, &'static str, wgpu::TextureFormat, Blend),
-        (wgpu::RenderPipeline, wgpu::BindGroupLayout),
-    >,
+    pipelines: HashMap<PipelineKey, (wgpu::RenderPipeline, wgpu::BindGroupLayout)>,
     pub linear_clamp: wgpu::Sampler,
 }
 
@@ -190,9 +223,42 @@ impl Fullscreen {
         profiler: &mut GpuProfiler,
         timing: &'static str,
     ) -> PyResult<()> {
-        let key = (shader.to_string(), entry_point, format, blend);
+        let pass = FullscreenPass {
+            shader,
+            entry_point,
+            depth_samples: None,
+        };
+        self.run_pass(gpu, encoder, pass, target, format, resources, blend, clear, profiler, timing)
+    }
+
+    /// `run` for a variant of a shader (see `FullscreenPass`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_pass(
+        &mut self,
+        gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        pass: FullscreenPass,
+        target: &wgpu::TextureView,
+        format: wgpu::TextureFormat,
+        resources: &[wgpu::BindingResource],
+        blend: Blend,
+        clear: bool,
+        profiler: &mut GpuProfiler,
+        timing: &'static str,
+    ) -> PyResult<()> {
+        let FullscreenPass {
+            shader,
+            entry_point,
+            depth_samples,
+        } = pass;
+        let key = (shader.to_string(), entry_point, format, blend, depth_samples);
         if !self.pipelines.contains_key(&key) {
-            let module = gpu.shader(shader, &[])?;
+            let count = format!("const DEPTH_SAMPLES: i32 = {};", depth_samples.unwrap_or(4));
+            let mut replacements = vec![("const DEPTH_SAMPLES: i32 = 4;", count.as_str())];
+            if depth_samples == Some(1) {
+                replacements.push(("texture_depth_multisampled_2d", "texture_depth_2d"));
+            }
+            let module = gpu.shader(shader, &replacements)?;
             let pipeline = gpu
                 .device
                 .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -446,9 +512,81 @@ impl Composer {
     }
 
     /// `fs_composite`: tone mapped lit layer and vector layer over the
-    /// background, `weight` times into `target`.
+    /// background, `weight` times into `target`; through `depth_of_field`
+    /// when given (`FrameComposer._composite`).
     #[allow(clippy::too_many_arguments)]
     pub fn composite(
+        &mut self,
+        gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        lit: &wgpu::Texture,
+        vector: &wgpu::Texture,
+        target: CompositeTarget,
+        background: [f32; 4],
+        profiler: &mut GpuProfiler,
+        depth_of_field: Option<DepthOfField>,
+    ) -> PyResult<()> {
+        let Some(lens) = depth_of_field else {
+            return self.composite_layers(gpu, encoder, lit, vector, target, background, profiler);
+        };
+        let image = self.textures.get(
+            &gpu.device,
+            "depth of field",
+            lens.size,
+            HDR_FORMAT,
+            1,
+            wgpu::TextureUsages::empty(),
+        );
+        let image_view = image.create_view(&Default::default());
+        let sharp = CompositeTarget {
+            view: &image_view,
+            weight: 1.0,
+            clear: true,
+            background: target.background,
+            blend: Blend::Replace,
+        };
+        self.composite_layers(gpu, encoder, lit, vector, sharp, background, profiler)?;
+        let params = DepthOfFieldParams {
+            focus_distance: lens.focus_distance,
+            aperture: lens.aperture,
+            weight: target.weight,
+            _pad: 0.0,
+        };
+        let params = self
+            .composite_params
+            .write(&gpu.queue, bytemuck::bytes_of(&params));
+        let resources = [
+            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: lens.frame_uniform,
+                offset: 0,
+                size: wgpu::BufferSize::new(size_of::<crate::records::Frame>() as u64),
+            }),
+            params,
+            wgpu::BindingResource::TextureView(&image_view),
+            wgpu::BindingResource::TextureView(lens.mesh_depth),
+            wgpu::BindingResource::TextureView(lens.vector_depth),
+        ];
+        let pass = FullscreenPass {
+            shader: "depth_of_field.wgsl",
+            entry_point: "fs_depth_of_field",
+            depth_samples: Some(lens.samples),
+        };
+        self.fullscreen.run_pass(
+            gpu,
+            encoder,
+            pass,
+            target.view,
+            HDR_FORMAT,
+            &resources,
+            target.blend,
+            target.clear,
+            profiler,
+            "depth of field",
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn composite_layers(
         &mut self,
         gpu: &Gpu,
         encoder: &mut wgpu::CommandEncoder,

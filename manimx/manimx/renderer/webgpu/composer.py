@@ -50,8 +50,10 @@ from ...robjects import RClippingGroup, RGroup, RNode, RShape3D
 from ...robjects.planned_frame import PlannedFrame
 from ..config import Camera, CameraViewState, Frame, RenderConfig, ViewState
 from ..effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap
+from .frame import FRAME_DTYPE
 from .gpu import COLOR_FORMAT, HDR_FORMAT, GPUContext, ResourceCache, expand_includes
 from .profiler import GpuProfiler
+from .targets import RenderLayers
 
 if TYPE_CHECKING:
     from .service import RenderService
@@ -140,8 +142,8 @@ class FrameComposer:
                 # composite share an encoder. Buffer writes for this sub-frame
                 # land before it; the previous one is already submitted.
                 encoder = device.create_command_encoder(label="sub-frame")
-                lit, vector = self._render_view(encoder, views[0], sub_config)
-                self._composite(encoder, lit, vector, accumulator, config, weight, first=index == 0)
+                lit, layers, camera = self._render_view(encoder, views[0], sub_config)
+                self._composite(encoder, lit, layers, accumulator, config, weight, first=index == 0, camera=camera)
                 device.queue.submit([encoder.finish()])
                 continue
             # Several views: each is rendered and submitted on its own (the
@@ -150,8 +152,8 @@ class FrameComposer:
             stack = self._textures.get("view stack", size, HDR_FORMAT)
             for position, view in enumerate(views):
                 encoder = device.create_command_encoder(label="view")
-                lit, vector = self._render_view(encoder, view, sub_config)
-                self._composite(encoder, lit, vector, stack, config, 1.0, first=position == 0, background=position == 0, blend=_OVER)
+                lit, layers, camera = self._render_view(encoder, view, sub_config)
+                self._composite(encoder, lit, layers, stack, config, 1.0, first=position == 0, background=position == 0, blend=_OVER, camera=camera)
                 device.queue.submit([encoder.finish()])
             encoder = device.create_command_encoder(label="accumulate views")
             self._passes.run(
@@ -185,10 +187,10 @@ class FrameComposer:
             return [(time, 1.0)]  # a fixed scene looks the same at every time
         return blur.sample_times(time)
 
-    def _render_view(self, encoder: wgpu.GPUCommandEncoder, view: _View, config: RenderConfig) -> tuple[wgpu.GPUTexture, wgpu.GPUTexture]:
+    def _render_view(self, encoder: wgpu.GPUCommandEncoder, view: _View, config: RenderConfig) -> tuple[wgpu.GPUTexture, RenderLayers, Camera]:
         """Render one view into the renderer's layers; returns the lit layer
-        after the lit-stage effects, and the vector layer. The pictures of
-        its camera views are rendered and submitted first.
+        after the lit-stage effects, the layers and the view's camera. The
+        pictures of its camera views are rendered and submitted first.
         """
         root, camera, camera_views = view
         if camera is not None:
@@ -197,7 +199,7 @@ class FrameComposer:
             config = dataclasses.replace(config, camera_views=camera_views)
             self._render_camera_views(root, config)
         layers = self.service.render_layers(root, config, encoder)
-        return self._lit(encoder, layers.lit), layers.vector
+        return self._lit(encoder, layers.lit), layers, config.camera
 
     def _render_camera_views(self, root: RNode, config: RenderConfig) -> None:
         """Render each camera view of ``config`` into its layer of the
@@ -211,7 +213,8 @@ class FrameComposer:
             view_config = dataclasses.replace(config, camera=view.camera, view_aspect=view.aspect_ratio, hide_camera_views=True)
             encoder = device.create_command_encoder(label="camera view")
             layers = self.service.render_layers(root, view_config, encoder)
-            self._composite(encoder, self._lit(encoder, layers.lit), layers.vector, renderer.camera_view_layer(layer), config, 1.0, first=True)
+            target = renderer.camera_view_layer(layer)
+            self._composite(encoder, self._lit(encoder, layers.lit), layers, target, config, 1.0, first=True, camera=view.camera)
             device.queue.submit([encoder.finish()])
 
     def _lit(self, encoder: wgpu.GPUCommandEncoder, lit: wgpu.GPUTexture) -> wgpu.GPUTexture:
@@ -239,24 +242,63 @@ class FrameComposer:
         self,
         encoder: wgpu.GPUCommandEncoder,
         lit: wgpu.GPUTexture,
-        vector: wgpu.GPUTexture,
-        target: wgpu.GPUTexture,
+        layers: RenderLayers,
+        target: wgpu.GPUTexture | wgpu.GPUTextureView,
         config: RenderConfig,
         weight: float,
         first: bool,
         background: bool = True,
-        blend: dict = _ADDITIVE,
+        blend: dict | None = _ADDITIVE,
+        camera: Camera | None = None,
     ) -> None:
+        """The tone mapped lit layer and the vector layer over the
+        background, ``weight`` times into ``target``; through the depth of
+        field of ``camera`` when its aperture is open."""
+        profiler = self.service.renderer.profiler
+        depth_of_field = camera is not None and camera.aperture > 0.0 and layers.mesh_depth is not None
+        image = self._textures.get("depth of field", (layers.width, layers.height), HDR_FORMAT) if depth_of_field else target
         self._passes.run(
             encoder,
             "composite.wgsl",
             "fs_composite",
-            target,
-            [self._params(config, weight, background), self._resources.view(lit), self._resources.view(vector)],
-            blend=blend,
-            clear=first,  # the first sub-frame (or view) starts a new image
-            timing=self.service.renderer.profiler.pass_timing("composite"),
+            image,
+            [
+                self._params(config, 1.0 if depth_of_field else weight, background),
+                self._resources.view(lit),
+                self._resources.view(layers.vector),
+            ],
+            blend=None if depth_of_field else blend,
+            clear=first or depth_of_field,  # the first sub-frame (or view) starts a new image
+            timing=profiler.pass_timing("composite"),
         )
+        if not depth_of_field:
+            return
+        assert camera is not None
+        params = np.array([camera.focus_distance, camera.aperture, weight, 0.0], dtype=np.float32)
+        self._passes.run(
+            encoder,
+            "depth_of_field.wgsl",
+            "fs_depth_of_field",
+            target,
+            [
+                {"buffer": self.service.renderer.frame_uniform, "offset": 0, "size": FRAME_DTYPE.itemsize},
+                self._uniform(params),
+                self._resources.view(image),
+                layers.mesh_depth,
+                layers.vector_depth,
+            ],
+            blend=blend,
+            clear=first,
+            timing=profiler.pass_timing("depth of field"),
+            replacements=_depth_samples(layers.samples),
+        )
+
+    def _uniform(self, data: np.ndarray) -> dict:
+        """``data`` in the next uniform slot, as a binding."""
+        self._slot = (self._slot + 1) % 64
+        offset = self._slot * _UNIFORM_STRIDE
+        self._context.device.queue.write_buffer(self._composite_params, offset, data)
+        return {"buffer": self._composite_params, "offset": offset, "size": data.nbytes}
 
 
 _View = tuple[RNode, Camera | None, tuple[CameraViewState, ...]]
@@ -329,6 +371,13 @@ class _TreeKeys:
         return entry[1], entry[2]
 
 
+def _depth_samples(samples: int) -> tuple[tuple[str, str], ...]:
+    """The variant of depth_of_field.wgsl for depth buffers with ``samples``
+    samples per pixel."""
+    count = (("const DEPTH_SAMPLES: i32 = 4;", f"const DEPTH_SAMPLES: i32 = {samples};"),)
+    return count if samples > 1 else (*count, ("texture_depth_multisampled_2d", "texture_depth_2d"))
+
+
 _KeyEntry = tuple[RNode, object, bool]
 """A node, its key and whether its picture depends on the time."""
 
@@ -386,12 +435,15 @@ class _Fullscreen:
             address_mode_v=wgpu.AddressMode.clamp_to_edge,
         )
 
-    def pipeline(self, shader: str, entry_point: str, format: str, blend: dict | None = None) -> tuple[wgpu.GPURenderPipeline, wgpu.GPUBindGroupLayout]:
+    def pipeline(
+        self, shader: str, entry_point: str, format: str, blend: dict | None = None, replacements: tuple[tuple[str, str], ...] = ()
+    ) -> tuple[wgpu.GPURenderPipeline, wgpu.GPUBindGroupLayout]:
         """The pipeline and its bind group layout (kept: each
-        ``get_bind_group_layout`` call returns a new object)."""
-        key = (shader, entry_point, format, None if blend is None else str(blend))
+        ``get_bind_group_layout`` call returns a new object).
+        ``replacements`` make a variant of the shader (see GPUContext.shader)."""
+        key = (shader, entry_point, format, None if blend is None else str(blend), replacements)
         if key not in self._pipelines:
-            module = self._context.shader(shader)
+            module = self._context.shader(shader, dict(replacements))
             target = {"format": format}
             if blend is not None:
                 target["blend"] = blend
@@ -415,10 +467,11 @@ class _Fullscreen:
         blend: dict | None = None,
         clear: bool = True,
         timing: dict | None = None,
+        replacements: tuple[tuple[str, str], ...] = (),
     ) -> None:
         """Draw one fullscreen pass; ``resources`` are bindings 0, 1, 2, ..."""
         view = self._resources.view(target)
-        pipeline, layout = self.pipeline(shader, entry_point, view.texture.format, blend)
+        pipeline, layout = self.pipeline(shader, entry_point, view.texture.format, blend, replacements)
         bind_group = self._resources.bind_group(layout, resources)
         render_pass = encoder.begin_render_pass(
             color_attachments=[

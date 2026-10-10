@@ -36,6 +36,11 @@ class RenderLayers:
     """sRGB-valued, premultiplied 2D shapes and curves (Manim colors, exact)."""
     width: int
     height: int
+    mesh_depth: wgpu.GPUTextureView | None = None
+    """The meshes' depth buffer (multisampled like the frame)."""
+    vector_depth: wgpu.GPUTextureView | None = None
+    """The 2D shapes' and curves' depth buffer (multisampled like the frame)."""
+    samples: int = 1
 
 
 class RenderTargets:
@@ -53,7 +58,7 @@ class RenderTargets:
         self.depth = texture("depth", DEPTH_FORMAT, usage=_ATTACHMENT | _SAMPLED)
         # The vector pass orders shapes with biased depth in its own buffer
         # and tests against the meshes' depth (above) explicitly.
-        self.vector_depth = texture("vector depth", DEPTH_FORMAT)
+        self.vector_depth = texture("vector depth", DEPTH_FORMAT, usage=_ATTACHMENT | _SAMPLED)
 
         # Resolved outputs, read by the composer.
         self.lit = texture("lit", HDR_FORMAT, sample_count=1, usage=_ATTACHMENT | _SAMPLED | wgpu.TextureUsage.COPY_SRC)
@@ -82,12 +87,13 @@ class RenderTargets:
             for view in self.gbuffer_views[:-1]
         ]
         self._depth_attachment = _depth(self.gbuffer_views[-1])
-        self._vector_depth_attachment = _depth(self.vector_depth.create_view())
+        self.vector_depth_view = self.vector_depth.create_view()
+        self._vector_depth_attachment = _depth(self.vector_depth_view)
 
     @property
     def layers(self) -> RenderLayers:
-        width, height, _ = self.size
-        return RenderLayers(self.lit, self.vector, width, height)
+        width, height, samples = self.size
+        return RenderLayers(self.lit, self.vector, width, height, self.gbuffer_views[-1], self.vector_depth_view, samples)
 
     # -- attachments ----------------------------------------------------------
 

@@ -1013,6 +1013,13 @@ flowchart LR
   `frame.time`, so a frame with one is never held (`PlannedFrame.uses_time`,
   `_TreeKeys`); WGSL errors become Python errors;
 - camera views (`CameraView`, see section 6);
+- depth of field: `animation.Camera` has `focus_distance` and `aperture`
+  (signals; `set_focus()`, `focus_on()`, `set_aperture()`), copied into
+  `renderer.Camera`. With an open aperture, a view is composited into a
+  scratch texture and depth_of_field.wgsl blurs it into the target: a
+  gather blur whose radius follows a thin lens, from the nearest depth of
+  all MSAA samples of the meshes' and the shapes' depth buffers. Python
+  composer and core do the same; the lens is part of the core's frame key;
 - `load_gltf()` builds a node tree: one `Group` per glTF node, one
   `Shape3D` per primitive, glTF names as node names, material names as
   `material:<name>` tags;
