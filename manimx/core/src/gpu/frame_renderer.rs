@@ -20,7 +20,9 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 
-use super::composer::{Blend, Bloom, Composer, CompositeTarget, DepthOfField, Effect, ShaderEffect};
+use super::composer::{
+    Blend, Bloom, Composer, CompositeTarget, DepthOfField, Effect, ShaderEffect,
+};
 use super::context::{Gpu, COLOR_FORMAT, HDR_FORMAT};
 use super::renderer::{Renderer, TargetSettings};
 use crate::evaluator::FrameState;
@@ -410,7 +412,8 @@ impl FrameRenderer {
             for (layer, camera_view) in camera_views.iter().enumerate() {
                 // Each is submitted on its own: the renderer's buffers hold
                 // one render at a time.
-                let mut picture_encoder = self.gpu.device.create_command_encoder(&Default::default());
+                let mut picture_encoder =
+                    self.gpu.device.create_command_encoder(&Default::default());
                 let layer_view = self.renderer.camera_view_layer(layer);
                 let picture = CompositeTarget {
                     view: &layer_view,
@@ -430,7 +433,14 @@ impl FrameRenderer {
                 self.gpu.queue.submit([picture_encoder.finish()]);
             }
         }
-        self.render_layers_into(py, encoder, view, &view.get_item(3)?, &view.get_item(4)?, target)
+        self.render_layers_into(
+            py,
+            encoder,
+            view,
+            &view.get_item(3)?,
+            &view.get_item(4)?,
+            target,
+        )
     }
 
     /// Pack and render the graph and state of `view`, seen with `config`
@@ -466,7 +476,10 @@ impl FrameRenderer {
             encoder,
         )?;
         let (lit, vector) = (targets.lit.clone(), targets.vector.clone());
-        let depths = (targets.depth_view.clone(), targets.vector_depth_view.clone());
+        let depths = (
+            targets.depth_view.clone(),
+            targets.vector_depth_view.clone(),
+        );
         let frame_uniform = self.renderer.frame_uniform().clone();
         let lit = self.composer.lit_effects(
             &self.gpu,
@@ -545,7 +558,10 @@ impl FrameRenderer {
 
 /// The camera's focus distance and aperture in a `config_values()` tuple.
 fn lens(config: &Bound<'_, PyAny>) -> PyResult<(f32, f32)> {
-    Ok((config.get_item(12)?.extract()?, config.get_item(13)?.extract()?))
+    Ok((
+        config.get_item(12)?.extract()?,
+        config.get_item(13)?.extract()?,
+    ))
 }
 
 fn frame_record(bytes: &Bound<'_, PyAny>) -> PyResult<Frame> {
