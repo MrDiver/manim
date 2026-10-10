@@ -13,8 +13,10 @@
 //   4. filter: compare depths at `samples` points spread over the
 //      penumbra (hardware 2x2 comparison per tap) and average
 //
-// Taps lie on a Vogel (sunflower) disk rotated per point, which spreads the
-// remaining noise evenly instead of producing banding.
+// Taps lie on a Vogel (sunflower) disk in the receiving surface's plane,
+// turned per pixel and sample by white noise (a PCG hash), which leaves no
+// pattern once the samples and renders of a frame are averaged. The lighting pass
+// sets `shadow_pixel` before shading.
 //
 // Needs `shadow_maps`, `shadow_sampler` and `shadow_views` declared by the
 // including shader (deferred_lighting.wgsl).
@@ -28,73 +30,95 @@ struct ShadowView {
 const MAX_SHADOW_SAMPLES: u32 = 64u;
 const MAX_SEARCH_UV: f32 = 0.05;
 const GOLDEN_ANGLE: f32 = 2.39996323;
-
-/// 1 where `surface` sees `light` fully, 0 in full shadow.
 /// PCF (previews): the radius of the soft edge in shadow-map texels, and
 /// the most taps it takes.
 const PCF_RADIUS: f32 = 1.5;
 const PCF_TAPS: u32 = 8u;
 
+/// The pixel being lit and its MSAA sample (in z), set by the lighting
+/// pass: their noise turns the tap pattern.
+var<private> shadow_pixel: vec3<u32>;
+
+/// Where a world point is in the shadow maps: the layer (a point light's
+/// cube face it falls in), that layer's view, its uv and depth there, and
+/// whether the view covers it.
+struct ShadowTap {
+    layer: i32,
+    view: ShadowView,
+    at: vec3<f32>,
+    inside: bool,
+};
+
+fn shadow_tap(light: Light, world: vec3<f32>) -> ShadowTap {
+    var layer = light.shadow_view;
+    if light.kind == LIGHT_POINT {
+        layer += i32(cube_face(world - light.position));
+    }
+    let view = shadow_views[layer];
+    let at = project(view, world);
+    let inside = all(at.xy >= vec2<f32>(0.0)) && all(at.xy <= vec2<f32>(1.0)) && at.z <= 1.0;
+    return ShadowTap(layer, view, at, inside);
+}
+
+/// 1 where `surface` sees `light` fully, 0 in full shadow.
+///
+/// Every tap is a point on a disk in the surface's plane, lifted 1.5
+/// texels off it ("normal offset"), looked up in the shadow view it falls
+/// in (across a cube seam, the next face) and compared with its own
+/// depth. So a surface never shadows itself, whatever its angle to the
+/// light, and soft edges continue across the faces of a point light.
 fn shadow_visibility(light: Light, surface: Surface) -> f32 {
     if light.shadow_view < 0 || frame.shadow.w == 0.0 {
         return 1.0;
     }
-    var layer = light.shadow_view;
-    if light.kind == LIGHT_POINT {
-        layer += i32(cube_face(surface.position - light.position));
-    }
-    let view = shadow_views[layer];
+    let center = shadow_tap(light, surface.position);
+    let view = center.view;
     let perspective = view.params.w > 0.5;
     let resolution = frame.shadow.z;
-
-    // Normal offset: look the shadow up about one texel off the surface, so
-    // the surface does not shadow itself ("shadow acne").
-    let center = project(view, surface.position);
-    let receiver = linear_depth(view, center.z);
+    let receiver = linear_depth(view, center.at.z);
+    // World size of one shadow-map texel at the surface.
     let texel_world = select(view.params.z, receiver * view.params.z, perspective) / resolution;
-    let probe = project(view, surface.position + surface.normal * texel_world * 1.5);
-    if any(probe.xy < vec2<f32>(0.0)) || any(probe.xy > vec2<f32>(1.0)) || probe.z > 1.0 {
-        return 1.0;  // outside the shadow view: lit
-    }
+    let world_per_uv = texel_world * resolution;
 
-    // The receiver's plane in the shadow map: its depth at a tap is the
-    // probe's plus the slope times the tap's offset. A surface seen at a
-    // grazing angle from the light would otherwise shadow itself, its own
-    // depth at the taps being nearer than at the probe.
-    let slope = receiver_slope(view, surface, probe, texel_world);
+    let normal = surface.normal;
+    let origin = surface.position + normal * texel_world * 1.5;
+    let helper = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), abs(normal.x) < 0.9);
+    let u = normalize(cross(normal, helper));
+    let v = cross(normal, u);
 
     let size = light.size * frame.shadow.x;
     // Taps per lookup: fewer when the frame averages several renders, each
     // with its pattern turned on (RenderConfig.shadow_filter).
     let samples = clamp(u32(frame.shadow_filter.y), 1u, MAX_SHADOW_SAMPLES);
-    let rotation = 6.2831853 * (hash(surface.position) + frame.shadow_filter.z);
-    let texel_uv = 1.0 / resolution;
+    let rotation = 6.2831853 * (pixel_noise(shadow_pixel) + frame.shadow_filter.z);
     if frame.shadow_filter.x < 0.5 {
         // PCF: a fixed soft edge PCF_RADIUS texels wide (times the softness).
-        return filtered(layer, probe, slope, texel_uv * PCF_RADIUS * frame.shadow.x, min(samples, PCF_TAPS), rotation);
+        return filtered(light, origin, u, v, texel_world * PCF_RADIUS * frame.shadow.x, min(samples, PCF_TAPS), rotation);
     }
     if size <= 0.0 {
-        return filtered(layer, probe, slope, texel_uv, samples, rotation);  // hard shadow
+        return filtered(light, origin, u, v, texel_world, samples, rotation);  // hard shadow
     }
 
     // Blocker search region: how far a penumbra could reach for blockers
-    // halfway between the light and the receiver.
+    // halfway between the light and the receiver (in uv, then on the plane).
     let near = view.params.x;
     var search = size * (receiver - near) / view.params.z;
     if perspective {
         search = size / (receiver * view.params.z);
     }
-    search = clamp(search, texel_uv, MAX_SEARCH_UV);
+    search = clamp(search, 1.0 / resolution, MAX_SEARCH_UV) * world_per_uv;
 
     var blocker_sum = 0.0;
     var blockers = 0.0;
     for (var i = 0u; i < samples; i++) {
         let offset = vogel(i, samples, rotation) * search;
-        let uv = probe.xy + offset;
-        let texel = vec2<i32>(clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)) * (resolution - 1.0));
-        let depth = linear_depth(view, textureLoad(shadow_maps, texel, layer, 0));
-        let receiver_here = linear_depth(view, probe.z + dot(slope, offset));
-        if depth < receiver_here - texel_world {
+        let tap = shadow_tap(light, origin + u * offset.x + v * offset.y);
+        if !tap.inside {
+            continue;
+        }
+        let texel = vec2<i32>(tap.at.xy * (resolution - 1.0));
+        let depth = linear_depth(tap.view, textureLoad(shadow_maps, texel, tap.layer, 0));
+        if depth < linear_depth(tap.view, tap.at.z) - texel_world {
             blocker_sum += depth;
             blockers += 1.0;
         }
@@ -108,34 +132,21 @@ fn shadow_visibility(light: Light, surface: Surface) -> f32 {
     if perspective {
         penumbra = size * (receiver - blocker) / blocker / (receiver * view.params.z);
     }
-    return filtered(layer, probe, slope, max(penumbra, texel_uv), samples, rotation);
+    return filtered(light, origin, u, v, max(penumbra, 1.0 / resolution) * world_per_uv, samples, rotation);
 }
 
-/// How the depth of the plane through `probe` parallel to the surface
-/// changes per shadow-map uv (receiver plane depth bias): from the
-/// projections of two steps along the surface, a texel long.
-fn receiver_slope(view: ShadowView, surface: Surface, probe: vec3<f32>, step: f32) -> vec2<f32> {
-    let n = surface.normal;
-    let helper = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), abs(n.x) < 0.9);
-    let t1 = normalize(cross(n, helper));
-    let t2 = cross(n, t1);
-    let origin = surface.position + n * step * 1.5;  // the probe's world point
-    let d1 = project(view, origin + t1 * step) - probe;
-    let d2 = project(view, origin + t2 * step) - probe;
-    let det = d1.x * d2.y - d1.y * d2.x;
-    if abs(det) < 1e-12 {
-        return vec2<f32>(0.0);  // seen edge-on: no plane to follow
-    }
-    return vec2<f32>(d1.z * d2.y - d1.y * d2.z, d1.x * d2.z - d1.z * d2.x) / det;
-}
-
-/// Fraction of `samples` comparison taps within `radius` (uv) that are lit.
-fn filtered(layer: i32, probe: vec3<f32>, slope: vec2<f32>, radius: f32, samples: u32, rotation: f32) -> f32 {
+/// Fraction of `samples` comparison taps on the disk of `radius` (world
+/// units) around `origin` in the plane of `u` and `v` that are lit.
+fn filtered(light: Light, origin: vec3<f32>, u: vec3<f32>, v: vec3<f32>, radius: f32, samples: u32, rotation: f32) -> f32 {
     var lit = 0.0;
     for (var i = 0u; i < samples; i++) {
         let offset = vogel(i, samples, rotation) * radius;
-        let uv = probe.xy + offset;
-        lit += textureSampleCompareLevel(shadow_maps, shadow_sampler, uv, layer, probe.z + dot(slope, offset));
+        let tap = shadow_tap(light, origin + u * offset.x + v * offset.y);
+        if !tap.inside {
+            lit += 1.0;  // outside the shadow view: lit
+            continue;
+        }
+        lit += textureSampleCompareLevel(shadow_maps, shadow_sampler, tap.at.xy, tap.layer, tap.at.z);
     }
     return lit / f32(samples);
 }
@@ -176,6 +187,11 @@ fn cube_face(direction: vec3<f32>) -> u32 {
     return select(5u, 4u, direction.z > 0.0);
 }
 
-fn hash(p: vec3<f32>) -> f32 {
-    return fract(sin(dot(p, vec3<f32>(12.9898, 78.233, 37.719))) * 43758.5453);
+/// A turn in [0, 1) for a pixel and sample: the PCG hash (Jarzynski and
+/// Olano 2020) of their coordinates, without any spatial pattern.
+fn pixel_noise(pixel: vec3<u32>) -> f32 {
+    var state = pixel.x * 1664525u + pixel.y * 22695477u + pixel.z * 1013904223u;
+    state = state * 747796405u + 2891336453u;
+    let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return f32((word >> 22u) ^ word) / 4294967296.0;
 }

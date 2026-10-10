@@ -29,6 +29,7 @@
 @fragment
 fn fs_light(@builtin(position) position: vec4<f32>, @builtin(sample_index) sample: u32) -> @location(0) vec4<f32> {
     let pixel = vec2<i32>(floor(position.xy));
+    shadow_pixel = vec3<u32>(vec2<u32>(pixel), sample);  // each sample its own noise
     let depth = textureLoad(depth_samples, pixel, i32(sample));
     if depth >= 1.0 {
         return vec4<f32>(0.0);  // no mesh here: transparent

@@ -1,7 +1,7 @@
 // Composite one rendered sub-frame and add it to the frame accumulator.
 //
-//   1. tone map the lit 3D layer (linear HDR, premultiplied by coverage)
-//      and put it over the background, in linear light
+//   1. tone map the lit 3D layer (linear HDR, premultiplied by coverage),
+//      dither it, and put it over the background, in linear light
 //   2. encode to sRGB and put the vector layer over it in sRGB values,
 //      which is how Manim blends, so 2D colors come out exactly
 //   3. decode back to linear and add `weight` times the result to the
@@ -32,7 +32,7 @@ fn fs_composite(in: FullscreenVertex) -> @location(0) vec4<f32> {
     // 3D over background, linear light, premultiplied.
     let background = params.background;
     let under_alpha = lit.a + background.a * (1.0 - lit.a);
-    let under_linear = tone_map(lit.rgb, params.tone_map)
+    let under_linear = dithered(tone_map(lit.rgb, params.tone_map), lit.a, vec2<u32>(pixel))
         + srgb_to_linear(background.rgb) * background.a * (1.0 - lit.a);
 
     // 2D over 3D, sRGB values, premultiplied.
@@ -55,4 +55,28 @@ fn fs_composite(in: FullscreenVertex) -> @location(0) vec4<f32> {
 @fragment
 fn fs_accumulate(in: FullscreenVertex) -> @location(0) vec4<f32> {
     return textureLoad(lit_layer, vec2<i32>(floor(in.position.xy)), 0) * params.weight;
+}
+
+
+/// Tone-mapped 3D color (premultiplied by `coverage`) with noise of less
+/// than half an 8-bit sRGB step: rounding the output to 8 bits would show
+/// the smooth gradients of light as steps (rings around a bright spot).
+/// Only the 3D layer is dithered, so 2D colors and the background stay
+/// exact.
+fn dithered(premultiplied: vec3<f32>, coverage: f32, pixel: vec2<u32>) -> vec3<f32> {
+    if coverage <= 0.0 {
+        return premultiplied;
+    }
+    let srgb = linear_to_srgb(premultiplied / coverage);
+    let noise = vec3<f32>(pixel_dither(pixel, 0u), pixel_dither(pixel, 1u), pixel_dither(pixel, 2u));
+    return srgb_to_linear(clamp(srgb + noise, vec3<f32>(0.0), vec3<f32>(1.0))) * coverage;
+}
+
+/// Noise in (-0.49, 0.49) / 255 for one channel of a pixel (a PCG hash).
+fn pixel_dither(pixel: vec2<u32>, channel: u32) -> f32 {
+    var state = pixel.x * 1664525u + pixel.y * 22695477u + channel * 1013904223u;
+    state = state * 747796405u + 2891336453u;
+    let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    let unit = f32((word >> 22u) ^ word) / 4294967296.0;
+    return (unit - 0.5) * 0.98 / 255.0;
 }
