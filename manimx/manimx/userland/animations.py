@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 import numpy as np
 import quaternion
@@ -261,24 +261,32 @@ class _PlannedAnimation(Animation):
         return self._planned[signal.id][1]
 
 
+MorphTarget = TypeVar("MorphTarget", bound=Node)
+
+
 @dataclass(eq=False)
-class Morph(_PlannedAnimation):
+class Morph(_PlannedAnimation, Generic[MorphTarget]):
     """Turn ``source`` into ``target`` (Manim's ``ReplacementTransform``).
 
-    The paths of their shapes (``Shape2D`` and ``Curve3D``, in tree order)
-    are paired evenly, as Manim pairs submobjects: with more shapes on one
-    side, each shape of the other side stands for several in a row. A
-    pair's paths are aligned once, when the animation is created, and then
-    interpolated point by point together with their colors, opacities and
-    widths. A target shape that shares its source with an earlier one
-    starts as a copy of that source; a source shape that shares its
-    target with an earlier one ends as a copy of that target. When the
-    morph ends, ``target`` takes ``source``'s place in the scene; it looks
-    exactly like the morphed source, so the switch does not show.
+    Neither side is changed: the morph is drawn by in-between shapes
+    (plain Shape2D or Curve3D with free points), one per pair of paths,
+    which exist only while it plays. When it ends, ``target`` takes
+    ``source``'s place in the scene, so the morph's result is ``target``
+    itself, of its own class and with its own parameters::
+
+        square = Square(2.0)
+        self.play(Morph(circle, square))
+        self.play(square.animate.set_side_length(3.0))
+
+    Paths (``Shape2D`` and ``Curve3D``, in tree order) are paired evenly,
+    as Manim pairs submobjects: with more on one side, each path of the
+    other side stands for several in a row. A pair's paths are aligned
+    once, when the animation is created; its in-between shape goes from
+    the source path (where it is, how it looks) to the target path.
     """
 
     source: Node
-    target: Node
+    target: MorphTarget
     run_time: float = 1.0
     rate: RateFunction = smooth
 
@@ -286,86 +294,99 @@ class Morph(_PlannedAnimation):
         self._plan()
         sources, targets = _drawn_paths(self.source), _drawn_paths(self.target)
         if not sources or not targets:
-            raise ValueError("Morph needs a Shape2D or Curve3D (or a group of them) on both sides")
-        worlds = {**_world_matrices(self.source), **_world_matrices(self.target)}
-        paired: set[int] = set()
-        if len(targets) >= len(sources):
-            for index, target in enumerate(targets):
-                source = sources[index * len(sources) // len(targets)]
-                if id(source) in paired:
-                    self._move(target, source, target, worlds)  # a copy of the source turns into it
-                else:
-                    paired.add(id(source))
-                    self._morph_pair(source, target, worlds)
-        else:
-            for index, source in enumerate(sources):
-                target = targets[index * len(targets) // len(sources)]
-                if id(target) in paired:
-                    self._move(source, source, target, worlds)  # it ends as a copy of the target
-                else:
-                    paired.add(id(target))
-                    self._morph_pair(source, target, worlds)
+            raise ValueError(f"{type(self).__name__} needs a Shape2D or Curve3D (or a group of them) on both sides")
+        self._worlds = {**_world_matrices(self.source), **_world_matrices(self.target)}
+        self._inbetweens: list[Node] = []
+        self._pair(sources, targets)
+        # The in-between shapes show the morph: the source is hidden from
+        # its start, the target until its end.
+        self._between(self.source.alpha, authoring_current(self.source.alpha), 0.0, 0.0, 0.0)
+        self._between(self.target.alpha, 0.0, authoring_current(self.target.alpha), 1.0, 1.0)
 
-    def _morph_pair(self, source: Node, target: Node, worlds: dict[int, np.ndarray]) -> None:
-        self._move(source, source, target, worlds)
-        # The target stays hidden until it replaces the source at the end.
-        self._between(target.alpha, 0.0, authoring_current(target.alpha), 1.0, 1.0)
+    def _pair(self, sources: list[Node], targets: list[Node]) -> None:
+        count = max(len(sources), len(targets))
+        for index in range(count):
+            source = sources[index * len(sources) // count]
+            target = targets[index * len(targets) // count]
+            self._inbetween(source, target)
 
-    def _move(self, moving: Node, start: Node, end: Node, worlds: dict[int, np.ndarray]) -> None:
-        """Animate ``moving``'s path and style from those of ``start`` to
-        those of ``end`` (``moving`` is one of them)."""
-        here = _in_space_of(_points(start), worlds[id(start)], worlds[id(moving)], _points(moving).shape[1])
-        there = _in_space_of(_points(end), worlds[id(end)], worlds[id(moving)], _points(moving).shape[1])
+    def _inbetween(self, start: Node, end: Node, alpha: tuple[float, float] | None = None, window: tuple[float, float] = (0.0, 1.0)) -> None:
+        """An in-between shape going from path ``start`` to path ``end``;
+        its alpha goes from ``alpha[0]`` to ``alpha[1]`` within ``window``
+        (default: from ``start``'s to ``end``'s over the whole morph)."""
+        flat = isinstance(start, Shape2D) and isinstance(end, Shape2D)
+        dimension = 2 if flat else 3
+        here = _resized(_points(start), dimension)
+        there = _resized(_points(end), dimension)
         first, last = align_paths(here, there)
-        self._between(moving.points, first, last)
+        shape: Shape2D | Curve3D = Shape2D(first, f"{start.name}-morph") if flat else Curve3D(first, f"{start.name}-morph")
+        self._between(shape.points, first, last)
         for name in _STYLE_SIGNALS:
-            if hasattr(start, name) and hasattr(end, name) and hasattr(moving, name):
-                self._between(getattr(moving, name), authoring_current(getattr(start, name)), authoring_current(getattr(end, name)))
+            if hasattr(start, name) and hasattr(end, name) and hasattr(shape, name):
+                begin, finish = authoring_current(getattr(start, name)), authoring_current(getattr(end, name))
+                getattr(shape, name).set(begin)
+                self._between(getattr(shape, name), begin, finish)
+        (start_position, start_rotation, start_scale), (end_position, end_rotation, end_scale) = (
+            _decomposed(self._worlds[id(start)]), _decomposed(self._worlds[id(end)])
+        )  # fmt: skip
+        for axis, begin, finish in zip(shape.position.axes, start_position, end_position, strict=True):
+            axis.set(begin)
+            self._between(axis, begin, finish)
+        for axis, begin, finish in zip(shape.scale.axes, start_scale, end_scale, strict=True):
+            axis.set(begin)
+            self._between(axis, begin, finish)
+        shape.rotation.set(start_rotation)
+        self._between(shape.rotation, start_rotation, end_rotation)
+        if alpha is None:
+            alpha = (_world_alpha(start), _world_alpha(end))
+        shape.alpha.set(alpha[0])
+        self._between(shape.alpha, alpha[0], alpha[1], *window)
+        self._inbetweens.append(shape)
+
+    @property
+    def inbetweens(self) -> list[Node]:
+        """The shapes that show the morph while it plays."""
+        return list(self._inbetweens)
 
     def nodes(self) -> Sequence[Node]:
-        return (self.source, self.target)
+        return (self.source, self.target, *self._inbetweens)
 
     def removes(self) -> Sequence[Node]:
-        return (self.source,)
+        return (self.source, *self._inbetweens)
 
 
 @dataclass(eq=False)
-class MorphMatching(Morph):
+class MorphMatching(Morph[MorphTarget]):
     """Turn ``source`` into ``target`` keeping what they share (Manim's
-    ``TransformMatchingShapes``): shapes that look the same on both sides
+    ``TransformMatchingShapes``): paths that look the same on both sides
     (the same path up to where it is, e.g. the same glyph of a formula)
     move to their new place; the others fade out in the first half and in
     in the second, so the two never pile up. Pairs are found in tree
-    order, each shape used once.
+    order, each path used once. Like :class:`Morph`, it changes neither
+    side and leaves ``target`` in the scene.
     """
 
     tolerance: float = 1e-3
-    """How far (world units) points may differ for shapes to match."""
+    """How far (world units) points may differ for paths to match."""
 
-    def __post_init__(self) -> None:
-        self._plan()
-        sources, targets = _drawn_paths(self.source), _drawn_paths(self.target)
-        if not sources or not targets:
-            raise ValueError("MorphMatching needs a Shape2D or Curve3D (or a group of them) on both sides")
-        worlds = {**_world_matrices(self.source), **_world_matrices(self.target)}
-        free = [(target, self._relative_points(target, worlds)) for target in targets]
+    def _pair(self, sources: list[Node], targets: list[Node]) -> None:
+        free = [(target, self._relative_points(target)) for target in targets]
         matched: set[int] = set()
         for source in sources:
-            points = self._relative_points(source, worlds)
+            points = self._relative_points(source)
             target = next((t for t, other in free if id(t) not in matched and self._same(points, other)), None)
             if target is not None:
                 matched.add(id(target))
-                self._morph_pair(source, target, worlds)
+                self._inbetween(source, target)
             else:
-                self._between(source.alpha, authoring_current(source.alpha), 0.0, 0.0, 0.5)
+                self._inbetween(source, source, (_world_alpha(source), 0.0), (0.0, 0.5))
         for target in targets:
             if id(target) not in matched:
-                self._between(target.alpha, 0.0, authoring_current(target.alpha), 0.5, 1.0)
+                self._inbetween(target, target, (0.0, _world_alpha(target)), (0.5, 1.0))
 
-    @staticmethod
-    def _relative_points(path: Node, worlds: dict[int, np.ndarray]) -> np.ndarray:
+    def _relative_points(self, path: Node) -> np.ndarray:
         """The path's points in world space, relative to their lowest corner."""
-        points = _in_space_of(_points(path), worlds[id(path)], np.eye(4), 3)
+        points = _in_space_of(_points(path), self._worlds[id(path)], np.eye(4), 3)
         return points - points.min(axis=0) if len(points) else points
 
     def _same(self, points: np.ndarray, other: np.ndarray) -> bool:
@@ -503,6 +524,32 @@ def _children(node: Node) -> list[Node]:
     if isinstance(node, ClippingGroup):
         return [node.mask, node.content]
     return []
+
+
+def _resized(points: np.ndarray, dimension: int) -> np.ndarray:
+    """``points`` with ``dimension`` columns (2D paths lie in z = 0)."""
+    if points.shape[1] == dimension:
+        return points
+    if dimension == 3:
+        return np.column_stack([points, np.zeros(len(points))])
+    return points[:, :2]
+
+
+def _decomposed(matrix: np.ndarray) -> tuple[tuple[float, ...], quaternion.quaternion, tuple[float, ...]]:
+    """Position, rotation and scale of a world matrix without shear."""
+    scale = np.linalg.norm(matrix[:3, :3], axis=0)
+    rotation = matrix[:3, :3] / np.where(scale > 1e-12, scale, 1.0)
+    if np.linalg.det(rotation) < 0:  # a mirror: put it in the scale
+        scale[0], rotation[:, 0] = -scale[0], -rotation[:, 0]
+    return tuple(matrix[:3, 3]), quaternion.from_rotation_matrix(rotation), tuple(scale)
+
+
+def _world_alpha(node: Node) -> float:
+    """``node``'s alpha times that of every group above it."""
+    alpha = authoring_current(node.alpha)
+    for ancestor in _ancestors(node):
+        alpha *= authoring_current(ancestor.alpha)
+    return float(alpha)
 
 
 def _local_matrix(node: Node) -> np.ndarray:

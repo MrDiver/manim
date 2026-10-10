@@ -87,47 +87,66 @@ def test_aligned_paths_have_equal_shapes_and_keep_their_ends() -> None:
 # --- animations --------------------------------------------------------------------
 
 
-def test_morph_turns_the_source_into_the_target_and_swaps_them_at_the_end() -> None:
-    circle = Circle(color="#ff0000", fill_opacity=0.5)
-    square = Square(color="#0000ff", fill_opacity=1.0).shift(RIGHT * 2)
-    prepared = prepare(lambda s: (s.add(circle), s.play(Morph(circle, square), run_time=2)))
+def _drawn(prepared, t: float) -> list[RShape2D]:
+    """Every RShape2D drawn at ``t`` (its alpha times every group's above
+    it is above 0), anywhere in the tree, with its own alpha."""
+    found: list[RShape2D] = []
 
-    middle = {node.uid: node for node in shapes(prepared, 1.0)}
-    assert set(middle) == {circle.uid, square.uid}
-    assert middle[square.uid].alpha == 0.0  # hidden until it replaces the source
-    halfway = middle[circle.uid]
-    assert 0.5 < halfway.fill.opacity[0] < 1.0
-    end = shapes(prepared, 2.0)
-    assert [node.uid for node in end] == [square.uid] and end[0].alpha == 1.0
-    # Just before the end the morphed source covers the target exactly.
-    almost = {node.uid: node for node in shapes(prepared, 2.0 - 1e-9)}[circle.uid]
-    corners = almost.points[::4]
-    assert np.allclose(corners.min(axis=0), [1.0, -1.0], atol=1e-6) and np.allclose(corners.max(axis=0), [3.0, 1.0], atol=1e-6)
+    def visit(node, alpha: float) -> None:
+        alpha *= node.alpha
+        if isinstance(node, RShape2D) and alpha > 0.0:
+            found.append(node)
+        for child in getattr(node, "children", []):
+            visit(child, alpha)
+
+    visit(prepared.state_at(t), 1.0)
+    return found
 
 
 def _world_box(node: RShape2D) -> tuple[np.ndarray, np.ndarray]:
-    points = np.asarray(node.points) + np.asarray(node.transform.position)[:2]
+    points = np.asarray(node.points) * np.asarray(node.transform.scale)[:2] + np.asarray(node.transform.position)[:2]
     return points.min(axis=0), points.max(axis=0)
 
 
+def test_morph_shows_in_between_shapes_and_leaves_the_target() -> None:
+    circle = Circle(color="#ff0000", fill_opacity=0.5)
+    square = Square(color="#0000ff", fill_opacity=1.0).shift(RIGHT * 2)
+    morph = Morph(circle, square)
+    prepared = prepare(lambda s: (s.add(circle), s.play(morph, run_time=2)))
+    (inbetween,) = morph.inbetweens
+
+    middle = _drawn(prepared, 1.0)
+    assert [node.uid for node in middle] == [inbetween.uid]  # source and target hidden
+    assert 0.5 < middle[0].fill.opacity[0] < 1.0
+    # Just before the end the in-between shape covers the target exactly.
+    (almost,) = _drawn(prepared, 2.0 - 1e-9)
+    low, high = _world_box(almost)
+    assert np.allclose(low, [1.0, -1.0], atol=1e-6) and np.allclose(high, [3.0, 1.0], atol=1e-6)
+    end = shapes(prepared, 2.0)
+    assert [node.uid for node in end] == [square.uid] and end[0].alpha == 1.0
+    # Neither side was changed: their points are their own.
+    assert all(track.signal not in (circle.points, square.points) for track in prepared.tracks)
+    assert morph.target is square
+
+
 def test_extra_shapes_start_and_end_as_copies() -> None:
-    """Shapes are paired evenly: an extra target starts as a copy of its
+    """Paths are paired evenly: an extra target starts as a copy of its
     source, an extra source ends as a copy of its target."""
     one = Group(Square(), name="one")
     three = Group(Square(), Circle().shift(RIGHT * 3), Circle().shift(UP * 3), name="three")
     prepared = prepare(lambda s: (s.add(one), s.play(Morph(one, three))))
-    shown = [child for group in prepared.state_at(0.0).children for child in getattr(group, "children", [])]
-    extra = [node for node in shown if node.uid in {three.children[1].uid, three.children[2].uid}]
-    assert len(extra) == 2
-    for node in extra:  # where the square is, not a point
+    start = _drawn(prepared, 0.0)
+    assert len(start) == 3
+    for node in start:  # all where the square is, not points
         low, high = _world_box(node)
         assert np.allclose(low, [-1.0, -1.0], atol=1e-6) and np.allclose(high, [1.0, 1.0], atol=1e-6)
 
     many = Group(Square(), Circle().shift(RIGHT * 3), name="many")
     single = Group(Square(side_length=1.0).shift(UP * 2), name="single")
     prepared = prepare(lambda s: (s.add(many), s.play(Morph(many, single))))
-    group = next(child for child in prepared.state_at(0.999).children if child.uid == many.uid)
-    for node in group.children:  # both end on the one target
+    almost = _drawn(prepared, 0.999)
+    assert len(almost) == 2
+    for node in almost:  # both end on the one target
         low, high = _world_box(node)
         assert np.allclose(low, [-0.5, 1.5], atol=1e-2) and np.allclose(high, [0.5, 2.5], atol=1e-2)
 
@@ -174,18 +193,20 @@ def test_morph_matching_moves_equal_shapes_and_fades_the_rest() -> None:
     moved = Square().shift(UP * 2)
     new = Triangle().shift(DOWN * 2)
     target = Group(new, moved, name="target")
-    prepared = prepare(lambda s: (s.add(source), s.play(MorphMatching(source, target), run_time=2)))
+    morph = MorphMatching(source, target)
+    prepared = prepare(lambda s: (s.add(source), s.play(morph, run_time=2)))
+    sliding, fading_out, fading_in = morph.inbetweens
 
-    def shown(t: float) -> dict[int, RShape2D]:
-        return {child.uid: child for group in prepared.state_at(t).children for child in getattr(group, "children", [])}
+    def drawn(t: float) -> dict[int, RShape2D]:
+        return {node.uid: node for node in _drawn(prepared, t)}
 
-    halfway = shown(1.0)
-    low, high = _world_box(halfway[kept.uid])
+    halfway = drawn(1.0)
+    low, high = _world_box(halfway[sliding.uid])
     assert np.allclose((low + high) / 2, [-1.0, 1.0], atol=1e-6)  # halfway to its match, the same shape
     assert np.allclose(high - low, [2.0, 2.0], atol=1e-6)
-    assert 0.0 < shown(0.5)[gone.uid].alpha < 1.0 and 0.0 < shown(1.5)[new.uid].alpha < 1.0  # out first, then in
-    assert halfway[gone.uid].alpha == 0.0 and halfway[new.uid].alpha == 0.0
-    assert moved.uid not in halfway or halfway[moved.uid].alpha == 0.0  # replaced at the end
+    assert set(halfway) == {sliding.uid}  # the others: one faded out, the other not in yet
+    assert 0.0 < drawn(0.5)[fading_out.uid].alpha < 1.0 and 0.0 < drawn(1.5)[fading_in.uid].alpha < 1.0
+    assert {node.uid for node in _drawn(prepared, 2.0)} == {new.uid, moved.uid}
     with pytest.raises(ValueError, match="MorphMatching needs"):
         MorphMatching(Group(), Square())
 

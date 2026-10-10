@@ -63,8 +63,8 @@ from .kinds import (
 )
 from .light import DirectionalLight, PointLight, SpotLight
 from .node import Node, Offset, PositionMixin, RotationMixin, ScalableMixin
-from .paths import DrawnPart
 from .particles import Particles
+from .paths import DrawnPart
 from .rates import linear, smooth
 from .scene import PreparedScene
 from .shape2d import Shape2D
