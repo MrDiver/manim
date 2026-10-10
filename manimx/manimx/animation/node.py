@@ -203,14 +203,33 @@ class PositionMixin:
         derived signal per axis; the replacement for updaters). ``other``
         is a node or a point that follows signals, such as
         ``shape.point_at(0.5)``."""
-        if isinstance(other, PointSignal):
-            axes = other.axes
-        else:
-            require(other, PositionMixin, f"{type(self).__name__}.follow()")
-            axes = other.position.axes  # type: ignore[attr-defined]
-        for name, axis, delta in zip("xyz", axes, _vector(offset), strict=True):
-            setattr(self.position, name, derive(Offset(float(delta)), axis, name=f"{self.name}.position.{name}"))  # type: ignore[attr-defined]
+        follow_point(self.position, other, offset, f"{self.name}.position", f"{type(self).__name__}.follow()")  # type: ignore[attr-defined]
         return self
+
+
+def follow_point(
+    point: Vector3Signal,
+    other: Node | PointSignal,
+    offset: Sequence[float] = (0.0, 0.0, 0.0),
+    name: str = "",
+    caller: str = "follow_point()",
+) -> None:
+    """Make the axes of ``point`` (a position, a Line's end) follow
+    ``other``'s position or a PointSignal, plus ``offset``: each axis
+    becomes a signal derived from the other's (see PositionMixin.follow).
+    Signals already derived from an axis (a Line's points from its end)
+    are rebound to the new one."""
+    if isinstance(other, PointSignal):
+        axes = other.axes
+    else:
+        require(other, PositionMixin, caller)
+        axes = other.position.axes  # type: ignore[attr-defined]
+    for axis_name, axis, delta in zip("xyz", axes, _vector(offset), strict=True):
+        old = getattr(point, axis_name)
+        new = derive(Offset(float(delta)), axis, name=f"{name}.{axis_name}")
+        setattr(point, axis_name, new)
+        for dependent in list(old._dependents):
+            dependent.rebind(dependent.function, tuple(new if source is old else source for source in dependent.inputs))
 
 
 class Offset:
@@ -346,4 +365,4 @@ def _vector(value: Sequence[float]) -> tuple[float, float, float]:
     return (float(array[0]), float(array[1]), float(array[2]))
 
 
-__all__ = ["Node", "PositionMixin", "RotationMixin", "ScalableMixin", "animatable", "require"]
+__all__ = ["Node", "PositionMixin", "RotationMixin", "ScalableMixin", "animatable", "follow_point", "require"]
