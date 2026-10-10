@@ -57,6 +57,12 @@ fn shadow_visibility(light: Light, surface: Surface) -> f32 {
         return 1.0;  // outside the shadow view: lit
     }
 
+    // The receiver's plane in the shadow map: its depth at a tap is the
+    // probe's plus the slope times the tap's offset. A surface seen at a
+    // grazing angle from the light would otherwise shadow itself, its own
+    // depth at the taps being nearer than at the probe.
+    let slope = receiver_slope(view, surface, probe, texel_world);
+
     let size = light.size * frame.shadow.x;
     // Taps per lookup: fewer when the frame averages several renders, each
     // with its pattern turned on (RenderConfig.shadow_filter).
@@ -65,10 +71,10 @@ fn shadow_visibility(light: Light, surface: Surface) -> f32 {
     let texel_uv = 1.0 / resolution;
     if frame.shadow_filter.x < 0.5 {
         // PCF: a fixed soft edge PCF_RADIUS texels wide (times the softness).
-        return filtered(layer, probe, texel_uv * PCF_RADIUS * frame.shadow.x, min(samples, PCF_TAPS), rotation);
+        return filtered(layer, probe, slope, texel_uv * PCF_RADIUS * frame.shadow.x, min(samples, PCF_TAPS), rotation);
     }
     if size <= 0.0 {
-        return filtered(layer, probe, texel_uv, samples, rotation);  // hard shadow
+        return filtered(layer, probe, slope, texel_uv, samples, rotation);  // hard shadow
     }
 
     // Blocker search region: how far a penumbra could reach for blockers
@@ -83,10 +89,12 @@ fn shadow_visibility(light: Light, surface: Surface) -> f32 {
     var blocker_sum = 0.0;
     var blockers = 0.0;
     for (var i = 0u; i < samples; i++) {
-        let uv = probe.xy + vogel(i, samples, rotation) * search;
+        let offset = vogel(i, samples, rotation) * search;
+        let uv = probe.xy + offset;
         let texel = vec2<i32>(clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)) * (resolution - 1.0));
         let depth = linear_depth(view, textureLoad(shadow_maps, texel, layer, 0));
-        if depth < receiver - texel_world {
+        let receiver_here = linear_depth(view, probe.z + dot(slope, offset));
+        if depth < receiver_here - texel_world {
             blocker_sum += depth;
             blockers += 1.0;
         }
@@ -100,15 +108,34 @@ fn shadow_visibility(light: Light, surface: Surface) -> f32 {
     if perspective {
         penumbra = size * (receiver - blocker) / blocker / (receiver * view.params.z);
     }
-    return filtered(layer, probe, max(penumbra, texel_uv), samples, rotation);
+    return filtered(layer, probe, slope, max(penumbra, texel_uv), samples, rotation);
+}
+
+/// How the depth of the plane through `probe` parallel to the surface
+/// changes per shadow-map uv (receiver plane depth bias): from the
+/// projections of two steps along the surface, a texel long.
+fn receiver_slope(view: ShadowView, surface: Surface, probe: vec3<f32>, step: f32) -> vec2<f32> {
+    let n = surface.normal;
+    let helper = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), abs(n.x) < 0.9);
+    let t1 = normalize(cross(n, helper));
+    let t2 = cross(n, t1);
+    let origin = surface.position + n * step * 1.5;  // the probe's world point
+    let d1 = project(view, origin + t1 * step) - probe;
+    let d2 = project(view, origin + t2 * step) - probe;
+    let det = d1.x * d2.y - d1.y * d2.x;
+    if abs(det) < 1e-12 {
+        return vec2<f32>(0.0);  // seen edge-on: no plane to follow
+    }
+    return vec2<f32>(d1.z * d2.y - d1.y * d2.z, d1.x * d2.z - d1.z * d2.x) / det;
 }
 
 /// Fraction of `samples` comparison taps within `radius` (uv) that are lit.
-fn filtered(layer: i32, probe: vec3<f32>, radius: f32, samples: u32, rotation: f32) -> f32 {
+fn filtered(layer: i32, probe: vec3<f32>, slope: vec2<f32>, radius: f32, samples: u32, rotation: f32) -> f32 {
     var lit = 0.0;
     for (var i = 0u; i < samples; i++) {
-        let uv = probe.xy + vogel(i, samples, rotation) * radius;
-        lit += textureSampleCompareLevel(shadow_maps, shadow_sampler, uv, layer, probe.z);
+        let offset = vogel(i, samples, rotation) * radius;
+        let uv = probe.xy + offset;
+        lit += textureSampleCompareLevel(shadow_maps, shadow_sampler, uv, layer, probe.z + dot(slope, offset));
     }
     return lit / f32(samples);
 }
