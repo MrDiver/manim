@@ -39,7 +39,7 @@ from ...robjects.rbezier_path import (
 from ..cache import RNodeDataCache
 from ..config import RenderConfig
 from ..scene_graph import NO_CLIP, DrawItem, FlatScene
-from ..tessellation import FillMesh, tessellate_fill
+from ..tessellation import FILL_VERTEX_DTYPE, FillMesh, tessellate_fill
 
 STROKE_WIDTH_SCALE = 0.01
 """World units per unit of stroke width (Manim: width 4 = 0.04 units)."""
@@ -95,9 +95,6 @@ OBJECT_DTYPE = np.dtype(
 )
 INSTANCE_DTYPE = np.dtype(
     [("kind", "<u4"), ("object", "<u4"), ("curve", "<u4"), ("_pad", "<u4")]
-)
-FILL_VERTEX_DTYPE = np.dtype(
-    [("position", "<f4", 2), ("uv", "<f4", 2), ("side", "<f4"), ("curve", "<u4"), ("t", "<f4"), ("_pad", "<f4")]
 )
 STROKE_POINT_DTYPE = np.dtype(
     [("position", "<f4", 3), ("width", "<f4"), ("color", "<f4", 4)]

@@ -195,7 +195,7 @@ def test_tessellation_records_where_every_vertex_comes_from() -> None:
             control = curves[mesh.curve[index]]
             t = mesh.t[index]
             weights = np.array([(1 - t) ** 3, 3 * (1 - t) ** 2 * t, 3 * (1 - t) * t**2, t**3])
-            np.testing.assert_allclose(mesh.positions[index], weights @ control, atol=1e-9)
+            np.testing.assert_allclose(mesh.positions[index], weights @ control, atol=1e-6)  # float32, as the GPU reads them
 
 
 # --- vector batch -----------------------------------------------------------------

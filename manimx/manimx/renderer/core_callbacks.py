@@ -1,12 +1,12 @@
 """What the core (manimx._core, see CORE.md) asks Python for while packing.
 
 The core packs records per frame in Rust. A few records depend only on
-geometry or style and change rarely: a fill's triangulation, a stroke's
-curve links, a mesh's interleaved vertices, a material entry. The core
-builds those once per version of the signals they come from by calling
-these functions, which reuse the reference implementation (so both
-paths produce the same bytes), and keeps the result until a version
-changes. Every function returns plain bytes in the record layouts of
+geometry or style and change rarely: a stroke's curve links, a mesh's
+interleaved vertices, a material entry. The core builds those once per
+version of the signals they come from by calling these functions, which
+reuse the reference implementation (so both paths produce the same
+bytes), and keeps the result until a version changes. Fills are
+tessellated in Rust for both (core/src/tessellation.rs). Every function returns plain bytes in the record layouts of
 vector_batch.py and mesh_batch.py.
 """
 
@@ -24,17 +24,10 @@ from ..robjects.material import (
 )
 from ..robjects.mesh import MeshData
 from ..robjects.transform import Transform, rotation_towards
-from .tessellation import tessellate_fill
 from .webgpu.mesh_batch import _interleave, _material_entry
 from .webgpu.mesh_pass import _mip_chain
 from .webgpu.shadow_views import _box
-from .webgpu.vector_batch import _fill_vertices, _StrokeTopology
-
-
-def fill_vertices(points: np.ndarray) -> bytes:
-    """The triangulated fill of a Shape2D's points (FILL_VERTEX_DTYPE)."""
-    mesh = tessellate_fill(points)
-    return _fill_vertices([mesh]).tobytes() if len(mesh) else b""
+from .webgpu.vector_batch import _StrokeTopology
 
 
 def fill_colors(color: np.ndarray, opacity: np.ndarray, count: int) -> tuple[bytes, bool, bool]:

@@ -7,7 +7,6 @@ use pyo3::types::PyBytes;
 pub struct Callbacks {
     pub path_center: Py<PyAny>,
     pub path_box: Py<PyAny>,
-    pub fill_vertices: Py<PyAny>,
     pub fill_colors: Py<PyAny>,
     pub stroke_records: Py<PyAny>,
     pub mesh_records: Py<PyAny>,
@@ -23,7 +22,6 @@ impl Callbacks {
         Ok(Callbacks {
             path_center: function("path_center")?,
             path_box: function("path_box")?,
-            fill_vertices: function("fill_vertices")?,
             fill_colors: function("fill_colors")?,
             stroke_records: function("stroke_records")?,
             mesh_records: function("mesh_records")?,

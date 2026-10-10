@@ -16,7 +16,8 @@ use crate::arena::Arena;
 use crate::callbacks::{bytes_of, Callbacks};
 use crate::graph::{DrawItem, FlatScene, Node, NodeData, PathFields, SceneGraph, Values, NO_CLIP};
 use crate::records::{self, DrawIndirect, Instance, Object, StrokeCurve};
-use glam::{DMat4, DVec3};
+use crate::tessellation::tessellate_fill;
+use glam::{DMat4, DVec2, DVec3};
 
 /// Where one path's records live, and what they were built from (`_Slot`).
 struct Slot {
@@ -595,13 +596,13 @@ impl PathContext<'_> {
         version: u64,
     ) -> PyResult<&'c Vec<u8>> {
         if cache.fill_vertices.as_ref().map(|entry| entry.0) != Some(version) {
-            let bytes = bytes_of(
-                &self
-                    .callbacks
-                    .fill_vertices
-                    .bind(self.py)
-                    .call1((self.python(fields.points)?,))?,
-            )?;
+            let points = self.values.get(fields.points).array()?;
+            let corners: Vec<DVec2> = points
+                .data
+                .chunks_exact(points.cols())
+                .map(|row| DVec2::new(row[0], row[1]))
+                .collect();
+            let bytes = bytemuck::cast_slice(&tessellate_fill(&corners)).to_vec();
             cache.fill_vertices = Some((version, bytes));
         }
         Ok(&cache.fill_vertices.as_ref().unwrap().1)

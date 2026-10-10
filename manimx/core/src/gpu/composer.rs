@@ -184,7 +184,13 @@ pub struct FullscreenPass<'a> {
 }
 
 /// Shader, entry point, target format, blend and depth samples of a pipeline.
-type PipelineKey = (String, &'static str, wgpu::TextureFormat, Blend, Option<u32>);
+type PipelineKey = (
+    String,
+    &'static str,
+    wgpu::TextureFormat,
+    Blend,
+    Option<u32>,
+);
 
 /// Fullscreen-triangle passes; pipelines are kept per shader, entry
 /// point, target format and blend (`_Fullscreen`).
@@ -228,7 +234,9 @@ impl Fullscreen {
             entry_point,
             depth_samples: None,
         };
-        self.run_pass(gpu, encoder, pass, target, format, resources, blend, clear, profiler, timing)
+        self.run_pass(
+            gpu, encoder, pass, target, format, resources, blend, clear, profiler, timing,
+        )
     }
 
     /// `run` for a variant of a shader (see `FullscreenPass`).
@@ -251,7 +259,13 @@ impl Fullscreen {
             entry_point,
             depth_samples,
         } = pass;
-        let key = (shader.to_string(), entry_point, format, blend, depth_samples);
+        let key = (
+            shader.to_string(),
+            entry_point,
+            format,
+            blend,
+            depth_samples,
+        );
         if !self.pipelines.contains_key(&key) {
             let count = format!("const DEPTH_SAMPLES: i32 = {};", depth_samples.unwrap_or(4));
             let mut replacements = vec![("const DEPTH_SAMPLES: i32 = 4;", count.as_str())];

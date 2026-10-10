@@ -16,6 +16,7 @@ glam = { version = "0.34", features = ["bytemuck"] }
 bytemuck = { version = "1.25", features = ["derive"] }
 wgpu = "30"
 pollster = "1"
+earcutr = "0.5.0"
 
 [profile.release]
 debug = 1
