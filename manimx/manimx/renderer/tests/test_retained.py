@@ -90,19 +90,19 @@ def test_patched_renders_equal_fresh_renders(renderer: RenderService) -> None:
 
 def test_a_moving_shape_only_rewrites_its_object_entry() -> None:
     retained, cache = RetainedVectors(), RNodeDataCache()
-    retained.build(flatten_scene(RGroup(children=[shape(circle, A, 0), shape(square, B, 2)])), cache, np.zeros(3))
-    batch = retained.build(flatten_scene(RGroup(children=[shape(circle, A, 1), shape(square, B, 2)])), cache, np.zeros(3))
+    retained.build(flatten_scene(RGroup(children=[shape(circle, A, 0), shape(square, B, 2)])), cache, np.eye(4))
+    batch = retained.build(flatten_scene(RGroup(children=[shape(circle, A, 1), shape(square, B, 2)])), cache, np.eye(4))
 
     assert batch.dirty["objects"] == [(0, 1)]
     assert all(batch.dirty[name] == [] for name in ("instances", "fill_vertices", "fill_colors", "stroke_points", "stroke_curves"))
-    unchanged = retained.build(flatten_scene(RGroup(children=[shape(circle, A, 1), shape(square, B, 2)])), cache, np.zeros(3))
+    unchanged = retained.build(flatten_scene(RGroup(children=[shape(circle, A, 1), shape(square, B, 2)])), cache, np.eye(4))
     assert all(ranges == [] for ranges in unchanged.dirty.values())
 
 
 def test_a_fade_only_rewrites_the_object_entry() -> None:
     retained, cache = RetainedVectors(), RNodeDataCache()
-    retained.build(flatten_scene(RGroup(children=[shape(circle, A, 0), shape(square, B, 2)])), cache, np.zeros(3))
-    batch = retained.build(flatten_scene(RGroup(children=[shape(circle, A, 0, alpha=0.5), shape(square, B, 2)])), cache, np.zeros(3))
+    retained.build(flatten_scene(RGroup(children=[shape(circle, A, 0), shape(square, B, 2)])), cache, np.eye(4))
+    batch = retained.build(flatten_scene(RGroup(children=[shape(circle, A, 0, alpha=0.5), shape(square, B, 2)])), cache, np.eye(4))
 
     assert batch.dirty["objects"] == [(0, 1)] and batch.objects[0]["alpha"] == 0.5
     assert all(batch.dirty[name] == [] for name in ("instances", "fill_vertices", "fill_colors", "stroke_points", "stroke_curves"))
@@ -122,7 +122,7 @@ def test_alpha_renders_like_the_opacity_it_multiplies(renderer: RenderService) -
 def test_garbage_is_repacked() -> None:
     retained, cache = RetainedVectors(), RNodeDataCache()
     for _ in range(1, 400):  # every frame a new shape replaces the last: its ranges become garbage
-        retained.build(flatten_scene(RGroup(children=[shape(circle, new_uid())])), cache, np.zeros(3))
+        retained.build(flatten_scene(RGroup(children=[shape(circle, new_uid())])), cache, np.eye(4))
     assert retained.arenas["stroke_points"].used < 4096 + 400 and len(retained.slots) == 1
 
 

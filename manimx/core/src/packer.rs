@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use glam::{DMat4, DVec3};
+use glam::DMat4;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 
@@ -48,7 +48,6 @@ pub struct MeshPacket {
 pub struct PackSettings {
     pub frame: FrameSettings,
     pub default_lights: bool,
-    pub camera_position: DVec3,
     /// The camera's world matrix.
     pub camera: DMat4,
     /// The frame's camera views (`RenderConfig.camera_views`).
@@ -134,7 +133,7 @@ impl Packer {
             graph,
             &values,
             &scene,
-            settings.camera_position.to_array(),
+            settings.camera.inverse(),
             &settings.camera_views,
             &self.callbacks,
             self.generation,
@@ -323,9 +322,8 @@ pub fn row_major(values: &[f64]) -> DMat4 {
 pub fn parse_settings(config: &Bound<'_, PyAny>) -> PyResult<PackSettings> {
     let item = |index: usize| config.get_item(index);
     let ambient: (f64, f64, f64) = item(3)?.extract()?;
-    let camera_position: (f64, f64, f64) = item(9)?.extract()?;
-    let camera: Vec<f64> = item(10)?.extract()?;
-    let views: Vec<(u64, f32, f32)> = item(11)?.extract()?;
+    let camera: Vec<f64> = item(9)?.extract()?;
+    let views: Vec<(u64, f32, f32)> = item(10)?.extract()?;
     let camera_views = views
         .into_iter()
         .enumerate()
@@ -343,9 +341,8 @@ pub fn parse_settings(config: &Bound<'_, PyAny>) -> PyResult<PackSettings> {
             shadows: item(7)?.extract()?,
         },
         default_lights: item(8)?.extract()?,
-        camera_position: DVec3::new(camera_position.0, camera_position.1, camera_position.2),
         camera: row_major(&camera),
         camera_views,
-        hide_camera_views: item(12)?.extract()?,
+        hide_camera_views: item(11)?.extract()?,
     })
 }

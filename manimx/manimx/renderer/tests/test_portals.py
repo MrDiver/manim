@@ -41,7 +41,7 @@ def test_scoped_lights_and_scope_membership() -> None:
 def test_one_sided_masks_are_flagged() -> None:
     scene = flatten_scene(_portal(_world(RShape2D(points=rectangle_points(2.0, 2.0))), one_sided=True))
 
-    batch = VectorBatch.build(scene, RNodeDataCache(), np.zeros(3))
+    batch = VectorBatch.build(scene, RNodeDataCache(), np.eye(4))
 
     assert batch.objects["flags"][-1] & FLAG_FRONT_ONLY  # the mask, built last
     assert not batch.objects["flags"][0] & FLAG_FRONT_ONLY

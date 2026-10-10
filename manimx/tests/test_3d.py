@@ -161,7 +161,7 @@ def test_meshes_cannot_be_masks() -> None:
 def test_curve3d_is_a_camera_facing_stroke() -> None:
     curve = RCurve3D(points=corner_points([(0, 0, 0), (1, 0, 1), (2, 0, 0)]), stroke=Stroke(width=10))
 
-    batch = VectorBatch.build(flatten_scene(curve), RNodeDataCache(), np.zeros(3))
+    batch = VectorBatch.build(flatten_scene(curve), RNodeDataCache(), np.eye(4))
 
     assert batch.objects["flags"][0] == FLAG_CAMERA_FACING
     assert len(batch.fill_vertices) == 0  # curves have no fill

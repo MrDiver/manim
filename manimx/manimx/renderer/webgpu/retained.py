@@ -19,7 +19,7 @@ using the render contract's identity and version tokens:
 
 Only the written ranges are uploaded (:attr:`VectorBatch.dirty`). The
 draw lists are rebuilt every frame from the slots; they are small, and
-transparent draws must be re-sorted by camera distance anyway. Shapes
+transparent draws must be re-sorted by view depth anyway. Shapes
 that leave the scene free their slots; when garbage outweighs live
 records, everything is repacked from scratch.
 
@@ -58,6 +58,7 @@ from .vector_batch import (
     _draw_args,
     _fill_vertices,
     _StrokeTopology,
+    view_depth,
 )
 
 ARENAS = {
@@ -108,17 +109,17 @@ class RetainedVectors:
     _views: CameraViews = field(default_factory=dict)
     """The camera views of the current build (see ``camera_view_entries``)."""
 
-    def build(self, scene: FlatScene, cache: RNodeDataCache, camera_position: np.ndarray, views: CameraViews | None = None) -> VectorBatch:
+    def build(self, scene: FlatScene, cache: RNodeDataCache, world_to_view: np.ndarray, views: CameraViews | None = None) -> VectorBatch:
         if self._too_much_garbage():
             self.__init__()  # repack everything from scratch
         self._views = views or {}
         draws: list[_Draw] = []
         seen: set[tuple[int, int]] = set()
         for item in scene.items:
-            self._add(item, cache, camera_position, draws, seen)
+            self._add(item, cache, world_to_view, draws, seen)
         for index, scope in enumerate(scene.clips):
             for item in scope.mask:
-                self._add(item, cache, camera_position, draws, seen, mask_of=index, front_only=scope.group.one_sided)
+                self._add(item, cache, world_to_view, draws, seen, mask_of=index, front_only=scope.group.one_sided)
         for key in [key for key in self.slots if key not in seen]:
             self._free(self.slots.pop(key))
         return self._batch(scene, draws)
@@ -129,7 +130,7 @@ class RetainedVectors:
         self,
         item: DrawItem,
         cache: RNodeDataCache,
-        camera_position: np.ndarray,
+        world_to_view: np.ndarray,
         draws: list[_Draw],
         seen: set[tuple[int, int]],
         mask_of: int = NO_CLIP,
@@ -165,7 +166,7 @@ class RetainedVectors:
             return  # invisible: the slot stays, nothing is drawn
 
         local_center = cache.get_or_create(shape.uid, "center", points_key, lambda: np.append(shape.points_3d().mean(axis=0), 1.0))
-        distance = float(np.linalg.norm((item.world @ local_center)[:3] - camera_position))
+        distance = view_depth(world_to_view, item.world @ local_center)
         clipped = item.clip != NO_CLIP
         for draw in (self._fill(shape, slot, cache, distance, layer), self._stroke(shape, slot, cache, distance, layer + 1)):
             if draw is None:

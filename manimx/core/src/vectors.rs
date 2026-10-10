@@ -86,6 +86,8 @@ struct StrokeRecords {
 pub struct Draw {
     pub args: DrawIndirect,
     pub opaque: bool,
+    /// Depth of the path's center along the view direction: paths in one
+    /// plane facing the camera tie, so their layers order them.
     pub camera_distance: f64,
     pub layer: usize,
     pub mask_of: i32,
@@ -156,7 +158,7 @@ impl VectorPacker {
         graph: &SceneGraph,
         values: &Values,
         scene: &FlatScene,
-        camera_position: [f64; 3],
+        view: DMat4,
         camera_views: &CameraViews,
         callbacks: &Callbacks,
         generation: u64,
@@ -174,7 +176,7 @@ impl VectorPacker {
             graph,
             values,
             callbacks,
-            camera_position,
+            view,
             camera_views,
             generation,
         };
@@ -281,7 +283,7 @@ impl VectorPacker {
         cache.last_used = context.generation;
         let center = context.center(cache, fields, points_version)?;
         let world_center = item.world.transform_point3(DVec3::from(center));
-        let distance = world_center.distance(DVec3::from(context.camera_position));
+        let distance = -context.view.transform_point3(world_center).z;
         let clipped = item.clip != NO_CLIP;
         let casts_shadow = context.values.truthy(fields.cast_shadows)? && mask_of == NO_CLIP;
         let fill = self.fill(context, node, fields, &mut slot, distance, layer)?;
@@ -552,7 +554,9 @@ struct PathContext<'a> {
     graph: &'a SceneGraph,
     values: &'a Values<'a>,
     callbacks: &'a Callbacks,
-    camera_position: [f64; 3],
+    /// World to view space: transparent draws sort by depth along the
+    /// view direction (`view_depth` in vector_batch.py).
+    view: DMat4,
     camera_views: &'a CameraViews,
     generation: u64,
 }

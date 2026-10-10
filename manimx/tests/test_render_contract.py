@@ -86,7 +86,7 @@ def test_snapshots_from_unchanged_signals_share_cached_triangulations() -> None:
             transform=Transform(position=(x.value, 0.0, 0.0)),
             versions={"points": version_token(points), "fill": "fill-0", "stroke": "stroke-0"},
         )
-        VectorBatch.build(flatten_scene(RGroup(children=[shape])), cache, np.zeros(3))
+        VectorBatch.build(flatten_scene(RGroup(children=[shape])), cache, np.eye(4))
         return shape
 
     first = snapshot()

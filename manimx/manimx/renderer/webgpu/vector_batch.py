@@ -134,6 +134,9 @@ class _Draw:
     args: tuple[int, int, int, int]
     opaque: bool
     camera_distance: float
+    """Depth of the shape's center along the view direction (not the
+    distance to the camera: shapes in one plane facing the camera tie, so
+    their layers order them)."""
     layer: int
     mask_of: int = NO_CLIP
     """Scope whose mask this draw belongs to, or NO_CLIP for the frame."""
@@ -162,8 +165,8 @@ class VectorBatch:
     upload all of it). None for a batch built from scratch."""
 
     @staticmethod
-    def build(scene: FlatScene, cache: RNodeDataCache, camera_position: np.ndarray, views: CameraViews | None = None) -> VectorBatch:
-        builder = _BatchBuilder(cache, camera_position, views or {})
+    def build(scene: FlatScene, cache: RNodeDataCache, world_to_view: np.ndarray, views: CameraViews | None = None) -> VectorBatch:
+        builder = _BatchBuilder(cache, world_to_view, views or {})
         for item in scene.items:
             builder.add(item)
         for index, scope in enumerate(scene.clips):
@@ -175,7 +178,8 @@ class VectorBatch:
 @dataclass(slots=True)
 class _BatchBuilder:
     cache: RNodeDataCache
-    camera_position: np.ndarray
+    world_to_view: np.ndarray
+    """World to view space: transparent draws sort by depth along the view direction."""
     views: CameraViews
     objects: list[np.ndarray] = field(default_factory=list)
     instances: list[np.ndarray] = field(default_factory=list)
@@ -211,7 +215,7 @@ class _BatchBuilder:
 
         local_center = self.cache.get_or_create(shape.uid, "center", shape.version("points"), lambda: np.append(shape.points_3d().mean(axis=0), 1.0))
         center = item.world @ local_center
-        distance = float(np.linalg.norm(center[:3] - self.camera_position))
+        distance = view_depth(self.world_to_view, center)
         clipped = item.clip != NO_CLIP
         for draw in (
             self._add_fill(shape, object_index, distance, layer),
@@ -336,6 +340,12 @@ class _BatchBuilder:
                 for scope in (NO_CLIP, *range(scope_count))
             },
         )
+
+
+def view_depth(world_to_view: np.ndarray, world_point: np.ndarray) -> float:
+    """How far ``world_point`` (homogeneous) is in front of the camera,
+    along its view direction (it looks along its local -z)."""
+    return -float((world_to_view @ world_point)[2])
 
 
 def _link_curves(shape: RBezierPath, first_point: int) -> np.ndarray:

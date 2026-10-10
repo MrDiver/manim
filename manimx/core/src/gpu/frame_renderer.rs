@@ -545,7 +545,7 @@ impl FrameRenderer {
 
 /// The camera's focus distance and aperture in a `config_values()` tuple.
 fn lens(config: &Bound<'_, PyAny>) -> PyResult<(f32, f32)> {
-    Ok((config.get_item(13)?.extract()?, config.get_item(14)?.extract()?))
+    Ok((config.get_item(12)?.extract()?, config.get_item(13)?.extract()?))
 }
 
 fn frame_record(bytes: &Bound<'_, PyAny>) -> PyResult<Frame> {

@@ -205,7 +205,7 @@ def _batch(*shapes: RShape2D, cache: RNodeDataCache | None = None) -> VectorBatc
     root = RGroup(children=list(shapes))
     if cache is None:  # not `or`: an empty cache is falsy
         cache = RNodeDataCache()
-    return VectorBatch.build(flatten_scene(root), cache, np.array([0.0, 0.0, 11.0]))
+    return VectorBatch.build(flatten_scene(root), cache, Camera().view_matrix())
 
 
 def test_batch_links_closed_subpaths_into_a_loop() -> None:
@@ -266,7 +266,7 @@ def test_batch_draws_masks_separately_and_clipped_content_transparent() -> None:
     content = RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill(opacity=1.0), stroke=Stroke(width=0.0))
     clip = RClippingGroup(mask=mask, content=content)
 
-    batch = VectorBatch.build(flatten_scene(clip), RNodeDataCache(), np.zeros(3))
+    batch = VectorBatch.build(flatten_scene(clip), RNodeDataCache(), np.eye(4))
 
     assert len(batch.opaque_draws) == 0
     assert len(batch.transparent_draws) == 1
