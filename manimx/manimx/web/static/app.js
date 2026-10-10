@@ -266,7 +266,13 @@ function showIndices(on) {
   }
 }
 
-/** The index of every path over the frame, or nothing with the toggle off. */
+/** Relative luminance of a #rrggbb color, 0 (black) to 1 (white). */
+function luminance(hex) {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** The index of every path over the frame, in its path's color, or nothing with the toggle off. */
 async function drawLabels(time) {
   elements.labels.replaceChildren();
   if (!state.indices) return;
@@ -278,6 +284,8 @@ async function drawLabels(time) {
     tag.title = `${label.name} (${label.index} in ${label.group})`;
     tag.style.left = `${100 * label.x}%`;
     tag.style.top = `${100 * label.y}%`;
+    tag.style.background = label.color;
+    tag.style.color = luminance(label.color) > 0.5 ? "#000" : "#fff";
     elements.labels.append(tag);
   }
 }

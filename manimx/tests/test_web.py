@@ -213,7 +213,7 @@ def test_labels_give_every_paths_index_in_its_group_on_the_frame() -> None:
 
     class Labeled(Scene):
         def construct(self) -> None:
-            self.add(TypstMath("x + 1").shift(LEFT * 2), Group(Square(), Square().shift(RIGHT)).shift(RIGHT * 3))
+            self.add(TypstMath("x + 1").shift(LEFT * 2), Group(Square(color="#ff0000"), Square(stroke_color="#00ff00", fill_color="#0000ff", fill_opacity=0.5).shift(RIGHT)).shift(RIGHT * 3))
 
     timeline = Timeline()
     timeline.add(Labeled().prepare(), name="labeled")
@@ -223,6 +223,8 @@ def test_labels_give_every_paths_index_in_its_group_on_the_frame() -> None:
     # Fractions of the frame: the formula left of the middle, the squares right of it, all at mid height.
     assert all(label["x"] < 0.5 for label in labels[:3]) and all(label["x"] > 0.5 for label in labels[3:])
     assert all(label["y"] == pytest.approx(0.5, abs=0.05) for label in labels)
+    assert [label["color"] for label in labels[3:]] == ["#ff0000", "#0000ff"]  # the stroke without fill, else the fill
+    assert labels[0]["color"] == "#000000"  # Typst's default text color
     first_square = labels[3]
     assert first_square["x"] == pytest.approx(0.5 + 3 / (8 * 16 / 9))  # x = 3 of a 14.2 wide frame
 

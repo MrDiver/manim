@@ -9,7 +9,7 @@ at any size.
 
 A label is placed at the center of its path's bounding box, projected
 through the clip's camera, as fractions of the frame (x to the right,
-y down).
+y down), and carries the path's color.
 """
 
 from __future__ import annotations
@@ -54,7 +54,18 @@ def _label(node: RBezierPath, world: np.ndarray, clip_space: np.ndarray, index: 
     local[: len(center)], local[3] = center, 1.0
     clip = clip_space @ (world @ local)
     x, y = clip[:2] / clip[3]
-    return {"x": (x + 1) / 2, "y": (1 - y) / 2, "index": index, "name": path.name, "group": group.name}
+    return {"x": (x + 1) / 2, "y": (1 - y) / 2, "index": index, "name": path.name, "group": group.name, "color": _color(node)}
+
+
+def _color(node: RBezierPath) -> str:
+    """The color the path shows most: its fill's where the fill is seen,
+    else its stroke's (the first of a gradient), as ``#rrggbb``."""
+    fill, stroke = getattr(node, "fill", None), getattr(node, "stroke", None)
+    style = fill if fill is not None and np.max(fill.opacity) > 0 else stroke
+    if style is None:
+        return "#ffffff"
+    red, green, blue = (round(255 * float(np.clip(channel, 0.0, 1.0))) for channel in np.asarray(style.color)[0][:3])
+    return f"#{red:02x}{green:02x}{blue:02x}"
 
 
 __all__ = ["index_labels"]
