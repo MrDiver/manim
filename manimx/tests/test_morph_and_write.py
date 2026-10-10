@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 from manimx.animation import Group, Scene
@@ -25,6 +27,7 @@ from manimx.userland import (
 from manimx.userland.geometry import (
     align_paths,
     arc_points,
+    corner_points,
     insert_curves,
     rectangle_points,
     subpaths,
@@ -67,12 +70,18 @@ def test_partial_path_keeps_whole_curves_and_cuts_the_ends() -> None:
     assert len(middle) == 4
 
 
-def test_aligned_paths_have_equal_shapes_and_keep_their_ends() -> None:
+def test_aligned_paths_have_equal_shapes_and_start_close() -> None:
     circle, square = arc_points(), rectangle_points()
     a, b = align_paths(circle, square)
     assert a.shape == b.shape == (len(circle), 2)
-    np.testing.assert_allclose(b[0], square[0])
-    np.testing.assert_allclose(b[-1], square[-1])
+    # Both closed: the square starts where the circle does (on the right),
+    # not at its first corner, so the morph does not turn.
+    np.testing.assert_allclose(b[0], [2.0, 0.0], atol=1e-12)
+    np.testing.assert_allclose(b[-1], b[0], atol=1e-12)
+    # Open paths keep their ends.
+    line, arc = corner_points([(0.0, 0.0), (1.0, 0.0)]), arc_points(angle=math.pi)
+    a, b = align_paths(arc, line)
+    np.testing.assert_allclose(b[[0, -1]], line[[0, -1]])
     assert len(insert_curves(square, 3)) == len(square) + 12
     # Two subpaths against one: the single one gets an empty second subpath.
     two = np.concatenate([square, square + 5.0])

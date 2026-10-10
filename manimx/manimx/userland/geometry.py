@@ -68,6 +68,25 @@ def corner_points(corners: Sequence[Sequence[float]], closed: bool = False) -> n
     return curves.reshape(-1, anchors.shape[1])
 
 
+def brace_points(length: float, depth: float) -> np.ndarray:
+    """A curly brace from ``(-length / 2, 0)`` to ``(length / 2, 0)`` with
+    its tip at ``(0, -depth)``: quarter circles into a straight part on
+    each side, and two more into the tip (six cubic curves). The circles
+    shrink on a brace shorter than twice its depth."""
+    half = length / 2
+    r = min(depth / 2, length / 4)
+    k = 4 / 3 * math.tan(math.pi / 8) * r  # the handle of a quarter circle
+    d = depth / 2  # the height of the straight parts
+    left = [
+        [(-half, 0.0), (-half, -k), (-half + r - k, -d), (-half + r, -d)],
+        [(-half + r, -d), (-half + r + (half - 2 * r) / 3, -d), (-r - (half - 2 * r) / 3, -d), (-r, -d)],
+        [(-r, -d), (-r + k, -d), (0.0, -depth + k), (0.0, -depth)],
+    ]
+    curves = np.array(left, dtype=np.float64)
+    right = curves[::-1, ::-1] * np.array([-1.0, 1.0])  # mirrored, in path order
+    return np.concatenate([curves, right]).reshape(-1, 2)
+
+
 def parametric_points(function: Callable[[float], Any], t_range: tuple[float, float], samples: int = 64) -> np.ndarray:
     """A smooth 3D curve through ``function(t)`` at ``samples`` evenly
     spaced ``t``.
@@ -190,6 +209,7 @@ def _grid_indices(rows: int, columns: int, flip: bool = False) -> np.ndarray:
 
 __all__ = [
     "arc_points",
+    "brace_points",
     "box_mesh",
     "corner_points",
     "parametric_points",
@@ -238,8 +258,10 @@ def align_paths(first: np.ndarray, second: np.ndarray) -> tuple[np.ndarray, np.n
     """Both paths with the same number of subpaths and of curves in each,
     so they interpolate point by point (Manim's ``align_points``). A path
     with fewer subpaths gets empty ones (four times its last point); in
-    each pair of subpaths the shorter one gets more curves. An empty path
-    becomes a point at the other's center.
+    each pair of subpaths the shorter one gets more curves. Where both
+    subpaths are closed, the second starts at the curve that keeps the
+    pair closest (a circle into a square does not turn on the way). An
+    empty path becomes a point at the other's center.
     """
     first, second = _not_empty(first, second), _not_empty(second, first)
     parts_1, parts_2 = subpaths(first), subpaths(second)
@@ -248,9 +270,26 @@ def align_paths(first: np.ndarray, second: np.ndarray) -> tuple[np.ndarray, np.n
         part_1 = parts_1[index] if index < len(parts_1) else np.repeat(parts_1[-1][-1:], POINTS_PER_CURVE, axis=0)
         part_2 = parts_2[index] if index < len(parts_2) else np.repeat(parts_2[-1][-1:], POINTS_PER_CURVE, axis=0)
         difference = (len(part_2) - len(part_1)) // POINTS_PER_CURVE
-        aligned_1.append(insert_curves(part_1, difference))
-        aligned_2.append(insert_curves(part_2, -difference))
+        part_1, part_2 = insert_curves(part_1, difference), insert_curves(part_2, -difference)
+        if _closed(part_1) and _closed(part_2):
+            part_2 = _closest_start(part_2, part_1)
+        aligned_1.append(part_1)
+        aligned_2.append(part_2)
     return np.concatenate(aligned_1), np.concatenate(aligned_2)
+
+
+def _closed(points: np.ndarray) -> bool:
+    return len(points) > POINTS_PER_CURVE and bool(np.linalg.norm(points[0] - points[-1]) <= TOLERANCE_FOR_POINT_EQUALITY)
+
+
+def _closest_start(points: np.ndarray, other: np.ndarray) -> np.ndarray:
+    """The closed path ``points`` starting at the curve whose start gives
+    the least squared distance between its anchors and ``other``'s (same
+    curve count)."""
+    curves = points.reshape(-1, POINTS_PER_CURVE, points.shape[1])
+    anchors, targets = curves[:, 0], other.reshape(curves.shape)[:, 0]
+    costs = [np.sum((np.roll(anchors, -shift, axis=0) - targets) ** 2) for shift in range(len(curves))]
+    return np.roll(curves, -int(np.argmin(costs)), axis=0).reshape(points.shape)
 
 
 def _not_empty(points: np.ndarray, other: np.ndarray) -> np.ndarray:
