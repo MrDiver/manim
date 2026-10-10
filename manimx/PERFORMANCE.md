@@ -611,6 +611,22 @@ submission (waiting for the latest one serialized CPU and GPU: 94 fps),
 and copying the mapped image once, straight into the Python `bytes`
 (two copies out of mapped memory: 272 fps without blur).
 
+### T. Depth of field reads each depth sample once
+
+The depth of field gathered 64 taps per pixel, and every tap read all
+MSAA samples of both depth buffers (eight loads at 4×MSAA) to find its
+distance. Now a pass before it (view_distance.wgsl) resolves the
+distance of every pixel into an `r32float` texture, and the blur reads
+one value per tap. Showcase `Cameras` (four views, depth of field, motion
+blur 8), power profile `balanced`:
+
+| | fps | GPU ms/frame | depth of field |
+|---|---|---|---|
+| before | 6.9 | 105.1 | 82.1 |
+| after | 19.6 | 34.7 | 11.9 |
+
+Frames are bit-identical, in the Python renderer and in the core.
+
 ## Where the time goes now
 
 Benchmark project with `PortalOrbit`, after steps L to O: 48.6 to about

@@ -4,9 +4,7 @@
 // The blur radius of a pixel (its circle of confusion) follows a thin
 // lens: aperture * |distance - focus| / distance, as a fraction of the
 // image height; so `aperture` is the blur of something infinitely far
-// away. Distances come from the meshes' and the shapes' depth buffers
-// (the nearest of all their samples, so a pixel an edge only partly
-// covers is as far as that edge); the background is infinitely far.
+// away. Distances come from view_distance.wgsl, rendered before.
 //
 // The blur gathers SAMPLES pixels in a disk (golden-angle spiral) as large
 // as the largest blur in the image, the spiral turned by a different angle
@@ -29,31 +27,16 @@ struct DepthOfFieldParams {
 
 @group(0) @binding(1) var<uniform> params: DepthOfFieldParams;
 @group(0) @binding(2) var image: texture_2d<f32>;
-@group(0) @binding(3) var mesh_depth: texture_depth_multisampled_2d;
-@group(0) @binding(4) var vector_depth: texture_depth_multisampled_2d;
+@group(0) @binding(3) var distances: texture_2d<f32>;
 
 const SAMPLES: u32 = 64u;
-/// Samples per pixel of the depth buffers (the frame's MSAA; the renderer
-/// replaces this line, and the texture type when there is only one).
-const DEPTH_SAMPLES: i32 = 4;
 /// The largest blur radius, as a fraction of the image height.
 const MAX_RADIUS: f32 = 0.05;
 const GOLDEN_ANGLE: f32 = 2.39996323;
-const FAR: f32 = 1e9;
 
 /// Distance from the camera along its view axis at `pixel`.
 fn distance_at(pixel: vec2<i32>) -> f32 {
-    var depth = 1.0;
-    for (var index = 0; index < DEPTH_SAMPLES; index++) {
-        depth = min(depth, min(textureLoad(mesh_depth, pixel, index), textureLoad(vector_depth, pixel, index)));
-    }
-    if depth >= 1.0 {
-        return FAR;
-    }
-    let position = (vec2<f32>(pixel) + 0.5) * frame.viewport.zw;
-    let ndc = vec4<f32>(position.x * 2.0 - 1.0, 1.0 - position.y * 2.0, depth, 1.0);
-    let view = frame.inverse_projection * ndc;
-    return -view.z / view.w;
+    return textureLoad(distances, pixel, 0).r;
 }
 
 /// The blur radius in pixels of something at `distance`.

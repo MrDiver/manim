@@ -179,7 +179,7 @@ pub struct FullscreenPass<'a> {
     pub entry_point: &'static str,
     /// For a pass that reads the frame's depth buffers: their samples per
     /// pixel (the shader is written for 4, multisampled; see
-    /// depth_of_field.wgsl).
+    /// view_distance.wgsl).
     pub depth_samples: Option<u32>,
 }
 
@@ -560,6 +560,44 @@ impl Composer {
             blend: Blend::Replace,
         };
         self.composite_layers(gpu, encoder, lit, vector, sharp, background, profiler)?;
+        let frame_uniform = || {
+            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: lens.frame_uniform,
+                offset: 0,
+                size: wgpu::BufferSize::new(size_of::<crate::records::Frame>() as u64),
+            })
+        };
+        let distances = self.textures.get(
+            &gpu.device,
+            "view distances",
+            lens.size,
+            wgpu::TextureFormat::R32Float,
+            1,
+            wgpu::TextureUsages::empty(),
+        );
+        let distances_view = distances.create_view(&Default::default());
+        let pass = FullscreenPass {
+            shader: "view_distance.wgsl",
+            entry_point: "fs_view_distance",
+            depth_samples: Some(lens.samples),
+        };
+        let resources = [
+            frame_uniform(),
+            wgpu::BindingResource::TextureView(lens.mesh_depth),
+            wgpu::BindingResource::TextureView(lens.vector_depth),
+        ];
+        self.fullscreen.run_pass(
+            gpu,
+            encoder,
+            pass,
+            &distances_view,
+            wgpu::TextureFormat::R32Float,
+            &resources,
+            Blend::Replace,
+            true,
+            profiler,
+            "depth of field",
+        )?;
         let params = DepthOfFieldParams {
             focus_distance: lens.focus_distance,
             aperture: lens.aperture,
@@ -570,25 +608,16 @@ impl Composer {
             .composite_params
             .write(&gpu.queue, bytemuck::bytes_of(&params));
         let resources = [
-            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                buffer: lens.frame_uniform,
-                offset: 0,
-                size: wgpu::BufferSize::new(size_of::<crate::records::Frame>() as u64),
-            }),
+            frame_uniform(),
             params,
             wgpu::BindingResource::TextureView(&image_view),
-            wgpu::BindingResource::TextureView(lens.mesh_depth),
-            wgpu::BindingResource::TextureView(lens.vector_depth),
+            wgpu::BindingResource::TextureView(&distances_view),
         ];
-        let pass = FullscreenPass {
-            shader: "depth_of_field.wgsl",
-            entry_point: "fs_depth_of_field",
-            depth_samples: Some(lens.samples),
-        };
-        self.fullscreen.run_pass(
+        self.fullscreen.run(
             gpu,
             encoder,
-            pass,
+            "depth_of_field.wgsl",
+            "fs_depth_of_field",
             target.view,
             HDR_FORMAT,
             &resources,

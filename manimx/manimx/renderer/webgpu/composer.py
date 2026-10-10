@@ -274,23 +274,29 @@ class FrameComposer:
         if not depth_of_field:
             return
         assert camera is not None
+        frame_uniform = {"buffer": self.service.renderer.frame_uniform, "offset": 0, "size": FRAME_DTYPE.itemsize}
+        distances = self._textures.get("view distances", (layers.width, layers.height), wgpu.TextureFormat.r32float)
+        self._passes.run(
+            encoder,
+            "view_distance.wgsl",
+            "fs_view_distance",
+            distances,
+            [frame_uniform, layers.mesh_depth, layers.vector_depth],
+            blend=None,
+            clear=True,
+            timing=profiler.pass_timing("depth of field"),
+            replacements=_depth_samples(layers.samples),
+        )
         params = np.array([camera.focus_distance, camera.aperture, weight, 0.0], dtype=np.float32)
         self._passes.run(
             encoder,
             "depth_of_field.wgsl",
             "fs_depth_of_field",
             target,
-            [
-                {"buffer": self.service.renderer.frame_uniform, "offset": 0, "size": FRAME_DTYPE.itemsize},
-                self._uniform(params),
-                self._resources.view(image),
-                layers.mesh_depth,
-                layers.vector_depth,
-            ],
+            [frame_uniform, self._uniform(params), self._resources.view(image), self._resources.view(distances)],
             blend=blend,
             clear=first,
             timing=profiler.pass_timing("depth of field"),
-            replacements=_depth_samples(layers.samples),
         )
 
     def _uniform(self, data: np.ndarray) -> dict:
@@ -372,7 +378,7 @@ class _TreeKeys:
 
 
 def _depth_samples(samples: int) -> tuple[tuple[str, str], ...]:
-    """The variant of depth_of_field.wgsl for depth buffers with ``samples``
+    """The variant of view_distance.wgsl for depth buffers with ``samples``
     samples per pixel."""
     count = (("const DEPTH_SAMPLES: i32 = 4;", f"const DEPTH_SAMPLES: i32 = {samples};"),)
     return count if samples > 1 else (*count, ("texture_depth_multisampled_2d", "texture_depth_2d"))
