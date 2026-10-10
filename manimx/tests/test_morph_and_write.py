@@ -188,3 +188,18 @@ def test_morph_matching_moves_equal_shapes_and_fades_the_rest() -> None:
     assert moved.uid not in halfway or halfway[moved.uid].alpha == 0.0  # replaced at the end
     with pytest.raises(ValueError, match="MorphMatching needs"):
         MorphMatching(Group(), Square())
+
+
+def test_create_and_write_draw_a_part_and_never_touch_points() -> None:
+    """They animate draw_end; points stay the shape's own, so the shape can
+    change while it is drawn, and drawn_points is the part on screen."""
+    square = Square()
+    full = np.asarray(square.points.value).copy()
+    prepared = prepare(lambda s: (s.play(Create(square), square.animate.scale_by(2.0), run_time=2), s.play(Write(Square().shift(UP)), run_time=1)))
+    assert all(track.signal is not square.points for track in prepared.tracks)
+    prepared.evaluate(1.0)
+    drawn = np.asarray(square.drawn_points.value)
+    assert 0 < len(drawn) < len(full) and np.allclose(drawn[0], full[0])
+    assert square.scale.x.value > 1.0  # the scale animates at the same time
+    prepared.evaluate(2.0)
+    np.testing.assert_array_equal(square.drawn_points.value, full)

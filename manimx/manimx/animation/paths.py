@@ -1,5 +1,6 @@
 """Operations on point arrays of cubic Bezier curves that animations use
-while they play: the part of a path drawn so far (:func:`partial_path`).
+while they play: the part of a path drawn so far (:func:`partial_path`,
+:class:`DrawnPart`).
 
 Points are laid out as in ``RBezierPath``: four per curve (anchor,
 handle, handle, anchor), a new subpath wherever a curve does not start
@@ -11,6 +12,9 @@ agree; keep them in step.
 from __future__ import annotations
 
 import numpy as np
+
+from .kinds import PATH, SCALAR
+from .signals import DerivedSignal, RootSignal, Signal
 
 POINTS_PER_CURVE = 4
 
@@ -73,4 +77,28 @@ def _curve_at(count: int, alpha: float) -> tuple[int, float]:
     return int(position), position % 1.0
 
 
-__all__ = ["partial_curve", "partial_path", "split_curve"]
+
+
+def drawn_part(points: Signal, prefix: str) -> tuple[RootSignal, RootSignal, DerivedSignal]:
+    """``draw_start``, ``draw_end`` (0 and 1) and the ``drawn_points``
+    derived from them and ``points``, for the node named ``prefix``."""
+    start = RootSignal(0.0, SCALAR, name=f"{prefix}.draw_start")
+    end = RootSignal(1.0, SCALAR, name=f"{prefix}.draw_end")
+    return start, end, DerivedSignal(DrawnPart(), (points, start, end), PATH, name=f"{prefix}.drawn_points")
+
+
+class DrawnPart:
+    """``partial_path(points, start, end)``: the function of the
+    ``drawn_points`` signal of Shape2D and Curve3D, the part of their path
+    from ``draw_start`` to ``draw_end``. A class instead of a function, so
+    the core (manimx._core) recognizes it and computes it in Rust."""
+
+    __slots__ = ()
+
+    def __call__(self, points: np.ndarray, start: float, end: float) -> np.ndarray:
+        if start <= 0.0 and end >= 1.0:
+            return points
+        return partial_path(np.asarray(points), start, end)
+
+
+__all__ = ["DrawnPart", "drawn_part", "partial_curve", "partial_path", "split_curve"]

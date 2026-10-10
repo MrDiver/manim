@@ -24,6 +24,7 @@ from .node import (
     ScalableMixin,
     animatable,
 )
+from .paths import drawn_part
 from .signals import RootSignal, Signal
 from .snapshot import version_token
 from .style import Colors, Scalars
@@ -46,6 +47,9 @@ class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
     ``stroke_cap``      DISCRETE  ``stroke.cap``
     ``cast_shadows``    DISCRETE  ``cast_shadows``
     ==================  ========  ==========================================
+
+    ``draw_start`` and ``draw_end`` say which part of the path is drawn and
+    ``drawn_points`` is that part, as for Shape2D.
     """
 
     def __init__(
@@ -64,6 +68,7 @@ class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
         super().__init__(name, tags=tags)
         prefix = self.name
         self.points = RootSignal(np.zeros((0, 3)) if len(points) == 0 else points, PATH, name=f"{prefix}.points")
+        self.draw_start, self.draw_end, self.drawn_points = drawn_part(self.points, prefix)
         self.stroke_color = RootSignal(style.colors(color), COLORS, name=f"{prefix}.stroke_color")
         self.stroke_width = RootSignal(stroke_width, SCALARS, name=f"{prefix}.stroke_width")
         self.stroke_opacity = RootSignal(stroke_opacity, SCALARS, name=f"{prefix}.stroke_opacity")
@@ -74,7 +79,8 @@ class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()
         yield from (
-            self.points, self.stroke_color, self.stroke_width, self.stroke_opacity,
+            self.points, self.draw_start, self.draw_end, self.drawn_points,
+            self.stroke_color, self.stroke_width, self.stroke_opacity,
             self.stroke_joint, self.stroke_cap, self.cast_shadows,
         )  # fmt: skip
 
@@ -113,7 +119,7 @@ class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
             return None
         return RCurve3D(
             uid=self.uid,
-            points=self.points.value,
+            points=self.drawn_points.value,
             stroke=style.stroke(
                 self.stroke_color.value, self.stroke_opacity.value, self.stroke_width.value,
                 self.stroke_joint.value, self.stroke_cap.value,
@@ -122,7 +128,7 @@ class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
             transform=self._transform(),
             alpha=self.alpha.value,
             versions={
-                "points": version_token(self.points),
+                "points": version_token(self.drawn_points),
                 "stroke": version_token(
                     self.stroke_color, self.stroke_width, self.stroke_opacity, self.stroke_joint, self.stroke_cap
                 ),

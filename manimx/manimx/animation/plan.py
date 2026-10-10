@@ -63,6 +63,7 @@ from .kinds import (
 )
 from .light import DirectionalLight, PointLight, SpotLight
 from .node import Node, Offset, PositionMixin, RotationMixin, ScalableMixin
+from .paths import DrawnPart
 from .particles import Particles
 from .rates import linear, smooth
 from .scene import PreparedScene
@@ -280,7 +281,8 @@ def _node_fields(node: Node) -> Iterator[tuple[str, Signal]]:
     if isinstance(node, ScalableMixin):
         yield from ((f"scale.{name}", axis) for name, axis in zip("xyz", node.scale.axes, strict=True))
     for name in _FIELDS[_node_kind(node) or "group"]:
-        yield name, getattr(node, name)
+        # A path draws the part of its points from draw_start to draw_end.
+        yield name, getattr(node, "drawn_points" if name == "points" else name)
 
 
 def planned_frames(source: Any) -> PlannedTimeline | PlannedScene | None:
@@ -376,6 +378,8 @@ def _derivation(signal: DerivedSignal) -> tuple:
     function = signal.function
     if isinstance(function, Offset):
         return ("offset", function.offset)
+    if isinstance(function, DrawnPart):
+        return ("drawn_part",)
     return ("python", function)
 
 

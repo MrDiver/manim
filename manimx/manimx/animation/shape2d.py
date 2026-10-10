@@ -26,6 +26,7 @@ from .node import (
     ScalableMixin,
     animatable,
 )
+from .paths import drawn_part
 from .signals import RootSignal, Signal
 from .snapshot import version_token
 from .style import Colors, Scalars
@@ -39,7 +40,7 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
     ==================  ========  ==========================================
     signal              kind      RShape2D field
     ==================  ========  ==========================================
-    ``points``          PATH      ``points``
+    ``points``          PATH      ``points`` (the part ``drawn_points``)
     ``fill_color``      COLORS    ``fill.color`` (one color or a gradient)
     ``fill_opacity``    SCALARS   ``fill.opacity``
     ``stroke_color``    COLORS    ``stroke.color``
@@ -53,6 +54,12 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
     Lists (gradients, tapering widths) are spread over the path's points
     by the renderer. ``color`` sets fill and stroke color together. The
     fill is transparent unless ``fill_opacity`` is given.
+
+    ``draw_start`` and ``draw_end`` (SCALAR, 0 and 1) say which part of the
+    path is drawn, as fractions of its curves: Create and Write animate
+    them, so they never change ``points`` (or a shape's parameters).
+    ``drawn_points`` is derived from the three and is what the snapshot
+    draws.
     """
 
     def __init__(
@@ -74,6 +81,7 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         super().__init__(name, tags=tags)
         prefix = self.name
         self.points = RootSignal(np.zeros((0, 2)) if len(points) == 0 else points, PATH, name=f"{prefix}.points")
+        self.draw_start, self.draw_end, self.drawn_points = drawn_part(self.points, prefix)
         self.fill_color = RootSignal(style.colors(color if fill_color is None else fill_color), COLORS, name=f"{prefix}.fill_color")
         self.fill_opacity = RootSignal(fill_opacity, SCALARS, name=f"{prefix}.fill_opacity")
         self.stroke_color = RootSignal(style.colors(color if stroke_color is None else stroke_color), COLORS, name=f"{prefix}.stroke_color")
@@ -88,7 +96,8 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()
         yield from (
-            self.points, self.fill_color, self.fill_opacity, self.stroke_color, self.stroke_width,
+            self.points, self.draw_start, self.draw_end, self.drawn_points,
+            self.fill_color, self.fill_opacity, self.stroke_color, self.stroke_width,
             self.stroke_opacity, self.stroke_joint, self.stroke_cap, self.cast_shadows,
         )  # fmt: skip
 
@@ -154,13 +163,13 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         self._styles = (cached_fill, cached_stroke)
         return RShape2D(
             uid=self.uid,
-            points=self.points.value,
+            points=self.drawn_points.value,
             fill=cached_fill[1],
             stroke=cached_stroke[1],
             cast_shadows=bool(self.cast_shadows.value),
             transform=self._transform(),
             alpha=self.alpha.value,
-            versions={"points": version_token(self.points), "fill": fill_token, "stroke": stroke_token},
+            versions={"points": version_token(self.drawn_points), "fill": fill_token, "stroke": stroke_token},
         )
 
 

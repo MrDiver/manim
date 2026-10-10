@@ -19,6 +19,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
 use crate::contribution::{Contribution, Keyframes, Window};
+use crate::paths;
 use crate::rates::Rate;
 use crate::track::{Entry, Track};
 use crate::value::{Kind, Value};
@@ -36,6 +37,9 @@ struct Slot {
 enum Derivation {
     /// `input + offset` (`PositionMixin.follow()`).
     Offset(f64),
+    /// `partial_path(points, start, end)`: the drawn part of a path
+    /// (`DrawnPart`, the `drawn_points` of Shape2D and Curve3D).
+    DrawnPart,
     /// A Python function of the input values (`derive()`).
     Python(Py<PyAny>),
 }
@@ -132,7 +136,7 @@ impl Evaluator {
     }
 
     /// Add derived signal `slot`, computed from `inputs` by `derivation`:
-    /// `("offset", d)` or `("python", function)`. Add them in dependency order.
+    /// `("offset", d)`, `("drawn_part",)` or `("python", function)`. Add them in dependency order.
     fn add_derived(
         &mut self,
         slot: usize,
@@ -142,6 +146,7 @@ impl Evaluator {
         let tag: String = derivation.get_item(0)?.extract()?;
         let derivation = match tag.as_str() {
             "offset" => Derivation::Offset(derivation.get_item(1)?.extract()?),
+            "drawn_part" => Derivation::DrawnPart,
             "python" => Derivation::Python(derivation.get_item(1)?.unbind()),
             _ => return Err(PyValueError::new_err(format!("unknown derivation {tag:?}"))),
         };
@@ -234,6 +239,20 @@ impl Evaluator {
         let value = match &self.derived[index].derivation {
             Derivation::Offset(offset) => {
                 Value::Scalar(self.slots[inputs[0]].value.scalar()? + offset)
+            }
+            Derivation::DrawnPart => {
+                let start = self.slots[inputs[1]].value.scalar()?;
+                let end = self.slots[inputs[2]].value.scalar()?;
+                match &self.slots[inputs[0]].value {
+                    // Fully drawn (nearly always): the same array, not a copy.
+                    Value::Array(points) if start <= 0.0 && end >= 1.0 => {
+                        Value::Array(points.clone())
+                    }
+                    Value::Array(points) => {
+                        Value::Array(Arc::new(paths::partial_path(points, start, end)))
+                    }
+                    _ => return Err(PyValueError::new_err("drawn_points needs a path")),
+                }
             }
             Derivation::Python(function) => {
                 let function = function.clone_ref(py);

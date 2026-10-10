@@ -376,7 +376,8 @@ class MorphMatching(Morph):
 class Create(_PlannedAnimation):
     """Draw a node's paths from their start (Manim's ``Create``): the
     shapes of a group one after another, each overlapping the previous by
-    ``1 - lag_ratio`` of its time.
+    ``1 - lag_ratio`` of its time. It animates each path's ``draw_end``,
+    never its points, so the shape may change meanwhile.
     """
 
     node: Node
@@ -388,7 +389,7 @@ class Create(_PlannedAnimation):
         self._plan()
         paths = _drawn_paths(self.node)
         for path, (lower, upper) in zip(paths, _lagged(len(paths), self.lag_ratio), strict=True):
-            self._set(path.points, Partial(_points(path), lower, upper))
+            self._between(path.draw_end, 0.0, 1.0, lower, upper)
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
@@ -397,7 +398,7 @@ class Create(_PlannedAnimation):
 @dataclass(eq=False)
 class Uncreate(_PlannedAnimation):
     """Undraw a node's paths back to their start, the last shape first,
-    and remove the node (Manim's ``Uncreate``).
+    and remove the node (Manim's ``Uncreate``), through ``draw_end``.
     """
 
     node: Node
@@ -410,7 +411,7 @@ class Uncreate(_PlannedAnimation):
         paths = _drawn_paths(self.node)
         windows = _lagged(len(paths), self.lag_ratio)[::-1]
         for path, (lower, upper) in zip(paths, windows, strict=True):
-            self._set(path.points, Partial(_points(path), lower, upper, reverse=True))
+            self._between(path.draw_end, authoring_current(path.draw_end), 0.0, lower, upper)
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
@@ -444,7 +445,7 @@ class DrawBorderThenFill(_PlannedAnimation):
         width = authoring_current(path.stroke_width)
         has_stroke = bool(np.any(np.asarray(width) > 0.0))
         outline_color = authoring_current(path.stroke_color if has_stroke or not hasattr(path, "fill_color") else path.fill_color)
-        self._set(path.points, Partial(_points(path), lower, middle))
+        self._between(path.draw_end, 0.0, 1.0, lower, middle)
         self._between(path.stroke_color, outline_color, authoring_current(path.stroke_color), middle, upper)
         self._between(path.stroke_width, self.stroke_width, width, middle, upper)
         if hasattr(path, "fill_opacity"):
