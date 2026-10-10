@@ -5,10 +5,11 @@ import math
 
 import numpy as np
 import pytest
+import quaternion
 from manimx.renderer.scene_graph import flatten_scene
 
 from manimx.robjects import RShape2D
-from manimx.animation import Group, Scene, derive
+from manimx.animation import Camera, Group, Scene, derive
 from manimx.userland import DOWN, LEFT, ORIGIN, RIGHT, TAU, UP, Circle, Dot, FadeIn, FadeOut, Indicate, Rectangle, RegularPolygon, Rotate, Square, Triangle
 from manimx.userland.rate_functions import linear
 from naming import by_name
@@ -394,3 +395,27 @@ def test_clipping_group_without_visible_parts_is_skipped() -> None:
     prepared = prepare(construct)
 
     assert "clip" not in objects(prepared, 0.0) and "clip" in objects(prepared, 1.0)
+
+
+def test_an_animate_chain_describes_one_end_state() -> None:
+    """Each step of a chain sees the end state of the steps before it."""
+
+    class Chain(Scene):
+        def construct(self) -> None:
+            camera = Camera("chained", position=(0.0, -5.0, 0.0))
+            square = Square()
+            self.add(square)
+            self.play(camera.animate.move_to((5.0, 0.0, 0.0)).look_at((0.0, 0.0, 0.0)))
+            self.play(square.animate.move_to((1.0, 0.0, 0.0)).shift((1.0, 0.0, 0.0)).scale_by(2.0).shift((0.0, 1.0, 0.0)))
+            self.camera_node = camera
+            self.square = square
+
+    scene = Chain()
+    prepared = scene.prepare()
+    prepared.evaluate(prepared.duration)
+    camera = scene.camera_node
+    assert camera.position.value == pytest.approx((5.0, 0.0, 0.0))
+    looking = -quaternion.as_rotation_matrix(camera.rotation.value)[:, 2]
+    assert looking == pytest.approx((-1.0, 0.0, 0.0), abs=1e-9)  # from the new position
+    assert scene.square.position.value == pytest.approx((2.0, 1.0, 0.0))
+    assert scene.square.scale.value == pytest.approx((2.0, 2.0, 2.0))

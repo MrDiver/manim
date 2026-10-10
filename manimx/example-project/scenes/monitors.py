@@ -1,6 +1,6 @@
 """Monitors: two cameras' pictures on planes in the scene.
 
-Shows ``CameraView``: a top camera and a side camera film a
+Shows ``CameraView``: a top camera and a side camera (moving around it) film a
 small 3D set, and their pictures sit next to it, one of them masked by a
 circle (a ClippingGroup). The cameras are animated like any node.
 """
@@ -47,7 +47,7 @@ class Monitors(Scene):
         self.play(FadeIn(stage), run_time=1.0)
         self.play(FadeIn(side_view), FadeIn(frame), FadeIn(top_view), Write(label), run_time=1.0)
         self.play(
-            side.animate.shift(RIGHT * 2.5),
+            side.animate.move_to((2.8, -3.0, 3.0)).look_at((-3.2, 0.0, 0.5)),
             Rotate(ring, PI, axis=(1.0, 0.0, 0.0)),
             run_time=3.0,
         )

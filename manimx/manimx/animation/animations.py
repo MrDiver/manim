@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from . import authoring
 from .contributions import By, Contribution, To
 from .rates import smooth
 from .signal_tracks import Change, RateFunction
@@ -142,7 +143,8 @@ class AnimationBuilder:
         self.play(square.animate.shift(RIGHT).rotate(PI / 4), run_time=2)
 
     Every method records a change of the node's own signals; nothing is
-    copied. ``run_time`` and ``rate`` can be set here or in ``play``.
+    copied. The chain describes the end state, step by step: each method
+    sees the values the methods before it set. ``run_time`` and ``rate`` can be set here or in ``play``.
     """
 
     def __init__(self, node: Node) -> None:
@@ -158,7 +160,10 @@ class AnimationBuilder:
 
         def record(*args: Any, **kwargs: Any) -> AnimationBuilder:
             self.animation.methods.append(name)
-            for signal, mode, value in changes(self._node, *args, **kwargs):
+            # Each step sees the end state of the steps before it.
+            with authoring.chained(self.animation.changes):
+                recorded = list(changes(self._node, *args, **kwargs))
+            for signal, mode, value in recorded:
                 self.animation.add(signal, mode, value)
             return self
 
