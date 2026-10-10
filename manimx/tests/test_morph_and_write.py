@@ -263,3 +263,22 @@ def test_morph_matching_pairs_paths_by_index_or_name() -> None:
         MorphMatching(two, three, pairs=[("x", 0)])
     with pytest.raises(IndexError, match="no index 9"):
         MorphMatching(two, three, pairs=[(9, 0)])
+
+
+def test_a_morph_target_counts_as_visible_after_the_morph_whatever_the_float_times() -> None:
+    """A switch at the very end of a placement happens even where
+    ``(end - start) / duration`` rounds to just below 1 (1.1 + 1.2)."""
+    circle, square, triangle = Circle(), Square(), Triangle()
+    morphs = []
+
+    def construct(scene):
+        scene.wait(1.1)
+        scene.add(circle)
+        scene.play(Morph(circle, square), run_time=1.2)
+        morphs.append(Morph(square, triangle))
+        scene.play(morphs[0], run_time=1.2)
+
+    prepared = prepare(construct)
+    (inbetween,) = morphs[0].inbetweens
+    prepared.evaluate(2.4)
+    assert inbetween.alpha.value == 1.0  # not fading in from 0

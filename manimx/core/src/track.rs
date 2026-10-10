@@ -29,7 +29,13 @@ impl Entry {
         if self.duration <= 0.0 {
             return Ok(1.0); // instantaneous: done from its start time on
         }
-        let linear = ((t - self.start) / self.duration).clamp(0.0, 1.0);
+        // At and after the end exactly 1 (`Placement.progress`): the
+        // quotient can round to just below 1 and miss a switch at the end.
+        let linear = if t >= self.start + self.duration {
+            1.0
+        } else {
+            ((t - self.start) / self.duration).clamp(0.0, 1.0)
+        };
         self.rate.at(py, linear)
     }
 }

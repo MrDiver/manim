@@ -96,7 +96,10 @@ class Placement:
         """Rate-mapped progress at local time ``t`` (``t >= start``)."""
         if self.duration <= 0.0:
             return 1.0  # instantaneous: done from its start time on
-        linear_progress = min(1.0, max(0.0, (t - self.start) / self.duration))
+        # At and after the end exactly 1: (end - start) / duration can round
+        # to just below 1, and a switch at the end (Between with lower ==
+        # upper == 1) would then never happen.
+        linear_progress = 1.0 if t >= self.end else min(1.0, max(0.0, (t - self.start) / self.duration))
         return float(self.rate(linear_progress))
 
 
