@@ -190,6 +190,7 @@ class MeshBatch:
         material_slots: dict[int, int] = {}
         groups: dict[tuple[int, ...], DrawGroup] = {}
         object_count = 0
+        material_count = 0  # rows in ``materials`` (a particle block adds one per particle)
 
         light_items = scene.lights or (default_lights(config) if config.default_lights else [])
         for item in scene.items:
@@ -217,14 +218,16 @@ class MeshBatch:
                 if count == 0:
                     continue
                 worlds.append(item.world @ _particle_matrices(shape.positions[shown], shape.rotations[shown], shape.scales[shown]))
-                object_materials.append(np.arange(len(materials), len(materials) + count))
+                object_materials.append(np.arange(material_count, material_count + count))
                 materials.append(_tinted(entry, shape.colors[shown]))
+                material_count += count
             else:
                 count = 1
                 slot_key = (id(material), item.alpha)
                 if slot_key not in material_slots:
-                    material_slots[slot_key] = len(materials)
+                    material_slots[slot_key] = material_count
                     materials.append(entry[None])
+                    material_count += 1
                 worlds.append(item.world[None])
                 object_materials.append(np.array([material_slots[slot_key]]))
             clips.append(np.full(count, item.clip))

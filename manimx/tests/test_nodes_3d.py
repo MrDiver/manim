@@ -298,6 +298,23 @@ def test_particles_snapshot_to_one_rparticles_and_animate_their_arrays() -> None
         sparks.set_scales([[1.0, 1.0, 1.0]])
 
 
+def test_meshes_after_particles_keep_their_own_material(renderer: RenderService) -> None:
+    from manimx.animation import Particles
+    from manimx.renderer.webgpu.mesh_batch import MeshBatch
+    from manimx.robjects import RGroup
+
+    sparks = Particles(3, box_mesh(1.0, 1.0, 1.0), color="#ffffff")
+    after = Shape3D(box_mesh(1.0, 1.0, 1.0), color="#ff0000")
+    root = RGroup(children=[sparks.snapshot(), after.snapshot()])
+    batch = MeshBatch.build(flatten_scene(root), renderer.cache, RenderConfig(shadows=False))
+
+    # A particle block adds one material row per particle: the mesh after
+    # it must point past all of them, at its own (red) material.
+    material = batch.materials[batch.objects["material"][-1]]
+    assert batch.objects["material"].tolist() == [0, 1, 2, 3]
+    assert material["base_color"][0] > 0.9 and material["base_color"][1] < 0.1
+
+
 def test_particles_draw_as_instances_with_their_color_and_hide_at_scale_zero(renderer: RenderService) -> None:
     from manimx.animation import Particles
     from manimx.renderer.webgpu.mesh_batch import MeshBatch
