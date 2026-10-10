@@ -185,14 +185,15 @@ def test_write_draws_the_outline_then_fills_with_manims_timing() -> None:
     assert write.run_time == 2.0 and write.lag_ratio == pytest.approx(0.2)
     assert Write(Square()).run_time == 1.0
 
-    square = Square(fill_opacity=1.0, stroke_width=0.0)
+    square = Square(fill_opacity=1.0, stroke_width=0.0, stroke_opacity=0.0)  # like a glyph: no stroke
     prepared = prepare(lambda s: s.play(DrawBorderThenFill(square, run_time=2, rate=lambda t: t)))
     (early,) = shapes(prepared, 0.5)
     assert early.fill.opacity[0] == 0.0 and early.stroke.width[0] == 2.0 and 0 < len(early.points) < 16
+    assert early.stroke.opacity[0] == 1.0  # the outline shows
     (late,) = shapes(prepared, 1.5)
     assert 0.0 < late.fill.opacity[0] < 1.0 and len(late.points) == 16
     (end,) = shapes(prepared, 2.0)
-    assert end.fill.opacity[0] == 1.0 and end.stroke.width[0] == 0.0
+    assert end.fill.opacity[0] == 1.0 and end.stroke.width[0] == 0.0 and end.stroke.opacity[0] == 0.0
 
 
 def test_morph_matching_moves_equal_shapes_and_fades_the_rest() -> None:

@@ -481,8 +481,9 @@ class Uncreate(_PlannedAnimation):
 @dataclass(eq=False)
 class DrawBorderThenFill(_PlannedAnimation):
     """Draw each shape's outline, then fade its fill and stroke in (Manim's
-    ``DrawBorderThenFill``). The outline has width ``stroke_width`` and the
-    shape's stroke color, or its fill color when it has no stroke.
+    ``DrawBorderThenFill``). The outline is opaque, has width
+    ``stroke_width`` and the shape's stroke color, or its fill color when
+    it has no stroke.
     """
 
     node: Node
@@ -506,6 +507,8 @@ class DrawBorderThenFill(_PlannedAnimation):
         self._between(path.draw_end, 0.0, 1.0, lower, middle)
         self._between(path.stroke_color, outline_color, authoring_current(path.stroke_color), middle, upper)
         self._between(path.stroke_width, self.stroke_width, width, middle, upper)
+        # The outline is opaque even where the shape has no stroke (glyphs).
+        self._between(path.stroke_opacity, 1.0, authoring_current(path.stroke_opacity), middle, upper)
         if hasattr(path, "fill_opacity"):
             self._between(path.fill_opacity, 0.0, authoring_current(path.fill_opacity), middle, upper)
 
