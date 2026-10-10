@@ -8,7 +8,7 @@ them in a :class:`~manimx.animation.Group` together. Shapes built on it
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Any
 
 import numpy as np
@@ -27,7 +27,7 @@ from .node import (
     animatable,
 )
 from .paths import drawn_part
-from .signals import RootSignal, Signal
+from .signals import DerivedSignal, RootSignal, Signal
 from .snapshot import version_token
 from .style import Colors, Scalars
 
@@ -92,6 +92,15 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         self.cast_shadows = RootSignal(cast_shadows, DISCRETE, name=f"{prefix}.cast_shadows")
         self._styles: tuple[tuple[object, Fill | None], tuple[object, Stroke | None]] = ((None, None), (None, None))
         """The last snapshot's (token, Fill) and (token, Stroke)."""
+
+    def _derive_points(self, function: Callable[..., Any], *parameters: Signal) -> None:
+        """Make ``points`` a signal derived from ``parameters`` by
+        ``function`` (a pure function of their values): what a shape with
+        parameters (a Circle's radius) calls in its constructor. Animating
+        a parameter then changes the points at every frame; ``points``
+        itself can no longer be changed directly."""
+        self.points = DerivedSignal(function, parameters, PATH, name=f"{self.name}.points")
+        self.draw_start, self.draw_end, self.drawn_points = drawn_part(self.points, self.name)
 
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()

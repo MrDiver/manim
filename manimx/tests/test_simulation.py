@@ -2,9 +2,9 @@
 
 import numpy as np
 import pytest
-
-from manimx.animation import Scene, Simulation, Timeline
-from manimx.userland import RIGHT, UP, Dot, Polyline
+from manimx.animation import Scene, Shape2D, Simulation, Timeline
+from manimx.userland import RIGHT, UP, Dot
+from manimx.userland.geometry import corner_points
 from manimx.userland.rate_functions import linear
 from naming import by_name
 
@@ -139,7 +139,7 @@ def test_steps_see_simulated_and_scene_time() -> None:
 
 
 def test_paths_that_change_point_count_switch_between_keyframes() -> None:
-    line = Polyline([(0, 0), (1, 0)], name="line")
+    line = Shape2D(corner_points([(0, 0), (1, 0)]), name="line")  # free points, not a shape with parameters
 
     def grow(dt):
         end = line.points.value[-1]

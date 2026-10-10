@@ -27,8 +27,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Protocol
 
-from .signals import RootSignal, Signal
 from .signal_tracks import Change
+from .signals import DerivedSignal, RootSignal, Signal
 
 if TYPE_CHECKING:
     from .scene import SceneCompiler
@@ -77,6 +77,10 @@ def change(signal: Signal, mode: Change, value: Any) -> None:
 def current(signal: Signal) -> Any:
     """The value of ``signal`` as authoring code should see it right now."""
     compiler = active_compiler()
+    if isinstance(signal, DerivedSignal) and (compiler is not None or _chain.get() is not None):
+        # Computed from its inputs as authoring code sees them, so pending
+        # changes of the inputs (a radius being animated) count too.
+        return signal.kind.validate(signal.function(*(current(source) for source in signal.inputs)))
     value = compiler.current_value(signal) if compiler is not None else signal.value
     pending = _chain.get()
     if pending is not None and (step := pending.get(signal.id)) is not None:
