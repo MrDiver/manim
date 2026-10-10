@@ -6,6 +6,7 @@
   --line: #d9d7d2;
   --clip: #e3e8f4;
   --segment: #5b7bd5;
+  --animation: rgb(91 123 213 / 0.18);
   --playhead: #d9480f;
   --stage: #0b1020;
   color-scheme: light dark;
@@ -20,6 +21,7 @@
     --line: #2d2e34;
     --clip: #262a36;
     --segment: #7d9cf0;
+    --animation: rgb(125 156 240 / 0.22);
     --playhead: #ff8a4c;
   }
 }
@@ -94,6 +96,7 @@ main {
 }
 
 #timeline {
+  --label: 220px;
   position: relative;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -101,7 +104,6 @@ main {
   padding: 0 0 8px;
   user-select: none;
   touch-action: none;
-  cursor: ew-resize;
 }
 
 #timeline:focus-visible {
@@ -109,11 +111,101 @@ main {
   outline-offset: 2px;
 }
 
-#ruler {
+.row {
+  display: grid;
+  grid-template-columns: var(--label) 1fr;
+  align-items: stretch;
+}
+
+.label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 8px;
+  border-right: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.lane {
   position: relative;
-  height: 22px;
+  margin-right: 12px;
+  cursor: ew-resize;
+}
+
+.ruler-row {
+  height: 24px;
   border-bottom: 1px solid var(--line);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+}
+
+#collapse,
+.toggle {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+#collapse {
+  color: var(--muted);
+  cursor: pointer;
+}
+
+#collapse:hover {
+  color: var(--text);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  text-align: left;
+}
+
+button.toggle {
+  cursor: pointer;
+}
+
+button.toggle::before,
+span.toggle::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  flex: none;
+  color: var(--muted);
+}
+
+button.toggle::before {
+  content: "▸";
+}
+
+button.toggle[aria-expanded="true"]::before {
+  content: "▾";
+}
+
+button.toggle:focus-visible {
+  outline: 2px solid var(--segment);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.type {
+  margin-left: auto;
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+#ruler {
+  height: 100%;
 }
 
 .tick {
@@ -123,13 +215,24 @@ main {
   border-left: 1px solid var(--line);
   padding-left: 3px;
   font-size: 11px;
+  line-height: 24px;
   color: var(--muted);
 }
 
-.clip {
-  position: relative;
-  height: 28px;
-  margin: 4px 0;
+.row.clip {
+  height: 30px;
+  margin: 4px 0 2px;
+}
+
+.row.node,
+.row.signal {
+  height: 22px;
+}
+
+.row.signal .label {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
 }
 
 .clip-body {
@@ -138,16 +241,6 @@ main {
   height: 100%;
   background: var(--clip);
   border-radius: 4px;
-  overflow: hidden;
-}
-
-.clip-name {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  font-size: 12px;
-  white-space: nowrap;
-  pointer-events: none;
 }
 
 .segment {
@@ -158,6 +251,41 @@ main {
   border-radius: 2px;
 }
 
+.animation {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  min-width: 2px;
+  overflow: hidden;
+  padding: 0 4px;
+  background: var(--animation);
+  border: 1px solid var(--segment);
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.instant {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  background: var(--muted);
+  transform: rotate(45deg);
+}
+
+#overlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--label);
+  right: 12px;
+  pointer-events: none;
+}
+
 #playhead {
   position: absolute;
   top: 0;
@@ -165,7 +293,6 @@ main {
   width: 2px;
   margin-left: -1px;
   background: var(--playhead);
-  pointer-events: none;
 }
 
 .hint {

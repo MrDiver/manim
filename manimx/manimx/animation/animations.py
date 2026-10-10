@@ -114,6 +114,8 @@ class ChangeSignals(Animation):
     changes: dict[int, SignalChange] = field(default_factory=dict)
     run_time: float = 1.0
     rate: RateFunction = smooth
+    methods: list[str] = field(default_factory=list)
+    """The names of the recorded methods, in order (for display)."""
 
     def add(self, signal: Signal, mode: Change, value: Any) -> None:
         if not isinstance(signal, RootSignal):
@@ -155,6 +157,7 @@ class AnimationBuilder:
             raise AttributeError(f"{type(self._node).__name__}.{name} cannot be animated")
 
         def record(*args: Any, **kwargs: Any) -> AnimationBuilder:
+            self.animation.methods.append(name)
             for signal, mode, value in changes(self._node, *args, **kwargs):
                 self.animation.add(signal, mode, value)
             return self

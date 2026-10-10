@@ -19,11 +19,14 @@
       <figcaption id="error" hidden></figcaption>
     </figure>
     <section id="timeline" aria-label="Timeline" tabindex="0">
-      <div id="ruler"></div>
-      <div id="clips"></div>
-      <div id="playhead"></div>
+      <div class="row ruler-row">
+        <div class="label"><button id="collapse" type="button" title="Collapse every track">Collapse all</button></div>
+        <div class="lane" id="ruler"></div>
+      </div>
+      <div id="rows" role="tree" aria-label="Clips, nodes, signals and animations"></div>
+      <div id="overlay"><div id="playhead"></div></div>
     </section>
-    <p class="hint">Drag on the timeline to scrub. ← → one frame, Shift+← → one second, Home and End.</p>
+    <p class="hint">Drag on the tracks to scrub. ← → one frame, Shift+← → one second, Home and End. Click a name to open its tracks.</p>
   </main>
 </body>
 </html>

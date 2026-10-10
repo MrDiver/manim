@@ -209,6 +209,16 @@ class Clip:
             return timing.compiled_end  # holding until the next segment
         return timing.compiled_at(t)
 
+    def global_time(self, compiled: float) -> float | None:
+        """The global time at which the clip shows compiled time
+        ``compiled``, or None where the cut or an unfired event skips it."""
+        if self.timeline is not None:
+            self.timeline._ensure_resolved()
+        for timing in self.timings:
+            if timing is not None and timing.compiled_start <= compiled <= timing.compiled_end:
+                return timing.global_at(compiled)
+        return None
+
     def placed_sounds(self) -> list[tuple[float, float, Sound, float]]:
         """``(global time, skip, sound, volume)`` of the clip's sounds.
 

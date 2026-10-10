@@ -8,7 +8,9 @@ the user scrub through it. Everything it shows comes from three kinds of
 request, answered by the standard library's HTTP server:
 
     GET /                    the page and its static files
-    GET /api/timeline        duration, frame rate, size, clips, segments
+    GET /api/timeline        duration, frame rate, size, clips (with their
+                             nodes, signals and animations, see tracks.py),
+                             segments
     GET /api/frame?t=&w=     the frame at time t, w pixels wide (JPEG; PNG
                              with &format=png, WebP with &format=webp)
     GET /api/changes?since=  waits until the timeline's version passes
@@ -58,6 +60,7 @@ from PIL import Image
 from ..animation.plan import planned_frames
 from ..animation.timing import NEVER, Timeline
 from ..drivers.offline import RenderSettings
+from .tracks import clip_nodes
 from ..renderer import MotionBlur, RenderService
 
 MIN_WIDTH = 16
@@ -170,7 +173,13 @@ class PreviewServer:
             "width": config.pixel_width,
             "height": config.pixel_height,
             "clips": [
-                {"name": clip.name, "start": clip.start, "end": None if clip.end == NEVER else clip.end, "layer": clip.layer}
+                {
+                    "name": clip.name,
+                    "start": clip.start,
+                    "end": None if clip.end == NEVER else clip.end,
+                    "layer": clip.layer,
+                    "nodes": clip_nodes(clip),
+                }
                 for clip in clips
             ],
             "segments": [

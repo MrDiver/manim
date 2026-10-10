@@ -73,7 +73,9 @@ def test_the_timeline_describes_clips_and_segments(server, timeline) -> None:
     assert status == 200 and kind == "application/json"
     assert data["title"] == "demo" and data["duration"] == pytest.approx(timeline.duration)
     assert (data["fps"], data["width"], data["height"]) == (10, 128, 72)
-    assert data["clips"] == [{"name": "navigation", "start": 0.0, "end": pytest.approx(timeline.duration), "layer": 0}]
+    (clip,) = data["clips"]
+    assert {key: clip[key] for key in ("name", "start", "end", "layer")} == {"name": "navigation", "start": 0.0, "end": pytest.approx(timeline.duration), "layer": 0}
+    assert clip["nodes"][0]["type"] == "Camera"
     assert data["segments"] and all(segment["clip"] == 0 for segment in data["segments"])
 
 

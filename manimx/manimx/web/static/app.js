@@ -5,6 +5,12 @@
 // newest wanted time is remembered; when the frame arrives, that time is
 // asked for next. So scrubbing never queues outdated frames on the server.
 //
+// Tracks: under each clip, its scene's nodes as a tree; under a node, the
+// signals animations change; under a signal, those animations. A closed
+// node's lane shows every animation in its subtree. Which rows are open is
+// kept in localStorage by key (clip, node path, signal name), so a reload
+// on save keeps them.
+//
 // Reload on save: /api/changes answers when the server rebuilt the
 // timeline (or failed to); the page then fetches the timeline again and
 // shows the same time, or the build error above the frame.
@@ -17,8 +23,9 @@ const elements = {
   error: document.getElementById("error"),
   timeline: document.getElementById("timeline"),
   ruler: document.getElementById("ruler"),
-  clips: document.getElementById("clips"),
+  rows: document.getElementById("rows"),
   playhead: document.getElementById("playhead"),
+  collapse: document.getElementById("collapse"),
 };
 
 const state = {
@@ -28,6 +35,7 @@ const state = {
   loading: false, // a frame request is open
   wanted: null, // the time to show once it is done
   shownUrl: null,
+  open: loadOpen(), // keys of the rows whose tracks are shown
 };
 
 /** Horizontal position of a time, as a percentage of the timeline. */
@@ -36,9 +44,9 @@ function percent(time) {
   return (100 * time) / duration;
 }
 
-/** The time under a horizontal pixel position on the timeline, snapped to frames. */
+/** The time under a horizontal pixel position on the lanes, snapped to frames. */
 function timeAt(clientX) {
-  const box = elements.timeline.getBoundingClientRect();
+  const box = elements.ruler.getBoundingClientRect();
   const fraction = Math.min(1, Math.max(0, (clientX - box.left) / box.width));
   return snap(fraction * state.timeline.duration);
 }
@@ -60,34 +68,127 @@ function drawTimeline() {
     elements.ruler.append(tick);
   }
 
-  elements.clips.replaceChildren();
+  elements.rows.replaceChildren();
   const order = clips.map((clip, index) => index).sort((a, b) => clips[a].layer - clips[b].layer || a - b);
-  const rows = new Map();
   for (const index of order) {
     const clip = clips[index];
-    const row = document.createElement("div");
-    row.className = "clip";
+    const key = `clip:${index}:${clip.name}`;
+    const { row, lane } = addRow(key, 0, clip.name, "clip", clip.nodes.length > 0);
     const body = document.createElement("div");
     body.className = "clip-body";
     const end = clip.end ?? duration; // a clip that waits for an event runs on
     body.style.left = `${percent(clip.start)}%`;
     body.style.width = `${percent(end - clip.start)}%`;
     body.title = `${clip.name}: ${clip.start.toFixed(2)} – ${clip.end === null ? "waits" : `${end.toFixed(2)} s`}`;
-    const name = document.createElement("span");
-    name.className = "clip-name";
-    name.textContent = clip.name;
-    body.append(name);
-    row.append(body);
-    elements.clips.append(row);
-    rows.set(index, row);
+    lane.append(body);
+    for (const segment of segments.filter((segment) => segment.clip === index)) {
+      const bar = document.createElement("div");
+      bar.className = "segment";
+      bar.style.left = `${percent(segment.start)}%`;
+      bar.style.width = `${Math.max(0.2, percent((segment.end ?? duration) - segment.start))}%`;
+      lane.append(bar);
+    }
+    if (state.open.has(key)) {
+      for (const node of clip.nodes) addNode(node, key, 1);
+    }
+    row.dataset.clip = index;
   }
-  for (const segment of segments) {
+}
+
+/** A node's row, and when open its signals' rows and its children. */
+function addNode(node, parentKey, depth) {
+  const key = `${parentKey}/${node.name}`;
+  const expandable = node.signals.length > 0 || node.children.length > 0;
+  const { lane } = addRow(key, depth, node.name, "node", expandable, node.type);
+  addBars(lane, unique(subtreeAnimations(node)));
+  if (!state.open.has(key)) return;
+  for (const signal of node.signals) {
+    const signalRow = addRow(`${key}#${signal.name}`, depth + 1, signal.name, "signal", false);
+    addBars(signalRow.lane, signal.animations, true);
+  }
+  for (const child of node.children) addNode(child, key, depth + 1);
+}
+
+function subtreeAnimations(node) {
+  return [...node.signals.flatMap((signal) => signal.animations), ...node.children.flatMap(subtreeAnimations)];
+}
+
+/** One bar per animation (equal name, start and end shown once). */
+function unique(animations) {
+  const seen = new Map();
+  for (const animation of animations) seen.set(`${animation.name}@${animation.start}@${animation.end}`, animation);
+  return [...seen.values()];
+}
+
+function addBars(lane, animations, named = false) {
+  for (const animation of animations) {
     const bar = document.createElement("div");
-    bar.className = "segment";
-    const end = segment.end ?? duration;
-    bar.style.left = `${percent(segment.start)}%`;
-    bar.style.width = `${Math.max(0.2, percent(end - segment.start))}%`;
-    rows.get(segment.clip)?.append(bar);
+    const instant = animation.end - animation.start < 1e-9;
+    bar.className = instant ? "instant" : "animation";
+    bar.style.left = `${percent(animation.start)}%`;
+    if (!instant) bar.style.width = `${percent(animation.end - animation.start)}%`;
+    bar.title = `${animation.name}: ${animation.start.toFixed(2)}${instant ? "" : ` – ${animation.end.toFixed(2)}`} s`;
+    if (named && !instant) bar.textContent = animation.name;
+    lane.append(bar);
+  }
+}
+
+/** A row: a label (a toggle when it has tracks below) and a lane. */
+function addRow(key, depth, name, kind, expandable, type = null) {
+  const row = document.createElement("div");
+  row.className = `row ${kind}`;
+  row.setAttribute("role", "treeitem");
+  row.setAttribute("aria-level", depth + 1);
+  const label = document.createElement("div");
+  label.className = "label";
+  label.style.paddingLeft = `${8 + 14 * depth}px`;
+  const toggle = document.createElement(expandable ? "button" : "span");
+  toggle.className = "toggle";
+  if (expandable) {
+    const open = state.open.has(key);
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", open);
+    row.setAttribute("aria-expanded", open);
+    toggle.addEventListener("click", () => {
+      if (state.open.has(key)) state.open.delete(key);
+      else state.open.add(key);
+      saveOpen();
+      drawTimeline();
+    });
+  }
+  const text = document.createElement("span");
+  text.className = "name";
+  text.textContent = name;
+  text.title = type ? `${name} (${type})` : name;
+  toggle.append(text);
+  label.append(toggle);
+  if (type) {
+    const badge = document.createElement("span");
+    badge.className = "type";
+    badge.textContent = type;
+    label.append(badge);
+  }
+  const lane = document.createElement("div");
+  lane.className = "lane";
+  row.append(label, lane);
+  elements.rows.append(row);
+  return { row, lane };
+}
+
+/** Open tracks are remembered per page (a reload keeps them). */
+function loadOpen() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem("manimx.open") ?? "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveOpen() {
+  try {
+    localStorage.setItem("manimx.open", JSON.stringify([...state.open]));
+  } catch {
+    // storage is unavailable: the tracks stay open for this page only
   }
 }
 
@@ -142,12 +243,18 @@ async function load(time) {
 function listen() {
   const timeline = elements.timeline;
   timeline.addEventListener("pointerdown", (event) => {
+    if (!event.target.closest(".lane")) return; // the labels toggle tracks
     timeline.setPointerCapture(event.pointerId);
     timeline.focus();
     show(timeAt(event.clientX));
   });
   timeline.addEventListener("pointermove", (event) => {
     if (timeline.hasPointerCapture(event.pointerId)) show(timeAt(event.clientX));
+  });
+  elements.collapse.addEventListener("click", () => {
+    state.open.clear();
+    saveOpen();
+    drawTimeline();
   });
   document.addEventListener("keydown", (event) => {
     const { fps, duration } = state.timeline;
