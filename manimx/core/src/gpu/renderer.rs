@@ -281,7 +281,12 @@ impl Renderer {
                 && t.mask_capacity >= mask_count
         });
         if !fits {
-            let capacity = mask_count.max(current.map_or(1, |t| 2 * t.mask_capacity));
+            // Grow in steps when the masks do not fit; a new size alone
+            // keeps the capacity.
+            let mut capacity = current.map_or(1, |t| t.mask_capacity);
+            if capacity < mask_count {
+                capacity = mask_count.max(2 * capacity);
+            }
             self.targets = Some(RenderTargets::new(
                 &gpu.device,
                 settings.width,

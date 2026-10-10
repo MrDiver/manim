@@ -171,6 +171,8 @@ class WGPURenderer:
         size = (config.pixel_width, config.pixel_height, config.msaa_samples)
         targets = self._targets
         if targets is None or targets.size != size or targets.mask_capacity < mask_count:
-            capacity = max(mask_count, 2 * targets.mask_capacity if targets else 1)
+            capacity = targets.mask_capacity if targets else 1
+            if capacity < mask_count:
+                capacity = max(mask_count, 2 * capacity)  # grow in steps, not by one
             self._targets = targets = RenderTargets(self.context.device, *size, mask_capacity=capacity)
         return targets
