@@ -100,9 +100,10 @@ class SVG(Group):
         return [child for child in self.children if isinstance(child, Shape2D)]
 
 
-def read_svg(text: str, width: float | None = None, height: float | None = None) -> list[SVGPath]:
+def read_svg(text: str, width: float | None = None, height: float | None = None, centered: bool = True) -> list[SVGPath]:
     """Every drawn element of the SVG document ``text``, centered at the
-    origin and scaled as described in :class:`SVG`."""
+    origin and scaled as described in :class:`SVG`. With ``centered``
+    false the document's origin stays the origin (y still points up)."""
     root = ElementTree.fromstring(text)
     by_id = {element.get("id"): element for element in root.iter() if element.get("id")}
     raw = list(_walk(root, _root_matrix(root), _Paint(gradients=_gradients(by_id)), by_id))
@@ -111,7 +112,7 @@ def read_svg(text: str, width: float | None = None, height: float | None = None)
         return []
     everything = np.vstack([points for points, _ in raw])
     low, high = everything.min(axis=0), everything.max(axis=0)
-    center = (low + high) / 2
+    center = (low + high) / 2 if centered else np.zeros(2)
     size = high - low
     scale = UNITS_PER_INCH
     if height is not None and size[1] > 0:

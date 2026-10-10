@@ -13,7 +13,8 @@ from .animations import Create, DrawBorderThenFill, FadeIn, FadeOut, GrowFromCen
 from .constants import DEGREES, DL, DOWN, DR, IN, LEFT, ORIGIN, OUT, PI, RIGHT, TAU, UL, UP, UR
 from .curves3d import ParametricCurve3D
 from .gltf import load_gltf
-from .shapes2d import Circle, Dot, Polyline, Rectangle, RegularPolygon, Square, Triangle
+from .numbers import DecimalNumber
+from .shapes2d import Brace, Circle, Dot, Polyline, Rectangle, RegularPolygon, Square, Triangle
 from .shapes3d import Box, ParametricSurface, Sphere, Torus
 from .svg import SVG, read_svg
 from .typst import Typst, TypstMath
@@ -34,8 +35,10 @@ __all__ = [
     "UP",
     "UR",
     "Box",
+    "Brace",
     "Circle",
     "Create",
+    "DecimalNumber",
     "Dot",
     "DrawBorderThenFill",
     "FadeIn",

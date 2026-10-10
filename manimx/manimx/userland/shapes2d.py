@@ -23,15 +23,20 @@ from ..animation import (
     ARRAY,
     DISCRETE,
     SCALAR,
+    DerivedSignal,
+    Node,
+    PositionMixin,
     RootSignal,
     Shape2D,
     Signal,
     SignalKind,
     animatable,
 )
-from ..animation.node import ABS, ChangeList
+from ..animation.authoring import current
+from ..animation.node import ABS, ChangeList, require
 from .geometry import (
     arc_points,
+    brace_points,
     corner_points,
     rectangle_points,
     regular_polygon_points,
@@ -96,6 +101,15 @@ class Rectangle(Shape2D):
         if height is not None:
             changes.append((self.height, ABS, _positive("height", height)))
         return changes
+
+    def edge(self, direction: Sequence[float]) -> DerivedSignal:
+        """The side facing ``direction`` (UP, DOWN, LEFT or RIGHT) as a
+        segment signal ``[start, end]`` that follows ``width`` and
+        ``height``, in the rectangle's own frame. The sides run
+        counterclockwise, so a Brace on one points away from the
+        rectangle: ``Brace(rectangle.edge(DOWN))``."""
+        side = _Side(direction)
+        return DerivedSignal(side, (self.width, self.height), ARRAY, name=f"{self.name}.edge{side.direction}")
 
 
 class Square(Shape2D):
@@ -164,6 +178,135 @@ class Polyline(Shape2D):
         return [(self.corners, ABS, array)]
 
 
+class Brace(Shape2D):
+    """A curly brace along ``segment`` (``[start, end]``), ``buff`` away
+    from it and ``depth`` deep, its tip on the right of the way from
+    start to end (below a segment running to the right).
+
+    ``segment`` is a point pair or a segment signal to follow, such as
+    :meth:`Rectangle.edge`; following one, the brace is bound to it (it
+    has no segment of its own to change). The points are a path for a
+    stroke; a tapering ``stroke_width`` list gives the classic look.
+    """
+
+    def __init__(
+        self,
+        segment: Sequence[Sequence[float]] | Signal,
+        depth: float = 0.25,
+        buff: float = 0.1,
+        name: str | None = None,
+        **style: Any,
+    ) -> None:
+        super().__init__((), name, **style)
+        self.segment = segment if isinstance(segment, Signal) else parameter(self, "segment", _segment(segment), ARRAY)
+        self.depth = _positive("depth", depth)
+        self.buff = float(buff)
+        self._derive_points(_BracePoints(self.depth, self.buff), self.segment)
+
+    def signals(self) -> Iterator[Signal]:
+        yield from super().signals()
+        if isinstance(self.segment, RootSignal):
+            yield self.segment
+
+    @animatable
+    def set_segment(self, segment: Sequence[Sequence[float]]) -> ChangeList:
+        if not isinstance(self.segment, RootSignal):
+            raise TypeError(f"{self.name} follows {self.segment.name}; change that instead")
+        return [(self.segment, ABS, _segment(segment))]
+
+    def attach(self, node: Node, buff: float = 0.15) -> Node:
+        """Keep ``node`` (centered on its position) ``buff`` beyond the
+        brace's tip while the segment moves: its position follows the
+        segment, the node's current size keeps it clear of the tip."""
+        require(node, PositionMixin, "Brace.attach()")
+        reach = self.buff + self.depth + buff
+        extent = _half_size(node)
+        for axis in range(2):
+            label = _LabelAxis(axis, reach, extent)
+            setattr(node.position, "xy"[axis], DerivedSignal(label, (self.segment,), SCALAR, name=f"{node.name}.position.{'xy'[axis]}"))  # type: ignore[attr-defined]
+        return node
+
+
+class _Side:
+    """The segment of a rectangle's side from its width and height (for
+    Rectangle.edge; a class so it compares and prints well)."""
+
+    __slots__ = ("direction",)
+
+    def __init__(self, direction: Sequence[float]) -> None:
+        x, y = (float(component) for component in tuple(direction)[:2])
+        if (abs(x), abs(y)) not in ((1.0, 0.0), (0.0, 1.0)):
+            raise ValueError(f"an edge is UP, DOWN, LEFT or RIGHT, got {tuple(direction)}")
+        self.direction = (x, y)
+
+    def __call__(self, width: float, height: float) -> np.ndarray:
+        x, y = self.direction
+        normal = np.array([x * width / 2, y * height / 2])
+        along = np.array([-y * width / 2, x * height / 2])  # counterclockwise
+        return np.array([normal - along, normal + along])
+
+
+class _BracePoints:
+    """The points of a Brace along a segment (its derivation)."""
+
+    __slots__ = ("depth", "buff")
+
+    def __init__(self, depth: float, buff: float) -> None:
+        self.depth, self.buff = depth, buff
+
+    def __call__(self, segment: np.ndarray) -> np.ndarray:
+        start, end = segment[0, :2], segment[1, :2]
+        direction = end - start
+        length = float(np.linalg.norm(direction))
+        if length == 0.0:
+            return np.zeros((0, 2))
+        along = direction / length
+        right = np.array([along[1], -along[0]])
+        local = brace_points(length, self.depth) - [0.0, self.buff]
+        return (start + end) / 2 + local[:, :1] * along + local[:, 1:] * -right
+
+
+class _LabelAxis:
+    """One coordinate of a node kept beyond a Brace's tip (Brace.attach)."""
+
+    __slots__ = ("axis", "reach", "extent")
+
+    def __init__(self, axis: int, reach: float, extent: np.ndarray) -> None:
+        self.axis, self.reach, self.extent = axis, reach, extent
+
+    def __call__(self, segment: np.ndarray) -> float:
+        start, end = segment[0, :2], segment[1, :2]
+        direction = end - start
+        length = float(np.linalg.norm(direction)) or 1.0
+        right = np.array([direction[1], -direction[0]]) / length
+        clearance = float(np.abs(right) @ self.extent)  # the node's half size towards the tip
+        return float((start + end)[self.axis] / 2 + right[self.axis] * (self.reach + clearance))
+
+
+def _half_size(node: Node) -> np.ndarray:
+    """Half the width and height of the Shape2D points under ``node`` as
+    authoring code sees them (positions of nested nodes count, scales and
+    rotations do not)."""
+    boxes = []
+    for leaf in node.family():
+        if isinstance(leaf, Shape2D):
+            points = np.asarray(current(leaf.points))
+            if len(points):
+                offset = np.array([current(axis) for axis in leaf.position.axes[:2]]) if leaf is not node else 0.0
+                boxes.append(points[:, :2] + offset)
+    if not boxes:
+        return np.zeros(2)
+    everything = np.vstack(boxes)
+    return (everything.max(axis=0) - everything.min(axis=0)) / 2
+
+
+def _segment(segment: Sequence[Sequence[float]]) -> np.ndarray:
+    array = np.asarray(segment, dtype=np.float64)
+    if array.shape not in ((2, 2), (2, 3)):
+        raise ValueError(f"a segment is two 2D or 3D points, got shape {array.shape}")
+    return array
+
+
 def _square_points(side_length: float) -> np.ndarray:
     return rectangle_points(side_length, side_length)
 
@@ -185,4 +328,4 @@ def _corner_array(corners: Sequence[Sequence[float]]) -> np.ndarray:
     return array
 
 
-__all__ = ["Circle", "Dot", "Polyline", "Rectangle", "RegularPolygon", "Square", "Triangle", "parameter"]
+__all__ = ["Brace", "Circle", "Dot", "Polyline", "Rectangle", "RegularPolygon", "Square", "Triangle", "parameter"]

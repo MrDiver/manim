@@ -61,6 +61,10 @@
       "module": "scenes.text",
       "class": "Text"
     },
+    "Measures": {
+      "module": "scenes.measures",
+      "class": "Measures"
+    },
     "Morphing": {
       "module": "scenes.morphing",
       "class": "Morphing"
@@ -118,6 +122,9 @@
       },
       {
         "scene": "Physics"
+      },
+      {
+        "scene": "Measures"
       },
       {
         "scene": "LowerThird",
