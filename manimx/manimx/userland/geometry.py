@@ -119,6 +119,108 @@ def rectangle_points(width: float = 4.0, height: float = 2.0) -> np.ndarray:
     return corner_points([(w, h), (-w, h), (-w, -h), (w, -h)], closed=True)
 
 
+def ellipse_points(width: float = 2.0, height: float = 1.0) -> np.ndarray:
+    """A closed ellipse ``width`` by ``height`` centered at the origin,
+    starting on the right."""
+    return arc_points() * np.array([width / 2, height / 2])
+
+
+def sector_points(radius: float = 1.0, start_angle: float = 0.0, angle: float = math.pi / 2) -> np.ndarray:
+    """A closed wedge of a circle: from the center out along
+    ``start_angle``, the arc of ``angle`` and back."""
+    return annular_sector_points(0.0, radius, start_angle, angle)
+
+
+def annular_sector_points(inner_radius: float = 0.5, outer_radius: float = 1.0, start_angle: float = 0.0, angle: float = math.pi / 2) -> np.ndarray:
+    """A closed piece of a ring: the outer arc, a straight side in, the
+    inner arc back and a side out. With ``inner_radius`` 0 it is a sector."""
+    outer = arc_points(outer_radius, start_angle, angle, _arc_curves(angle))
+    if inner_radius > 0:
+        inner = arc_points(inner_radius, start_angle + angle, -angle, _arc_curves(angle))
+    else:
+        inner = corner_points([(0.0, 0.0), (0.0, 0.0)])  # the center, one zero-length curve
+    return np.concatenate([outer, corner_points([outer[-1], inner[0]]), inner, corner_points([inner[-1], outer[0]])])
+
+
+def annulus_points(inner_radius: float = 0.5, outer_radius: float = 1.0) -> np.ndarray:
+    """A ring: the outer circle counterclockwise and the inner one
+    clockwise, as two subpaths (the inner one is the hole)."""
+    return np.concatenate([arc_points(outer_radius), arc_points(inner_radius, 0.0, -math.tau)])
+
+
+def star_points(n: int = 5, outer_radius: float = 1.0, inner_radius: float | None = None, start_angle: float = math.pi / 2) -> np.ndarray:
+    """A closed star with ``n`` points on a circle of ``outer_radius`` (the
+    first at ``start_angle``) and corners in between on ``inner_radius``
+    (default: the regular star's, where its edges would cross)."""
+    if inner_radius is None:
+        inner_radius = outer_radius * math.cos(math.tau / n) / math.cos(math.pi / n) if n > 4 else outer_radius / 2
+    angles = start_angle + np.arange(2 * n) * math.pi / n
+    radii = np.where(np.arange(2 * n) % 2 == 0, outer_radius, inner_radius)
+    return corner_points(radii[:, None] * np.column_stack([np.cos(angles), np.sin(angles)]), closed=True)
+
+
+def rounded_rectangle_points(width: float = 4.0, height: float = 2.0, corner_radius: float = 0.5) -> np.ndarray:
+    """A closed rectangle with quarter circles of ``corner_radius`` at
+    its corners (at most half the shorter side), starting on the right."""
+    r = min(corner_radius, width / 2, height / 2)
+    w, h = width / 2 - r, height / 2 - r
+    pieces = []
+    for index, (x, y) in enumerate([(w, h), (-w, h), (-w, -h), (w, -h)]):
+        corner = arc_points(r, index * math.pi / 2, math.pi / 2, 1) + [x, y]
+        if pieces:
+            pieces.append(corner_points([pieces[-1][-1], corner[0]]))
+        pieces.append(corner)
+    pieces.append(corner_points([pieces[-1][-1], pieces[0][0]]))
+    return np.concatenate(pieces)
+
+
+def arc_between_points(start: Sequence[float], end: Sequence[float], angle: float = math.pi / 2) -> np.ndarray:
+    """The arc from ``start`` to ``end`` turning by ``angle`` (counter-
+    clockwise if positive), in the plane z of ``start``. A straight line
+    for an angle of 0."""
+    a, b = np.asarray(start, dtype=np.float64)[:2], np.asarray(end, dtype=np.float64)[:2]
+    chord = b - a
+    length = float(np.linalg.norm(chord))
+    if abs(angle) < 1e-9 or length == 0.0:
+        return corner_points([a, b])
+    radius = length / (2 * math.sin(abs(angle) / 2))
+    normal = np.array([-chord[1], chord[0]]) / length  # left of the chord
+    center = (a + b) / 2 + normal * math.copysign(radius * math.cos(angle / 2), angle)
+    start_angle = math.atan2(*(a - center)[::-1])
+    return arc_points(radius, start_angle, angle, _arc_curves(angle)) + center
+
+
+def tip_points(end: Sequence[float], direction: Sequence[float], length: float, width: float) -> np.ndarray:
+    """A closed triangle with its point at ``end``, pointing along
+    ``direction``, ``length`` long and ``width`` wide at its base."""
+    tip = np.asarray(end, dtype=np.float64)[:2]
+    along = np.asarray(direction, dtype=np.float64)[:2]
+    along = along / (np.linalg.norm(along) or 1.0)
+    across = np.array([-along[1], along[0]]) * width / 2
+    base = tip - along * length
+    return corner_points([tip, base + across, base - across], closed=True)
+
+
+def dashes_points(start: Sequence[float], end: Sequence[float], dash_length: float, dashed_ratio: float = 0.5) -> np.ndarray:
+    """The dashes of a straight line, one subpath each: ``dash_length``
+    long at most with gaps between, ``dashed_ratio`` of the length drawn,
+    and a whole number of dashes centered on the line."""
+    a, b = np.asarray(start, dtype=np.float64), np.asarray(end, dtype=np.float64)
+    length = float(np.linalg.norm(b - a))
+    count = max(1, round(length * dashed_ratio / dash_length)) if dash_length > 0 else 1
+    period = length / count
+    pieces = [
+        corner_points([a + (b - a) * ((i * period + (1 - dashed_ratio) * period / 2) / length), a + (b - a) * ((i * period + (1 + dashed_ratio) * period / 2) / length)])
+        for i in range(count)
+    ] if length > 0 else [corner_points([a, b])]
+    return np.concatenate(pieces)
+
+
+def _arc_curves(angle: float) -> int:
+    """Curves for an arc of ``angle``: one per eighth of a turn, at least one."""
+    return max(1, math.ceil(abs(angle) / (math.tau / 8) - 1e-9))
+
+
 # --------------------------------------------------------------------------
 # Meshes
 # --------------------------------------------------------------------------
@@ -208,14 +310,23 @@ def _grid_indices(rows: int, columns: int, flip: bool = False) -> np.ndarray:
 
 
 __all__ = [
+    "annular_sector_points",
+    "annulus_points",
+    "arc_between_points",
     "arc_points",
     "brace_points",
     "box_mesh",
     "corner_points",
+    "dashes_points",
+    "ellipse_points",
     "parametric_points",
     "rectangle_points",
     "regular_polygon_points",
+    "rounded_rectangle_points",
+    "sector_points",
     "sphere_mesh",
+    "star_points",
+    "tip_points",
     "surface_mesh",
     "torus_mesh",
 ]

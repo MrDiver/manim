@@ -14,6 +14,7 @@ the point generators of manimx.userland.geometry. No shape picks a color.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator, Sequence
 from typing import Any
 
@@ -35,11 +36,16 @@ from ..animation import (
 from ..animation.authoring import current
 from ..animation.node import ABS, ChangeList, require
 from .geometry import (
+    annular_sector_points,
+    annulus_points,
     arc_points,
     brace_points,
     corner_points,
+    ellipse_points,
     rectangle_points,
     regular_polygon_points,
+    rounded_rectangle_points,
+    star_points,
 )
 
 
@@ -178,6 +184,195 @@ class Polyline(Shape2D):
         return [(self.corners, ABS, array)]
 
 
+class RoundedRectangle(Rectangle):
+    """A Rectangle with corners rounded by ``corner_radius`` (at most half
+    the shorter side)."""
+
+    def __init__(self, width: float = 4.0, height: float = 2.0, corner_radius: float = 0.5, name: str | None = None, **style: Any) -> None:
+        super().__init__(width, height, name, **style)
+        self.corner_radius = parameter(self, "corner_radius", _not_negative("corner_radius", corner_radius))
+        self._derive_points(rounded_rectangle_points, self.width, self.height, self.corner_radius)
+
+    def signals(self) -> Iterator[Signal]:
+        yield from super().signals()
+        yield self.corner_radius
+
+    @animatable
+    def set_corner_radius(self, corner_radius: float) -> ChangeList:
+        return [(self.corner_radius, ABS, _not_negative("corner_radius", corner_radius))]
+
+
+class Ellipse(Shape2D):
+    """An ellipse ``width`` by ``height`` centered on the origin."""
+
+    def __init__(self, width: float = 2.0, height: float = 1.0, name: str | None = None, **style: Any) -> None:
+        super().__init__((), name, **style)
+        self.width = parameter(self, "width", _positive("width", width))
+        self.height = parameter(self, "height", _positive("height", height))
+        self._derive_points(ellipse_points, self.width, self.height)
+
+    def signals(self) -> Iterator[Signal]:
+        yield from super().signals()
+        yield from (self.width, self.height)
+
+    @animatable
+    def set_size(self, width: float | None = None, height: float | None = None) -> ChangeList:
+        changes: ChangeList = []
+        if width is not None:
+            changes.append((self.width, ABS, _positive("width", width)))
+        if height is not None:
+            changes.append((self.height, ABS, _positive("height", height)))
+        return changes
+
+
+class Arc(Shape2D):
+    """The arc of a circle of ``radius`` around the origin, from
+    ``start_angle`` turning by ``angle`` (counterclockwise if positive)."""
+
+    def __init__(self, radius: float = 1.0, start_angle: float = 0.0, angle: float = math.pi / 2, name: str | None = None, **style: Any) -> None:
+        super().__init__((), name, **style)
+        self.radius = parameter(self, "radius", _positive("radius", radius))
+        self.start_angle = parameter(self, "start_angle", start_angle)
+        self.angle = parameter(self, "angle", angle)
+        self._derive_points(_arc, self.radius, self.start_angle, self.angle)
+
+    def signals(self) -> Iterator[Signal]:
+        yield from super().signals()
+        yield from (self.radius, self.start_angle, self.angle)
+
+    @animatable
+    def set_radius(self, radius: float) -> ChangeList:
+        return [(self.radius, ABS, _positive("radius", radius))]
+
+    @animatable
+    def set_angles(self, start_angle: float | None = None, angle: float | None = None) -> ChangeList:
+        changes: ChangeList = []
+        if start_angle is not None:
+            changes.append((self.start_angle, ABS, start_angle))
+        if angle is not None:
+            changes.append((self.angle, ABS, angle))
+        return changes
+
+
+class AnnularSector(Arc):
+    """A piece of a ring between ``inner_radius`` and ``radius`` (the
+    outer one), from ``start_angle`` turning by ``angle``."""
+
+    def __init__(self, inner_radius: float = 0.5, radius: float = 1.0, start_angle: float = 0.0, angle: float = math.pi / 2, name: str | None = None, **style: Any) -> None:
+        super().__init__(radius, start_angle, angle, name, **style)
+        self.inner_radius = parameter(self, "inner_radius", _not_negative("inner_radius", inner_radius))
+        self._derive_points(annular_sector_points, self.inner_radius, self.radius, self.start_angle, self.angle)
+
+    def signals(self) -> Iterator[Signal]:
+        yield from super().signals()
+        yield self.inner_radius
+
+    @animatable
+    def set_inner_radius(self, inner_radius: float) -> ChangeList:
+        return [(self.inner_radius, ABS, _not_negative("inner_radius", inner_radius))]
+
+
+class Sector(AnnularSector):
+    """A wedge of a circle of ``radius``: an AnnularSector from the center."""
+
+    def __init__(self, radius: float = 1.0, start_angle: float = 0.0, angle: float = math.pi / 2, name: str | None = None, **style: Any) -> None:
+        super().__init__(0.0, radius, start_angle, angle, name, **style)
+
+
+class Annulus(Shape2D):
+    """A ring between ``inner_radius`` and ``outer_radius``; the inner
+    circle is a hole in the fill."""
+
+    def __init__(self, inner_radius: float = 0.5, outer_radius: float = 1.0, name: str | None = None, **style: Any) -> None:
+        super().__init__((), name, **style)
+        self.inner_radius = parameter(self, "inner_radius", _positive("inner_radius", inner_radius))
+        self.outer_radius = parameter(self, "outer_radius", _positive("outer_radius", outer_radius))
+        self._derive_points(annulus_points, self.inner_radius, self.outer_radius)
+
+    def signals(self) -> Iterator[Signal]:
+        yield from super().signals()
+        yield from (self.inner_radius, self.outer_radius)
+
+    @animatable
+    def set_radii(self, inner_radius: float | None = None, outer_radius: float | None = None) -> ChangeList:
+        changes: ChangeList = []
+        if inner_radius is not None:
+            changes.append((self.inner_radius, ABS, _positive("inner_radius", inner_radius)))
+        if outer_radius is not None:
+            changes.append((self.outer_radius, ABS, _positive("outer_radius", outer_radius)))
+        return changes
+
+
+class Star(Shape2D):
+    """A star with ``n`` points on a circle of ``outer_radius`` (the first
+    at ``start_angle``, default up) and inner corners on
+    ``inner_radius`` (default: where a regular star's edges cross)."""
+
+    def __init__(
+        self,
+        n: int = 5,
+        outer_radius: float = 1.0,
+        inner_radius: float | None = None,
+        start_angle: float = math.pi / 2,
+        name: str | None = None,
+        **style: Any,
+    ) -> None:
+        super().__init__((), name, **style)
+        self.n = parameter(self, "n", _corners(n), DISCRETE)
+        self.outer_radius = parameter(self, "outer_radius", _positive("outer_radius", outer_radius))
+        default_inner = star_points(int(n), float(outer_radius))[4]  # the first inner corner
+        self.inner_radius = parameter(self, "inner_radius", _positive("inner_radius", inner_radius if inner_radius is not None else float(np.linalg.norm(default_inner))))
+        self.start_angle = parameter(self, "start_angle", start_angle)
+        self._derive_points(star_points, self.n, self.outer_radius, self.inner_radius, self.start_angle)
+
+    def signals(self) -> Iterator[Signal]:
+        yield from super().signals()
+        yield from (self.n, self.outer_radius, self.inner_radius, self.start_angle)
+
+    @animatable
+    def set_radii(self, outer_radius: float | None = None, inner_radius: float | None = None) -> ChangeList:
+        changes: ChangeList = []
+        if outer_radius is not None:
+            changes.append((self.outer_radius, ABS, _positive("outer_radius", outer_radius)))
+        if inner_radius is not None:
+            changes.append((self.inner_radius, ABS, _positive("inner_radius", inner_radius)))
+        return changes
+
+
+class Polygon(Polyline):
+    """A closed Polyline through ``corners``: ``Polygon((0, 0), (1, 0), (0, 1))``."""
+
+    def __init__(self, *corners: Sequence[float], name: str | None = None, **style: Any) -> None:
+        super().__init__(corners, closed=True, name=name, **style)
+
+
+class CubicBezier(Shape2D):
+    """One cubic Bezier curve through ``start`` and ``end`` with the
+    handles ``start_handle`` and ``end_handle``; ``controls`` holds the
+    four points (2D or 3D, z ignored)."""
+
+    def __init__(
+        self,
+        start: Sequence[float],
+        start_handle: Sequence[float],
+        end_handle: Sequence[float],
+        end: Sequence[float],
+        name: str | None = None,
+        **style: Any,
+    ) -> None:
+        super().__init__((), name, **style)
+        self.controls = parameter(self, "controls", _controls((start, start_handle, end_handle, end)), ARRAY)
+        self._derive_points(_bezier_points, self.controls)
+
+    def signals(self) -> Iterator[Signal]:
+        yield from super().signals()
+        yield self.controls
+
+    @animatable
+    def set_controls(self, start: Sequence[float], start_handle: Sequence[float], end_handle: Sequence[float], end: Sequence[float]) -> ChangeList:
+        return [(self.controls, ABS, _controls((start, start_handle, end_handle, end)))]
+
+
 class Brace(Shape2D):
     """A curly brace along ``segment`` (``[start, end]``), ``buff`` away
     from it and ``depth`` deep, its tip on the right of the way from
@@ -307,6 +502,28 @@ def _segment(segment: Sequence[Sequence[float]]) -> np.ndarray:
     return array
 
 
+def _arc(radius: float, start_angle: float, angle: float) -> np.ndarray:
+    return arc_points(radius, start_angle, angle, max(1, math.ceil(abs(angle) / (math.tau / 8) - 1e-9)))
+
+
+def _bezier_points(controls: np.ndarray) -> np.ndarray:
+    return controls[:, :2].copy()
+
+
+def _controls(points: Sequence[Sequence[float]]) -> np.ndarray:
+    array = np.zeros((4, 3))
+    for row, point in zip(array, points, strict=True):
+        given = np.asarray(point, dtype=np.float64).reshape(-1)
+        row[: len(given)] = given
+    return array
+
+
+def _not_negative(name: str, value: float) -> float:
+    if value < 0:
+        raise ValueError(f"{name} must not be negative, got {value}")
+    return float(value)
+
+
 def _square_points(side_length: float) -> np.ndarray:
     return rectangle_points(side_length, side_length)
 
@@ -328,4 +545,4 @@ def _corner_array(corners: Sequence[Sequence[float]]) -> np.ndarray:
     return array
 
 
-__all__ = ["Brace", "Circle", "Dot", "Polyline", "Rectangle", "RegularPolygon", "Square", "Triangle", "parameter"]
+__all__ = ["AnnularSector", "Annulus", "Arc", "Brace", "Circle", "CubicBezier", "Dot", "Ellipse", "Polygon", "Polyline", "Rectangle", "RegularPolygon", "RoundedRectangle", "Sector", "Square", "Star", "Triangle", "parameter"]

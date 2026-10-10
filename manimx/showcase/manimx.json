@@ -96,6 +96,10 @@
     "Paths": {
       "module": "scenes.paths",
       "class": "Paths"
+    },
+    "Lines": {
+      "module": "scenes.lines",
+      "class": "Lines"
     }
   },
   "timeline": {
@@ -132,6 +136,9 @@
       },
       {
         "scene": "Paths"
+      },
+      {
+        "scene": "Lines"
       },
       {
         "scene": "LowerThird",
