@@ -117,3 +117,16 @@ def test_typst_glyphs_and_math() -> None:
     assert len(formula.shapes) == 3  # a, b and the fraction rule
     assert np.isclose(np.ptp(np.vstack([s.points.value for s in formula.shapes])[:, 1]), 2.0)
     assert not math.isnan(Write(formula).run_time)
+
+
+def test_typst_names_the_group_and_every_glyph() -> None:
+    formula = TypstMath("integral_0^infinity e^(-x^2) dif x = sqrt(pi) / 2")
+    assert formula.name == "$ integral_0^infinity e^(-x^2) dif x = sqrt(pi) / 2 $"
+    names = [shape.name for shape in formula.shapes]
+    assert names[:10] == ["∫", "∞", "0", "e", "−", "x", "2", "d", "x", "="]
+    assert len(formula.find_all("x")) == 2 and len(formula.find_all("2")) == 2
+    # The upper limit is above the lower one: the names follow the glyphs, not the text order alone.
+    infinity, zero = formula.find("∞"), formula.find("0")
+    assert np.asarray(infinity.points.value)[:, 1].min() > np.asarray(zero.points.value)[:, 1].max()
+    # The fraction bar and the bar of the root are rules, not glyphs: generated names.
+    assert sum(not name.startswith("shape2d-") for name in names) == 13 and len(names) == 15

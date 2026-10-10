@@ -18,6 +18,7 @@ and ``height`` in pt, mm, px, ...) is kept unless a size is asked for.
 
 from __future__ import annotations
 
+import itertools
 import math
 import re
 import xml.etree.ElementTree as ElementTree
@@ -53,6 +54,9 @@ class SVGPath:
     stroke_opacity: float
     stroke_width: float
     """In Shape2D stroke width units."""
+    glyph: int | None = None
+    """For a path drawn by a ``use`` of a ``symbol`` (how Typst and other
+    tools place glyphs): which such use it is, in document order."""
 
     def style(self) -> dict[str, Any]:
         """The Shape2D style arguments of this path."""
@@ -92,7 +96,11 @@ class SVG(Group):
     ) -> None:
         text = str(source) if isinstance(source, str) and source.lstrip().startswith("<") else Path(source).read_text()
         paths = read_svg(text, width=width, height=height)
-        super().__init__(*(Shape2D(path.points, **(path.style() | style)) for path in paths), name=name)
+        super().__init__(*(Shape2D(path.points, self._path_name(path), **(path.style() | style)) for path in paths), name=name)
+
+    def _path_name(self, path: SVGPath) -> str | None:
+        """The name of the Shape2D of ``path`` (None: a generated one)."""
+        return None
 
     @property
     def shapes(self) -> list[Shape2D]:
@@ -106,7 +114,7 @@ def read_svg(text: str, width: float | None = None, height: float | None = None,
     false the document's origin stays the origin (y still points up)."""
     root = ElementTree.fromstring(text)
     by_id = {element.get("id"): element for element in root.iter() if element.get("id")}
-    raw = list(_walk(root, _root_matrix(root), _Paint(gradients=_gradients(by_id)), by_id))
+    raw = list(_walk(root, _root_matrix(root), _Paint(gradients=_gradients(by_id)), by_id, itertools.count()))
     raw = [(points, paint) for points, paint in raw if len(points)]
     if not raw:
         return []
@@ -141,6 +149,8 @@ class _Paint:
     opacity: float = 1.0
     stroke_scale: float = 1.0
     """Inches per user unit at the element (for its stroke width)."""
+    glyph: int | None = None
+    """The symbol use the element is drawn by (SVGPath.glyph)."""
     gradients: tuple[tuple[str, str], ...] = ()
 
     def inherit(self, element: ElementTree.Element, matrix: Matrix) -> _Paint:
@@ -170,13 +180,14 @@ class _Paint:
             stroke_color=stroke,
             stroke_opacity=self.stroke_opacity * self.opacity,
             stroke_width=width,
+            glyph=self.glyph,
         )
 
 
 _SKIPPED = {"defs", "symbol", "clipPath", "mask", "linearGradient", "radialGradient", "style", "title", "desc", "metadata", "text", "image", "filter", "pattern", "marker"}
 
 
-def _walk(element: ElementTree.Element, matrix: Matrix, paint: _Paint, by_id: dict[str | None, ElementTree.Element]) -> Iterator[tuple[np.ndarray, _Paint]]:
+def _walk(element: ElementTree.Element, matrix: Matrix, paint: _Paint, by_id: dict[str | None, ElementTree.Element], uses: Iterator[int]) -> Iterator[tuple[np.ndarray, _Paint]]:
     """``(points in inches with y down, paint)`` of every drawn element
     under ``element``."""
     attributes = _style_declarations(element.get("style", ""))
@@ -190,19 +201,22 @@ def _walk(element: ElementTree.Element, matrix: Matrix, paint: _Paint, by_id: di
         if target is None:
             return
         offset = _translation(_length(element.get("x", "0")), _length(element.get("y", "0")))
-        yield from _walk_children(target, matrix @ offset, paint, by_id) if _tag(target) == "symbol" else _walk(target, matrix @ offset, paint, by_id)
+        if _tag(target) == "symbol":
+            yield from _walk_children(target, matrix @ offset, replace(paint, glyph=next(uses)), by_id, uses)
+        else:
+            yield from _walk(target, matrix @ offset, paint, by_id, uses)
         return
     if tag in _SKIPPED:
         return
     points = _element_points(element, tag)
     if points is not None and len(points):
         yield _apply(matrix, points), paint
-    yield from _walk_children(element, matrix, paint, by_id)
+    yield from _walk_children(element, matrix, paint, by_id, uses)
 
 
-def _walk_children(element: ElementTree.Element, matrix: Matrix, paint: _Paint, by_id: dict[str | None, ElementTree.Element]) -> Iterator[tuple[np.ndarray, _Paint]]:
+def _walk_children(element: ElementTree.Element, matrix: Matrix, paint: _Paint, by_id: dict[str | None, ElementTree.Element], uses: Iterator[int]) -> Iterator[tuple[np.ndarray, _Paint]]:
     for child in element:
-        yield from _walk(child, matrix, paint, by_id)
+        yield from _walk(child, matrix, paint, by_id, uses)
 
 
 def _root_matrix(root: ElementTree.Element) -> Matrix:
