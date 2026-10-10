@@ -311,10 +311,18 @@ class Morph(_PlannedAnimation, Generic[MorphTarget]):
             target = targets[index * len(targets) // count]
             self._inbetween(source, target)
 
-    def _inbetween(self, start: Node, end: Node, alpha: tuple[float, float] | None = None, window: tuple[float, float] = (0.0, 1.0)) -> None:
-        """An in-between shape going from path ``start`` to path ``end``;
-        its alpha goes from ``alpha[0]`` to ``alpha[1]`` within ``window``
-        (default: from ``start``'s to ``end``'s over the whole morph)."""
+    def _inbetween(
+        self,
+        start: Node,
+        end: Node,
+        alpha: tuple[float, float] | None = None,
+        window: tuple[float, float] = (0.0, 1.0),
+        shift: Sequence[float] = (0.0, 0.0, 0.0),
+    ) -> None:
+        """An in-between shape going from path ``start`` to path ``end``,
+        moved by ``shift`` (world units) at the end; its alpha goes from
+        ``alpha[0]`` to ``alpha[1]`` within ``window`` (default: from
+        ``start``'s to ``end``'s over the whole morph)."""
         flat = isinstance(start, Shape2D) and isinstance(end, Shape2D)
         dimension = 2 if flat else 3
         here = _resized(_points(start), dimension)
@@ -330,9 +338,9 @@ class Morph(_PlannedAnimation, Generic[MorphTarget]):
         (start_position, start_rotation, start_scale), (end_position, end_rotation, end_scale) = (
             _decomposed(self._worlds[id(start)]), _decomposed(self._worlds[id(end)])
         )  # fmt: skip
-        for axis, begin, finish in zip(shape.position.axes, start_position, end_position, strict=True):
+        for axis, begin, finish, offset in zip(shape.position.axes, start_position, end_position, shift, strict=True):
             axis.set(begin)
-            self._between(axis, begin, finish)
+            self._between(axis, begin, finish + offset)
         for axis, begin, finish in zip(shape.scale.axes, start_scale, end_scale, strict=True):
             axis.set(begin)
             self._between(axis, begin, finish)
@@ -359,36 +367,55 @@ class Morph(_PlannedAnimation, Generic[MorphTarget]):
 @dataclass(eq=False)
 class MorphMatching(Morph[MorphTarget]):
     """Turn ``source`` into ``target`` keeping what they share (Manim's
-    ``TransformMatchingShapes``): paths that look the same on both sides
-    (the same path up to where it is, e.g. the same glyph of a formula)
-    move to their new place; the others fade out in the first half and in
-    in the second, so the two never pile up. Pairs are found in tree
-    order, each path used once. Like :class:`Morph`, it changes neither
-    side and leaves ``target`` in the scene.
+    ``TransformMatchingShapes``): paths of the same shape on both sides
+    (up to where they are and how large, e.g. the same glyph of two
+    formulas, also as an exponent) move to their new place and size. The
+    others cross-fade over the whole morph, as in Manim: the source's fade
+    out while drifting towards where the target's appear. Pairs are found
+    in tree order, each path used once. Like :class:`Morph`, it changes
+    neither side and leaves ``target`` in the scene.
     """
 
     tolerance: float = 1e-3
-    """How far (world units) points may differ for paths to match."""
+    """How far points may differ for paths to match, as a fraction of
+    the path's size."""
 
     def _pair(self, sources: list[Node], targets: list[Node]) -> None:
-        free = [(target, self._relative_points(target)) for target in targets]
-        matched: set[int] = set()
+        free = [(target, self._normalized_points(target)) for target in targets]
+        matched: dict[int, Node] = {}
         for source in sources:
-            points = self._relative_points(source)
-            target = next((t for t, other in free if id(t) not in matched and self._same(points, other)), None)
+            points = self._normalized_points(source)
+            target = next((t for t, other in free if id(t) not in {id(m) for m in matched.values()} and self._same(points, other)), None)
             if target is not None:
-                matched.add(id(target))
-                self._inbetween(source, target)
+                matched[id(source)] = target
+        gone = [source for source in sources if id(source) not in matched]
+        new = [target for target in targets if target not in matched.values()]
+        drift = self._center(new) - self._center(gone) if gone and new else np.zeros(3)
+        for source in sources:
+            if id(source) in matched:
+                self._inbetween(source, matched[id(source)])
             else:
-                self._inbetween(source, source, (_world_alpha(source), 0.0), (0.0, 0.5))
-        for target in targets:
-            if id(target) not in matched:
-                self._inbetween(target, target, (0.0, _world_alpha(target)), (0.5, 1.0))
+                self._inbetween(source, source, (_world_alpha(source), 0.0), shift=drift)
+        for target in new:
+            self._inbetween(target, target, (0.0, _world_alpha(target)))
 
-    def _relative_points(self, path: Node) -> np.ndarray:
-        """The path's points in world space, relative to their lowest corner."""
-        points = _in_space_of(_points(path), self._worlds[id(path)], np.eye(4), 3)
-        return points - points.min(axis=0) if len(points) else points
+    def _world_points(self, path: Node) -> np.ndarray:
+        return _in_space_of(_points(path), self._worlds[id(path)], np.eye(4), 3)
+
+    def _normalized_points(self, path: Node) -> np.ndarray:
+        """The path's points in world space, relative to their lowest
+        corner and divided by their largest extent."""
+        points = self._world_points(path)
+        if not len(points):
+            return points
+        points = points - points.min(axis=0)
+        size = points.max()
+        return points / size if size > 0 else points
+
+    def _center(self, paths: list[Node]) -> np.ndarray:
+        """The center of the world bounding box of ``paths``."""
+        points = np.vstack([self._world_points(path) for path in paths])
+        return (points.min(axis=0) + points.max(axis=0)) / 2 if len(points) else np.zeros(3)
 
     def _same(self, points: np.ndarray, other: np.ndarray) -> bool:
         return points.shape == other.shape and len(points) > 0 and bool(np.abs(points - other).max() <= self.tolerance)

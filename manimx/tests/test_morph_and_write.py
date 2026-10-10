@@ -214,8 +214,11 @@ def test_morph_matching_moves_equal_shapes_and_fades_the_rest() -> None:
     low, high = _world_box(halfway[sliding.uid])
     assert np.allclose((low + high) / 2, [-1.0, 1.0], atol=1e-6)  # halfway to its match, the same shape
     assert np.allclose(high - low, [2.0, 2.0], atol=1e-6)
-    assert set(halfway) == {sliding.uid}  # the others: one faded out, the other not in yet
-    assert 0.0 < drawn(0.5)[fading_out.uid].alpha < 1.0 and 0.0 < drawn(1.5)[fading_in.uid].alpha < 1.0
+    # The others cross-fade over the whole morph; the circle drifts towards the triangle.
+    assert set(halfway) == {sliding.uid, fading_out.uid, fading_in.uid}
+    assert 0.0 < halfway[fading_out.uid].alpha < 1.0 and 0.0 < halfway[fading_in.uid].alpha < 1.0
+    triangle_center = (np.asarray(new.points.value).min(axis=0) + np.asarray(new.points.value).max(axis=0)) / 2 + [0.0, -2.0]
+    np.testing.assert_allclose(halfway[fading_out.uid].transform.position[:2], ([2.0, 0.0] + triangle_center) / 2, atol=1e-6)
     assert {node.uid for node in _drawn(prepared, 2.0)} == {new.uid, moved.uid}
     with pytest.raises(ValueError, match="MorphMatching needs"):
         MorphMatching(Group(), Square())
@@ -234,3 +237,15 @@ def test_create_and_write_draw_a_part_and_never_touch_points() -> None:
     assert square.scale.x.value > 1.0  # the scale animates at the same time
     prepared.evaluate(2.0)
     np.testing.assert_array_equal(square.drawn_points.value, full)
+
+
+def test_morph_matching_matches_shapes_of_any_size() -> None:
+    """As Manim's key: the same shape at another size (a glyph as an
+    exponent) matches and grows or shrinks on the way."""
+    small = Square(side_length=0.5).shift(LEFT)
+    large = Square(side_length=2.0).shift(RIGHT)
+    morph = MorphMatching(small, large)
+    prepared = prepare(lambda s: (s.add(small), s.play(morph, run_time=2)))
+    (inbetween,) = morph.inbetweens
+    (middle,) = _drawn(prepared, 1.0)
+    assert middle.uid == inbetween.uid and middle.alpha == 1.0  # moved, not faded
