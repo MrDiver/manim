@@ -67,11 +67,18 @@ class TypstMath(Typst):
 @lru_cache(maxsize=256)
 def compile_typst(source: str) -> str:
     """The SVG of the first page of the Typst document ``source``."""
-    import typst  # imported here: compiling is the only use
-
-    output = typst.compile(source.encode(), format="svg")
+    output = compiler().compile(input=source.encode(), format="svg")
     page = output[0] if isinstance(output, list) else output
     return page.decode()
+
+
+@lru_cache(maxsize=1)
+def compiler() -> Any:
+    """One Typst compiler for the process: creating one loads the system
+    fonts (about 0.2 s), compiling with it then takes milliseconds."""
+    import typst  # imported here: compiling is the only use
+
+    return typst.Compiler()
 
 
 
@@ -92,10 +99,8 @@ def glyph_characters(source: str) -> tuple[str, ...] | None:
     """The characters of the glyphs of the Typst document ``source``, in
     the order its SVG uses them (SVGPath.glyph), NFKC-normalized (a math
     italic 𝑥 is "x"). None if the PDF cannot be read that way."""
-    import typst  # imported here: compiling is the only use
-
     try:
-        return tuple(_pdf_glyph_text(typst.compile(source.encode(), format="pdf")))
+        return tuple(_pdf_glyph_text(compiler().compile(input=source.encode(), format="pdf")))
     except (ValueError, KeyError, IndexError, zlib.error):
         return None
 
