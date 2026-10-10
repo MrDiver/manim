@@ -302,11 +302,17 @@ fn parse_contribution(kind: &Kind, contribution: &Bound<'_, PyTuple>) -> PyResul
         "between" => Contribution::Between {
             start: kind.value_from_py(&item(1)?)?,
             end: kind.value_from_py(&item(2)?)?,
-            window: Window { lower: item(3)?.extract()?, upper: item(4)?.extract()? },
+            window: Window {
+                lower: item(3)?.extract()?,
+                upper: item(4)?.extract()?,
+            },
         },
         "partial" => Contribution::Partial {
             points: kind.value_from_py(&item(1)?)?,
-            window: Window { lower: item(2)?.extract()?, upper: item(3)?.extract()? },
+            window: Window {
+                lower: item(2)?.extract()?,
+                upper: item(3)?.extract()?,
+            },
             reverse: item(4)?.extract()?,
         },
         "python" => Contribution::Python {

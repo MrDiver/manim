@@ -7,6 +7,7 @@ mod arena;
 mod callbacks;
 mod contribution;
 mod evaluator;
+mod gpu;
 mod graph;
 mod lights;
 mod meshes;
@@ -26,5 +27,6 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<evaluator::FrameState>()?;
     module.add_class::<graph::SceneGraph>()?;
     module.add_class::<packer::Packer>()?;
+    module.add_class::<gpu::frame_renderer::FrameRenderer>()?;
     Ok(())
 }

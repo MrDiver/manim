@@ -16,7 +16,8 @@ settings (and once without motion blur), and prints:
 ``--save-reference`` / ``--check-reference`` store or compare a set of
 small frames across the timeline, so optimizations can be checked to be
 bit-identical. ``--core`` renders the timeline's frames through the core
-(PlannedTimeline, see CORE.md) instead of RNode trees. Results go to
+(PlannedTimeline and CoreFramePipeline, see CORE.md) instead of RNode
+trees and the Python renderer. Results go to
 PERFORMANCE.md by hand, one row per step.
 """
 
@@ -31,6 +32,7 @@ from collections import defaultdict
 
 import numpy as np
 from manimx.animation import plan, timing
+from manimx.drivers.core_pipeline import CoreFramePipeline
 from manimx.drivers.pipeline import FramePipeline
 from manimx.project import Project
 from manimx.renderer import FrameComposer, RenderService, SceneFlattener
@@ -50,6 +52,8 @@ STAGES = [
     (renderer.WGPURenderer, "render_layers", "render (GPU encoding)"),
     (composer_module.FrameComposer, "_composite", "composite"),
     (FramePipeline, "_finish_oldest", "wait + readback"),
+    (CoreFramePipeline, "submit", "core: submit (pack, render, composite)"),
+    (CoreFramePipeline, "flush", "core: flush"),
 ]
 
 
@@ -68,9 +72,13 @@ def wrap_stages(spent: dict[str, float]) -> None:
         setattr(owner, name, timed)
 
 
-def render_all(timeline, settings, times, profile: bool = False) -> tuple[float, RenderService]:
-    service = RenderService(profile=profile)
-    pipeline = FramePipeline(FrameComposer(service, settings.effects), settings.config, settings.in_flight)
+def render_all(timeline, settings, times, profile: bool = False, core: bool = False) -> tuple[float, object]:
+    if core:
+        pipeline = CoreFramePipeline(settings.effects, settings.config, settings.in_flight, profile=profile)
+        service = pipeline
+    else:
+        service = RenderService(profile=profile)
+        pipeline = FramePipeline(FrameComposer(service, settings.effects), settings.config, settings.in_flight)
     for t in times[:5]:  # warm up: shaders, caches, buffers
         pipeline.submit(0, t, timeline.frame_at)
     pipeline.flush()
@@ -125,11 +133,11 @@ def main() -> None:
     sharp_settings = copy.deepcopy(project.settings)
     sharp_settings.effects.motion_blur.enabled = False
     sharp = project.render_settings(sharp_settings)
-    sharp_wall, _ = render_all(timeline, sharp, times)
+    sharp_wall, _ = render_all(timeline, sharp, times, core=args.core)
 
     spent: dict[str, float] = defaultdict(float)
     wrap_stages(spent)
-    wall, _ = render_all(timeline, settings, times)
+    wall, _ = render_all(timeline, settings, times, core=args.core)
     count = len(times)
     out = project.output
     print(f"{out.width}x{out.height}, {count} frames, motion blur {project.settings.motion_blur_samples}: {count / wall:6.1f} fps  {wall / count * 1e3:6.2f} ms/frame")
@@ -137,15 +145,19 @@ def main() -> None:
     for label, seconds in ((label, spent[label]) for _, _, label in STAGES if label in spent):
         print(f"  {label:<32} {seconds / count * 1e3:6.2f} ms/frame  {seconds / wall * 100:5.1f}%")
 
-    _, profiled = render_all(timeline, settings, times[:: max(1, count // 60)], profile=True)
-    profiled.renderer.profiler.read()
     gpu: dict[str, float] = defaultdict(float)
     sample = times[:: max(1, count // 60)]
-    pipeline = FramePipeline(FrameComposer(profiled, settings.effects), settings.config, 1)
+    if args.core:
+        pipeline = CoreFramePipeline(settings.effects, settings.config, 1, profile=True)
+        read = pipeline.gpu_timings
+    else:
+        profiled = RenderService(profile=True)
+        pipeline = FramePipeline(FrameComposer(profiled, settings.effects), settings.config, 1)
+        read = profiled.renderer.profiler.read
     for t in sample:
         pipeline.submit(0, t, timeline.frame_at)
         pipeline.flush()
-        for name, ms in profiled.renderer.profiler.read().items():
+        for name, ms in read().items():
             gpu[name] += ms
     if gpu:
         total = sum(gpu.values()) / len(sample)

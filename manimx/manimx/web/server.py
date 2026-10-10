@@ -131,7 +131,8 @@ class PreviewServer:
     def _use(self, timeline: Timeline, settings: RenderSettings) -> None:
         self.timeline = timeline
         self.settings = settings
-        self._frame_at = (planned_frames(timeline) if settings.core else None) or timeline.frame_at
+        planned = planned_frames(timeline) if settings.core else None
+        self._frame_at = planned.frame_at if planned is not None else timeline.frame_at
         effects = tuple(effect for effect in settings.effects if not isinstance(effect, MotionBlur))
         self._composer = self._service.composer(effects)
 

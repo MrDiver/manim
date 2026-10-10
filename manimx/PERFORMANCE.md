@@ -586,6 +586,31 @@ is near its 19 ms of GPU work.
 What remains per frame on the benchmark is mostly outside the core:
 `render` (the wgpu-py calls, 2.16 ms), `composite` and the readback.
 
+### S. The core renders (CORE.md, phase 6)
+
+The passes, the composer (composite, bloom, shader effects, tone map,
+finalize) and the frame pipeline's readback run in Rust on wgpu
+(`manimx._core.FrameRenderer`, driven by `CoreFramePipeline`), with the
+same WGSL. Python only asks the timeline for each sub-frame's views and
+builds each camera's Frame record. Power profile `balanced`:
+
+| | fps (blur 8) | fps (no blur) | GPU ms/frame |
+|---|---|---|---|
+| core packs, Python renders (step R) | 105.8 | 415.3 | 6.13 |
+| core packs and renders | 123.5 | 604.0 | 6.83 |
+
++17% with motion blur, +45% without; the benchmark is now within 1.2
+times its GPU time. light-show, seconds 10 to 12: 25.0 to 23.1 ms per
+frame (GPU about 19). Every frame compared across the three projects and
+the test scenes (motion blur, bloom, both shader stages, tone mapping,
+several views, empty frames) is bit-identical to the Python renderer
+(tests/test_core_pipeline.py).
+
+Two things mattered for the readback: waiting for each frame's own
+submission (waiting for the latest one serialized CPU and GPU: 94 fps),
+and copying the mapped image once, straight into the Python `bytes`
+(two copies out of mapped memory: 272 fps without blur).
+
 ## Where the time goes now
 
 Benchmark project with `PortalOrbit`, after steps L to O: 48.6 to about

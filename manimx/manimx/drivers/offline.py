@@ -68,6 +68,9 @@ class FrameSource:
     duration: float
     audio: Callable[[float, float, int], np.ndarray] | None = None
     """``audio(start, end, sample_rate)``: stereo float32 samples, if any."""
+    core: bool = False
+    """Whether every frame comes from the core (views of PlannedFrames):
+    then the core's renderer (CoreFramePipeline) renders them."""
 
 
 @dataclass(frozen=True)
@@ -130,8 +133,9 @@ def load_source(spec: Any, core: bool = True) -> FrameSource:
     if hasattr(target, "state_at") and hasattr(target, "duration"):
         audio = getattr(target, "audio", None)
         # A timeline or prepared scene renders through its cameras.
-        frame_at = (planned_frames(target) if core else None) or getattr(target, "frame_at", target.state_at)
-        return FrameSource(frame_at, target.duration, audio if callable(audio) else None)
+        planned = planned_frames(target) if core else None
+        frame_at = planned.frame_at if planned is not None else getattr(target, "frame_at", target.state_at)
+        return FrameSource(frame_at, target.duration, audio if callable(audio) else None, core=planned is not None and planned.complete)
     raise TypeError(f"cannot render {target!r}: it needs duration and state_at")
 
 
@@ -241,13 +245,22 @@ def _release(release: Callable[[], None] | None) -> None:
 # --------------------------------------------------------------------------
 
 
-def _render_here(source: FrameSource, sink: FrameSink, settings: RenderSettings, progress: Progress | None) -> int:
+def _pipeline(source: FrameSource, settings: RenderSettings) -> Any:
+    """The core's renderer for frames of the core, else the Python one."""
+    if source.core:
+        from .core_pipeline import CoreFramePipeline
+
+        return CoreFramePipeline(settings.effects, settings.config, settings.in_flight)
     from ..renderer.webgpu import RenderService
     from .pipeline import FramePipeline
 
+    return FramePipeline(RenderService.shared().composer(settings.effects), settings.config, settings.in_flight)
+
+
+def _render_here(source: FrameSource, sink: FrameSink, settings: RenderSettings, progress: Progress | None) -> int:
     times = settings.frame_times(source.duration)
     config = settings.config
-    pipeline = FramePipeline(RenderService.shared().composer(settings.effects), config, settings.in_flight)
+    pipeline = _pipeline(source, settings)
     sink.open(_format(source, settings, times))
     try:
         writer = _Writer(sink, len(times), progress, capacity=2 * settings.in_flight + 4)
@@ -350,12 +363,9 @@ def _worker_main(
 ) -> None:  # pragma: no cover - runs in a child process
     memory = SharedMemory(name=memory_name)
     try:
-        from ..renderer.webgpu import RenderService
-        from .pipeline import FramePipeline
-
         source = load_source(spec, settings.core)
         times = settings.frame_times(source.duration)
-        pipeline = FramePipeline(RenderService.shared().composer(settings.effects), settings.config, settings.in_flight)
+        pipeline = _pipeline(source, settings)
 
         def deliver(index: int, image: np.ndarray) -> None:
             slot = free.get()  # waits while all of this worker's slots are queued

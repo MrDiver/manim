@@ -78,6 +78,13 @@ def test_pipelined_frames_match_synchronous_renders(renderer: RenderService) -> 
         FramePipeline(FrameComposer(renderer), config(64, 36), in_flight=0)
 
 
+def test_the_python_renderer_gives_the_same_frames_without_the_core(renderer: RenderService) -> None:
+    sink = FrameList()
+    render(SOURCE, sink, settings(core=False))
+    for frame, expected in zip(sink.frames, expected_frames(renderer), strict=True):
+        np.testing.assert_array_equal(frame, expected)
+
+
 def test_worker_processes_give_the_same_frames_in_order(renderer: RenderService) -> None:
     sink = FrameList()
     progress = []

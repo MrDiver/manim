@@ -23,6 +23,7 @@ from ..robjects.mesh import MeshData
 from ..robjects.transform import Transform, rotation_towards
 from .tessellation import tessellate_fill
 from .webgpu.mesh_batch import _interleave, _material_entry
+from .webgpu.mesh_pass import _mip_chain
 from .webgpu.shadow_views import _box
 from .webgpu.vector_batch import _fill_vertices, _StrokeTopology
 
@@ -118,3 +119,15 @@ def default_light(camera_matrix: np.ndarray) -> tuple[list[float], tuple[float, 
     direction = -(1.0 * up - 0.6 * right + 0.8 * backwards)
     light = RDirectionalLight(transform=Transform(rotation=rotation_towards(tuple(direction))), intensity=3.0)
     return light.transform.matrix().reshape(-1).tolist(), linear_rgb(light.color), light.intensity, light.size, light.cast_shadows
+
+
+def texture_levels(texture: Any) -> list[tuple[int, int, bytes]]:
+    """A material texture's image and its smaller mip levels down to 1x1,
+    as ``(width, height, RGBA bytes)`` (the core's renderer uploads them).
+    """
+    return [(level.shape[1], level.shape[0], np.ascontiguousarray(level).tobytes()) for level in _mip_chain(texture.image)]
+
+
+def default_texture_levels(rgba: tuple[int, int, int, int]) -> list[tuple[int, int, bytes]]:
+    """A 1x1 texture of one color (missing material textures)."""
+    return [(1, 1, bytes(rgba))]

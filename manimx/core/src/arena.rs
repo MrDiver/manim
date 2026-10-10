@@ -99,6 +99,15 @@ impl Arena {
         first
     }
 
+    /// The bytes of the records in use (for an upload).
+    pub fn bytes<'a>(&'a self, py: Python<'_>) -> &'a [u8] {
+        // SAFETY: as in records_mut; the slice lives while the arena is borrowed.
+        unsafe {
+            let all = self.data.bind(py).as_slice().expect("contiguous");
+            std::slice::from_raw_parts(all.as_ptr(), self.used * self.record_size)
+        }
+    }
+
     /// The records in use, as a numpy byte array view.
     pub fn view<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let end = self.used * self.record_size;

@@ -54,18 +54,32 @@ pub fn partial_path(points: &Array, lower: f64, upper: f64) -> Array {
     let dimension = points.cols();
     let count = points.rows() / POINTS_PER_CURVE;
     if lower <= 0.0 && upper >= 1.0 {
-        return Array { shape: points.shape.clone(), data: points.data.clone() };
+        return Array {
+            shape: points.shape.clone(),
+            data: points.data.clone(),
+        };
     }
     if count == 0 || upper <= lower {
-        return Array { shape: vec![0, dimension], data: Vec::new() };
+        return Array {
+            shape: vec![0, dimension],
+            data: Vec::new(),
+        };
     }
-    let rows: Vec<Point> = points.data.chunks_exact(dimension).map(|row| row.to_vec()).collect();
+    let rows: Vec<Point> = points
+        .data
+        .chunks_exact(dimension)
+        .map(|row| row.to_vec())
+        .collect();
     let curve = |index: usize| &rows[index * POINTS_PER_CURVE..(index + 1) * POINTS_PER_CURVE];
     let (lower_index, lower_residue) = curve_at(count, lower);
     let (upper_index, upper_residue) = curve_at(count, upper);
     let mut result: Vec<Point> = Vec::new();
     if lower_index == upper_index {
-        result.extend(partial_curve(curve(lower_index), lower_residue, upper_residue));
+        result.extend(partial_curve(
+            curve(lower_index),
+            lower_residue,
+            upper_residue,
+        ));
     } else {
         result.extend(partial_curve(curve(lower_index), lower_residue, 1.0));
         for index in lower_index + 1..upper_index {
@@ -73,5 +87,8 @@ pub fn partial_path(points: &Array, lower: f64, upper: f64) -> Array {
         }
         result.extend(partial_curve(curve(upper_index), 0.0, upper_residue));
     }
-    Array { shape: vec![result.len(), dimension], data: result.concat() }
+    Array {
+        shape: vec![result.len(), dimension],
+        data: result.concat(),
+    }
 }

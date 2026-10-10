@@ -37,6 +37,8 @@ Python first, then the module.
 | `arena.rs` | growable record arrays mirroring GPU buffers, in numpy byte arrays | `Arena` (renderer/webgpu/arena.py) |
 | `records.rs` | the GPU record structs (bytemuck) | the dtypes of vector_batch.py, mesh_batch.py, frame.py |
 | `callbacks.rs` | the Python functions called once per version | renderer/core_callbacks.py |
+| `paths.rs` | the part of a path drawn so far | animation/paths.py |
+| `gpu/` | the renderer: passes, composer, readback (its `mod.rs` maps it) | renderer/webgpu/, drivers/pipeline.py |
 
 Math is [glam](https://docs.rs/glam) (`DMat4`, `DQuat`, `DVec3` in f64,
 converted to f32 only when a record is written); records are `#[repr(C)]`

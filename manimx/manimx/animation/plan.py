@@ -27,7 +27,7 @@ compared value by value (tests/test_plan.py).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from typing import Any
 
 from .. import _core
@@ -36,7 +36,17 @@ from ..renderer.config import ViewState
 from ..robjects import Transform
 from ..robjects.planned_frame import PlannedFrame
 from .clipping_group import ClippingGroup
-from .contributions import Between, By, Contribution, Keyframes, Partial, Power, Ramp, To, Turn
+from .contributions import (
+    Between,
+    By,
+    Contribution,
+    Keyframes,
+    Partial,
+    Power,
+    Ramp,
+    To,
+    Turn,
+)
 from .curve3d import Curve3D
 from .group import Group
 from .kinds import (
@@ -192,6 +202,14 @@ class PlannedTimeline:
     def __getattr__(self, name: str) -> Any:
         return getattr(self.timeline, name)
 
+    @property
+    def complete(self) -> bool:
+        """Whether every frame comes from the core: no clip falls back to
+        snapshots.
+        """
+        self.timeline._ensure_resolved()
+        return all(self.plan(clip.scene).graph is not None for clip in self.timeline.clips)
+
     def plan(self, scene: PreparedScene) -> ScenePlan:
         plan = self._plans.get(id(scene))
         if plan is None or plan.scene is not scene:
@@ -268,19 +286,34 @@ def _node_fields(node: Node) -> Iterator[tuple[str, Signal]]:
         yield name, getattr(node, name)
 
 
-def planned_frames(source: Any) -> Callable[[float], tuple[ViewState, ...]] | None:
-    """``frame_at`` of a timeline or prepared scene, through the core; None
-    for anything else, and for a prepared scene the core cannot draw.
+def planned_frames(source: Any) -> PlannedTimeline | PlannedScene | None:
+    """The frames of a timeline or prepared scene through the core (an
+    object with ``frame_at`` and ``complete``); None for anything else, and
+    for a prepared scene the core cannot draw.
     """
     from .timing import Timeline
 
     if isinstance(source, Timeline):
-        return PlannedTimeline(source).frame_at
+        return PlannedTimeline(source)
     if isinstance(source, PreparedScene):
         plan = ScenePlan(source)
-        if plan.graph is not None:
-            return lambda t: (plan.frame_at(t),)
+        return PlannedScene(plan) if plan.graph is not None else None
     return None
+
+
+class PlannedScene:
+    """A prepared scene's frames from the core, shaped like
+    ``PreparedScene.frame_at`` (one view).
+    """
+
+    complete = True
+    """Every frame comes from the core."""
+
+    def __init__(self, plan: ScenePlan) -> None:
+        self.plan = plan
+
+    def frame_at(self, t: float) -> tuple[ViewState, ...]:
+        return (self.plan.frame_at(t),)
 
 
 def _readable_signals(scene: PreparedScene) -> list[Signal]:
@@ -347,4 +380,4 @@ def _derivation(signal: DerivedSignal) -> tuple:
     return ("python", function)
 
 
-__all__ = ["PlannedTimeline", "ScenePlan", "planned_frames"]
+__all__ = ["PlannedScene", "PlannedTimeline", "ScenePlan", "planned_frames"]

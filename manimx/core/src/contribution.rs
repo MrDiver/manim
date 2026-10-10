@@ -35,10 +35,18 @@ pub enum Contribution {
     Keyframes(Keyframes),
     /// From `start` to `end` while the progress runs through `window`
     /// (`Morph`, the style changes of `Write`).
-    Between { start: Value, end: Value, window: Window },
+    Between {
+        start: Value,
+        end: Value,
+        window: Window,
+    },
     /// The part of a path drawn so far (`Create`, `Write`); backwards when
     /// `reverse` (`Uncreate`).
-    Partial { points: Value, window: Window, reverse: bool },
+    Partial {
+        points: Value,
+        window: Window,
+        reverse: bool,
+    },
     /// No data form: `animation.contribution(signal, alpha, start)` in Python.
     Python {
         animation: Py<PyAny>,
@@ -99,11 +107,21 @@ impl Contribution {
                 angle * alpha,
             ))),
             Contribution::Keyframes(keyframes) => keyframes.at(py, kind, alpha),
-            Contribution::Between { start, end, window } => kind.interpolate(py, start, end, window.progress(alpha)),
-            Contribution::Partial { points, window, reverse } => {
+            Contribution::Between { start, end, window } => {
+                kind.interpolate(py, start, end, window.progress(alpha))
+            }
+            Contribution::Partial {
+                points,
+                window,
+                reverse,
+            } => {
                 let progress = window.progress(alpha);
                 let upper = if *reverse { 1.0 - progress } else { progress };
-                Ok(Value::Array(Arc::new(paths::partial_path(points.array()?, 0.0, upper))))
+                Ok(Value::Array(Arc::new(paths::partial_path(
+                    points.array()?,
+                    0.0,
+                    upper,
+                ))))
             }
             Contribution::Python { animation, signal } => {
                 let result = animation

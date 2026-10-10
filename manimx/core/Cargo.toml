@@ -14,6 +14,8 @@ pyo3 = { version = "0.29", features = ["abi3-py311"] }
 numpy = "0.29"
 glam = { version = "0.34", features = ["bytemuck"] }
 bytemuck = { version = "1.25", features = ["derive"] }
+wgpu = "30"
+pollster = "1"
 
 [profile.release]
 debug = 1

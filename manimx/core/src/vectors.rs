@@ -94,6 +94,7 @@ pub struct Draw {
 }
 
 /// The draw lists of one frame (the rest of `VectorBatch` is the arenas).
+#[derive(Default)]
 pub struct VectorDraws {
     pub opaque: Vec<u8>,
     pub transparent: Vec<u8>,
