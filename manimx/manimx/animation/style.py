@@ -29,7 +29,7 @@ def colors(value: Colors) -> np.ndarray:
     items = [value] if _is_one_color(value) else list(value)  # type: ignore[arg-type]
     if not items:
         raise ValueError("a color list needs at least one color")
-    array = np.array([ManimColor.parse(item).to_rgb() for item in items], dtype=np.float64)
+    array = np.array([_one_color(item).to_rgb() for item in items], dtype=np.float64)
     array.setflags(write=False)
     return array
 
@@ -64,6 +64,14 @@ def stroke(color: Any, opacity: Any, width: Any, joint: Any, cap: CapStyle) -> S
     and widths kept non-negative (``alpha`` as for :func:`fill`).
     """
     return Stroke(_color_argument(color), opacity=_unit(opacity), width=_non_negative(width), joint=joint, cap=cap)
+
+
+def _one_color(value: Any) -> ManimColor:
+    # ManimColor.parse reads any sequence as a list of colors, so a color
+    # given as numbers goes to the constructor (which takes a list).
+    if isinstance(value, (str, int, ManimColor)):
+        return ManimColor.parse(value)
+    return ManimColor(list(value))
 
 
 def _is_one_color(value: Any) -> bool:
