@@ -223,9 +223,16 @@ def _classify_rings(
             groups[i] = (_oriented(ring, counter_clockwise=True), [])
     for i, ring in enumerate(rings):
         if depth[i] % 2 == 1:
-            # The innermost container of a hole is its outer ring.
-            parent = max(containers[i], key=lambda j: depth[j])
-            groups[parent][1].append(_oriented(ring, counter_clockwise=False))
+            # The innermost outer ring around a hole is its outer ring.
+            # Rings that cross (a path in the middle of a morph) can
+            # disagree about nesting: a hole without an outer ring around
+            # it is filled as an outer ring of its own.
+            outers = [j for j in containers[i] if j in groups]
+            if outers:
+                parent = max(outers, key=lambda j: depth[j])
+                groups[parent][1].append(_oriented(ring, counter_clockwise=False))
+            else:
+                groups[i] = (_oriented(ring, counter_clockwise=True), [])
     return list(groups.values())
 
 

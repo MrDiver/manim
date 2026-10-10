@@ -313,3 +313,14 @@ def test_look_at_points_the_camera_at_the_target() -> None:
     assert (view @ [0.0, 0.0, 1.0, 0.0])[1] > 0.0  # world up is screen up
     with pytest.raises(ValueError, match="parallel"):
         Camera.look_at((0.0, 0.0, 5.0))
+
+
+def test_rings_that_cross_still_fill() -> None:
+    """A path in the middle of a morph can have rings that cross, so they
+    disagree about nesting: here a ring lies in a hole that sticks out of
+    its outer ring. It is filled as an outer ring of its own."""
+    outer = corner_points([(0, 0), (4, 0), (4, 4), (0, 4)], closed=True)
+    crossing_hole = corner_points([(3, 1), (3, 3), (6, 3), (6, 1)], closed=True)  # its first midpoint is inside outer
+    inside_hole_only = corner_points([(5, 1.5), (5.5, 1.5), (5.5, 2), (5, 2)], closed=True)
+    mesh = tessellate_fill(np.vstack([outer, crossing_hole, inside_hole_only]))
+    assert len(mesh) > 0
