@@ -2,7 +2,8 @@
 core (manimx.animation, manimx.robjects).
 
 Shapes built on the core node classes, the built-in animations, rate
-functions, direction constants, geometry generators and the glTF loader.
+functions, direction constants, geometry generators, the glTF loader,
+the SVG reader and Typst text.
 Nothing in the core imports this package, so it can be changed, replaced
 or extended without touching how animation and rendering work.
 """
@@ -14,6 +15,8 @@ from .curves3d import ParametricCurve3D
 from .gltf import load_gltf
 from .shapes2d import Circle, Dot, Polyline, Rectangle, RegularPolygon, Square, Triangle
 from .shapes3d import Box, ParametricSurface, Sphere, Torus
+from .svg import SVG, read_svg
+from .typst import Typst, TypstMath
 
 __all__ = [
     "DEGREES",
@@ -46,14 +49,18 @@ __all__ = [
     "Rectangle",
     "RegularPolygon",
     "Rotate",
+    "SVG",
     "ShrinkToCenter",
     "Sphere",
     "Square",
     "Torus",
     "Triangle",
+    "Typst",
+    "TypstMath",
     "Uncreate",
     "Write",
     "geometry",
     "load_gltf",
     "rate_functions",
+    "read_svg",
 ]

@@ -45,7 +45,8 @@
   },
   "performance": {
     "workers": 1,
-    "frames_in_flight": 3
+    "frames_in_flight": 3,
+    "core": true
   },
   "scenes": {
     "Intro": {
@@ -63,6 +64,10 @@
     "PortalOrbit": {
       "module": "scenes.portal_orbit",
       "class": "PortalOrbit"
+    },
+    "Formulas": {
+      "module": "scenes.formulas",
+      "class": "Formulas"
     }
   },
   "timeline": {
