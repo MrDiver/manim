@@ -9,6 +9,9 @@ use pyo3::prelude::*;
 
 use glam::{DQuat, DVec3};
 
+use std::sync::Arc;
+
+use crate::paths;
 use crate::value::{Kind, Value};
 
 pub enum Contribution {
@@ -30,11 +33,34 @@ pub enum Contribution {
     Turn { axis: [f64; 3], angle: f64 },
     /// Recorded values of a `Simulation`, interpolated.
     Keyframes(Keyframes),
+    /// From `start` to `end` while the progress runs through `window`
+    /// (`Morph`, the style changes of `Write`).
+    Between { start: Value, end: Value, window: Window },
+    /// The part of a path drawn so far (`Create`, `Write`); backwards when
+    /// `reverse` (`Uncreate`).
+    Partial { points: Value, window: Window, reverse: bool },
     /// No data form: `animation.contribution(signal, alpha, start)` in Python.
     Python {
         animation: Py<PyAny>,
         signal: Py<PyAny>,
     },
+}
+
+/// A stretch of an animation's progress, from `lower` to `upper`.
+pub struct Window {
+    pub lower: f64,
+    pub upper: f64,
+}
+
+impl Window {
+    /// `window()` in contributions.py: how far `alpha` is through the
+    /// window, in [0, 1]; a window of no width switches at its end.
+    fn progress(&self, alpha: f64) -> f64 {
+        if self.upper <= self.lower {
+            return if alpha >= self.upper { 1.0 } else { 0.0 };
+        }
+        ((alpha - self.lower) / (self.upper - self.lower)).clamp(0.0, 1.0)
+    }
 }
 
 /// `Simulation.times` and the recorded values of one signal.
@@ -73,6 +99,12 @@ impl Contribution {
                 angle * alpha,
             ))),
             Contribution::Keyframes(keyframes) => keyframes.at(py, kind, alpha),
+            Contribution::Between { start, end, window } => kind.interpolate(py, start, end, window.progress(alpha)),
+            Contribution::Partial { points, window, reverse } => {
+                let progress = window.progress(alpha);
+                let upper = if *reverse { 1.0 - progress } else { progress };
+                Ok(Value::Array(Arc::new(paths::partial_path(points.array()?, 0.0, upper))))
+            }
             Contribution::Python { animation, signal } => {
                 let result = animation
                     .bind(py)

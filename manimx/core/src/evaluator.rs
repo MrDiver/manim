@@ -18,7 +18,7 @@ use std::sync::Arc;
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
-use crate::contribution::{Contribution, Keyframes};
+use crate::contribution::{Contribution, Keyframes, Window};
 use crate::rates::Rate;
 use crate::track::{Entry, Track};
 use crate::value::{Kind, Value};
@@ -299,6 +299,16 @@ fn parse_contribution(kind: &Kind, contribution: &Bound<'_, PyTuple>) -> PyResul
                 values: parsed,
             })
         }
+        "between" => Contribution::Between {
+            start: kind.value_from_py(&item(1)?)?,
+            end: kind.value_from_py(&item(2)?)?,
+            window: Window { lower: item(3)?.extract()?, upper: item(4)?.extract()? },
+        },
+        "partial" => Contribution::Partial {
+            points: kind.value_from_py(&item(1)?)?,
+            window: Window { lower: item(2)?.extract()?, upper: item(3)?.extract()? },
+            reverse: item(4)?.extract()?,
+        },
         "python" => Contribution::Python {
             animation: item(1)?.unbind(),
             signal: item(2)?.unbind(),

@@ -15,6 +15,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from .kinds import SignalKind
+from .paths import partial_path
+
 
 @dataclass(frozen=True, slots=True)
 class To:
@@ -66,6 +69,52 @@ class Keyframes:
     values: Sequence[Any]
 
 
-Contribution = To | By | Ramp | Power | Turn | Keyframes
+@dataclass(frozen=True, slots=True)
+class Between:
+    """From ``start`` to ``end`` (``kind.interpolate``) while the progress
+    runs from ``lower`` to ``upper``: ``start`` before, ``end`` after. A
+    window of no width (``lower == upper``) switches at ``upper``. Unlike
+    :class:`To`, it ignores the signal's value when the animation starts.
+    """
 
-__all__ = ["By", "Contribution", "Keyframes", "Power", "Ramp", "To", "Turn"]
+    start: Any
+    end: Any
+    lower: float = 0.0
+    upper: float = 1.0
+
+
+@dataclass(frozen=True, slots=True)
+class Partial:
+    """The part of the path ``points`` drawn so far: from its start to the
+    fraction the progress has reached within ``lower`` to ``upper``
+    (:func:`~.paths.partial_path`); backwards (from the full path to
+    nothing) when ``reverse``.
+    """
+
+    points: Any
+    lower: float = 0.0
+    upper: float = 1.0
+    reverse: bool = False
+
+
+Contribution = To | By | Ramp | Power | Turn | Keyframes | Between | Partial
+
+
+def window(alpha: float, lower: float, upper: float) -> float:
+    """How far ``alpha`` is through ``lower`` to ``upper``, in [0, 1]."""
+    if upper <= lower:
+        return 1.0 if alpha >= upper else 0.0
+    return min(1.0, max(0.0, (alpha - lower) / (upper - lower)))
+
+
+def evaluate(planned: Between | Partial, kind: SignalKind, alpha: float) -> Any:
+    """The value of the data forms that depend on nothing but themselves,
+    in Python: what ``contribution()`` returns for animations defined by
+    them (Morph, Create, Write).
+    """
+    progress = window(alpha, planned.lower, planned.upper)
+    if isinstance(planned, Between):
+        return kind.interpolate(planned.start, planned.end, progress)
+    return partial_path(planned.points, 0.0, 1.0 - progress if planned.reverse else progress)
+
+__all__ = ["Between", "By", "Contribution", "Keyframes", "Partial", "Power", "Ramp", "To", "Turn", "evaluate", "window"]

@@ -8,7 +8,7 @@ or extended without touching how animation and rendering work.
 """
 
 from . import geometry, rate_functions
-from .animations import FadeIn, FadeOut, GrowFromCenter, Indicate, Rotate, ShrinkToCenter
+from .animations import Create, DrawBorderThenFill, FadeIn, FadeOut, GrowFromCenter, Indicate, Morph, Rotate, ShrinkToCenter, Uncreate, Write
 from .constants import DEGREES, DL, DOWN, DR, IN, LEFT, ORIGIN, OUT, PI, RIGHT, TAU, UL, UP, UR
 from .curves3d import ParametricCurve3D
 from .gltf import load_gltf
@@ -32,11 +32,14 @@ __all__ = [
     "UR",
     "Box",
     "Circle",
+    "Create",
     "Dot",
+    "DrawBorderThenFill",
     "FadeIn",
     "FadeOut",
     "GrowFromCenter",
     "Indicate",
+    "Morph",
     "ParametricCurve3D",
     "ParametricSurface",
     "Polyline",
@@ -48,6 +51,8 @@ __all__ = [
     "Square",
     "Torus",
     "Triangle",
+    "Uncreate",
+    "Write",
     "geometry",
     "load_gltf",
     "rate_functions",

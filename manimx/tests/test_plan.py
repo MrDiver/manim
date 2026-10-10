@@ -17,6 +17,10 @@ from manimx.animation.scene import PreparedScene
 from manimx.project import Project
 from manimx.userland import (
     PI,
+    Create,
+    Morph,
+    Uncreate,
+    Write,
     RIGHT,
     UP,
     Circle,
@@ -83,6 +87,12 @@ class EveryAnimation(Scene):
 
         self.play(Simulation(fall, duration=1.0))
         self.play(FadeOut(square, shift=RIGHT), ShrinkToCenter(circle))
+        star = Group(Square(side_length=1.0, fill_opacity=0.8), Circle(radius=0.3).shift(RIGHT), name="star")
+        self.play(Create(star))
+        self.play(Morph(star, Group(Circle(radius=1.2, color=RED), name="ring").shift(UP)))
+        words = Group(*(Square(side_length=0.4).shift(RIGHT * i) for i in range(5)), name="words")
+        self.play(Write(words))
+        self.play(Uncreate(words))
 
 
 def test_every_built_in_animation() -> None:

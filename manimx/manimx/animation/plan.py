@@ -36,7 +36,7 @@ from ..renderer.config import ViewState
 from ..robjects import Transform
 from ..robjects.planned_frame import PlannedFrame
 from .clipping_group import ClippingGroup
-from .contributions import By, Contribution, Keyframes, Power, Ramp, To, Turn
+from .contributions import Between, By, Contribution, Keyframes, Partial, Power, Ramp, To, Turn
 from .curve3d import Curve3D
 from .group import Group
 from .kinds import (
@@ -333,6 +333,10 @@ def _contribution(planned: Contribution) -> tuple:
         return ("turn", planned.axis, planned.angle)
     if isinstance(planned, Keyframes):
         return ("keyframes", planned.run_time, list(planned.times), list(planned.values))
+    if isinstance(planned, Between):
+        return ("between", planned.start, planned.end, planned.lower, planned.upper)
+    if isinstance(planned, Partial):
+        return ("partial", planned.points, planned.lower, planned.upper, planned.reverse)
     raise TypeError(f"unknown contribution {planned!r}")
 
 

@@ -21,7 +21,9 @@ from typing import Any
 
 import numpy as np
 
+from ..animation.paths import POINTS_PER_CURVE, partial_curve
 from ..robjects import MeshData
+from ..robjects.rbezier_path import TOLERANCE_FOR_POINT_EQUALITY
 
 
 def arc_points(
@@ -197,3 +199,62 @@ __all__ = [
     "surface_mesh",
     "torus_mesh",
 ]
+
+
+# -- aligning paths (Morph) ---------------------------------------------------------
+
+
+def subpaths(points: np.ndarray) -> list[np.ndarray]:
+    """``points`` split into continuous subpaths (same layout): a new one
+    wherever a curve does not start where the previous one ended.
+    """
+    curves = points.reshape(-1, POINTS_PER_CURVE, points.shape[1])
+    if len(curves) == 0:
+        return []
+    gaps = np.linalg.norm(curves[1:, 0] - curves[:-1, -1], axis=1)
+    breaks = np.flatnonzero(gaps > TOLERANCE_FOR_POINT_EQUALITY) + 1
+    return [part.reshape(-1, points.shape[1]) for part in np.split(curves, breaks)]
+
+
+def insert_curves(points: np.ndarray, count: int) -> np.ndarray:
+    """The same path with ``count`` more curves: every curve is cut into
+    equal pieces, the extra pieces spread evenly over the path (Manim's
+    ``insert_n_curves_to_point_list``).
+    """
+    if count <= 0:
+        return points
+    curves = points.reshape(-1, POINTS_PER_CURVE, points.shape[1])
+    current = len(curves)
+    target = current + count
+    pieces_per_curve = np.bincount((np.arange(target) * current) // target, minlength=current)
+    pieces = []
+    for curve, pieces_here in zip(curves, pieces_per_curve, strict=True):
+        cuts = np.linspace(0.0, 1.0, pieces_here + 1)
+        pieces += [partial_curve(curve, lower, upper) for lower, upper in zip(cuts[:-1], cuts[1:], strict=True)]
+    return np.concatenate(pieces)
+
+
+def align_paths(first: np.ndarray, second: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Both paths with the same number of subpaths and of curves in each,
+    so they interpolate point by point (Manim's ``align_points``). A path
+    with fewer subpaths gets empty ones (four times its last point); in
+    each pair of subpaths the shorter one gets more curves. An empty path
+    becomes a point at the other's center.
+    """
+    first, second = _not_empty(first, second), _not_empty(second, first)
+    parts_1, parts_2 = subpaths(first), subpaths(second)
+    aligned_1, aligned_2 = [], []
+    for index in range(max(len(parts_1), len(parts_2))):
+        part_1 = parts_1[index] if index < len(parts_1) else np.repeat(parts_1[-1][-1:], POINTS_PER_CURVE, axis=0)
+        part_2 = parts_2[index] if index < len(parts_2) else np.repeat(parts_2[-1][-1:], POINTS_PER_CURVE, axis=0)
+        difference = (len(part_2) - len(part_1)) // POINTS_PER_CURVE
+        aligned_1.append(insert_curves(part_1, difference))
+        aligned_2.append(insert_curves(part_2, -difference))
+    return np.concatenate(aligned_1), np.concatenate(aligned_2)
+
+
+def _not_empty(points: np.ndarray, other: np.ndarray) -> np.ndarray:
+    if len(points):
+        return points
+    center = other.mean(axis=0) if len(other) else np.zeros(points.shape[1])
+    return np.repeat(center[None], POINTS_PER_CURVE, axis=0)

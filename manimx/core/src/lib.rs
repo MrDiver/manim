@@ -11,6 +11,7 @@ mod graph;
 mod lights;
 mod meshes;
 mod packer;
+mod paths;
 mod rates;
 mod records;
 mod shadows;
