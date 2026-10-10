@@ -249,3 +249,17 @@ def test_morph_matching_matches_shapes_of_any_size() -> None:
     (inbetween,) = morph.inbetweens
     (middle,) = _drawn(prepared, 1.0)
     assert middle.uid == inbetween.uid and middle.alpha == 1.0  # moved, not faded
+
+
+def test_morph_matching_pairs_paths_by_index_or_name() -> None:
+    from manimx.userland import TypstMath
+
+    two, three = TypstMath("x + x = 2 x"), TypstMath("x + x + x = 3 x")
+    morph = MorphMatching(two, three, pairs=[("2", "3"), (0, 0), (0, 2)])
+    starts = [inbetween.name for inbetween in morph.inbetweens[:3]]
+    assert starts == ["2-morph", "x-morph", "x-morph"]  # the first x became two
+    prepare(lambda s: (s.add(two), s.play(morph)))
+    with pytest.raises(ValueError, match=r"3 paths named 'x' \(at the indices \[0, 2, 5\]"):
+        MorphMatching(two, three, pairs=[("x", 0)])
+    with pytest.raises(IndexError, match="no index 9"):
+        MorphMatching(two, three, pairs=[(9, 0)])

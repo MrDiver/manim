@@ -374,13 +374,30 @@ class MorphMatching(Morph[MorphTarget]):
     out while drifting towards where the target's appear. Pairs are found
     in tree order, each path used once. Like :class:`Morph`, it changes
     neither side and leaves ``target`` in the scene.
+
+    ``pairs`` says which paths become which, before any matching: each
+    ``(source, target)`` names a path of each side by its index among the
+    side's paths (in tree order; the preview's Indices toggle shows them
+    for a formula) or by its name, if only one path has it (a Typst glyph
+    is named by its character). A source may become several targets, and
+    several sources one target::
+
+        MorphMatching(two, three, pairs=[("2", "3"), (0, 0), (0, 2)])  # one x becomes two
     """
 
     tolerance: float = 1e-3
     """How far points may differ for paths to match, as a fraction of
     the path's size."""
+    pairs: Sequence[tuple[int | str, int | str]] = ()
+    """Paths to morph into each other, before the matching (see above)."""
 
     def _pair(self, sources: list[Node], targets: list[Node]) -> None:
+        chosen = [(_path_of(sources, source, "source"), _path_of(targets, target, "target")) for source, target in self.pairs]
+        for source, target in chosen:
+            self._inbetween(source, target)
+        taken = {id(path) for pair in chosen for path in pair}
+        sources = [source for source in sources if id(source) not in taken]
+        targets = [target for target in targets if id(target) not in taken]
         free = [(target, self._normalized_points(target)) for target in targets]
         matched: dict[int, Node] = {}
         for source in sources:
@@ -565,6 +582,19 @@ class Write(DrawBorderThenFill):
 
 
 _STYLE_SIGNALS = ("fill_color", "fill_opacity", "stroke_color", "stroke_width", "stroke_opacity", "stroke_joint", "stroke_cap")
+
+
+def _path_of(paths: list[Node], key: int | str, side: str) -> Node:
+    """The path ``key`` (an index or a unique name) of a MorphMatching side."""
+    if isinstance(key, int):
+        if not -len(paths) <= key < len(paths):
+            raise IndexError(f"the {side} has {len(paths)} paths, no index {key}")
+        return paths[key]
+    found = [index for index, path in enumerate(paths) if path.name == key]
+    if len(found) != 1:
+        where = f"at the indices {found}; give one of them" if found else "none"
+        raise ValueError(f"the {side} has {len(found)} paths named {key!r} ({where})")
+    return paths[found[0]]
 
 
 def _drawn_paths(node: Node) -> list[Node]:
