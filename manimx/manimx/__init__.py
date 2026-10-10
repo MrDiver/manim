@@ -9,7 +9,7 @@ __version__ = "0.1.0"
 from .animation import *  # noqa: F403
 from .animation import __all__ as _animation_all
 from .renderer import RenderConfig, Renderer, RenderService
-from .robjects import CapStyle, JointType, MeshData, PbrMaterial, Texture
+from .robjects import CapStyle, JointType, MeshData, PbrMaterial, SurfaceShader, Texture
 from .testing import assert_snapshot, visual_test
 from .userland import *  # noqa: F403
 from .userland import __all__ as _userland_all
@@ -30,6 +30,7 @@ __all__ = [
     "Renderer",
     "Texture",
     "RenderService",
+    "SurfaceShader",
     "__version__",
     "assert_snapshot",
     "package_name",

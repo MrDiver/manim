@@ -2,8 +2,10 @@
 //! pipelines and draws into the G-buffer. Ports `MeshPass`
 //! (manimx/renderer/webgpu/mesh_pass.py).
 //!
-//! Draws are grouped by the material's texture set: one bind group and one
-//! `multi_draw_indexed_indirect` per group. Textures are uploaded once per
+//! Draws are grouped by the material's texture set and surface shader: one
+//! bind group and one `multi_draw_indexed_indirect` per group, and one
+//! pipeline per surface shader (mesh.wgsl with the shader's code in place
+//! of surface_shader.wgsl's default). Textures are uploaded once per
 //! (texture, color space) and kept while any frame uses them; their mip
 //! levels come from Python (core_callbacks.texture_levels), made as the
 //! reference makes them.
@@ -51,12 +53,15 @@ pub struct MeshPass {
     /// (texture uid, sRGB) -> view.
     textures: HashMap<(u64, bool), wgpu::TextureView>,
     material_groups: HashMap<Vec<u64>, wgpu::BindGroup>,
-    pipelines: HashMap<u32, wgpu::RenderPipeline>,
+    /// By sample count and surface shader uid (0: none).
+    pipelines: HashMap<(u32, u64), wgpu::RenderPipeline>,
+    /// mesh.wgsl with each surface shader's code, by shader uid.
+    surface_shaders: HashMap<u64, wgpu::ShaderModule>,
     shadow_pipeline: Option<wgpu::RenderPipeline>,
     scene_group: Option<wgpu::BindGroup>,
     targets_generation: u64,
-    /// (material group key, first draw, draw count) per texture set.
-    draw_groups: Vec<(Vec<u64>, u64, u32)>,
+    /// (material group key, surface shader uid, first draw, draw count) per group.
+    draw_groups: Vec<(Vec<u64>, u64, u64, u32)>,
     shadows: HashMap<i32, (u64, u32)>,
     shadow_groups: HashMap<u64, wgpu::BindGroup>,
 }
@@ -94,6 +99,7 @@ impl MeshPass {
             textures: HashMap::new(),
             material_groups: HashMap::new(),
             pipelines: HashMap::new(),
+            surface_shaders: HashMap::new(),
             shadow_pipeline: None,
             scene_group: None,
             targets_generation: u64::MAX,
@@ -145,6 +151,7 @@ impl MeshPass {
 
         let mut used_textures = HashSet::new();
         let mut used_groups = HashSet::new();
+        let mut used_shaders = HashSet::new();
         self.draw_groups.clear();
         let mut first = 0u64;
         for group in data.groups {
@@ -179,29 +186,62 @@ impl MeshPass {
                 let bind_group = self.create_material_group(gpu, &uids);
                 self.material_groups.insert(uids.clone(), bind_group);
             }
+            let shader = self.surface_shader(py, gpu, &group.surface_shader, callbacks_module)?;
+            used_shaders.insert(shader);
             self.draw_groups
-                .push((uids, first, group.draws.len() as u32));
+                .push((uids, shader, first, group.draws.len() as u32));
             first += group.draws.len() as u64;
         }
         // Forget textures and bind groups no longer used by any mesh.
         self.textures.retain(|key, _| used_textures.contains(key));
         self.material_groups
             .retain(|key, _| used_groups.contains(key));
+        self.surface_shaders
+            .retain(|uid, _| used_shaders.contains(uid));
+        self.pipelines
+            .retain(|(_, uid), _| *uid == 0 || used_shaders.contains(uid));
         Ok(())
+    }
+
+    /// The uid of a group's surface shader (0 for none), its shader module
+    /// compiled on first use.
+    fn surface_shader(
+        &mut self,
+        py: Python<'_>,
+        gpu: &Gpu,
+        shader: &Py<PyAny>,
+        callbacks_module: &Bound<'_, PyAny>,
+    ) -> PyResult<u64> {
+        let shader = shader.bind(py);
+        if shader.is_none() {
+            return Ok(0);
+        }
+        let uid: u64 = shader.getattr("uid")?.extract()?;
+        if let Entry::Vacant(slot) = self.surface_shaders.entry(uid) {
+            let default: String = callbacks_module
+                .getattr("DEFAULT_SURFACE_SHADER")?
+                .extract()?;
+            let code: String = shader.call_method0("wgsl")?.extract()?;
+            slot.insert(gpu.checked_shader("mesh.wgsl", &[(&default, &code)])?);
+        }
+        Ok(uid)
     }
 
     pub fn draw(&mut self, gpu: &Gpu, pass: &mut wgpu::RenderPass, sample_count: u32) {
         if self.draw_groups.is_empty() {
             return;
         }
-        if !self.pipelines.contains_key(&sample_count) {
-            let pipeline = self.create_pipeline(gpu, sample_count);
-            self.pipelines.insert(sample_count, pipeline);
+        for (_, shader, _, _) in &self.draw_groups {
+            if !self.pipelines.contains_key(&(sample_count, *shader)) {
+                let module = self.surface_shaders.get(shader).unwrap_or(&self.shader);
+                let pipeline = self.create_pipeline(gpu, module, sample_count);
+                self.pipelines.insert((sample_count, *shader), pipeline);
+            }
         }
-        pass.set_pipeline(&self.pipelines[&sample_count]);
         pass.set_bind_group(0, self.scene_group.as_ref(), &[]);
         pass.set_index_buffer(self.indices.buffer.slice(..), wgpu::IndexFormat::Uint32);
-        for (key, first, count) in &self.draw_groups {
+        for (key, shader, first, count) in &self.draw_groups {
+            pass.set_pipeline(&self.pipelines[&(sample_count, *shader)]);
             pass.set_bind_group(1, self.material_groups.get(key), &[]);
             pass.multi_draw_indexed_indirect(&self.indirect.buffer, first * DRAW_SIZE, *count);
         }
@@ -243,7 +283,12 @@ impl MeshPass {
 
     // -- setup ------------------------------------------------------------
 
-    fn create_pipeline(&self, gpu: &Gpu, sample_count: u32) -> wgpu::RenderPipeline {
+    fn create_pipeline(
+        &self,
+        gpu: &Gpu,
+        module: &wgpu::ShaderModule,
+        sample_count: u32,
+    ) -> wgpu::RenderPipeline {
         let layout = gpu
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -260,7 +305,7 @@ impl MeshPass {
                 label: Some("mesh"),
                 layout: Some(&layout),
                 vertex: wgpu::VertexState {
-                    module: &self.shader,
+                    module,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
                     buffers: &[],
@@ -283,7 +328,7 @@ impl MeshPass {
                     ..Default::default()
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &self.shader,
+                    module,
                     entry_point: Some("fs_main"),
                     compilation_options: Default::default(),
                     targets: &targets,

@@ -72,6 +72,10 @@
     "Monitors": {
       "module": "scenes.monitors",
       "class": "Monitors"
+    },
+    "Shaders": {
+      "module": "scenes.shaders",
+      "class": "Shaders"
     }
   },
   "timeline": {

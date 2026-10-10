@@ -99,6 +99,21 @@ impl Gpu {
         Ok(self.module(filename, &code))
     }
 
+    /// `shader`, with errors in the code (e.g. a user's surface shader)
+    /// returned instead of aborting the process.
+    pub fn checked_shader(
+        &self,
+        filename: &str,
+        replacements: &[(&str, &str)],
+    ) -> PyResult<wgpu::ShaderModule> {
+        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let module = self.shader(filename, replacements)?;
+        match pollster::block_on(scope.pop()) {
+            None => Ok(module),
+            Some(error) => Err(PyRuntimeError::new_err(format!("{filename}: {error}"))),
+        }
+    }
+
     pub fn module(&self, label: &str, code: &str) -> wgpu::ShaderModule {
         self.device
             .create_shader_module(wgpu::ShaderModuleDescriptor {

@@ -1,4 +1,4 @@
-from .material import PbrMaterial, Texture
+from .material import PbrMaterial, SurfaceShader, Texture
 from .mesh import MeshData
 from .rclipping_group import RClippingGroup
 from .rcurve3d import RCurve3D
@@ -17,6 +17,7 @@ __all__ = [
     "JointType",
     "MeshData",
     "PbrMaterial",
+    "SurfaceShader",
     "Quaternion",
     "RClippingGroup",
     "RCurve3D",

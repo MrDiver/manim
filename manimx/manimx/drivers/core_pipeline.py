@@ -101,8 +101,9 @@ class CoreFramePipeline:
 
     def _views(self, frame: Frame, time: float) -> list[tuple]:
         """Each view as the core takes it: graph, state, key, config values,
-        the camera's Frame record, and the config values and Frame record
-        of each of its camera views.
+        the camera's Frame record, the config values and Frame record of
+        each of its camera views, and whether its picture depends on the
+        time.
         """
         views = [frame] if isinstance(frame, ViewState) else list(frame)
         described = []
@@ -118,7 +119,7 @@ class CoreFramePipeline:
                     for camera_view in view.camera_views
                 )
             ]
-            described.append((root.graph, root.state, root.key, config_values(config), camera_frame(config, 0).tobytes(), pictures))
+            described.append((root.graph, root.state, root.key, config_values(config), camera_frame(config, 0).tobytes(), pictures, root.uses_time))
         return described
 
 

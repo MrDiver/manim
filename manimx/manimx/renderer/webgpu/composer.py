@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import wgpu
 
-from ...robjects import RClippingGroup, RGroup, RNode
+from ...robjects import RClippingGroup, RGroup, RNode, RShape3D
 from ...robjects.planned_frame import PlannedFrame
 from ..config import Camera, CameraViewState, Frame, RenderConfig, ViewState
 from ..effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap
@@ -124,7 +124,9 @@ class FrameComposer:
             keys = [self._keys.key(views) for _, _, views in sub_frames]
             self._keys.next_frame()
             frame_key = (tuple(keys), dataclasses.replace(config, time=0.0))
-            if self._last is not None and self._last[0] == frame_key:
+            if any(key is None for key in keys):
+                frame_key = None  # the picture depends on the time
+            elif self._last is not None and self._last[0] == frame_key:
                 self.held = True
                 return self._last[1]
         else:
@@ -285,32 +287,50 @@ class _TreeKeys:
     """
 
     def __init__(self) -> None:
-        self._previous: dict[int, tuple[RNode, object]] = {}
-        self._current: dict[int, tuple[RNode, object]] = {}
+        self._previous: dict[int, _KeyEntry] = {}
+        self._current: dict[int, _KeyEntry] = {}
 
     def key(self, views: list[_View]) -> object:
-        return tuple((self._node(root), camera, camera_views) for root, camera, camera_views in views)
+        """The key of ``views``; None when the picture depends on the time
+        (a surface shader may read ``frame.time``)."""
+        keys = [(self._node(root), camera, camera_views) for root, camera, camera_views in views]
+        if any(timed for (_, timed), _, _ in keys):
+            return None
+        return tuple((key, camera, camera_views) for (key, _), camera, camera_views in keys)
 
     def next_frame(self) -> None:
         self._previous, self._current = self._current, {}
 
-    def _node(self, node: RNode | None) -> object:
+    def _node(self, node: RNode | None) -> tuple[object, bool]:
+        """``(key, whether the subtree's picture depends on the time)``."""
         if node is None:
-            return None
+            return None, False
         if isinstance(node, PlannedFrame):
-            return ("planned", id(node.graph), node.key)  # the graph is held by its plan
+            return ("planned", id(node.graph), node.key), node.uses_time  # the graph is held by its plan
         entry = self._current.get(id(node)) or self._previous.get(id(node))
         if entry is None or entry[0] is not node:
             placement = (node.transform, node.alpha, node.visible)
             if isinstance(node, RGroup):
-                key: object = ("group", placement, tuple(self._node(child) for child in node.children))
+                children = [self._node(child) for child in node.children]
             elif isinstance(node, RClippingGroup):
-                key = ("clip", placement, node.one_sided, self._node(node.mask), self._node(node.content))
+                children = [self._node(node.mask), self._node(node.content)]
+            else:
+                children = []
+            timed = any(timed for _, timed in children) or (isinstance(node, RShape3D) and node.material.surface_shader is not None)
+            keys = tuple(key for key, _ in children)
+            if isinstance(node, RGroup):
+                key: object = ("group", placement, keys)
+            elif isinstance(node, RClippingGroup):
+                key = ("clip", placement, node.one_sided, *keys)
             else:
                 key = ("leaf", id(node))
-            entry = (node, key)
+            entry = (node, key, timed)
         self._current[id(node)] = entry
-        return entry[1]
+        return entry[1], entry[2]
+
+
+_KeyEntry = tuple[RNode, object, bool]
+"""A node, its key and whether its picture depends on the time."""
 
 
 def _validate(effects: tuple[Effect, ...]) -> None:

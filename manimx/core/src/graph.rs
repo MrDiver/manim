@@ -44,9 +44,11 @@ pub struct MeshFields {
     pub mesh: usize,
     /// base_color, opacity, metallic, roughness, emissive,
     /// emissive_strength, normal_scale, occlusion_strength and the five
-    /// textures, in the order of `Shape3D._material_signals()`.
+    /// textures and the surface shader, in the order of
+    /// `Shape3D._material_signals()`.
     pub material: Vec<usize>,
     pub textures: [usize; 5],
+    pub surface_shader: usize,
     pub cast_shadows: usize,
     /// positions, rotations, scales, colors.
     pub particles: Option<[usize; 4]>,
@@ -220,6 +222,7 @@ fn parse_node(
             "normal_texture",
             "occlusion_texture",
             "emissive_texture",
+            "surface_shader",
         ];
         let material = names
             .iter()
@@ -242,10 +245,12 @@ fn parse_node(
         } else {
             None
         };
+        let surface_shader = material[13];
         Ok(NodeData::Mesh(MeshFields {
             mesh: field("mesh")?,
             material,
             textures,
+            surface_shader,
             cast_shadows: field("cast_shadows")?,
             particles,
         }))

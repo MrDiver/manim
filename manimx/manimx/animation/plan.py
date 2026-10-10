@@ -110,6 +110,8 @@ class ScenePlan:
         """The core's scene graph, or None when a node is of a class the
         core cannot draw (its scene is then drawn from snapshots)."""
         self._render_slots = sorted({self._slots[s.id] for root in scene.roots for node in root.family() for s in node.signals()})
+        self._shader_slots = sorted({self.slot(node.surface_shader) for root in scene.roots for node in root.family() if isinstance(node, Shape3D)})
+        """Slots of every surface shader: one in use makes a frame depend on time."""
 
     @property
     def signals(self) -> list[Signal]:
@@ -141,7 +143,7 @@ class ScenePlan:
         state = self.evaluator.state()
         value = lambda signal: state.value(self.slot(signal))  # noqa: E731
         return ViewState(
-            PlannedFrame(self.graph, state, state.key(self._render_slots)),
+            PlannedFrame(self.graph, state, state.key(self._render_slots), any(state.value(slot) is not None for slot in self._shader_slots)),
             self.scene.camera.render_camera(value),
             camera_views(self.scene.roots, value),
         )
@@ -251,7 +253,7 @@ _FIELDS: dict[str, tuple[str, ...]] = {
     "shape3d": (
         "mesh", "base_color", "opacity", "metallic", "roughness", "emissive", "emissive_strength", "normal_scale",
         "occlusion_strength", "base_color_texture", "metallic_roughness_texture", "normal_texture",
-        "occlusion_texture", "emissive_texture", "cast_shadows",
+        "occlusion_texture", "emissive_texture", "surface_shader", "cast_shadows",
     ),  # fmt: skip
     "directional_light": ("color", "intensity", "size", "cast_shadows"),
     "point_light": ("color", "intensity", "size", "cast_shadows", "range"),

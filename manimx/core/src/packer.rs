@@ -257,6 +257,7 @@ impl Packer {
             let textures = PyTuple::new(py, group.textures.iter().map(|t| t.bind(py)))?;
             groups.append((
                 textures,
+                group.surface_shader.bind(py),
                 PyBytes::new(py, bytemuck::cast_slice(&group.draws)),
             ))?;
         }

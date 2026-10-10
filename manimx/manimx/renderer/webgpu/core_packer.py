@@ -115,7 +115,10 @@ def _mesh_batch(meshes: dict) -> MeshBatch:
         materials=_records(meshes["materials"], MATERIAL_DTYPE),
         lights=np.frombuffer(meshes["lights"], LIGHT_DTYPE).copy(),
         light_items=[],
-        groups=[DrawGroup(textures, list(map(tuple, _records(draws, DRAW_INDEXED_DTYPE).tolist()))) for textures, draws in meshes["groups"]],
+        groups=[
+            DrawGroup(textures, surface_shader, list(map(tuple, _records(draws, DRAW_INDEXED_DTYPE).tolist())))
+            for textures, surface_shader, draws in meshes["groups"]
+        ],
         shadow_draws={scope: _records(draws, DRAW_INDEXED_DTYPE) for scope, draws in meshes["shadow_draws"]},
         dirty=meshes["dirty"],
     )

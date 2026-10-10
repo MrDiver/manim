@@ -123,7 +123,8 @@ impl FrameRenderer {
     /// Render frame `index` from `sub_frames`: a list of `(weight, views)`,
     /// each view `(graph, state, key, config, frame, camera_views)` with
     /// the `config_values()` tuple, the camera's Frame record (bytes) and
-    /// a `(config, frame)` pair per camera view of the view.
+    /// a `(config, frame)` pair per camera view of the view, and whether
+    /// the view's picture depends on the time.
     /// Returns True when the frame shows exactly what the frame before
     /// showed: then nothing is rendered or read back for it.
     fn render(
@@ -309,8 +310,8 @@ impl FrameRenderer {
 
 impl FrameRenderer {
     /// Equal keys promise equal frames: every view's graph, state key and
-    /// Frame record (without the time). None with a shader effect, which
-    /// may read the time.
+    /// Frame record (without the time). None with a shader effect or a
+    /// surface shader in a view, which may read the time.
     fn frame_key(
         &self,
         sub_frames: &[(f32, Vec<Bound<'_, PyTuple>>)],
@@ -319,6 +320,14 @@ impl FrameRenderer {
             return Ok(None);
         }
         let mut key = Vec::new();
+        for (_, views) in sub_frames {
+            for view in views {
+                // A surface shader may read the time: such frames are never held.
+                if view.get_item(6)?.extract::<bool>()? {
+                    return Ok(None);
+                }
+            }
+        }
         for (weight, views) in sub_frames {
             key.extend(weight.to_le_bytes());
             key.extend((views.len() as u64).to_le_bytes());

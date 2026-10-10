@@ -23,6 +23,10 @@ class PlannedFrame:
     key: bytes
     """Equal keys (with the same graph) promise equal pictures: the
     versions of every slot a node reads."""
+    uses_time: bool = False
+    """Whether the picture depends on the frame's time apart from the
+    values (a surface shader may read ``frame.time``): such a frame is
+    never held."""
 
 
 __all__ = ["PlannedFrame"]

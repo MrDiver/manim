@@ -15,7 +15,8 @@ import wgpu
 from PIL import Image
 from wgpu.backends.wgpu_native.extras import multi_draw_indexed_indirect
 
-from ...robjects import Texture
+from ...robjects import SurfaceShader, Texture
+from ...robjects.material import DEFAULT_SURFACE_SHADER
 from .frame import FRAME_DTYPE
 from .gpu import (
     DEPTH_FORMAT,
@@ -62,10 +63,12 @@ class MeshPass:
         ]
         self._textures: dict[tuple[int, bool], wgpu.GPUTexture] = {}
         self._material_groups: dict[tuple[int, ...], wgpu.GPUBindGroup] = {}
-        self._pipelines: dict[int, wgpu.GPURenderPipeline] = {}
+        self._pipelines: dict[tuple[int, int], wgpu.GPURenderPipeline] = {}
+        """By sample count and surface shader uid (0: none)."""
+        self._surface_shaders: dict[int, wgpu.GPUShaderModule] = {}
         self._scene_group: wgpu.GPUBindGroup | None = None
         self._mask_layers: wgpu.GPUTextureView | None = None
-        self._draw_groups: list[tuple[wgpu.GPUBindGroup, int, int]] = []
+        self._draw_groups: list[tuple[wgpu.GPUBindGroup, SurfaceShader | None, int, int]] = []
         self._shadows: dict[int, tuple[int, int]] = {}
         self._shadow_groups: dict[tuple[int, int], wgpu.GPUBindGroup] = {}
         self._shadow_pipeline: wgpu.GPURenderPipeline | None = None
@@ -96,22 +99,27 @@ class MeshPass:
 
         used_textures: set[tuple[int, bool]] = set()
         used_groups: set[tuple[int, ...]] = set()
+        used_shaders: set[int] = set()
         self._draw_groups = []
         first = 0
         for group in batch.groups:
             key = tuple(t.uid if t else 0 for t in group.textures)
             used_groups.add(key)
+            if group.surface_shader is not None:
+                used_shaders.add(group.surface_shader.uid)
             used_textures.update(
                 (t.uid, srgb) for t, srgb in zip(group.textures, _SLOT_IS_SRGB) if t is not None
             )
             if key not in self._material_groups:
                 self._material_groups[key] = self._create_material_group(group.textures)
-            self._draw_groups.append((self._material_groups[key], first, len(group.draws)))
+            self._draw_groups.append((self._material_groups[key], group.surface_shader, first, len(group.draws)))
             first += len(group.draws)
 
         # Forget textures and bind groups no longer used by any mesh.
         self._textures = {k: v for k, v in self._textures.items() if k in used_textures}
         self._material_groups = {k: v for k, v in self._material_groups.items() if k in used_groups}
+        self._surface_shaders = {k: v for k, v in self._surface_shaders.items() if k in used_shaders}
+        self._pipelines = {k: v for k, v in self._pipelines.items() if k[1] == 0 or k[1] in used_shaders}
 
     @staticmethod
     def _write(buffer: GrowableBuffer, batch: MeshBatch, name: str, full_upload: bool) -> bool:
@@ -122,10 +130,14 @@ class MeshPass:
     def draw(self, render_pass: wgpu.GPURenderPassEncoder, sample_count: int) -> None:
         if not self._draw_groups:
             return
-        render_pass.set_pipeline(self._pipeline(sample_count))
         render_pass.set_bind_group(0, self._scene_group)
         render_pass.set_index_buffer(self._indices.buffer, wgpu.IndexFormat.uint32)
-        for material_group, first, count in self._draw_groups:
+        current = None
+        for material_group, surface_shader, first, count in self._draw_groups:
+            pipeline = self._pipeline(sample_count, surface_shader)
+            if pipeline is not current:
+                render_pass.set_pipeline(pipeline)
+                current = pipeline
             render_pass.set_bind_group(1, material_group)
             multi_draw_indexed_indirect(
                 render_pass,
@@ -204,15 +216,26 @@ class MeshPass:
 
     # -- setup --------------------------------------------------------------
 
-    def _pipeline(self, sample_count: int) -> wgpu.GPURenderPipeline:
-        if sample_count not in self._pipelines:
+    def _surface_shader(self, shader: SurfaceShader | None) -> wgpu.GPUShaderModule:
+        """mesh.wgsl with ``shader``'s code in place of the default surface shader."""
+        if shader is None:
+            return self._shader
+        module = self._surface_shaders.get(shader.uid)
+        if module is None:
+            module = self._surface_shaders[shader.uid] = self._context.shader("mesh.wgsl", {DEFAULT_SURFACE_SHADER: shader.wgsl()})
+        return module
+
+    def _pipeline(self, sample_count: int, shader: SurfaceShader | None = None) -> wgpu.GPURenderPipeline:
+        key = (sample_count, shader.uid if shader else 0)
+        if key not in self._pipelines:
             device = self._context.device
-            self._pipelines[sample_count] = device.create_render_pipeline(
+            module = self._surface_shader(shader)
+            self._pipelines[key] = device.create_render_pipeline(
                 label=f"mesh x{sample_count}",
                 layout=device.create_pipeline_layout(
                     bind_group_layouts=[self._scene_layout, self._material_layout]
                 ),
-                vertex={"module": self._shader, "entry_point": "vs_main", "buffers": []},
+                vertex={"module": module, "entry_point": "vs_main", "buffers": []},
                 primitive={
                     "topology": wgpu.PrimitiveTopology.triangle_list,
                     # Double sided: the fragment shader flips back-face normals.
@@ -225,12 +248,12 @@ class MeshPass:
                 },
                 multisample={"count": sample_count},
                 fragment={
-                    "module": self._shader,
+                    "module": module,
                     "entry_point": "fs_main",
                     "targets": [{"format": f} for f in GBUFFER_FORMATS],
                 },
             )
-        return self._pipelines[sample_count]
+        return self._pipelines[key]
 
     def _create_layouts(self) -> tuple[wgpu.GPUBindGroupLayout, wgpu.GPUBindGroupLayout]:
         device = self._context.device

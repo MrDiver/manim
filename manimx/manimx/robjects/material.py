@@ -36,6 +36,55 @@ class Texture:
         return self.image.shape[1], self.image.shape[0]
 
 
+_next_shader_uid = itertools.count(1)
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class SurfaceShader:
+    """WGSL that changes a Shape3D's surface per pixel, before lighting.
+
+    ``code`` defines ``fn shade(surface: Surface, in: SurfaceInput) -> Surface``
+    (and any helpers it needs). ``surface`` is what the material gives at
+    the pixel; the returned surface is lit, shadowed and tone mapped like
+    any other::
+
+        SurfaceShader('''
+            fn shade(surface: Surface, in: SurfaceInput) -> Surface {
+                var out = surface;
+                let stripes = step(0.5, fract(in.local_position.y * 4.0 + frame.time));
+                out.base_color = mix(surface.base_color, vec3<f32>(1.0), stripes);
+                return out;
+            }
+        ''')
+
+    ``Surface`` (surface.wgsl): ``position``, ``normal`` (world space,
+    unit), ``base_color`` (linear), ``alpha``, ``metallic``, ``roughness``,
+    ``occlusion``, ``emissive`` (linear radiance). ``SurfaceInput``
+    (material.wgsl): ``position`` (world), ``local_position`` (the mesh's
+    own coordinates), ``normal``, ``tangent``, ``uv``, ``front_facing``.
+    ``frame.time`` is the frame's time in seconds. Meshes are opaque: the
+    alpha is not used.
+
+    ``uid`` identifies the shader for GPU caches: one pipeline per shader,
+    however many shapes share it.
+    """
+
+    code: str
+    uid: int = field(default_factory=lambda: next(_next_shader_uid), init=False)
+
+    def __post_init__(self) -> None:
+        if "fn shade(" not in self.code:
+            raise ValueError("a SurfaceShader must define fn shade(surface: Surface, in: SurfaceInput) -> Surface")
+
+    def wgsl(self) -> str:
+        """The code that takes the place of DEFAULT_SURFACE_SHADER."""
+        return f"{self.code}\n\nfn shade_surface(surface: Surface, in: SurfaceInput) -> Surface {{\n    return shade(surface, in);\n}}\n"
+
+
+DEFAULT_SURFACE_SHADER = "fn shade_surface(surface: Surface, in: SurfaceInput) -> Surface { return surface; }"
+"""The line of surface_shader.wgsl that a SurfaceShader's code replaces."""
+
+
 def linear_rgb(color: ParsableManimColor) -> tuple[float, float, float]:
     """sRGB-encoded color (how Manim colors are written) to linear RGB."""
     srgb = np.asarray(ManimColor.parse(color).to_rgb(), dtype=np.float64)
@@ -71,6 +120,8 @@ class PbrMaterial:
     normal_texture: Texture | None = None
     occlusion_texture: Texture | None = None
     emissive_texture: Texture | None = None
+    surface_shader: SurfaceShader | None = None
+    """Changes the surface per pixel (see :class:`SurfaceShader`)."""
 
     def __post_init__(self) -> None:
         for name in ("opacity", "metallic", "roughness", "occlusion_strength"):

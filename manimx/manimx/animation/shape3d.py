@@ -22,6 +22,7 @@ signal                         kind      RShape3D field
 ``normal_texture``             DISCRETE  ``material.normal_texture``
 ``occlusion_texture``          DISCRETE  ``material.occlusion_texture``
 ``emissive_texture``           DISCRETE  ``material.emissive_texture``
+``surface_shader``             DISCRETE  ``material.surface_shader``
 ``cast_shadows``               DISCRETE  ``cast_shadows``
 =============================  ========  =================================
 
@@ -42,6 +43,7 @@ from ..robjects import (
     PbrMaterial,
     RNode,
     RShape3D,
+    SurfaceShader,
     Texture,
 )
 from ..utils.color import ParsableManimColor
@@ -65,7 +67,8 @@ class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
 
     ``material`` gives the initial value of every material signal;
     ``color``, ``metallic``, ``roughness``, ``opacity``, ``emissive`` and
-    ``emissive_strength`` override single ones.
+    ``emissive_strength`` override single ones, ``surface_shader``
+    sets a :class:`~manimx.robjects.SurfaceShader`.
     """
 
     def __init__(
@@ -80,6 +83,7 @@ class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
         opacity: float | None = None,
         emissive: ParsableManimColor | None = None,
         emissive_strength: float | None = None,
+        surface_shader: SurfaceShader | None = None,
         cast_shadows: bool = True,
         tags: Iterable[str] = (),
     ) -> None:
@@ -106,6 +110,7 @@ class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
         self.normal_texture = signal("normal_texture", base.normal_texture, DISCRETE)
         self.occlusion_texture = signal("occlusion_texture", base.occlusion_texture, DISCRETE)
         self.emissive_texture = signal("emissive_texture", base.emissive_texture, DISCRETE)
+        self.surface_shader = signal("surface_shader", _shader(base.surface_shader if surface_shader is None else surface_shader), DISCRETE)
         self.cast_shadows = signal("cast_shadows", cast_shadows, DISCRETE)
 
     def signals(self) -> Iterator[Signal]:
@@ -119,6 +124,7 @@ class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
         return (
             self.base_color, self.opacity, self.metallic, self.roughness, self.emissive,
             self.emissive_strength, self.normal_scale, self.occlusion_strength, *self._texture_signals(),
+            self.surface_shader,
         )  # fmt: skip
 
     def _texture_signals(self) -> tuple[RootSignal, ...]:
@@ -170,6 +176,11 @@ class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
         return changes
 
     @animatable
+    def set_surface_shader(self, shader: SurfaceShader | None) -> ChangeList:
+        """Switch to another surface shader (None: the plain material)."""
+        return [(self.surface_shader, ABS, _shader(shader))]
+
+    @animatable
     def set_color(self, color: ParsableManimColor) -> ChangeList:
         return [(self.base_color, ABS, _rgb(color))]
 
@@ -203,6 +214,7 @@ class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
             normal_texture=self.normal_texture.value,
             occlusion_texture=self.occlusion_texture.value,
             emissive_texture=self.emissive_texture.value,
+            surface_shader=self.surface_shader.value,
         )
         return RShape3D(
             uid=self.uid,
@@ -221,6 +233,12 @@ class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
 def _no_mesh() -> MeshData:
     """An empty mesh: nothing to draw until one is set."""
     return MeshData(np.zeros((0, 3)), np.zeros(0, dtype=np.uint32))
+
+
+def _shader(shader: SurfaceShader | None) -> SurfaceShader | None:
+    if shader is not None and not isinstance(shader, SurfaceShader):
+        raise TypeError(f"a surface shader must be a SurfaceShader or None, got {type(shader).__name__}")
+    return shader
 
 
 def _unit(value: float) -> float:

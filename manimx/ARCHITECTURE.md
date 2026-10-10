@@ -91,7 +91,7 @@ flowchart LR
 | Package | Contents | Depends on |
 |---|---|---|
 | `manimx._core` | the native core (Rust, PyO3; `core/`): `Evaluator`, `FrameState`, `SceneGraph`, `Packer`, `FrameRenderer` (section 9) | numpy; calls back into animation and renderer for user functions and records built once per version |
-| `manimx.robjects` | `RNode` and its subclasses `RGroup`, `RClippingGroup`, `RBezierPath` (→ `RShape2D`, `RCurve3D`), `RShape3D` (→ `RParticles`), `RLight` (→ `RDirectionalLight`, `RPointLight`, `RSpotLight`); `Transform`, `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`; `new_uid()`, `versioned()`; `PlannedFrame` (a frame of the core) | numpy |
+| `manimx.robjects` | `RNode` and its subclasses `RGroup`, `RClippingGroup`, `RBezierPath` (→ `RShape2D`, `RCurve3D`), `RShape3D` (→ `RParticles`), `RLight` (→ `RDirectionalLight`, `RPointLight`, `RSpotLight`); `Transform`, `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`, `SurfaceShader`; `new_uid()`, `versioned()`; `PlannedFrame` (a frame of the core) | numpy |
 | `manimx.animation` (core) | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses (`Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D` (→ `Particles`), `Light` → `DirectionalLight`, `PointLight`, `SpotLight`; `animation.Camera`), `PositionMixin`, `RotationMixin`, `ScalableMixin`; the `Animation` contract (`Animation`, `SetValue`, `ChangeSignals`/`AnimationBuilder`) and the default rates `linear`, `smooth`; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound`; contributions as data (`contributions.py`: `To`, `By`, `Ramp`, `Power`, `Turn`, `Keyframes`, `Between`, `Partial`), `paths.partial_path()`, `ScenePlan`, `PlannedTimeline`, `PlannedScene`, `planned_frames()` | robjects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
 | `manimx.userland` | everything a project could write on top of the core: shapes (`Circle`, `Dot`, `Square`, `Rectangle`, `RegularPolygon`, `Triangle`, `Polyline`, `ParametricCurve3D`, `Box`, `Sphere`, `Torus`, `ParametricSurface`), animations (`FadeIn`, `FadeOut`, `Rotate`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter`, `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`), `rate_functions`, `constants` (`UP`, `PI`, ...), `geometry` (every point and mesh generator, `align_paths()`), `load_gltf()` | animation, robjects |
 | `manimx.renderer` | `SceneFlattener` → `FlatScene`; `tessellate_fill()`; `RNodeDataCache`; `RenderConfig`, `renderer.Camera`, `ViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `RemoveObjects`, `ClearScene`; `core_callbacks` (records the core asks Python for) | robjects |
@@ -1003,6 +1003,16 @@ flowchart LR
   `PointLight`, `SpotLight`; `cast_shadows` as a `DISCRETE` signal on every
   leaf. Known gap: the deferred mesh pass ignores `PbrMaterial.opacity`,
   so fading a `Shape3D` (its `alpha` or `opacity`) does not show yet;
+- surface shaders: `SurfaceShader(code)` (`robjects/material.py`) is WGSL
+  defining `fn shade(surface: Surface, in: SurfaceInput) -> Surface`,
+  set per `Shape3D` (`surface_shader`, a `DISCRETE` signal and the last
+  material signal). The mesh pass splices it into mesh.wgsl in place of
+  surface_shader.wgsl's default and makes one pipeline per shader; draws
+  are grouped by texture set and shader. It runs before the G-buffer, so
+  the result is lit, shadowed and tone mapped. A shader may read
+  `frame.time`, so a frame with one is never held (`PlannedFrame.uses_time`,
+  `_TreeKeys`); WGSL errors become Python errors;
+- camera views (`CameraView`, see section 6);
 - `load_gltf()` builds a node tree: one `Group` per glTF node, one
   `Shape3D` per primitive, glTF names as node names, material names as
   `material:<name>` tags;

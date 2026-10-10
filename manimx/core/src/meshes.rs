@@ -29,16 +29,19 @@ pub struct MeshGeometry {
 }
 
 /// A node's material entry, with the versions it was built from and the
-/// identities of its textures (draws are grouped by them).
+/// identities of its textures and surface shader (draws are grouped by them).
 struct MaterialEntry {
     versions: Vec<u64>,
     entry: Material,
     texture_key: Vec<usize>,
 }
 
-/// Meshes sharing one texture set: one bind group, one multi-draw (`DrawGroup`).
+/// Meshes sharing one texture set and surface shader: one bind group, one
+/// pipeline, one multi-draw (`DrawGroup`).
 pub struct DrawGroup {
     pub textures: Vec<Py<PyAny>>,
+    /// A `SurfaceShader`, or None.
+    pub surface_shader: Py<PyAny>,
     pub draws: Vec<DrawIndexed>,
 }
 
@@ -146,6 +149,7 @@ impl MeshPacker {
             let texture_key = fields
                 .textures
                 .iter()
+                .chain([&fields.surface_shader])
                 .map(|&slot| texture_identity(values, slot))
                 .collect();
             self.materials.insert(
@@ -277,10 +281,14 @@ impl MeshPacker {
                         .iter()
                         .map(|&slot| values.state.kinds[slot].value_to_py(py, values.get(slot)))
                         .collect::<PyResult<Vec<_>>>()?;
+                    let slot = fields.surface_shader;
+                    let surface_shader =
+                        values.state.kinds[slot].value_to_py(py, values.get(slot))?;
                     groups.push((
                         texture_key,
                         DrawGroup {
                             textures,
+                            surface_shader,
                             draws: Vec::new(),
                         },
                     ));

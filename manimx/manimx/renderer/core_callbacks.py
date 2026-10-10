@@ -18,7 +18,10 @@ import numpy as np
 
 from ..animation import style
 from ..robjects import PbrMaterial, RCurve3D, RDirectionalLight, RShape2D
-from ..robjects.material import linear_rgb
+from ..robjects.material import (
+    DEFAULT_SURFACE_SHADER,  # noqa: F401 - read by the core (mesh_pass.rs)
+    linear_rgb,
+)
 from ..robjects.mesh import MeshData
 from ..robjects.transform import Transform, rotation_towards
 from .tessellation import tessellate_fill
@@ -82,7 +85,7 @@ def material_entry(*values: Any) -> bytes:
     the order of ``Shape3D._material_signals()``), clamped as the
     snapshot clamps them.
     """
-    base_color, opacity, metallic, roughness, emissive, strength, normal_scale, occlusion, *textures = values
+    base_color, opacity, metallic, roughness, emissive, strength, normal_scale, occlusion, *textures, _surface_shader = values
     material = PbrMaterial(
         base_color=np.array(base_color),
         opacity=_unit(opacity),

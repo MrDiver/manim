@@ -34,6 +34,7 @@ from ...robjects import (
     RPointLight,
     RShape3D,
     RSpotLight,
+    SurfaceShader,
     Texture,
 )
 from ...robjects.material import linear_rgb
@@ -105,9 +106,11 @@ TextureSet = tuple[Texture | None, ...]
 
 @dataclass(slots=True)
 class DrawGroup:
-    """Meshes sharing one texture set: one bind group, one multi-draw."""
+    """Meshes sharing one texture set and surface shader: one bind group,
+    one pipeline, one multi-draw."""
 
     textures: TextureSet
+    surface_shader: SurfaceShader | None = None
     draws: list[tuple[int, int, int, int, int]] = field(default_factory=list)
 
 
@@ -233,8 +236,9 @@ class MeshBatch:
             clips.append(np.full(count, item.clip))
             object_count += count
 
-            key = tuple(t.uid if t else 0 for t in material.textures)
-            group = groups.setdefault(key, DrawGroup(material.textures))
+            shader = material.surface_shader
+            key = (*(t.uid if t else 0 for t in material.textures), shader.uid if shader else 0)
+            group = groups.setdefault(key, DrawGroup(material.textures, shader))
             first_index, base_vertex = geometry.place(shape, mesh_vertices)
             draw = (len(shape.mesh.indices), count, first_index, base_vertex, first_object)
             group.draws.append(draw)

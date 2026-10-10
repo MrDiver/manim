@@ -28,6 +28,7 @@ struct Material {
 
 struct SurfaceInput {
     position: vec3<f32>,
+    local_position: vec3<f32>,  // the mesh's own coordinates
     normal: vec3<f32>,          // interpolated, not normalized
     tangent: vec4<f32>,         // xyz world tangent, w handedness
     uv: vec2<f32>,
