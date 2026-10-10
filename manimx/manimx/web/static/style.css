@@ -299,3 +299,32 @@ button.toggle:focus-visible {
   color: var(--muted);
   font-size: 12px;
 }
+
+.tools {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+#indices[aria-pressed="true"] {
+  background: var(--segment);
+  border-color: var(--segment);
+  color: var(--surface);
+}
+
+#labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#labels span {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgb(217 72 15 / 0.85);
+  color: #fff;
+  font: 600 10px/1.4 ui-monospace, monospace;
+  pointer-events: auto;
+}

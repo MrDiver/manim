@@ -11,6 +11,10 @@
 // kept in localStorage by key (clip, node path, signal name), so a reload
 // on save keeps them.
 //
+// Indices: with the toggle on, the page asks /api/labels for every frame
+// it shows and draws each path's index in its group over the image (the
+// name and group on hover). The toggle is kept in localStorage.
+//
 // Reload on save: /api/changes answers when the server rebuilt the
 // timeline (or failed to); the page then fetches the timeline again and
 // shows the same time, or the build error above the frame.
@@ -26,6 +30,8 @@ const elements = {
   rows: document.getElementById("rows"),
   playhead: document.getElementById("playhead"),
   collapse: document.getElementById("collapse"),
+  indices: document.getElementById("indices"),
+  labels: document.getElementById("labels"),
 };
 
 const state = {
@@ -36,6 +42,7 @@ const state = {
   wanted: null, // the time to show once it is done
   shownUrl: null,
   open: loadOpen(), // keys of the rows whose tracks are shown
+  indices: loadIndices(), // index labels over the frame
 };
 
 /** Horizontal position of a time, as a percentage of the timeline. */
@@ -231,6 +238,7 @@ async function load(time) {
     if (state.shownUrl) URL.revokeObjectURL(state.shownUrl);
     state.shownUrl = url;
     elements.error.hidden = true;
+    await drawLabels(time);
   } catch (error) {
     elements.error.textContent = `${time.toFixed(2)} s: ${error.message}`;
     elements.error.hidden = false;
@@ -240,7 +248,45 @@ async function load(time) {
   }
 }
 
+function loadIndices() {
+  try {
+    return localStorage.getItem("manimx.indices") === "on";
+  } catch {
+    return false;
+  }
+}
+
+function showIndices(on) {
+  state.indices = on;
+  elements.indices.setAttribute("aria-pressed", String(on));
+  try {
+    localStorage.setItem("manimx.indices", on ? "on" : "off");
+  } catch {
+    // no storage: the toggle only lasts until a reload
+  }
+}
+
+/** The index of every path over the frame, or nothing with the toggle off. */
+async function drawLabels(time) {
+  elements.labels.replaceChildren();
+  if (!state.indices) return;
+  const response = await fetch(`/api/labels?t=${time}`);
+  if (!response.ok) return;
+  for (const label of await response.json()) {
+    const tag = document.createElement("span");
+    tag.textContent = label.index;
+    tag.title = `${label.name} (${label.index} in ${label.group})`;
+    tag.style.left = `${100 * label.x}%`;
+    tag.style.top = `${100 * label.y}%`;
+    elements.labels.append(tag);
+  }
+}
+
 function listen() {
+  elements.indices.addEventListener("click", () => {
+    showIndices(!state.indices);
+    drawLabels(state.time);
+  });
   const timeline = elements.timeline;
   timeline.addEventListener("pointerdown", (event) => {
     if (!event.target.closest(".lane")) return; // the labels toggle tracks
@@ -303,6 +349,7 @@ async function followChanges() {
 }
 
 async function start() {
+  showIndices(state.indices);
   await loadTimeline();
   listen();
   const linked = Number(new URLSearchParams(location.hash.slice(1)).get("t"));

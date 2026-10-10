@@ -13,6 +13,8 @@ request, answered by the standard library's HTTP server:
                              segments
     GET /api/frame?t=&w=     the frame at time t, w pixels wide (JPEG; PNG
                              with &format=png, WebP with &format=webp)
+    GET /api/labels?t=       the index of every path in its group at time
+                             t, with its name and place (see labels.py)
     GET /api/changes?since=  waits until the timeline's version passes
                              `since` (or 25 s), then answers the version
                              and the last build error
@@ -60,8 +62,9 @@ from PIL import Image
 from ..animation.plan import planned_frames
 from ..animation.timing import NEVER, Timeline
 from ..drivers.offline import RenderSettings
-from .tracks import clip_nodes
 from ..renderer import MotionBlur, RenderService
+from .labels import index_labels
+from .tracks import clip_nodes
 
 MIN_WIDTH = 16
 CHANGES_TIMEOUT = 25.0
@@ -188,6 +191,12 @@ class PreviewServer:
             ],
         }
 
+    def labels(self, time: float) -> list[dict[str, Any]]:
+        """The index labels of the frame at ``time`` (see labels.py)."""
+        with self._lock:
+            time = min(max(float(time), 0.0), self.timeline.duration)
+            return index_labels(self.timeline, time, self.settings.config.aspect_ratio)
+
     def frame(self, time: float, width: int | None = None, image_format: str = "jpeg") -> bytes:
         """The frame at ``time`` (clamped to the timeline), ``width`` pixels
         wide (default and at most the output width), encoded.
@@ -231,6 +240,7 @@ class _Handler(BaseHTTPRequestHandler):
         routes: dict[str, Callable[[dict[str, list[str]]], None]] = {
             "/api/timeline": self._timeline,
             "/api/frame": self._frame,
+            "/api/labels": self._labels,
             "/api/changes": self._changes,
         }
         route = routes.get(url.path)
@@ -259,6 +269,9 @@ class _Handler(BaseHTTPRequestHandler):
         if image_format not in FORMATS:
             raise _BadRequest(f"unknown format {image_format!r}")
         self._send(self.preview.frame(time, width, image_format), FORMATS[image_format][1], cache=False)
+
+    def _labels(self, query: dict[str, list[str]]) -> None:
+        self._json(self.preview.labels(_number(query, "t", float)))
 
     def _changes(self, query: dict[str, list[str]]) -> None:
         version, error = self.preview.wait_for_change(_number(query, "since", int))

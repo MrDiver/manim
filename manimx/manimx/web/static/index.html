@@ -10,12 +10,16 @@
 <body>
   <header>
     <h1 id="title">manimx</h1>
-    <output id="time" aria-live="off">0.00 s</output>
+    <div class="tools">
+      <button id="indices" type="button" aria-pressed="false" title="Show the index of every path in its group (for MorphMatching pairs)">Indices</button>
+      <output id="time" aria-live="off">0.00 s</output>
+    </div>
   </header>
   <main>
     <pre id="problem" role="alert" hidden></pre>
     <figure id="stage">
       <img id="frame" alt="The frame at the current time">
+      <div id="labels" aria-hidden="true"></div>
       <figcaption id="error" hidden></figcaption>
     </figure>
     <section id="timeline" aria-label="Timeline" tabindex="0">

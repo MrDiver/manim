@@ -204,3 +204,29 @@ def test_only_the_projects_own_modules_are_unloaded(tmp_path, monkeypatch) -> No
     loaded.root = tmp_path.resolve()
     assert "own_scene" in loaded.unload_modules()
     assert "own_scene" not in sys.modules and "installed_package" in sys.modules
+
+
+def test_labels_give_every_paths_index_in_its_group_on_the_frame() -> None:
+    from manimx.animation import Group, Scene
+    from manimx.userland import LEFT, RIGHT, Square, TypstMath
+    from manimx.web.labels import index_labels
+
+    class Labeled(Scene):
+        def construct(self) -> None:
+            self.add(TypstMath("x + 1").shift(LEFT * 2), Group(Square(), Square().shift(RIGHT)).shift(RIGHT * 3))
+
+    timeline = Timeline()
+    timeline.add(Labeled().prepare(), name="labeled")
+    labels = index_labels(timeline, 0.0, 16 / 9)
+    assert [(label["index"], label["name"]) for label in labels[:3]] == [(0, "x"), (1, "+"), (2, "1")]
+    assert labels[0]["group"] == "$ x + 1 $" and [label["index"] for label in labels[3:]] == [0, 1]
+    # Fractions of the frame: the formula left of the middle, the squares right of it, all at mid height.
+    assert all(label["x"] < 0.5 for label in labels[:3]) and all(label["x"] > 0.5 for label in labels[3:])
+    assert all(label["y"] == pytest.approx(0.5, abs=0.05) for label in labels)
+    first_square = labels[3]
+    assert first_square["x"] == pytest.approx(0.5 + 3 / (8 * 16 / 9))  # x = 3 of a 14.2 wide frame
+
+
+def test_the_labels_route_answers_json(server) -> None:
+    status, kind, body = get(server, "/api/labels?t=0.5")
+    assert status == 200 and kind == "application/json" and isinstance(json.loads(body), list)
