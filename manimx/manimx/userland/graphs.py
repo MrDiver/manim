@@ -55,6 +55,8 @@ class Value(Node):
     """A number to animate that is not drawn (Manim's ValueTracker): derive
     other signals from ``value``. ``self.play(t.animate.set_value(1))``."""
 
+    drawn = False
+
     def __init__(self, value: float = 0.0, name: str | None = None) -> None:
         super().__init__(name)
         self.value = RootSignal(float(value), SCALAR, name=f"{self.name}.value")

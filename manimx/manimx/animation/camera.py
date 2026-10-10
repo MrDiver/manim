@@ -57,6 +57,8 @@ class Camera(PositionMixin, RotationMixin, Node):
       infinitely far, as a fraction of the image height (0: no blur).
     """
 
+    drawn = False
+
     def __init__(
         self,
         name: str | None = None,

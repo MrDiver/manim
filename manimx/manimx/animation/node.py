@@ -85,6 +85,11 @@ class Node:
     docs).
     """
 
+    drawn: bool = True
+    """False for nodes that never draw anything (a Camera, a Value): they
+    snapshot to None, and the core's plan leaves them out of the scene
+    graph."""
+
     def __init__(self, name: str | None = None, *, tags: Iterable[str] = ()) -> None:
         self.uid = new_uid()
         self.name = name or f"{type(self).__name__.lower()}-{self.uid}"

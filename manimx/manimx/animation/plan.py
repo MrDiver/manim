@@ -33,7 +33,6 @@ from typing import Any
 from .. import _core
 from ..renderer.config import ViewState
 from ..robjects.planned_frame import PlannedFrame
-from .camera import Camera
 from .camera_view import camera_views, current_value, view_cameras
 from .clipping_group import ClippingGroup
 from .contributions import (
@@ -152,8 +151,9 @@ class ScenePlan:
     def _scene_graph(self) -> Any:
         nodes: list[Node] = []
         index: dict[int, int] = {}
-        # Cameras (animated ones are roots too) are never drawn.
-        drawn_roots = [root for root in self.scene.roots if not isinstance(root, Camera)]
+        # Nodes that are never drawn (cameras, values) can be roots too,
+        # when animated; their signals reach the plan as inputs.
+        drawn_roots = [root for root in self.scene.roots if root.drawn]
         for root in drawn_roots:
             for node in root.family():
                 if id(node) not in index:
