@@ -13,7 +13,8 @@ clip's render state with its camera in a
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from typing import Any
 
 import numpy as np
 import quaternion
@@ -34,6 +35,11 @@ from .node import (
     animatable,
 )
 from .signals import RootSignal, Signal
+
+
+def _current(signal: Signal) -> Any:
+    return signal.value
+
 
 DEFAULT_DISTANCE = 11.0
 """Manim's default camera distance from the z = 0 plane."""
@@ -99,12 +105,13 @@ class Camera(PositionMixin, RotationMixin, Node):
     def snapshot(self) -> RNode | None:
         return None  # cameras are never drawn
 
-    def render_camera(self) -> RenderCamera:
-        """The renderer camera for the current signal values."""
+    def render_camera(self, value: Callable[[Signal], Any] = _current) -> RenderCamera:
+        """The renderer camera for the signal values ``value`` reads (by
+        default the current ones; a ScenePlan reads its frame state)."""
         return RenderCamera(
-            transform=Transform(position=self.position.value, rotation=self.rotation.value),
-            frame_height=self.frame_height.value,
-            field_of_view=self.field_of_view.value if self.perspective.value else None,
+            transform=Transform(position=tuple(value(axis) for axis in self.position.axes), rotation=value(self.rotation)),
+            frame_height=value(self.frame_height),
+            field_of_view=value(self.field_of_view) if value(self.perspective) else None,
             near=self.near,
             far=self.far,
         )

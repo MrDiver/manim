@@ -100,17 +100,25 @@ class CoreFramePipeline:
         return blur.sample_times(time)
 
     def _views(self, frame: Frame, time: float) -> list[tuple]:
-        """Each view as the core takes it: graph, state, key, config values
-        and the camera's Frame record.
+        """Each view as the core takes it: graph, state, key, config values,
+        the camera's Frame record, and the config values and Frame record
+        of each of its camera views.
         """
         views = [frame] if isinstance(frame, ViewState) else list(frame)
         described = []
         for view in views:
             if not isinstance(view.root, PlannedFrame):
                 raise TypeError("CoreFramePipeline renders frames of the core (PlannedFrame views) only")
-            config = dataclasses.replace(self.config, time=time, camera=view.camera or self.config.camera)
+            config = dataclasses.replace(self.config, time=time, camera=view.camera or self.config.camera, camera_views=view.camera_views)
             root = view.root
-            described.append((root.graph, root.state, root.key, config_values(config), camera_frame(config, 0).tobytes()))
+            pictures = [
+                (config_values(picture), camera_frame(picture, 0).tobytes())
+                for picture in (
+                    dataclasses.replace(config, camera=camera_view.camera, view_aspect=camera_view.aspect_ratio, hide_camera_views=True)
+                    for camera_view in view.camera_views
+                )
+            ]
+            described.append((root.graph, root.state, root.key, config_values(config), camera_frame(config, 0).tobytes(), pictures))
         return described
 
 

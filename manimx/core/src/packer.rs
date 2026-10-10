@@ -22,7 +22,7 @@ use crate::lights::{self, LightColors};
 use crate::meshes::{MeshOutput, MeshPacker};
 use crate::records::Light;
 use crate::shadows::{self, Bounds, FrameSettings, ShadowLayers, ShadowViews};
-use crate::vectors::{VectorDraws, VectorPacker};
+use crate::vectors::{CameraViews, VectorDraws, VectorPacker};
 
 /// Packs after which per-node data unused since is dropped (`CACHE_MAX_AGE`).
 const CACHE_MAX_AGE: u64 = 1024;
@@ -51,6 +51,10 @@ pub struct PackSettings {
     pub camera_position: DVec3,
     /// The camera's world matrix.
     pub camera: DMat4,
+    /// The frame's camera views (`RenderConfig.camera_views`).
+    pub camera_views: CameraViews,
+    /// Leave the camera views' shapes out (while one is rendered).
+    pub hide_camera_views: bool,
 }
 
 #[pyclass(module = "manimx._core")]
@@ -110,7 +114,13 @@ impl Packer {
             self.sweep();
         }
         let values = Values { state, py };
-        let scene = graph.flatten(&values)?;
+        let mut scene = graph.flatten(&values)?;
+        if settings.hide_camera_views {
+            let views = &settings.camera_views;
+            scene
+                .items
+                .retain(|item| !views.contains_key(&graph.nodes[item.node].uid));
+        }
         for item in scene
             .items
             .iter()
@@ -125,6 +135,7 @@ impl Packer {
             &values,
             &scene,
             settings.camera_position.to_array(),
+            &settings.camera_views,
             &self.callbacks,
             self.generation,
         )?;
@@ -313,6 +324,12 @@ pub fn parse_settings(config: &Bound<'_, PyAny>) -> PyResult<PackSettings> {
     let ambient: (f64, f64, f64) = item(3)?.extract()?;
     let camera_position: (f64, f64, f64) = item(9)?.extract()?;
     let camera: Vec<f64> = item(10)?.extract()?;
+    let views: Vec<(u64, f32, f32)> = item(11)?.extract()?;
+    let camera_views = views
+        .into_iter()
+        .enumerate()
+        .map(|(layer, (uid, x, y))| (uid, (layer as i32, [x, y])))
+        .collect();
     Ok(PackSettings {
         frame: FrameSettings {
             time: item(0)?.extract()?,
@@ -327,5 +344,7 @@ pub fn parse_settings(config: &Bound<'_, PyAny>) -> PyResult<PackSettings> {
         default_lights: item(8)?.extract()?,
         camera_position: DVec3::new(camera_position.0, camera_position.1, camera_position.2),
         camera: row_major(&camera),
+        camera_views,
+        hide_camera_views: item(12)?.extract()?,
     })
 }

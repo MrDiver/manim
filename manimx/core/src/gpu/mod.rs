@@ -6,6 +6,7 @@
 //! | `context` | `GPUContext`, `load_wgsl` (gpu.py) |
 //! | `buffer` | `GrowableBuffer` (gpu.py) |
 //! | `targets` | `RenderTargets` (targets.py) |
+//! | `camera_views` | the camera view texture of `WGPURenderer` (renderer.py) |
 //! | `vector_pass` | `VectorPass` (vector_pass.py) |
 //! | `mesh_pass` | `MeshPass` (mesh_pass.py) |
 //! | `lighting_pass` | `LightingPass` (lighting_pass.py) |
@@ -16,6 +17,7 @@
 //! | `frame_renderer` | `FrameComposer` + `FramePipeline` behind one Python class |
 
 pub mod buffer;
+pub mod camera_views;
 pub mod composer;
 pub mod context;
 pub mod frame_renderer;

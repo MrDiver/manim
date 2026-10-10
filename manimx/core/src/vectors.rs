@@ -22,7 +22,7 @@ use glam::{DMat4, DVec3};
 struct Slot {
     object: usize,
     world: Option<DMat4>,
-    placement: (usize, i32, u32, f64),
+    placement: (usize, i32, u32, f64, CameraView),
     /// Points version the geometry ranges below were built from.
     points_version: u64,
     fill_version: Option<u64>,
@@ -45,7 +45,7 @@ impl Slot {
         Slot {
             object,
             world: None,
-            placement: (usize::MAX, NO_CLIP - 1, u32::MAX, -1.0),
+            placement: (usize::MAX, NO_CLIP - 1, u32::MAX, -1.0, NOT_A_VIEW),
             points_version: 0,
             fill_version: None,
             fill_first: 0,
@@ -157,6 +157,7 @@ impl VectorPacker {
         values: &Values,
         scene: &FlatScene,
         camera_position: [f64; 3],
+        camera_views: &CameraViews,
         callbacks: &Callbacks,
         generation: u64,
     ) -> PyResult<VectorDraws> {
@@ -174,6 +175,7 @@ impl VectorPacker {
             values,
             callbacks,
             camera_position,
+            camera_views,
             generation,
         };
         for item in &scene.items {
@@ -253,7 +255,12 @@ impl VectorPacker {
         } else {
             0
         });
-        let placement = (layer, item.clip, flags, item.alpha);
+        let view = context
+            .camera_views
+            .get(&node.uid)
+            .copied()
+            .unwrap_or(NOT_A_VIEW);
+        let placement = (layer, item.clip, flags, item.alpha, view);
         if slot.world != Some(item.world) || slot.placement != placement {
             let entry: &mut Object = self.objects.record_mut(context.py, slot.object);
             entry.model = records::gpu_matrix(&item.world);
@@ -261,6 +268,7 @@ impl VectorPacker {
             entry.clip = item.clip;
             entry.flags = flags;
             entry.alpha = item.alpha as f32;
+            (entry.view, entry.view_scale) = view;
             slot.world = Some(item.world);
             slot.placement = placement;
         }
@@ -317,7 +325,11 @@ impl VectorPacker {
             context.values.state.versions[opacity],
         ];
         let colors = context.fill_colors(cache, fields, color, opacity, &colors_key)?;
-        let (visible, opaque) = (colors.2, colors.3);
+        // A picture may be see-through anywhere (a transparent background).
+        let (visible, opaque) = (
+            colors.2,
+            colors.3 && !context.camera_views.contains_key(&node.uid),
+        );
         if !visible {
             return Ok(None);
         }
@@ -525,6 +537,15 @@ fn draw_bytes(draws: impl IntoIterator<Item = DrawIndirect>) -> Vec<u8> {
     bytemuck::cast_slice(&draws).to_vec()
 }
 
+/// A camera view's layer and `1 / (width, height)` of its plane.
+pub type CameraView = (i32, [f32; 2]);
+
+/// The camera views of a frame by node uid (`camera_view_entries` in
+/// vector_batch.py).
+pub type CameraViews = HashMap<u64, CameraView>;
+
+const NOT_A_VIEW: CameraView = (records::NO_VIEW, [0.0, 0.0]);
+
 /// What building one path's records needs, besides the packer itself.
 struct PathContext<'a> {
     py: Python<'a>,
@@ -532,6 +553,7 @@ struct PathContext<'a> {
     values: &'a Values<'a>,
     callbacks: &'a Callbacks,
     camera_position: [f64; 3],
+    camera_views: &'a CameraViews,
     generation: u64,
 }
 

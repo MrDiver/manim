@@ -47,10 +47,12 @@ from .vector_batch import (
     KIND_FILL,
     KIND_STROKE,
     NO_NEIGHBOR,
+    NO_VIEW_ENTRY,
     OBJECT_DTYPE,
     STROKE_CURVE_DTYPE,
     STROKE_POINT_DTYPE,
     STROKE_VERTEX_COUNT,
+    CameraViews,
     VectorBatch,
     _Draw,
     _draw_args,
@@ -78,6 +80,7 @@ class _Slot:
     clip: int = NO_CLIP - 1
     flags: int = -1
     alpha: float = -1.0
+    view: object = None
     points_key: object = None
     """Points version the geometry ranges below were built from."""
     fill_mesh: object = None
@@ -102,10 +105,13 @@ class RetainedVectors:
     arenas: dict[str, Arena] = field(default_factory=lambda: {name: Arena(dtype) for name, dtype in ARENAS.items()})
     slots: dict[tuple[int, int], _Slot] = field(default_factory=dict)
     free_objects: list[int] = field(default_factory=list)
+    _views: CameraViews = field(default_factory=dict)
+    """The camera views of the current build (see ``camera_view_entries``)."""
 
-    def build(self, scene: FlatScene, cache: RNodeDataCache, camera_position: np.ndarray) -> VectorBatch:
+    def build(self, scene: FlatScene, cache: RNodeDataCache, camera_position: np.ndarray, views: CameraViews | None = None) -> VectorBatch:
         if self._too_much_garbage():
             self.__init__()  # repack everything from scratch
+        self._views = views or {}
         draws: list[_Draw] = []
         seen: set[tuple[int, int]] = set()
         for item in scene.items:
@@ -146,13 +152,15 @@ class RetainedVectors:
         layer = 2 * item.order
         flags = (0 if isinstance(shape, RShape2D) else FLAG_CAMERA_FACING) | (FLAG_FRONT_ONLY if front_only else 0)
         entry = self.arenas["objects"].data[slot.object : slot.object + 1]
-        placement = (layer, item.clip, flags, item.alpha)
-        if slot.world is None or not np.array_equal(slot.world, item.world) or (slot.layer, slot.clip, slot.flags, slot.alpha) != placement:
+        view = self._views.get(shape.uid, NO_VIEW_ENTRY)
+        placement = (layer, item.clip, flags, item.alpha, view)
+        if slot.world is None or not np.array_equal(slot.world, item.world) or (slot.layer, slot.clip, slot.flags, slot.alpha, slot.view) != placement:
             entry["model"] = item.world.T  # WGSL matrices are column-major
-            entry["layer"], entry["clip"], entry["flags"], entry["alpha"] = placement
+            entry["layer"], entry["clip"], entry["flags"], entry["alpha"] = placement[:4]
+            entry["view"], entry["view_scale"] = view
             self.arenas["objects"].touch(slot.object, slot.object + 1)
             slot.world = item.world
-            slot.layer, slot.clip, slot.flags, slot.alpha = placement
+            slot.layer, slot.clip, slot.flags, slot.alpha, slot.view = placement
         if item.alpha <= 0.0:
             return  # invisible: the slot stays, nothing is drawn
 
@@ -196,7 +204,8 @@ class RetainedVectors:
             self.arenas["instances"].write(slot.fill_instance, _instances(KIND_FILL, slot.object, np.zeros(1, np.uint32)))
         return _Draw(
             args=(slot.fill_count, 1, slot.fill_first, slot.fill_instance),
-            opaque=bool(np.all(opacity >= 1.0)),
+            # A picture may be see-through anywhere (a transparent background).
+            opaque=bool(np.all(opacity >= 1.0)) and shape.uid not in self._views,
             camera_distance=distance,
             layer=layer,
         )

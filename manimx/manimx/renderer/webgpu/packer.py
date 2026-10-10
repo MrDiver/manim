@@ -30,7 +30,7 @@ from .frame import camera_frame
 from .mesh_batch import MeshBatch, RetainedMeshes
 from .retained import RetainedVectors
 from .shadow_views import ShadowLayers, ShadowViews, build_shadow_views
-from .vector_batch import VectorBatch
+from .vector_batch import VectorBatch, camera_view_entries, without_camera_views
 
 CACHE_MAX_AGE = 1024
 """Packs after which unused per-object cache entries are dropped."""
@@ -74,7 +74,8 @@ class FramePacker:
     def pack(self, scene: FlatScene, config: RenderConfig) -> FramePacket:
         if self.cache.next_generation() % CACHE_MAX_AGE == 0:
             self.cache.sweep(CACHE_MAX_AGE)
-        vectors = self._vectors.build(scene, self.cache, config.camera.position)
+        scene = without_camera_views(scene, config)
+        vectors = self._vectors.build(scene, self.cache, config.camera.position, camera_view_entries(config))
         meshes = shadows = None
         if any(isinstance(item.obj, RShape3D) for item in scene.items):
             if self._meshes.too_much_garbage():

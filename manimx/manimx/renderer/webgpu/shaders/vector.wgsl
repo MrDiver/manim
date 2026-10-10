@@ -28,12 +28,17 @@
 // inside the group reads its layer at its own pixel and multiplies its
 // alpha by the mask's alpha. Masks of nested groups are themselves clipped
 // by the enclosing mask, so one lookup covers all enclosing groups.
+//
+// Camera views: the fill of a CameraView shape is the picture of another
+// camera, rendered before the frame into one layer of `camera_views`
+// (linear, premultiplied, see composite.wgsl). The fill color tints it.
 
 // ---------------------------------------------------------------------------
 // Bindings (layouts mirror the numpy dtypes in vector_batch.py)
 // ---------------------------------------------------------------------------
 
 #include "frame.wgsl"
+#include "color.wgsl"
 
 const NO_CLIP: i32 = -1;
 
@@ -44,7 +49,11 @@ struct Object {
     flags: u32,                 // FLAG_* bits
     fill_colors: u32,           // index of the shape's first point in `fill_colors`
     alpha: f32,                 // Node.alpha times every one above: multiplies every color's alpha
+    view: i32,                  // layer in `camera_views` shown by the fill, or NO_VIEW
+    view_scale: vec2<f32>,      // 1 / (width, height) of a camera view's plane
 };
+
+const NO_VIEW: i32 = -1;
 
 /// The stroke ribbon faces the camera (Curve3D) instead of lying in the
 /// object's XY plane (Shape2D).
@@ -102,6 +111,8 @@ struct StrokeCurve {
 @group(0) @binding(6) var<storage, read> stroke_curves: array<StrokeCurve>;
 @group(0) @binding(7) var mask_layers: texture_2d_array<f32>;
 @group(0) @binding(8) var mesh_depth: texture_depth_multisampled_2d;
+@group(0) @binding(9) var camera_views: texture_2d_array<f32>;
+@group(0) @binding(10) var camera_view_sampler: sampler;
 
 // ---------------------------------------------------------------------------
 // Shared vertex output
@@ -119,6 +130,10 @@ struct VertexOutput {
     @location(2) @interpolate(flat) side: f32,
     // 1 / clip w, linear in screen space: see layer_slope().
     @location(5) @interpolate(linear) inverse_w: f32,
+    // Camera views: the layer (NO_VIEW for everything else) and where in
+    // the picture this fragment is.
+    @location(6) @interpolate(flat) view: i32,
+    @location(7) picture: vec2<f32>,
 };
 
 fn project(world: vec3<f32>) -> vec4<f32> {
@@ -171,6 +186,7 @@ fn vs_main(
     if (object.flags & FLAG_FRONT_ONLY) != 0u && !faces_camera(object) {
         var culled: VertexOutput;
         culled.clip_position = CULLED;
+        culled.view = NO_VIEW;
         return culled;
     }
     var out: VertexOutput;
@@ -258,6 +274,9 @@ fn shade(in: VertexOutput) -> vec4<f32> {
         }
     }
     var color = in.color;
+    if in.view != NO_VIEW {
+        color = tinted_picture(color, in);
+    }
     if in.clip != NO_CLIP {
         let pixel = vec2<i32>(floor(in.clip_position.xy));
         color.a *= textureLoad(mask_layers, pixel, in.clip, 0).a;
@@ -267,6 +286,18 @@ fn shade(in: VertexOutput) -> vec4<f32> {
         discard;
     }
     return color;
+}
+
+/// A camera view's picture at this fragment, tinted by the fill color.
+/// The picture is linear and premultiplied; vector colors are sRGB values
+/// with straight alpha.
+fn tinted_picture(tint: vec4<f32>, in: VertexOutput) -> vec4<f32> {
+    let picture = textureSampleLevel(camera_views, camera_view_sampler, in.picture, in.view, 0.0);
+    if picture.a <= 0.0 {
+        return vec4<f32>(0.0);
+    }
+    let srgb = linear_to_srgb(picture.rgb / picture.a);
+    return vec4<f32>(srgb * tint.rgb, picture.a * tint.a);
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +327,9 @@ fn fill_vertex(object: Object, vertex_index: u32) -> VertexOutput {
     out.color = faded(fill_color(object, vertex), object);
     out.uv = vertex.uv;
     out.side = vertex.side;
+    out.view = object.view;
+    // The plane is centered on the local origin; texture rows go down.
+    out.picture = vec2<f32>(0.5, 0.5) + vec2<f32>(1.0, -1.0) * vertex.position * object.view_scale;
     return out;
 }
 
@@ -476,6 +510,8 @@ fn stroke_vertex(object: Object, record: StrokeCurve, vertex_index: u32) -> Vert
     var out: VertexOutput;
     out.uv = vec2<f32>(0.0);
     out.side = 0.0;
+    out.view = NO_VIEW;
+    out.picture = vec2<f32>(0.0);
     out.layer = object.layer + 1.0;
     out.clip = object.clip;
 

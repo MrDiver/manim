@@ -20,7 +20,14 @@ import wgpu
 from wgpu.backends.wgpu_native.extras import multi_draw_indirect
 
 from .frame import FRAME_DTYPE
-from .gpu import COLOR_FORMAT, DEPTH_FORMAT, SHADOW_FORMAT, GPUContext, GrowableBuffer
+from .gpu import (
+    COLOR_FORMAT,
+    DEPTH_FORMAT,
+    HDR_FORMAT,
+    SHADOW_FORMAT,
+    GPUContext,
+    GrowableBuffer,
+)
 from .vector_batch import DRAW_INDIRECT_DTYPE, VectorBatch
 
 _STORAGE = wgpu.BufferUsage.STORAGE
@@ -76,6 +83,10 @@ class VectorPass:
         self._bind_group: wgpu.GPUBindGroup | None = None
         self._mask_layers: wgpu.GPUTextureView | None = None
         self._mesh_depth: wgpu.GPUTextureView | None = None
+        self._camera_views: wgpu.GPUTextureView | None = None
+        self._camera_view_sampler = context.device.create_sampler(
+            mag_filter=wgpu.FilterMode.linear, min_filter=wgpu.FilterMode.linear
+        )
         # (first draw, draw count) of each list in the indirect buffer.
         self._opaque = (0, 0)
         self._transparent = (0, 0)
@@ -92,6 +103,7 @@ class VectorPass:
         mesh_depth: wgpu.GPUTextureView,
         multisampled: bool,
         full_upload: bool = False,
+        camera_views: wgpu.GPUTextureView | None = None,
     ) -> None:
         """Upload the frame's batch. Must be called before drawing.
 
@@ -100,7 +112,8 @@ class VectorPass:
         ``mesh_depth`` is the meshes' depth buffer that hides shapes behind
         meshes (see ``hidden_by_meshes`` in vector.wgsl). ``full_upload``
         ignores the batch's dirty ranges, for buffers that hold another
-        packer's records.
+        packer's records. ``camera_views`` holds the pictures of camera
+        views, one per layer.
         """
         changed = self._use_variant(multisampled)
         grown = False
@@ -120,9 +133,10 @@ class VectorPass:
         self._shadows = dict(zip(shadow_scopes, ranges[2 : 2 + len(shadow_scopes)]))
         self._masks = ranges[2 + len(shadow_scopes) :]
 
-        inputs_changed = mask_layers is not self._mask_layers or mesh_depth is not self._mesh_depth
+        camera_views = camera_views or self._camera_views or self._empty_camera_views()
+        inputs_changed = mask_layers is not self._mask_layers or mesh_depth is not self._mesh_depth or camera_views is not self._camera_views
         if grown or changed or self._bind_group is None or inputs_changed:
-            self._mask_layers, self._mesh_depth = mask_layers, mesh_depth
+            self._mask_layers, self._mesh_depth, self._camera_views = mask_layers, mesh_depth, camera_views
             self._bind_group = self._create_bind_group(self._frame_uniform, 0)
             self._shadow_groups.clear()
 
@@ -219,6 +233,14 @@ class VectorPass:
             fragment={"module": self._shader, "entry_point": "fs_shadow", "targets": []},
         )
 
+    def _empty_camera_views(self) -> wgpu.GPUTextureView:
+        """A one-pixel picture, for frames drawn without a renderer's
+        camera view texture."""
+        texture = self._context.device.create_texture(
+            size=(1, 1, 1), format=HDR_FORMAT, usage=wgpu.TextureUsage.TEXTURE_BINDING
+        )
+        return texture.create_view(dimension=wgpu.TextureViewDimension.d2_array)
+
     def _use_variant(self, multisampled: bool) -> bool:
         """Build shader, layout and pipelines for the mesh depth's sample
         count; returns True if they changed."""
@@ -266,11 +288,19 @@ class VectorPass:
                 "texture": {"sample_type": wgpu.TextureSampleType.depth, "multisampled": multisampled},
             }
         )
+        entries.append(
+            {
+                "binding": 3 + len(self._buffers),
+                "visibility": fragment,
+                "texture": {"sample_type": wgpu.TextureSampleType.float, "view_dimension": wgpu.TextureViewDimension.d2_array},
+            }
+        )
+        entries.append({"binding": 4 + len(self._buffers), "visibility": fragment, "sampler": {"type": wgpu.SamplerBindingType.filtering}})
         return self._context.device.create_bind_group_layout(entries=entries)
 
     def _create_bind_group(self, frames: wgpu.GPUBuffer, offset: int) -> wgpu.GPUBindGroup:
         # Binding order matches vector.wgsl: frame, storage buffers, masks,
-        # mesh depth.
+        # mesh depth, camera views and their sampler.
         entries = [{"binding": 0, "resource": {"buffer": frames, "offset": offset, "size": FRAME_DTYPE.itemsize}}]
         buffers = [b.buffer for b in self._buffers.values()]
         entries += [
@@ -279,4 +309,6 @@ class VectorPass:
         ]
         entries.append({"binding": 1 + len(buffers), "resource": self._mask_layers})
         entries.append({"binding": 2 + len(buffers), "resource": self._mesh_depth})
+        entries.append({"binding": 3 + len(buffers), "resource": self._camera_views})
+        entries.append({"binding": 4 + len(buffers), "resource": self._camera_view_sampler})
         return self._context.device.create_bind_group(layout=self._layout, entries=entries)

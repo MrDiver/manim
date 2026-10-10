@@ -68,6 +68,10 @@
     "Formulas": {
       "module": "scenes.formulas",
       "class": "Formulas"
+    },
+    "Monitors": {
+      "module": "scenes.monitors",
+      "class": "Monitors"
     }
   },
   "timeline": {

@@ -474,7 +474,23 @@ classDiagram
 - **`View(world, camera)`:** `Timeline.view(view)` is a function of time
   returning `ViewState(root, camera)`. `FrameComposer` uses
   `ViewState.camera` for every motion-blur sample.
-- **Showing a `View` inside a `World2D`** (compositions) is not built yet.
+- **`CameraView(camera, width, height)`** (`animation/camera_view.py`): a
+  `Shape2D` rectangle whose fill is the picture of another
+  `animation.Camera`, tinted by the fill color. It moves, fades and is
+  masked by a `ClippingGroup` like any `Shape2D`. Every `ViewState` lists
+  its scene's present camera views in `ViewState.camera_views`
+  (`CameraViewState`: uid, `renderer.Camera`, width, height); the core
+  reads the views' cameras from its `FrameState` like the scene camera.
+- **Rendering camera views:** before a view, `FrameComposer` (and the
+  core's `FrameRenderer`) renders each of its camera views at the frame's
+  pixel size, with `RenderConfig.view_aspect` set to the plane's aspect
+  and `RenderConfig.hide_camera_views` set, so a picture never shows a
+  camera view (no recursion; an explicit recursion depth is parked).
+  Each picture is composited into one layer of the renderer's camera view
+  texture and submitted on its own. The packers write the layer and
+  `1 / (width, height)` into the shape's `Object` record (`view`,
+  `view_scale`); `vector.wgsl` samples the layer at the fill's local
+  position.
 
 ## 7. `RNode`: the contract between both sides
 

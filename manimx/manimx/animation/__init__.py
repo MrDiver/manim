@@ -14,6 +14,7 @@ See docs/animation_engine_design.md.
 from .animations import Animation, AnimationBuilder, ChangeSignals, SetValue, SignalChange, Target
 from .audio import Sound, SoundEvent, mix, write_wav
 from .camera import Camera
+from .camera_view import CameraView
 from .clipping_group import ClippingGroup
 from .curve3d import Curve3D
 from .group import Group
@@ -47,6 +48,7 @@ __all__ = [
     "Animation",
     "AnimationBuilder",
     "Camera",
+    "CameraView",
     "Change",
     "ChangeSignals",
     "Clip",

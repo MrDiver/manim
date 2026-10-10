@@ -120,9 +120,21 @@ class RenderConfig:
     """Multiplies every light's ``size``: 0 gives hard shadows everywhere."""
     shadow_samples: int = 16
     """Taps per shadow lookup; more give smoother penumbras."""
+    camera_views: tuple[CameraViewState, ...] = ()
+    """The camera views of the frame (see :class:`CameraViewState`): the
+    shape with the uid of entry ``i`` shows layer ``i`` of the renderer's
+    camera view texture."""
+    hide_camera_views: bool = False
+    """Leave the shapes of :attr:`camera_views` out: set while a camera
+    view itself is rendered, so views never show views."""
+    view_aspect: float | None = None
+    """The width / height of the picture (default: of the pixels). A camera
+    view renders at the frame's pixel size with the aspect of its plane."""
 
     @property
     def aspect_ratio(self) -> float:
+        if self.view_aspect is not None:
+            return self.view_aspect
         return self.pixel_width / self.pixel_height
 
     @property
@@ -141,6 +153,22 @@ class RenderConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class CameraViewState:
+    """What one camera view shows in a frame: the picture of ``camera``,
+    drawn on the shape with ``uid`` (a ``CameraView`` node), which is
+    ``width`` by ``height`` world units, centered on its local origin."""
+
+    uid: int
+    camera: Camera
+    width: float
+    height: float
+
+    @property
+    def aspect_ratio(self) -> float:
+        return self.width / self.height
+
+
+@dataclass(frozen=True, slots=True)
 class ViewState:
     """A scene tree together with the camera looking at it.
 
@@ -152,6 +180,9 @@ class ViewState:
 
     root: RNode
     camera: Camera
+    camera_views: tuple[CameraViewState, ...] = ()
+    """The camera views in the tree, rendered before it (see
+    :class:`CameraViewState`)."""
 
 
 Frame = RNode | ViewState | Sequence[ViewState]

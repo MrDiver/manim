@@ -23,8 +23,14 @@ pub struct Object {
     pub flags: u32,
     pub fill_colors: u32,
     pub alpha: f32,
-    pub _pad: [f32; 3],
+    /// Layer of the camera view texture the fill shows, or `NO_VIEW`.
+    pub view: i32,
+    /// `1 / (width, height)` of a camera view's plane.
+    pub view_scale: [f32; 2],
 }
+
+/// `Object.view` of every shape that is not a camera view.
+pub const NO_VIEW: i32 = -1;
 
 /// `INSTANCE_DTYPE`: what one draw instance generates.
 #[repr(C)]

@@ -98,6 +98,8 @@ def config_values(config: RenderConfig) -> tuple:
         config.default_lights,
         tuple(float(c) for c in camera.position),
         camera.transform.matrix().reshape(-1).tolist(),
+        [(view.uid, 1.0 / view.width, 1.0 / view.height) for view in config.camera_views],
+        config.hide_camera_views,
     )
 
 

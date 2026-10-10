@@ -46,9 +46,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import wgpu
 
-from ...robjects.planned_frame import PlannedFrame
 from ...robjects import RClippingGroup, RGroup, RNode
-from ..config import Camera, Frame, RenderConfig, ViewState
+from ...robjects.planned_frame import PlannedFrame
+from ..config import Camera, CameraViewState, Frame, RenderConfig, ViewState
 from ..effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap
 from .gpu import COLOR_FORMAT, HDR_FORMAT, GPUContext, ResourceCache, expand_includes
 from .profiler import GpuProfiler
@@ -183,23 +183,43 @@ class FrameComposer:
             return [(time, 1.0)]  # a fixed scene looks the same at every time
         return blur.sample_times(time)
 
-    def _render_view(
-        self, encoder: wgpu.GPUCommandEncoder, view: tuple[RNode, Camera | None], config: RenderConfig
-    ) -> tuple[wgpu.GPUTexture, wgpu.GPUTexture]:
+    def _render_view(self, encoder: wgpu.GPUCommandEncoder, view: _View, config: RenderConfig) -> tuple[wgpu.GPUTexture, wgpu.GPUTexture]:
         """Render one view into the renderer's layers; returns the lit layer
-        after the lit-stage effects, and the vector layer.
+        after the lit-stage effects, and the vector layer. The pictures of
+        its camera views are rendered and submitted first.
         """
-        root, camera = view
+        root, camera, camera_views = view
         if camera is not None:
             config = dataclasses.replace(config, camera=camera)
+        if camera_views:
+            config = dataclasses.replace(config, camera_views=camera_views)
+            self._render_camera_views(root, config)
         layers = self.service.render_layers(root, config, encoder)
-        lit = layers.lit
+        return self._lit(encoder, layers.lit), layers.vector
+
+    def _render_camera_views(self, root: RNode, config: RenderConfig) -> None:
+        """Render each camera view of ``config`` into its layer of the
+        renderer's camera view texture, without the camera views
+        themselves. Each is submitted on its own: the renderer's buffers
+        hold one render at a time."""
+        renderer = self.service.renderer
+        device = self._context.device
+        renderer.ensure_camera_views(len(config.camera_views), (config.pixel_width, config.pixel_height))
+        for layer, view in enumerate(config.camera_views):
+            view_config = dataclasses.replace(config, camera=view.camera, view_aspect=view.aspect_ratio, hide_camera_views=True)
+            encoder = device.create_command_encoder(label="camera view")
+            layers = self.service.render_layers(root, view_config, encoder)
+            self._composite(encoder, self._lit(encoder, layers.lit), layers.vector, renderer.camera_view_layer(layer), config, 1.0, first=True)
+            device.queue.submit([encoder.finish()])
+
+    def _lit(self, encoder: wgpu.GPUCommandEncoder, lit: wgpu.GPUTexture) -> wgpu.GPUTexture:
+        """The lit layer after the lit-stage effects."""
         for effect in self.effects:
             if isinstance(effect, Bloom):
                 lit = self._bloom.apply(encoder, lit, effect)
             elif isinstance(effect, ShaderEffect) and effect.stage == "lit":
                 lit = self._shaders.apply(encoder, lit, effect, "lit")
-        return lit, layers.vector
+        return lit
 
     def _params(self, config: RenderConfig, weight: float, background: bool) -> dict:
         """Composite parameters in the next uniform slot, as a binding."""
@@ -237,16 +257,20 @@ class FrameComposer:
         )
 
 
-def _views(frame: Frame) -> list[tuple[RNode, Camera | None]]:
-    """``(tree, camera)`` per view of a frame, lowest first; a camera of
-    None means ``RenderConfig.camera``. An empty frame shows the background.
+_View = tuple[RNode, Camera | None, tuple[CameraViewState, ...]]
+
+
+def _views(frame: Frame) -> list[_View]:
+    """``(tree, camera, camera views)`` per view of a frame, lowest first;
+    a camera of None means ``RenderConfig.camera``. An empty frame shows
+    the background.
     """
     if isinstance(frame, RNode):
-        return [(frame, None)]
+        return [(frame, None, ())]
     if isinstance(frame, ViewState):
-        return [(frame.root, frame.camera)]
-    views = [(view.root, view.camera) for view in frame]
-    return views or [(RGroup(), None)]
+        return [(frame.root, frame.camera, frame.camera_views)]
+    views = [(view.root, view.camera, view.camera_views) for view in frame]
+    return views or [(RGroup(), None, ())]
 
 
 class _TreeKeys:
@@ -264,8 +288,8 @@ class _TreeKeys:
         self._previous: dict[int, tuple[RNode, object]] = {}
         self._current: dict[int, tuple[RNode, object]] = {}
 
-    def key(self, views: list[tuple[RNode, Camera | None]]) -> object:
-        return tuple((self._node(root), camera) for root, camera in views)
+    def key(self, views: list[_View]) -> object:
+        return tuple((self._node(root), camera, camera_views) for root, camera, camera_views in views)
 
     def next_frame(self) -> None:
         self._previous, self._current = self._current, {}

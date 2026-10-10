@@ -121,8 +121,9 @@ impl FrameRenderer {
     }
 
     /// Render frame `index` from `sub_frames`: a list of `(weight, views)`,
-    /// each view `(graph, state, key, config, frame)` with the
-    /// `config_values()` tuple and the camera's Frame record (bytes).
+    /// each view `(graph, state, key, config, frame, camera_views)` with
+    /// the `config_values()` tuple, the camera's Frame record (bytes) and
+    /// a `(config, frame)` pair per camera view of the view.
     /// Returns True when the frame shows exactly what the frame before
     /// showed: then nothing is rendered or read back for it.
     fn render(
@@ -330,6 +331,11 @@ impl FrameRenderer {
                 // The Frame record holds the camera and every config value a
                 // pack reads, except whether the default light is on.
                 key.push(parse_settings(&view.get_item(3)?)?.default_lights as u8);
+                for camera_view in view.get_item(5)?.cast::<PyList>()?.iter() {
+                    let mut frame = frame_record(&camera_view.get_item(1)?)?;
+                    frame.time = 0.0;
+                    key.extend(bytemuck::bytes_of(&frame));
+                }
             }
         }
         Ok(Some(key))
@@ -369,7 +375,8 @@ impl FrameRenderer {
         )
     }
 
-    /// Pack and render one view and composite it into `target`.
+    /// Pack and render one view and composite it into `target`. The
+    /// pictures of its camera views are rendered and submitted first.
     fn render_view(
         &mut self,
         py: Python<'_>,
@@ -377,12 +384,56 @@ impl FrameRenderer {
         view: &Bound<'_, PyTuple>,
         target: CompositeTarget,
     ) -> PyResult<()> {
+        let camera_views = view.get_item(5)?;
+        let camera_views = camera_views.cast::<PyList>()?;
+        if !camera_views.is_empty() {
+            let size = (self.settings.width, self.settings.height);
+            self.renderer
+                .ensure_camera_views(&self.gpu, camera_views.len(), size);
+            for (layer, camera_view) in camera_views.iter().enumerate() {
+                // Each is submitted on its own: the renderer's buffers hold
+                // one render at a time.
+                let mut picture_encoder = self.gpu.device.create_command_encoder(&Default::default());
+                let layer_view = self.renderer.camera_view_layer(layer);
+                let picture = CompositeTarget {
+                    view: &layer_view,
+                    weight: 1.0,
+                    clear: true,
+                    background: true,
+                    blend: Blend::Replace,
+                };
+                self.render_layers_into(
+                    py,
+                    &mut picture_encoder,
+                    view,
+                    &camera_view.get_item(0)?,
+                    &camera_view.get_item(1)?,
+                    picture,
+                )?;
+                self.gpu.queue.submit([picture_encoder.finish()]);
+            }
+        }
+        self.render_layers_into(py, encoder, view, &view.get_item(3)?, &view.get_item(4)?, target)
+    }
+
+    /// Pack and render the graph and state of `view`, seen with `config`
+    /// (a `config_values()` tuple) and `frame` (a Frame record), and
+    /// composite the result into `target`.
+    fn render_layers_into(
+        &mut self,
+        py: Python<'_>,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &Bound<'_, PyTuple>,
+        config: &Bound<'_, PyAny>,
+        frame: &Bound<'_, PyAny>,
+        target: CompositeTarget,
+    ) -> PyResult<()> {
         let graph = view.get_item(0)?;
         let graph = graph.cast::<SceneGraph>()?.get();
         let state = view.get_item(1)?;
         let state = state.cast::<FrameState>()?.get();
-        let settings = parse_settings(&view.get_item(3)?)?;
-        let mut frame = frame_record(&view.get_item(4)?)?;
+        let settings = parse_settings(config)?;
+        let mut frame = frame_record(frame)?;
         let packet = self.packer.pack_frame(py, graph, state, &settings)?;
         frame.light_count = packet
             .meshes

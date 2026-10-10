@@ -50,6 +50,18 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    /// Make the camera view texture hold `count` pictures of `size` pixels.
+    pub fn ensure_camera_views(&mut self, gpu: &Gpu, count: usize, size: (u32, u32)) {
+        self.vector_pass
+            .camera_views
+            .ensure(&gpu.device, count, size);
+    }
+
+    /// Layer `layer` of the camera view texture, to render a picture into.
+    pub fn camera_view_layer(&self, layer: usize) -> wgpu::TextureView {
+        self.vector_pass.camera_views.layer(layer).clone()
+    }
+
     pub fn new(py: Python<'_>, gpu: &Gpu, profile: bool) -> PyResult<Renderer> {
         Ok(Renderer {
             frame_uniform: gpu.device.create_buffer(&wgpu::BufferDescriptor {

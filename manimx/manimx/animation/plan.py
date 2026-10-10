@@ -31,10 +31,10 @@ from collections.abc import Iterator
 from typing import Any
 
 from .. import _core
-from ..renderer.config import Camera as RenderCamera
 from ..renderer.config import ViewState
-from ..robjects import Transform
 from ..robjects.planned_frame import PlannedFrame
+from .camera import Camera
+from .camera_view import camera_views, current_value, view_cameras
 from .clipping_group import ClippingGroup
 from .contributions import (
     Between,
@@ -139,24 +139,19 @@ class ScenePlan:
         """
         self.evaluate(t, global_time)
         state = self.evaluator.state()
-        return ViewState(PlannedFrame(self.graph, state, state.key(self._render_slots)), self._camera(state))
-
-    def _camera(self, state: Any) -> RenderCamera:
-        """``Camera.render_camera()`` with the values of ``state``."""
-        camera = self.scene.camera
         value = lambda signal: state.value(self.slot(signal))  # noqa: E731
-        return RenderCamera(
-            transform=Transform(position=tuple(value(axis) for axis in camera.position.axes), rotation=value(camera.rotation)),
-            frame_height=value(camera.frame_height),
-            field_of_view=value(camera.field_of_view) if value(camera.perspective) else None,
-            near=camera.near,
-            far=camera.far,
+        return ViewState(
+            PlannedFrame(self.graph, state, state.key(self._render_slots)),
+            self.scene.camera.render_camera(value),
+            camera_views(self.scene.roots, value),
         )
 
     def _scene_graph(self) -> Any:
         nodes: list[Node] = []
         index: dict[int, int] = {}
-        for root in self.scene.roots:
+        # Cameras (animated ones are roots too) are never drawn.
+        drawn_roots = [root for root in self.scene.roots if not isinstance(root, Camera)]
+        for root in drawn_roots:
             for node in root.family():
                 if id(node) not in index:
                     index[id(node)] = len(nodes)
@@ -173,7 +168,7 @@ class ScenePlan:
                 children = [node.mask, node.content]
             fields = {name: self.slot(signal) for name, signal in _node_fields(node)}
             described.append((kind, node.uid, fields, [index[id(child)] for child in children]))
-        roots = [(index[id(root)], self.slot(root.present)) for root in self.scene.roots]
+        roots = [(index[id(root)], self.slot(root.present)) for root in drawn_roots]
         return _core.SceneGraph(described, roots)
 
     def _add_signal(self, signal: Signal) -> None:
@@ -228,7 +223,7 @@ class PlannedTimeline:
             plan = self.plan(clip.scene)
             if plan.graph is None:
                 state = clip.scene.state_at(compiled, global_time=t)
-                views.append(ViewState(clip._group(state.children), clip.scene.camera.render_camera()))
+                views.append(ViewState(clip._group(state.children), clip.scene.camera.render_camera(), camera_views(clip.scene.roots, current_value)))
             else:
                 views.append(plan.frame_at(compiled, global_time=t))
         return tuple(views)
@@ -324,6 +319,8 @@ def _readable_signals(scene: PreparedScene) -> list[Signal]:
         for node in root.family():
             signals += node.signals()
     signals += scene.camera.signals()
+    for camera in view_cameras(scene.roots):
+        signals += camera.signals()
     return signals
 
 

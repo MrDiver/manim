@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 
 use super::buffer::{GrowableBuffer, Records};
+use super::camera_views::CameraViewTexture;
 use super::context::{Gpu, COLOR_FORMAT, DEPTH_FORMAT, SHADOW_FORMAT};
 use crate::records::Frame;
 
@@ -61,6 +62,10 @@ pub struct VectorPass {
     masks: Vec<(u64, u32)>,
     shadows: HashMap<i32, (u64, u32)>,
     shadow_groups: HashMap<u64, wgpu::BindGroup>,
+    /// The pictures of the frame's camera views.
+    pub camera_views: CameraViewTexture,
+    /// The camera view texture the bind group was made with.
+    camera_views_generation: u64,
 }
 
 impl VectorPass {
@@ -95,6 +100,8 @@ impl VectorPass {
             masks: Vec::new(),
             shadows: HashMap::new(),
             shadow_groups: HashMap::new(),
+            camera_views: CameraViewTexture::new(&gpu.device),
+            camera_views_generation: u64::MAX,
         }
     }
 
@@ -145,8 +152,10 @@ impl VectorPass {
             || changed
             || self.bind_group.is_none()
             || targets_generation != self.targets_generation
+            || self.camera_views.generation != self.camera_views_generation
         {
             self.targets_generation = targets_generation;
+            self.camera_views_generation = self.camera_views.generation;
             self.bind_group =
                 Some(self.create_bind_group(gpu, frame_uniform, 0, mask_layers, mesh_depth));
             self.shadow_groups.clear();
@@ -367,6 +376,22 @@ impl VectorPass {
             },
             count: None,
         });
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: next + 2,
+            visibility: fragment,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2Array,
+                multisampled: false,
+            },
+            count: None,
+        });
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: next + 3,
+            visibility: fragment,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        });
         gpu.device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("vector"),
@@ -382,7 +407,8 @@ impl VectorPass {
         mask_layers: &wgpu::TextureView,
         mesh_depth: &wgpu::TextureView,
     ) -> wgpu::BindGroup {
-        // Binding order matches vector.wgsl: frame, storage buffers, masks, mesh depth.
+        // Binding order matches vector.wgsl: frame, storage buffers, masks,
+        // mesh depth, camera views and their sampler.
         let mut entries = vec![wgpu::BindGroupEntry {
             binding: 0,
             resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
@@ -405,6 +431,14 @@ impl VectorPass {
         entries.push(wgpu::BindGroupEntry {
             binding: next + 1,
             resource: wgpu::BindingResource::TextureView(mesh_depth),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: next + 2,
+            resource: wgpu::BindingResource::TextureView(&self.camera_views.array_view),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: next + 3,
+            resource: wgpu::BindingResource::Sampler(&self.camera_views.sampler),
         });
         gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("vector"),

@@ -56,6 +56,7 @@ from .animations import (
 from .audio import DEFAULT_SAMPLE_RATE, Sound, SoundEvent, mix
 from .authoring import _active
 from .camera import Camera
+from .camera_view import camera_views, current_value
 from .node import Node
 from .signal_tracks import Change, Placement, RateFunction, SignalTrack, linear
 from .signals import RootSignal, Signal, TimeSignals
@@ -419,7 +420,7 @@ class PreparedScene:
         camera (the same shape as ``Timeline.frame_at``).
         """
         root = self.state_at(t)
-        return (ViewState(root, self.camera.render_camera()),)
+        return (ViewState(root, self.camera.render_camera(), camera_views(self.roots, current_value)),)
 
     def sounds(self) -> list[tuple[float, Sound, float]]:
         """``(compiled time, sound, volume)`` of every sound in the scene."""

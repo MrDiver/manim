@@ -26,7 +26,7 @@ import wgpu
 
 from ..config import RenderConfig
 from .frame import FRAME_DTYPE
-from .gpu import GPUContext, ResourceCache
+from .gpu import HDR_FORMAT, GPUContext, ResourceCache
 from .lighting_pass import LightingPass
 from .mesh_pass import MeshPass
 from .packer import FramePacket
@@ -66,11 +66,34 @@ class WGPURenderer:
         self._targets: RenderTargets | None = None
         self._empty_3d: RenderTargets | None = None
         """Targets whose G-buffer and lit layer are known to be empty."""
+        self._camera_views: wgpu.GPUTexture | None = None
+        self._camera_views_view: wgpu.GPUTextureView | None = None
+        self.ensure_camera_views(1, (1, 1))
 
     @property
     def frame_uniform(self) -> wgpu.GPUBuffer:
         """Camera, viewport and time of the latest render (frame.wgsl)."""
         return self._frame_uniform
+
+    def ensure_camera_views(self, count: int, size: tuple[int, int]) -> None:
+        """Make the camera view texture hold at least ``count`` layers of
+        ``size`` pixels (composers render the pictures into it, the vector
+        pass samples it; see ``RenderConfig.camera_views``)."""
+        texture = self._camera_views
+        if texture is not None and texture.size[2] >= count and tuple(texture.size[:2]) == tuple(size):
+            return
+        self._camera_views = self.context.device.create_texture(
+            label="camera views",
+            size=(size[0], size[1], max(count, 1)),
+            format=HDR_FORMAT,
+            usage=wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.TEXTURE_BINDING,
+        )
+        self._camera_views_view = self._camera_views.create_view(dimension=wgpu.TextureViewDimension.d2_array)
+
+    def camera_view_layer(self, layer: int) -> wgpu.GPUTextureView:
+        """Layer ``layer`` of the camera view texture, to render a picture into."""
+        assert self._camera_views is not None
+        return self.resources.view(self._camera_views, dimension=wgpu.TextureViewDimension.d2, base_array_layer=layer, array_layer_count=1)
 
     def render_layers(self, packet: FramePacket, encoder: wgpu.GPUCommandEncoder | None = None) -> RenderLayers:
         """Render ``packet`` into the lit and vector layers (GPU textures).
@@ -93,7 +116,9 @@ class WGPURenderer:
         device.queue.write_buffer(self._frame_uniform, 0, packet.frame)
         full_upload = packet.source is not self._source
         self._source = packet.source
-        self._vector_pass.prepare(packet.vectors, targets.mask_layers_view, targets.gbuffer_views[-1], samples > 1, full_upload)
+        self._vector_pass.prepare(
+            packet.vectors, targets.mask_layers_view, targets.gbuffer_views[-1], samples > 1, full_upload, self._camera_views_view
+        )
         if meshes is not None:
             self._mesh_pass.prepare(meshes, targets.mask_layers_view, full_upload)
             shadows_changed = self._shadow_pass.prepare(packet.shadows, config.shadow_resolution, all_layers=full_upload)

@@ -8,7 +8,8 @@ Buffers (dtypes mirror the WGSL structs one to one):
 
 * ``objects``        one entry per path: model matrix, depth layer, clip, flags,
                      alpha (the item's, multiplied into every color on the
-                     GPU, so fades rewrite this entry only)
+                     GPU, so fades rewrite this entry only), and for a
+                     camera view its layer and plane size
 * ``instances``      what each draw instance generates (fill or stroke curve)
 * ``fill_vertices``  all tessellated fill triangles, concatenated; geometry
                      only (cached per points version)
@@ -30,8 +31,13 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ...robjects import RShape2D
-from ...robjects.rbezier_path import POINTS_PER_CURVE, TOLERANCE_FOR_POINT_EQUALITY, RBezierPath
+from ...robjects.rbezier_path import (
+    POINTS_PER_CURVE,
+    TOLERANCE_FOR_POINT_EQUALITY,
+    RBezierPath,
+)
 from ..cache import RNodeDataCache
+from ..config import RenderConfig
 from ..scene_graph import NO_CLIP, DrawItem, FlatScene
 from ..tessellation import FillMesh, tessellate_fill
 
@@ -41,6 +47,29 @@ STROKE_WIDTH_SCALE = 0.01
 KIND_FILL = 0
 KIND_STROKE = 1
 NO_NEIGHBOR = -1
+
+NO_VIEW = -1
+"""Object ``view`` of every shape that is not a camera view."""
+
+CameraViews = dict[int, tuple[int, tuple[float, float]]]
+"""Per camera view shape uid: its layer and ``1 / (width, height)``."""
+NO_VIEW_ENTRY = (NO_VIEW, (0.0, 0.0))
+
+
+def camera_view_entries(config: RenderConfig) -> CameraViews:
+    """The camera views of ``config`` by shape uid (see ``RenderConfig.camera_views``)."""
+    return {view.uid: (layer, (1.0 / view.width, 1.0 / view.height)) for layer, view in enumerate(config.camera_views)}
+
+
+def without_camera_views(scene: FlatScene, config: RenderConfig) -> FlatScene:
+    """``scene`` without the shapes of camera views, when ``config`` hides
+    them (while a camera view is rendered)."""
+    if not config.hide_camera_views or not config.camera_views:
+        return scene
+    hidden = {view.uid for view in config.camera_views}
+    items = [item for item in scene.items if item.obj.uid not in hidden]
+    return FlatScene(items=items, clips=scene.clips, lights=scene.lights)
+
 
 FLAG_CAMERA_FACING = 1
 """Object flag: the stroke ribbon faces the camera (all paths except RShape2D)."""
@@ -60,7 +89,8 @@ OBJECT_DTYPE = np.dtype(
         ("flags", "<u4"),
         ("fill_colors", "<u4"),
         ("alpha", "<f4"),
-        ("_pad", "<f4", 3),
+        ("view", "<i4"),
+        ("view_scale", "<f4", 2),
     ]
 )
 INSTANCE_DTYPE = np.dtype(
@@ -132,8 +162,8 @@ class VectorBatch:
     upload all of it). None for a batch built from scratch."""
 
     @staticmethod
-    def build(scene: FlatScene, cache: RNodeDataCache, camera_position: np.ndarray) -> VectorBatch:
-        builder = _BatchBuilder(cache, camera_position)
+    def build(scene: FlatScene, cache: RNodeDataCache, camera_position: np.ndarray, views: CameraViews | None = None) -> VectorBatch:
+        builder = _BatchBuilder(cache, camera_position, views or {})
         for item in scene.items:
             builder.add(item)
         for index, scope in enumerate(scene.clips):
@@ -146,6 +176,7 @@ class VectorBatch:
 class _BatchBuilder:
     cache: RNodeDataCache
     camera_position: np.ndarray
+    views: CameraViews
     objects: list[np.ndarray] = field(default_factory=list)
     instances: list[np.ndarray] = field(default_factory=list)
     """Chunks of ``(kind, object, curve, 0)`` rows (uint32)."""
@@ -173,6 +204,7 @@ class _BatchBuilder:
         entry["clip"] = item.clip
         entry["flags"] = (0 if isinstance(shape, RShape2D) else FLAG_CAMERA_FACING) | (FLAG_FRONT_ONLY if front_only else 0)
         entry["alpha"] = item.alpha
+        entry["view"], entry["view_scale"] = self.views.get(shape.uid, NO_VIEW_ENTRY)
         self.objects.append(entry)
         if item.alpha <= 0.0:
             return  # invisible: no draws
@@ -214,7 +246,8 @@ class _BatchBuilder:
         self.fill_color_count += len(colors)
         draw = _Draw(
             args=(len(mesh), 1, self.fill_vertex_count, self._add_instance(KIND_FILL, object_index)),
-            opaque=bool(np.all(opacity >= 1.0)),
+            # A picture may be see-through anywhere (a transparent background).
+            opaque=bool(np.all(opacity >= 1.0)) and shape.uid not in self.views,
             camera_distance=distance,
             layer=layer,
         )
