@@ -38,6 +38,8 @@ pub struct FrameSettings {
     pub shadow_samples: f64,
     pub shadow_resolution: u32,
     pub shadows: bool,
+    /// `RenderConfig.shadow_filter`.
+    pub shadow_filter: [f32; 4],
 }
 
 /// `frame_data`: one Frame record for a point of view.
@@ -70,6 +72,7 @@ pub fn frame_record(
             settings.shadow_resolution as f32,
             if settings.shadows { 1.0 } else { 0.0 },
         ],
+        shadow_filter: settings.shadow_filter,
     }
 }
 

@@ -27,9 +27,10 @@ FRAME_DTYPE = np.dtype(
         ("exposure", "<f4"),
         ("ambient", "<f4", 4),
         ("shadow", "<f4", 4),
+        ("shadow_filter", "<f4", 4),
     ]
 )
-assert FRAME_DTYPE.itemsize == 400
+assert FRAME_DTYPE.itemsize == 416
 
 
 def frame_data(
@@ -62,6 +63,7 @@ def frame_data(
         config.shadow_resolution,
         1.0 if config.shadows else 0.0,
     )
+    frame["shadow_filter"] = config.shadow_filter
     return frame
 
 

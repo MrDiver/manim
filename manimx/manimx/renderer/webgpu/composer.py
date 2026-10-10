@@ -136,7 +136,7 @@ class FrameComposer:
         accumulator = self._textures.get("accumulator", size, HDR_FORMAT)
 
         for index, (time, weight, views) in enumerate(sub_frames):
-            sub_config = dataclasses.replace(config, time=time)
+            sub_config = dataclasses.replace(config, time=time, shadow_share=len(sub_frames), shadow_index=index)
             if len(views) == 1:
                 # One submission per sub-frame: the renderer's passes and the
                 # composite share an encoder. Buffer writes for this sub-frame

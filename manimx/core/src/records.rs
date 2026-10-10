@@ -157,6 +157,7 @@ pub struct Frame {
     pub exposure: f32,
     pub ambient: [f32; 4],
     pub shadow: [f32; 4],
+    pub shadow_filter: [f32; 4],
 }
 
 /// `SHADOW_VIEW_DTYPE`.
@@ -177,6 +178,6 @@ const _: () = {
     assert!(size_of::<Material>() == 48);
     assert!(size_of::<Light>() == 64);
     assert!(size_of::<DrawIndexed>() == 20);
-    assert!(size_of::<Frame>() == 400);
+    assert!(size_of::<Frame>() == 416);
     assert!(size_of::<ShadowView>() == 80);
 };

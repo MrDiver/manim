@@ -64,7 +64,8 @@ class CoreFramePipeline:
         """Queue the frame at ``time``; the future gets its ``(H, W, 4)``
         uint8 RGBA pixels.
         """
-        sub_frames = [(weight, self._views(scene(t) if callable(scene) else scene, t)) for t, weight in self._sub_frames(scene, time)]
+        times = self._sub_frames(scene, time)
+        sub_frames = [(weight, self._views(scene(t) if callable(scene) else scene, t, len(times), index)) for index, (t, weight) in enumerate(times)]
         future: Future[np.ndarray] = Future()
         future.set_running_or_notify_cancel()
         number = self._submitted
@@ -99,7 +100,7 @@ class CoreFramePipeline:
             return [(time, 1.0)]
         return blur.sample_times(time)
 
-    def _views(self, frame: Frame, time: float) -> list[tuple]:
+    def _views(self, frame: Frame, time: float, share: int = 1, index: int = 0) -> list[tuple]:
         """Each view as the core takes it: graph, state, key, config values,
         the camera's Frame record, the config values and Frame record of
         each of its camera views, and whether its picture depends on the
@@ -110,7 +111,9 @@ class CoreFramePipeline:
         for view in views:
             if not isinstance(view.root, PlannedFrame):
                 raise TypeError("CoreFramePipeline renders frames of the core (PlannedFrame views) only")
-            config = dataclasses.replace(self.config, time=time, camera=view.camera or self.config.camera, camera_views=view.camera_views)
+            config = dataclasses.replace(
+                self.config, time=time, shadow_share=share, shadow_index=index, camera=view.camera or self.config.camera, camera_views=view.camera_views
+            )
             root = view.root
             pictures = [
                 (config_values(picture), camera_frame(picture, 0).tobytes())

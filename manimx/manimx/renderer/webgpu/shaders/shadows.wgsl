@@ -30,6 +30,11 @@ const MAX_SEARCH_UV: f32 = 0.05;
 const GOLDEN_ANGLE: f32 = 2.39996323;
 
 /// 1 where `surface` sees `light` fully, 0 in full shadow.
+/// PCF (previews): the radius of the soft edge in shadow-map texels, and
+/// the most taps it takes.
+const PCF_RADIUS: f32 = 1.5;
+const PCF_TAPS: u32 = 8u;
+
 fn shadow_visibility(light: Light, surface: Surface) -> f32 {
     if light.shadow_view < 0 || frame.shadow.w == 0.0 {
         return 1.0;
@@ -53,9 +58,15 @@ fn shadow_visibility(light: Light, surface: Surface) -> f32 {
     }
 
     let size = light.size * frame.shadow.x;
-    let samples = clamp(u32(frame.shadow.y), 1u, MAX_SHADOW_SAMPLES);
-    let rotation = 6.2831853 * hash(surface.position);
+    // Taps per lookup: fewer when the frame averages several renders, each
+    // with its pattern turned on (RenderConfig.shadow_filter).
+    let samples = clamp(u32(frame.shadow_filter.y), 1u, MAX_SHADOW_SAMPLES);
+    let rotation = 6.2831853 * (hash(surface.position) + frame.shadow_filter.z);
     let texel_uv = 1.0 / resolution;
+    if frame.shadow_filter.x < 0.5 {
+        // PCF: a fixed soft edge PCF_RADIUS texels wide (times the softness).
+        return filtered(layer, probe, texel_uv * PCF_RADIUS * frame.shadow.x, min(samples, PCF_TAPS), rotation);
+    }
     if size <= 0.0 {
         return filtered(layer, probe, texel_uv, samples, rotation);  // hard shadow
     }

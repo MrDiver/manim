@@ -339,6 +339,7 @@ pub fn parse_settings(config: &Bound<'_, PyAny>) -> PyResult<PackSettings> {
             shadow_samples: item(5)?.extract()?,
             shadow_resolution: item(6)?.extract()?,
             shadows: item(7)?.extract()?,
+            shadow_filter: item(14)?.extract()?,
         },
         default_lights: item(8)?.extract()?,
         camera: row_major(&camera),

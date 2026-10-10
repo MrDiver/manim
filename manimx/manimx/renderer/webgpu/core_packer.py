@@ -101,6 +101,7 @@ def config_values(config: RenderConfig) -> tuple:
         config.hide_camera_views,
         camera.focus_distance,
         camera.aperture,
+        config.shadow_filter,
     )
 
 

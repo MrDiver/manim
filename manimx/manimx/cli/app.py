@@ -245,7 +245,7 @@ class _RateColumn(ProgressColumn):
 def render(
     scene: Annotated[str | None, typer.Argument(help="Render one scene instead of the timeline.", show_default=False)] = None,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file (or folder with --png).", show_default=False)] = None,
-    preview: Annotated[bool, typer.Option("--preview", "-p", help="Fast: 960×540, 30 fps, no motion blur.")] = False,
+    preview: Annotated[bool, typer.Option("--preview", "-p", help="Fast: 960×540, 30 fps, no motion blur, PCF shadows.")] = False,
     png: Annotated[bool, typer.Option("--png", help="Write a PNG sequence instead of a video.")] = False,
     window: Annotated[bool, typer.Option("--window", help="Show the frames in a window as they render.")] = False,
     write: Annotated[
@@ -279,6 +279,7 @@ def render(
     if preview:
         chosen.output.width, chosen.output.height, chosen.output.fps = 960, 540, 30
         chosen.effects.motion_blur.enabled = False
+        chosen.effects.shadows.method = "pcf"
     _override(chosen, ("output", "width"), width)
     _override(chosen, ("output", "height"), height)
     _override(chosen, ("output", "fps"), fps)
@@ -423,9 +424,11 @@ def ui_command(
 
 
 def _preview_settings(project: Project) -> Any:
-    """The project's render settings for previews: one render per frame."""
+    """The project's render settings for previews: one render per frame,
+    PCF shadows."""
     chosen = copy.deepcopy(project.settings)
     chosen.effects.motion_blur.enabled = False
+    chosen.effects.shadows.method = "pcf"
     chosen.output.audio = False
     return project.render_settings(chosen)
 

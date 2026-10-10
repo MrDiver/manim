@@ -131,6 +131,11 @@ class ShadowSettings:
     softness: float = setting(1.0, "Multiplies every light's size: 0 gives hard shadows, larger is softer.", minimum=0.0)
     samples: int = setting(16, "Lookups per shadowed pixel; more give smoother soft edges.", minimum=1, maximum=64)
     resolution: int = setting(2048, "Width and height of each shadow map; more give sharper detail.", choices=(512, 1024, 2048, 4096), unit="px")
+    method: str = setting(
+        "pcss",
+        "pcss: edges soften with the distance to the caster and the light's size; pcf: a fixed narrow soft edge, much faster (previews use it).",
+        choices=("pcss", "pcf"),
+    )
 
 
 TONE_MAPS = tuple(operator.name.lower() for operator in ToneMapOperator)
@@ -203,6 +208,7 @@ class Settings:
             shadow_softness=effects.shadows.softness,
             shadow_samples=effects.shadows.samples,
             shadow_resolution=effects.shadows.resolution,
+            shadow_method=effects.shadows.method,
         )
 
     def effects_chain(self) -> tuple[Effect, ...]:

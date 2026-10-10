@@ -100,6 +100,10 @@ class Camera:
         )
 
 
+MIN_SHADOW_TAPS = 4
+"""The fewest taps a shadow lookup takes when renders share the taps."""
+
+
 @dataclass(frozen=True, slots=True)
 class RenderConfig:
     pixel_width: int = 1920
@@ -127,6 +131,17 @@ class RenderConfig:
     """Multiplies every light's ``size``: 0 gives hard shadows everywhere."""
     shadow_samples: int = 16
     """Taps per shadow lookup; more give smoother penumbras."""
+    shadow_method: str = "pcss"
+    """``"pcss"``: soft shadows whose edges widen with the distance to what
+    casts them and the light's ``size`` (contact hardening). ``"pcf"``: a
+    fixed narrow soft edge, much cheaper (previews)."""
+    shadow_share: int = 1
+    """How many renders a frame averages (motion blur sub-frames). Each takes
+    ``shadow_samples / shadow_share`` taps (at least MIN_SHADOW_TAPS), rotated
+    differently per render, so the average still gets them all."""
+    shadow_index: int = 0
+    """Which of the ``shadow_share`` renders this is: it turns the tap
+    pattern (the same in every frame, so unchanged frames stay equal)."""
     camera_views: tuple[CameraViewState, ...] = ()
     """The camera views of the frame (see :class:`CameraViewState`): the
     shape with the uid of entry ``i`` shows layer ``i`` of the renderer's
@@ -137,6 +152,16 @@ class RenderConfig:
     view_aspect: float | None = None
     """The width / height of the picture (default: of the pixels). A camera
     view renders at the frame's pixel size with the aspect of its plane."""
+
+    @property
+    def shadow_filter(self) -> tuple[float, float, float, float]:
+        """``frame.shadow_filter``: the method (1 PCSS, 0 PCF), the taps per
+        lookup and the turn (0 to 1) of the tap pattern for this render."""
+        share = max(1, self.shadow_share)
+        taps = min(self.shadow_samples, max(MIN_SHADOW_TAPS, math.ceil(self.shadow_samples / share)))
+        # A golden-ratio sequence spreads the renders' patterns evenly.
+        turn = (self.shadow_index * 0.6180339887) % 1.0
+        return (1.0 if self.shadow_method == "pcss" else 0.0, float(taps), turn, 0.0)
 
     @property
     def aspect_ratio(self) -> float:
