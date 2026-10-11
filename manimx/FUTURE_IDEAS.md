@@ -56,6 +56,13 @@ thought about from scratch again.
 
 ## Animation and authoring
 
+- **One description of what a node draws.** A node class says what it
+  draws twice: in `_build_snapshot()` (the `RNode` tree of `state_at()`)
+  and in the core's scene graph (`_FIELDS` in plan.py,
+  core/src/packing/scene_graph.rs). Frames come only from the second;
+  the trees remain for tests and the web UI's labels. Reading those from
+  the core's `FrameState` instead would let `_build_snapshot()`,
+  `Timeline.frame_at()` and most of `manimx.robjects` go.
 - **Regrouping:** shapes in one group (a grid rotated as a whole) and a
   second, overlapping group rotating some of them. Known to break
   Manim's tree; idea: the renderer takes only resolved world transforms,
