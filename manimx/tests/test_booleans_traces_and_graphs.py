@@ -1,4 +1,5 @@
-"""Boolean shapes (Union, Intersection, Difference, Exclusion) and TracedPath."""
+"""Boolean shapes (Union, Intersection, Difference, Exclusion), TracedPath,
+and Graph and DiGraph."""
 
 from __future__ import annotations
 
@@ -6,7 +7,7 @@ import numpy as np
 import pytest
 from manimx.animation import Group, Scene
 from manimx.animation.authoring import current
-from manimx.userland import Circle, Difference, Dot, Exclusion, Intersection, MoveAlongPath, Rectangle, Square, TracedPath, Union
+from manimx.userland import Circle, Difference, DiGraph, Dot, Exclusion, Graph, Intersection, MoveAlongPath, Rectangle, Square, TracedPath, Union
 from manimx.userland.geometry import boolean_points, subpaths
 
 
@@ -122,3 +123,63 @@ def test_a_traced_path_is_made_in_construct_and_traces_points() -> None:
 
     Built().prepare()
     assert errors == [ValueError, ValueError, TypeError]
+
+
+TREE = ([1, 2, 3, 4, 5], [(1, 2), (1, 3), (2, 4), (2, 5)])
+
+
+def place(graph: Graph, vertex: object) -> np.ndarray:
+    return np.array([axis.value for axis in graph[vertex].position.axes])
+
+
+def test_layouts_place_every_vertex_within_the_scale() -> None:
+    for layout in ("circular", "shell", "spring", "tree", "random"):
+        graph = Graph(*TREE, layout=layout, layout_scale=2.0)
+        places = np.array([place(graph, vertex) for vertex in TREE[0]])
+        assert np.linalg.norm(places, axis=1).max() == pytest.approx(2.0)
+        assert len({tuple(np.round(p, 6)) for p in places}) == 5, layout  # no two on top of each other
+    circle = np.array([place(Graph(*TREE, layout="circular"), vertex) for vertex in TREE[0]])
+    assert np.linalg.norm(circle, axis=1) == pytest.approx(np.full(5, 2.0))
+    tree = Graph(*TREE, layout="tree")
+    assert place(tree, 1)[1] > place(tree, 2)[1] > place(tree, 4)[1]  # the root on top
+    assert place(tree, 2)[0] == pytest.approx((place(tree, 4)[0] + place(tree, 5)[0]) / 2)  # centered over its children
+    given = Graph(*TREE, layout={v: (v, 0) for v in TREE[0]})
+    np.testing.assert_allclose(place(given, 3), [3.0, 0.0, 0.0])
+    shells = Graph(*TREE, layout="shell", shells=[[1], [2, 3]])
+    np.testing.assert_allclose(place(shells, 1), [0.0, 0.0, 0.0], atol=1e-9)
+
+
+def test_edges_follow_their_vertices() -> None:
+    graph = DiGraph(*TREE, layout="circular", vertex_radius=0.2)
+    edge = graph.edges[(1, 2)]
+    np.testing.assert_allclose([axis.value for axis in edge.start.axes], place(graph, 1))
+
+    class Built(Scene):
+        def construct(self):
+            self.add(graph)
+            self.play(graph.animate.change_layout("tree"))
+
+    prepared = Built().prepare()
+    prepared.evaluate(prepared.duration)
+    tree = Graph(*TREE, layout="tree")
+    np.testing.assert_allclose(place(graph, 4), place(tree, 4), atol=1e-9)
+    np.testing.assert_allclose([axis.value for axis in edge.end.axes], place(graph, 2), atol=1e-9)
+    tip = edge.tip.points.value
+    gap = np.linalg.norm(tip[:, :2] - place(graph, 2)[:2], axis=1).min()
+    assert gap == pytest.approx(0.2, abs=1e-6)  # the arrow ends at the vertex's edge
+
+
+def test_labels_and_bad_graphs() -> None:
+    labeled = Graph(*TREE, labels=True)
+    assert len(labeled[1].children) == 2  # a dot and its label
+    assert labeled.vertex_radius == 0.25
+    with pytest.raises(ValueError, match="not in the graph"):
+        Graph([1, 2], [(1, 3)])
+    with pytest.raises(ValueError, match="unknown layout"):
+        Graph(*TREE, layout="planar")
+    with pytest.raises(ValueError, match="no position"):
+        Graph(*TREE, layout={1: (0, 0)})
+    with pytest.raises(ValueError, match="connected to the root"):
+        Graph([1, 2, 3], [(1, 2)], layout="tree")
+    with pytest.raises(ValueError, match="root"):
+        Graph(*TREE, layout="tree", root=9)

@@ -86,6 +86,7 @@ from .markers import (
     current_bounds,
     edge,
 )
+from .networks import DiGraph, Graph
 from .numbers import DecimalNumber, Integer, Variable
 from .shapes2d import (
     AnnularSector,
@@ -170,6 +171,7 @@ __all__ = [
     "DashedLine",
     "DecimalMatrix",
     "DecimalNumber",
+    "DiGraph",
     "Difference",
     "Dot",
     "Dot3D",
@@ -184,6 +186,7 @@ __all__ = [
     "Flash",
     "Flipboard",
     "FunctionGraph",
+    "Graph",
     "GrowArrow",
     "GrowFromCenter",
     "GrowFromEdge",

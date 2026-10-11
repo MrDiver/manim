@@ -7,7 +7,16 @@ from typing import Any
 
 import numpy as np
 
-from ..animation import ARRAY, PATH, Curve3D, DerivedSignal, Node, PositionMixin, PreparedScene, RootSignal
+from ..animation import (
+    ARRAY,
+    PATH,
+    Curve3D,
+    DerivedSignal,
+    Node,
+    PositionMixin,
+    PreparedScene,
+    RootSignal,
+)
 from ..animation.authoring import active_compiler
 from ..animation.signals.paths import PointSignal, drawn_part
 from .geometry import parametric_points
