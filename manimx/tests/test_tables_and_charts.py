@@ -6,7 +6,7 @@ import math
 
 import numpy as np
 import pytest
-from manimx.animation import Scene, derive
+from manimx.animation import Scene, Shape2D, derive
 from manimx.userland import (
     BarChart,
     BulletedList,
@@ -22,6 +22,7 @@ from manimx.userland import (
     current_bounds,
 )
 from manimx.userland.charts import _colors, _nice_range
+from manimx.userland.geometry import subpaths
 
 
 def prepare(construct):
@@ -77,6 +78,7 @@ def test_matrices_have_brackets_around_their_entries() -> None:
     matrix = Matrix([[1, "x^2"], [-3.5, None]])
     assert [entry is None for row in matrix.entries for entry in row] == [False, False, False, True]
     left, right = matrix.brackets
+    assert isinstance(left, Shape2D) and len(subpaths(left.points.value)) == 1  # the pieces are one outline
     entries = current_bounds(matrix.entries[0][0])
     assert current_bounds(left)[1, 0] < entries[0, 0] and current_bounds(right)[0, 0] > current_bounds(matrix.entries[0][1])[1, 0]
     assert matrix.row(1) == [matrix.entries[1][0]] and matrix.column(1) == [matrix.entries[0][1]]

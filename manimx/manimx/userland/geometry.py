@@ -332,12 +332,67 @@ __all__ = [
     "sphere_mesh",
     "star_points",
     "tip_points",
+    "union_points",
     "surface_mesh",
     "torus_mesh",
 ]
 
 
 # -- aligning paths (Morph) ---------------------------------------------------------
+
+
+def union_points(paths: Sequence[np.ndarray]) -> np.ndarray:
+    """The outline of the union of the filled ``paths`` (2D, four points
+    per cubic curve, closed subpaths), as one path of that layout: shapes
+    built from overlapping pieces (a tall Typst delimiter) become one
+    outline to draw. Uses Skia's path operations (skia-pathops,
+    https://github.com/fonttools/skia-pathops)."""
+    import pathops
+
+    shapes = []
+    for points in paths:
+        shape = pathops.Path()
+        for piece in subpaths(np.asarray(points, dtype=np.float64)):
+            shape.moveTo(*piece[0])
+            for curve in piece.reshape(-1, 4, 2):
+                shape.cubicTo(*curve[1], *curve[2], *curve[3])
+            shape.close()
+        shapes.append(shape)
+    builder = pathops.OpBuilder()
+    for shape in shapes:
+        builder.add(shape, pathops.PathOp.UNION)
+    curves: list[np.ndarray] = []
+    start = current = np.zeros(2)
+    for verb, points in builder.resolve().segments:
+        targets = [np.array(point, dtype=np.float64) for point in points]
+        if verb == "moveTo":
+            start = current = targets[0]
+        elif verb == "lineTo":
+            curves.append(np.array([current, (2 * current + targets[0]) / 3, (current + 2 * targets[0]) / 3, targets[0]]))
+            current = targets[0]
+        elif verb == "qCurveTo":
+            for control, end in _quadratic_pieces(current, targets):
+                curves.append(np.array([current, current + 2 / 3 * (control - current), end + 2 / 3 * (control - end), end]))
+                current = end
+        elif verb == "curveTo":
+            curves.append(np.array([current, *targets]))
+            current = targets[-1]
+        elif verb == "closePath" and not np.allclose(current, start):
+            curves.append(np.array([current, (2 * current + start) / 3, (current + 2 * start) / 3, start]))
+            current = start
+    return np.concatenate(curves) if curves else np.zeros((0, 2))
+
+
+def _quadratic_pieces(start: np.ndarray, points: list[np.ndarray]) -> list[tuple[np.ndarray, np.ndarray]]:
+    """``(control, end)`` of each quadratic of a TrueType-style run of
+    controls ending on its last point (implied on-curve points between
+    two controls are their midpoints)."""
+    *controls, end = points
+    pieces = []
+    for index, control in enumerate(controls):
+        target = end if index == len(controls) - 1 else (control + controls[index + 1]) / 2
+        pieces.append((control, target))
+    return pieces
 
 
 def subpaths(points: np.ndarray) -> list[np.ndarray]:

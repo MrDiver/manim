@@ -21,6 +21,7 @@ from ..animation import Group, Node, RootSignal, Shape2D, Signal
 from ..animation.authoring import current
 from ..animation.nodes.node import ABS, ChangeList, animatable
 from .constants import ORIGIN
+from .geometry import union_points
 from .lines import Line
 from .markers import current_bounds
 from .numbers import DecimalNumber
@@ -223,13 +224,12 @@ class Matrix(Group):
                 if entry is not None:
                     self.grid.place(entry, r, c)
                     self.add(entry)
-        self.brackets: list[Group] = []
+        self.brackets: list[Shape2D] = []
         if bracket:
             (left, right), bracket_style = typst_brackets(bracket, round(float(self.grid.top * 2), 3), preamble)
             inner_left, inner_right = self.grid.lefts[0] + h_buff / 4, self.grid.lefts[-1] - h_buff / 4
-            for side, pieces, x in (("left", left, inner_left), ("right", right, inner_right)):
-                shapes = (Shape2D(piece + [x, 0.0], f"{self.name}.{side}_bracket{index}", **(bracket_style | style)) for index, piece in enumerate(pieces))
-                self.brackets.append(Group(*shapes, name=f"{self.name}.{side}_bracket"))
+            for side, points, x in (("left", left, inner_left), ("right", right, inner_right)):
+                self.brackets.append(Shape2D(points + [x, 0.0], f"{self.name}.{side}_bracket", **(bracket_style | style)))
             self.add(*self.brackets)
 
     def _entry(self, entry: Entry, preamble: str, name: str, style: dict[str, Any]) -> Node | None:
@@ -313,13 +313,14 @@ def _number_text(value: float) -> str:
 
 
 @lru_cache(maxsize=256)
-def typst_brackets(bracket: str, height: float, preamble: str = "") -> tuple[tuple[tuple[np.ndarray, ...], tuple[np.ndarray, ...]], dict[str, Any]]:
-    """The left ``bracket`` and its right partner as Typst stretches them
-    to ``height`` (``lr(size: ...)``): the points of each one's pieces (a
-    tall delimiter is built from overlapping glyphs, so they stay
-    separate paths), centered on y = 0, the left one ending at x = 0 on
-    its right and the right one starting at x = 0; and the style the
-    document gives them. Compiled once per bracket, height and preamble."""
+def typst_brackets(bracket: str, height: float, preamble: str = "") -> tuple[tuple[np.ndarray, np.ndarray], dict[str, Any]]:
+    """The points of the left ``bracket`` and its right partner as Typst
+    stretches them to ``height`` (``lr(size: ...)``), centered on y = 0,
+    the left one ending at x = 0 on its right and the right one starting
+    at x = 0; and the style the document gives them. Typst builds a tall
+    delimiter from overlapping pieces; each bracket is their union, one
+    outline, so it draws and fills as one shape. Compiled once per
+    bracket, height and preamble."""
     right = BRACKETS[bracket]
     escape = lambda delimiter: "\\" + delimiter if delimiter in "[](){}" else delimiter  # noqa: E731
     source = f"{PAGE}{preamble}\n$ lr(size: #{height * 72:.3f}pt, {escape(bracket)} #h(1in) {escape(right)}) $"
@@ -327,12 +328,8 @@ def typst_brackets(bracket: str, height: float, preamble: str = "") -> tuple[tup
     everything = np.vstack([path.points for path in paths])
     middle = everything[:, 0].mean()
     center = (everything[:, 1].min() + everything[:, 1].max()) / 2
-    sides = [[path.points - [0.0, center] for path in paths if (path.points[:, 0].mean() < middle) == is_left] for is_left in (True, False)]
-    left_edge = max(float(piece[:, 0].max()) for piece in sides[0])
-    right_edge = min(float(piece[:, 0].min()) for piece in sides[1])
-    left = tuple(piece - [left_edge, 0.0] for piece in sides[0])
-    right_pieces = tuple(piece - [right_edge, 0.0] for piece in sides[1])
-    return (left, right_pieces), paths[0].style()
+    left, right_points = (union_points([path.points for path in paths if (path.points[:, 0].mean() < middle) == is_left]) - [0.0, center] for is_left in (True, False))
+    return (left - [left[:, 0].max(), 0.0], right_points - [right_points[:, 0].min(), 0.0]), paths[0].style()
 
 
 __all__ = ["BRACKETS", "DecimalMatrix", "Entry", "IntegerMatrix", "Matrix", "Table", "typst_brackets"]
