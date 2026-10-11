@@ -47,7 +47,7 @@ default-groups = ["test"]
 cache-keys = [{ file = "pyproject.toml" }, { file = "core/Cargo.toml" }, { file = "core/src/**/*.rs" }]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "manimx/renderer/tests"]
+testpaths = ["tests"]
 addopts = [
     "--strict-markers",
     "--cov=manimx",
@@ -63,7 +63,7 @@ markers = [
 [tool.coverage.run]
 branch = true
 source = ["manimx"]
-omit = ["manimx/renderer/tests/*", "manimx/renderer/benchmarks/*"]
+omit = []
 
 [tool.coverage.report]
 exclude_lines = [
@@ -73,6 +73,6 @@ exclude_lines = [
 
 [tool.mutmut]
 source_paths = ["manimx/"]
-do_not_mutate = ["manimx/renderer/tests/*", "manimx/renderer/benchmarks/*"]
+do_not_mutate = []
 pytest_add_cli_args = ["--no-cov"]
 pytest_add_cli_args_test_selection = ["tests/"]

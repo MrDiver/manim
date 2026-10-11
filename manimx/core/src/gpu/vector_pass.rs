@@ -1,10 +1,11 @@
 //! GPU side of the vector pipeline: buffers, pipelines and draw encoding.
-//! Ports `VectorPass` (manimx/renderer/webgpu/vector_pass.py).
 //!
 //! Per frame, `prepare` uploads the records into persistent storage
 //! buffers and one indirect-draw buffer laid out as
 //!
-//!     [opaque draws][transparent draws][shadow draws per scope][mask 0 draws]...
+//! ```text
+//! [opaque draws][transparent draws][shadow draws per scope][mask 0 draws]...
+//! ```
 //!
 //! Every list is then issued with a single `multi_draw_indirect`.
 

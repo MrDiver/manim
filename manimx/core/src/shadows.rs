@@ -1,9 +1,23 @@
 //! Where shadow maps are rendered from, and which of them need rendering
-//! again. Ports manimx/renderer/webgpu/shadow_views.py (read its module
-//! docs) and `frame_data` from frame.py.
+//! again.
 //!
-//! The reference caches each light's views; here they are simply computed
-//! every frame, which costs a few matrix inverses per light.
+//! Every light that casts shadows gets one or more *shadow views*: a
+//! camera at the light that renders the depth of all casters into one
+//! layer of the shadow map array.
+//!
+//! ```text
+//! directional  1 view, orthographic, fitted around its scope's bounds
+//! spot         1 view, perspective, covering the light's outer cone
+//! point        6 views, perspective 90 degrees, one per cube face
+//!              (+x, -x, +y, -y, +z, -z; the shader picks the face from
+//!              the direction to the light)
+//! ```
+//!
+//! Each view gives a Frame record (to render the map with the normal
+//! pipelines) and a ShadowView record (to look the map up when lighting).
+//! The views are computed every frame, which costs a few matrix inverses
+//! per light; `ShadowLayers` tells which layers would come out exactly as
+//! before, so the renderer skips their passes.
 
 use std::f64::consts::PI;
 

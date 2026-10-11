@@ -1,12 +1,13 @@
-//! Every texture one frame renders into, made again when the size changes.
-//! Ports `RenderTargets` (manimx/renderer/webgpu/targets.py):
+//! Every texture one frame renders into, made again when the size changes:
 //!
-//!     masks       one RGBA layer per clip scope (+ a scratch target to draw into)
-//!     G-buffer    4 color targets + depth, multisampled (see gbuffer.wgsl)
-//!     lit         multisampled HDR target of the lighting pass, resolved,
-//!                 with a stencil marking the pixels on edges
-//!     vector      multisampled premultiplied RGBA of 2D shapes and curves,
-//!                 depth-tested against the G-buffer depth, resolved
+//! ```text
+//! masks       one RGBA layer per clip scope (+ a scratch target to draw into)
+//! G-buffer    4 color targets + depth, multisampled (see gbuffer.wgsl)
+//! lit         multisampled HDR target of the lighting pass, resolved,
+//!             with a stencil marking the pixels on edges
+//! vector      multisampled premultiplied RGBA of 2D shapes and curves,
+//!             depth-tested against the G-buffer depth, resolved
+//! ```
 //!
 //! The resolved `lit` and `vector` textures are the renderer's output; the
 //! composer combines them into an image.

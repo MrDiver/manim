@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import io
 import json
 import os
@@ -17,18 +16,19 @@ import numpy as np
 import pytest
 from manimx.animation import Timeline
 from manimx.cli import main
+from manimx.drivers import StillRenderer, render_image
 from manimx.drivers.offline import RenderSettings
 from manimx.examples.navigation import Navigation, config
 from manimx.project import Project
-from manimx.renderer import FrameComposer, MotionBlur, RenderService
+from manimx.renderer import MotionBlur
 from manimx.web import PreviewServer, ProjectReloader
 from PIL import Image
 
 
 @pytest.fixture(scope="module")
-def service() -> RenderService:
+def renderer() -> StillRenderer:
     try:
-        return RenderService()
+        return StillRenderer()
     except Exception as error:  # pragma: no cover - depends on the machine
         pytest.skip(f"no usable GPU: {error}")
 
@@ -41,9 +41,9 @@ def timeline() -> Timeline:
 
 
 @pytest.fixture
-def server(service, timeline):
+def server(renderer, timeline):
     settings = RenderSettings(config(128, 72), fps=10, effects=(MotionBlur(samples=4),))
-    server = PreviewServer(timeline, settings, title="demo", service=service)
+    server = PreviewServer(timeline, settings, title="demo", renderer=renderer)
     server.start()
     yield server
     server.close()
@@ -79,12 +79,12 @@ def test_the_timeline_describes_clips_and_segments(server, timeline) -> None:
     assert data["segments"] and all(segment["clip"] == 0 for segment in data["segments"])
 
 
-def test_frames_are_rendered_at_the_asked_width_without_motion_blur(server, service, timeline) -> None:
+def test_frames_are_rendered_at_the_asked_width_without_motion_blur(server, timeline) -> None:
     status, kind, body = get(server, "/api/frame?t=1.5&w=64&format=png")
     image = np.asarray(Image.open(io.BytesIO(body)))
 
     assert status == 200 and kind == "image/png" and image.shape == (36, 64, 4)
-    expected = FrameComposer(service).compose(timeline.frame_at, dataclasses.replace(config(64, 36), time=1.5))
+    expected = render_image(timeline, 1.5, config(64, 36))
     np.testing.assert_array_equal(image, expected)
     status, kind, body = get(server, "/api/frame?t=999")  # clamped to the end; full width; JPEG
     assert status == 200 and kind == "image/jpeg" and Image.open(io.BytesIO(body)).size == (128, 72)
@@ -139,7 +139,7 @@ def _write_scene(path, cls: str, body: str) -> None:
     os.utime(path, ns=(stamp, stamp))
 
 
-def test_saving_a_scene_rebuilds_the_timeline(tmp_path, monkeypatch, service) -> None:
+def test_saving_a_scene_rebuilds_the_timeline(tmp_path, monkeypatch, renderer) -> None:
     monkeypatch.chdir(tmp_path)
     assert main(["new", "demo", "--example", "--resolution", "720p", "--manimx-source", "/opt/manimx"]) == 0
     root = tmp_path / "demo"
@@ -151,7 +151,7 @@ def test_saving_a_scene_rebuilds_the_timeline(tmp_path, monkeypatch, service) ->
     _write_scene(module_file, entry.cls, "self.wait(2)")
 
     settings = RenderSettings(config(64, 36), fps=10)
-    server = PreviewServer(Project.load(root).build_timeline(), settings, service=service)
+    server = PreviewServer(Project.load(root).build_timeline(), settings, renderer=renderer)
     reloader = ProjectReloader(server, root, lambda project: settings)
     assert server.timeline.duration == pytest.approx(2.0)
     assert not reloader.check()  # nothing saved yet

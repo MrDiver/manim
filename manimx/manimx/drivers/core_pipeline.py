@@ -1,16 +1,16 @@
 """Pipelined frame rendering on the core's renderer.
 
-:class:`CoreFramePipeline` does what :class:`~.pipeline.FramePipeline`
-with a :class:`~manimx.renderer.FrameComposer` does, for frames of the
-core (views whose root is a ``PlannedFrame``): the core
-(``manimx._core.FrameRenderer``, see CORE.md) packs, renders, composites
-and reads back every frame in Rust, with up to ``in_flight`` frames on
-the GPU. Python only asks the timeline for the views of each sub-frame
-and builds each camera's Frame record.
+:class:`CoreFramePipeline` renders the frames of a timeline or prepared
+scene (views whose root is a ``PlannedFrame``): the core
+(``manimx._core.FrameRenderer``) packs, renders, composites and reads
+back every frame in Rust, with up to ``in_flight`` frames on the GPU, so
+the CPU prepares the next frames while the GPU draws the earlier ones.
+Python only asks the timeline for the views of each sub-frame and builds
+each camera's Frame record.
 
 A frame that shows exactly what the frame before showed is not rendered
 (the core compares keys of every view); its future gets the previous
-image, as in :class:`~.pipeline.FramePipeline`.
+image.
 """
 
 from __future__ import annotations
@@ -25,12 +25,10 @@ import numpy as np
 from .. import _core
 from ..renderer.config import Frame, RenderConfig, ViewState
 from ..renderer.effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap
-from ..renderer.webgpu.core_packer import config_values
-from ..renderer.webgpu.frame import camera_frame
+from ..renderer.frame import camera_frame, config_values
 from ..robjects.planned_frame import PlannedFrame
-from .pipeline import _pass_on
 
-SHADER_FOLDER = Path(__file__).resolve().parents[1] / "renderer" / "webgpu" / "shaders"
+SHADER_FOLDER = Path(__file__).resolve().parents[1] / "renderer" / "shaders"
 
 
 class CoreFramePipeline:
@@ -79,6 +77,12 @@ class CoreFramePipeline:
         self._last = future
         self._deliver(self.renderer.finished())
         return future
+
+    def render(self, scene: Frame | Callable[[float], Frame], time: float) -> np.ndarray:
+        """The frame at ``time``, waiting for it: ``(H, W, 4)`` uint8 RGBA."""
+        future = self.submit(0, time, scene)
+        self.flush()
+        return future.result()
 
     def flush(self) -> None:
         """Wait for every submitted frame."""
@@ -130,6 +134,15 @@ def _effect_tuple(effect: Bloom | ShaderEffect) -> tuple:
     if isinstance(effect, Bloom):
         return ("bloom", effect.threshold, effect.knee, effect.intensity, effect.radius, effect.levels)
     return ("shader", effect.code, effect.stage, list(effect.values))
+
+
+def _pass_on(done: Future[np.ndarray], future: Future[np.ndarray]) -> None:
+    """Complete ``future`` like ``done`` (a held frame repeats its image)."""
+    error = done.exception()
+    if error is not None:
+        future.set_exception(error)
+    else:
+        future.set_result(done.result())
 
 
 __all__ = ["CoreFramePipeline"]

@@ -16,6 +16,12 @@ engine's design rationale in `docs/animation_engine_design.md` (repository
 root), performance work in [PERFORMANCE.md](PERFORMANCE.md), usage in
 [GETTING_STARTED.md](GETTING_STARTED.md).
 
+> **Being rewritten.** Sections 1–3, 8, 9 and 10 describe the code as it
+> is. Sections 6 (worlds and views, removed when every scene got its own
+> camera), 7 and 12–14 still describe older states and are rewritten in
+> the documentation pass that follows the removal of the Python renderer
+> (FUTURE_IDEAS.md lists what was removed and why).
+
 Contents:
 
 1. [The big picture](#1-the-big-picture)
@@ -25,9 +31,9 @@ Contents:
 5. [Timing: `Timeline`, `Clip`, `Segment`, `MonotoneMap`](#5-timing-timeline-clip-segment-monotonemap)
 6. [`World2D`, `World3D`, `animation.Camera`, `View`](#6-world2d-world3d-animationcamera-view)
 7. [`RNode`: the contract between both sides](#7-rnode-the-contract-between-both-sides)
-8. [The render chain and `RenderService`](#8-the-render-chain-and-renderservice)
+8. [The renderer](#8-the-renderer)
 9. [The core: `manimx._core`](#9-the-core-manimx_core)
-10. [Drivers: `FramePipeline`, processes, `FrameSink`, audio](#10-drivers-framepipeline-processes-framesink-audio)
+10. [Drivers: `CoreFramePipeline`, processes, `FrameSink`, audio](#10-drivers-coreframepipeline-processes-framesink-audio)
 11. [`Project` and the CLI](#11-project-and-the-cli)
 12. [Lifetimes at a glance](#12-lifetimes-at-a-glance)
 13. [Design decisions](#13-design-decisions)
@@ -47,43 +53,36 @@ manimx has two passes:
    - every `Emit`, `Cue` and `SoundEvent` is stored in its `Segment`.
 
    The result is a `PreparedScene`.
-2. **Evaluate anywhere.** `PreparedScene.state_at(t)` and
-   `Timeline.state_at(t)` return a tree of `RNode`s for any time, in
-   any order and in any process, without replaying anything.
-   The render chain (`SceneFlattener`, `FramePacker`, `WGPURenderer`,
-   `FrameComposer`) turns such a tree into pixels.
+2. **Evaluate anywhere.** A `ScenePlan` hands the prepared scene to the
+   native core (`manimx._core`, Rust; section 9) as data once. For any
+   time, in any order and in any process, the core sets every signal to
+   its value, flattens the scene graph, packs the GPU records, renders,
+   composites and reads back, without replaying anything and without
+   per-object Python. Python runs per frame only where the user wrote
+   per-frame Python (`derive()` functions, custom animations, unknown
+   rate functions).
 
 Everything else follows from this split: random access makes scrubbing,
-retiming, cutting and parallel rendering possible. `RenderService` is a
-long-lived service that keeps GPU data per `RNode.uid` across all
-calls and only patches what changed.
+retiming, cutting and parallel rendering possible. The core's
+`FrameRenderer` is long-lived: it keeps GPU data per node uid across
+frames and only writes what changed.
 
-The second pass has two implementations that give the same pixels:
-
-- **The core** (`manimx._core`, Rust; section 9), the default: a
-  `ScenePlan` hands the prepared scene to the core as data once; per
-  frame the core evaluates every signal, flattens the scene graph, packs
-  the GPU records and renders, composites and reads back, without
-  `RNode` trees and without per-object Python. Python runs per frame only
-  where the user wrote per-frame Python (`derive()` functions, custom
-  animations, unknown rate functions).
-- **The reference path** in Python (`RNode` trees through the render
-  chain of section 8): the definition of what a frame shows, used by the
-  tests, by `manimx ui` for drawing, and with `performance.core` off.
+`PreparedScene.state_at(t)` still returns a tree of `RNode`s (section 7)
+for any time; tests and tools read scenes through it, but frames are
+rendered from the core only.
 
 ```mermaid
 flowchart LR
     Code["Scene.construct()"] -->|"Scene.prepare() — once"| PS["PreparedScene<br/>SignalTrack, Segment"]
-    PS --> TL["Timeline<br/>Clip, World2D/World3D, events"]
+    PS --> TL["Timeline<br/>Clip, events"]
     Proj["manimx.json"] -->|"Project.build_timeline()"| TL
-    TL -->|"Timeline.state_at(t) — any t, any order"| RO["RNode tree<br/>(RGroup, RShape2D, RShape3D, ...)"]
-    RO --> R["RenderService.shared()<br/>SceneFlattener, FramePacker,<br/>WGPURenderer"]
-    R --> C["FrameComposer<br/>MotionBlur, Bloom, ToneMap"]
-    C --> D["drivers.render()<br/>FramePipeline, worker processes"]
+    TL -->|"planned_frames() — once"| PT["PlannedTimeline<br/>a ScenePlan per clip"]
+    PT -->|"frame_at(t) — any t, any order"| V["ViewStates<br/>PlannedFrame + camera"]
+    V --> CP["CoreFramePipeline"]
+    CP --> Core["manimx._core.FrameRenderer<br/>Packer, Renderer, Composer"]
+    Core --> D["drivers.render()<br/>worker processes"]
     D --> Out["VideoFile / ImageSequence"]
     TL -->|"Timeline.audio(start, end)"| D
-    TL -->|"PlannedTimeline.frame_at(t) — the default"| Core["manimx._core<br/>Evaluator, SceneGraph, Packer,<br/>FrameRenderer"]
-    Core --> D
 ```
 
 ## 2. Packages
@@ -94,9 +93,8 @@ flowchart LR
 | `manimx.robjects` | `RNode` and its subclasses `RGroup`, `RClippingGroup`, `RBezierPath` (→ `RShape2D`, `RCurve3D`), `RShape3D` (→ `RParticles`), `RLight` (→ `RDirectionalLight`, `RPointLight`, `RSpotLight`); `Transform`, `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`, `SurfaceShader`; `new_uid()`, `versioned()`; `PlannedFrame` (a frame of the core) | numpy |
 | `manimx.animation` (core) | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses (`Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D` (→ `Particles`), `Light` → `DirectionalLight`, `PointLight`, `SpotLight`; `animation.Camera`), `PositionMixin`, `RotationMixin`, `ScalableMixin`; the `Animation` contract (`Animation`, `SetValue`, `ChangeSignals`/`AnimationBuilder`) and the default rates `linear`, `smooth`; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound`; contributions as data (`contributions.py`: `To`, `By`, `Ramp`, `Power`, `Turn`, `Keyframes`, `Between`, `Partial`), `paths.partial_path()`, `ScenePlan`, `PlannedTimeline`, `PlannedScene`, `planned_frames()` | robjects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
 | `manimx.userland` | everything a project could write on top of the core: shapes (`Circle`, `Dot`, `Square`, `Rectangle`, `RegularPolygon`, `Triangle`, `Polyline`, `ParametricCurve3D`, `Box`, `Sphere`, `Torus`, `ParametricSurface`), animations (`FadeIn`, `FadeOut`, `Rotate`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter`, `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`), `rate_functions`, `constants` (`UP`, `PI`, ...), `geometry` (every point and mesh generator, `align_paths()`), `load_gltf()` | animation, robjects |
-| `manimx.renderer` | `SceneFlattener` → `FlatScene`; `tessellate_fill()`; `RNodeDataCache`; `RenderConfig`, `renderer.Camera`, `ViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `RemoveObjects`, `ClearScene`; `core_callbacks` (records the core asks Python for) | robjects |
-| `manimx.renderer.webgpu` | `RenderService`, `FramePacker` → `FramePacket`, `WGPURenderer`, `FrameComposer`, `RetainedVectors`, `VectorBatch`, `MeshBatch`, `VectorPass`, `MeshPass`, `LightingPass`, `ShadowPass`, `RenderTargets`, `RenderLayers`, `ResourceCache`, `GPUContext`; `CorePacker` (the core's packer for the Python renderer) | wgpu |
-| `manimx.drivers` | `render()`, `FramePipeline`, `CoreFramePipeline`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation |
+| `manimx.renderer` | `RenderConfig`, `renderer.Camera`, `ViewState`, `CameraViewState`; the camera's Frame record (`frame.py`); `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `core_callbacks` (records the core asks Python for); the WGSL shaders | robjects |
+| `manimx.drivers` | `render()`, `CoreFramePipeline`, `StillRenderer`, `render_image()`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation, `_core` |
 | `manimx.project` | `Project`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers, settings |
 | `manimx.settings` | `Settings` and its sections (`OutputSettings`, `EffectsSettings`, `LightingSettings`, `PerformanceSettings`), `setting()` | renderer (config, effects) |
 | `manimx.cli` | the Typer `app` (`manimx` command), `scaffold`, `ui` | project, drivers, web |
@@ -116,9 +114,8 @@ sequenceDiagram
     participant S as Scene
     participant TL as Timeline
     participant D as drivers.render
-    participant FP as FramePipeline
-    participant FC as FrameComposer
-    participant R as RenderService.shared()
+    participant CP as CoreFramePipeline
+    participant FR as _core.FrameRenderer
     participant W as _Writer thread
     participant FF as ffmpeg (VideoFile)
 
@@ -128,19 +125,18 @@ sequenceDiagram
     P->>TL: Timeline.add() per ClipEntry, Clip.cut(), events
     CLI->>D: render(timeline, VideoFile, RenderSettings)
     D->>TL: Timeline.audio(first frame, last frame)
+    D->>D: planned_frames(timeline): a ScenePlan per clip
     D->>FF: VideoFile.open(FrameFormat with the audio)
     loop every time t of RenderSettings.frame_times()
-        D->>FP: FramePipeline.submit(index, t, timeline.state_at)
-        FP->>FC: FrameComposer.compose_texture(state_at, RenderConfig at t)
+        D->>CP: submit(index, t, planned.frame_at)
         loop every time s of MotionBlur.sample_times(t)
-            FC->>TL: Timeline.state_at(s) returns an RNode tree
-            FC->>R: render_layers(tree, RenderConfig, encoder): flatten, pack, render; returns RenderLayers
-            FC->>FC: composite RenderLayers into the HDR accumulator
+            CP->>CP: frame_at(s): the core evaluates every signal, ViewStates
         end
-        FC-->>FP: output texture
-        FP->>FP: copy into a staging buffer, map_async
-        Note over FP: up to RenderSettings.in_flight frames in flight
-        FP-->>D: Future with the (H, W, 4) uint8 image
+        CP->>FR: render(index, sub-frames with their views)
+        FR->>FR: pack, render, composite every sub-frame and view; copy for read-back
+        Note over FR: up to RenderSettings.in_flight frames on the GPU
+        FR-->>CP: finished frames, in submission order
+        CP-->>D: Future with the (H, W, 4) uint8 image
         D->>W: put(index, image)
         W->>FF: VideoFile.write in index order
     end
@@ -532,157 +528,15 @@ cache correct:
    objects gone for good. Otherwise `RNodeDataCache.sweep()` ages entries
    out (section 8).
 
-## 8. The render chain and `RenderService`
+## 8. The renderer
 
-A tree becomes a frame through four stages, each its own object with one
-input and one output:
-
-```mermaid
-flowchart LR
-    T["RNode tree"] -->|"SceneFlattener.flatten()"| F["FlatScene"]
-    F -->|"FramePacker.pack()"| P["FramePacket"]
-    P -->|"WGPURenderer.render_layers()"| L["RenderLayers"]
-    L -->|"FrameComposer"| Out["frame"]
-```
-
-```mermaid
-classDiagram
-    direction TB
-    class RenderService {
-        shared()$ RenderService
-        cache: RNodeDataCache
-        flattener: SceneFlattener
-        packer: FramePacker
-        renderer: WGPURenderer
-        composer(effects) FrameComposer
-        render(frame, config) image
-        render_layers(root, config, encoder) RenderLayers
-        submit(command)
-    }
-    class SceneFlattener {
-        flatten(root) FlatScene
-    }
-    class FramePacker {
-        cache: RNodeDataCache
-        pack(FlatScene, config) FramePacket
-    }
-    class FramePacket {
-        config
-        vectors: VectorBatch
-        meshes: MeshBatch or None
-        shadows: ShadowViews or None
-        frame, scope_parents, mask_count
-        source
-    }
-    class RetainedVectors {
-        arenas: _Arena per buffer
-        slots: _Slot per uid and mask scope
-        build(FlatScene) VectorBatch
-    }
-    class WGPURenderer {
-        context: GPUContext
-        resources: ResourceCache
-        profiler: GpuProfiler
-        render_layers(packet, encoder) RenderLayers
-    }
-    class FrameComposer {
-        effects
-        _TexturePool
-        _Fullscreen
-        compose_texture(scene, config)
-    }
-    RenderService *-- SceneFlattener
-    RenderService *-- FramePacker
-    RenderService *-- WGPURenderer
-    RenderService "1" *-- "*" FrameComposer : one per effect tuple
-    FramePacker *-- RNodeDataCache
-    FramePacker *-- RetainedVectors
-    FramePacker *-- RetainedMeshes
-    FramePacker ..> FramePacket : builds
-    WGPURenderer ..> FramePacket : reads
-    WGPURenderer *-- GPUContext
-    WGPURenderer *-- ResourceCache
-    WGPURenderer *-- RenderTargets : per size
-    WGPURenderer *-- VectorPass
-    WGPURenderer *-- MeshPass
-    WGPURenderer *-- LightingPass
-    WGPURenderer *-- ShadowPass
-    FrameComposer --> RenderService : runs the chain
-```
-
-- **`SceneFlattener`** resolves the hierarchy into a `FlatScene`:
-  `DrawItem`s with world matrices and painter's order, `ClipScope`s,
-  `LightItem`s.
-- **`FramePacker`** turns a `FlatScene` into a `FramePacket`: the numpy
-  records the shaders read (`VectorBatch` from `RetainedVectors`,
-  `MeshBatch`, `ShadowViews`, the camera's frame record). It owns every
-  per-object cache and never touches the GPU.
-- **`WGPURenderer`** uploads a packet and encodes the passes into the
-  encoder it is given (a `wgpu.GPUCommandEncoder`: commands are recorded,
-  and the caller submits them in one go). It never sees an `RNode` and
-  decides nothing about the scene.
-- **`FrameComposer`** runs the chain once per sub-frame and view, applies
-  the effects and composites.
-
-**One `RenderService` per process:** `RenderService.shared()` creates the
-stages once. `drivers.render()`, the CLI and the tests use it. One thread
-renders at a time. It implements the `Renderer` interface: `render()`,
-`submit()` for `RemoveObjects` and `ClearScene`, and `cache` (the
-packer's `RNodeDataCache`).
-
-**Each stage is usable alone.** A `WGPURenderer` renders packets from any
-`FramePacker`: a packet's dirty ranges are relative to the previous packet
-of the same packer (`FramePacket.source`), and a packet from another packer
-is uploaded in full.
-
-**What one pass through the chain does:**
-
-| Step | `RNode` unchanged | `RNode` changed |
-|---|---|---|
-| `SceneFlattener.flatten()` → `FlatScene` | every call | every call |
-| `RetainedVectors.build()` for `RShape2D` and `RCurve3D` | nothing written to its `_Slot` | new world matrix or alpha: the 96-byte object entry; new `fill`/`stroke` version: its records in place; new `points` version: records moved, curves and instances rewritten |
-| `RNodeDataCache` (`tessellate_fill()` result, stroke records, center, `RShape3D` vertices) | hit | rebuilt for the new version |
-| `MeshBatch.build()`, `build_shadow_views()` | skipped while the `FlatScene` contains no `RShape3D` | run when an `RShape3D` is present |
-| `RetainedMeshes` (mesh vertices and indices) | its ranges kept, nothing written | new `mesh` version: written over its ranges if the size fits, else into new ones |
-| a light's shadow views (`build_shadow_views()`) | cached in `RNodeDataCache` by its world matrix, settings, scope bounds and config | rebuilt |
-| a shadow map layer (`ShadowLayers.mark()`) | no shadow pass while its view and its scope's casters (identity, versions, world matrix) are unchanged | rendered again |
-| `GrowableBuffer.write()` in `WGPURenderer` | nothing uploaded | only the written record ranges |
-| geometry and lighting passes | skipped without `RShape3D` (G-buffer and lit target cleared once) | run when an `RShape3D` is present |
-| mask, shadow and vector passes | recorded into the `FrameComposer`'s command encoder | same |
-
-**Caches and their lifetimes:**
-
-| Cache | Owner | Key | Lives until |
-|---|---|---|---|
-| `RNodeDataCache` | `FramePacker` | (uid, kind) with a version | replaced on a new version; dropped after 1024 packs unused (`sweep()`), or by `RemoveObjects` / `ClearScene` |
-| `ShadowLayers` keys | `FramePacker` | layer index | the next pack with meshes |
-| `RetainedMeshes` slots | `FramePacker` | uid with the `mesh` version | freed when its `RShape3D` is missing from a pack with meshes; repacked when garbage outweighs live data |
-| `RetainedVectors._Slot` | `FramePacker` | (uid, mask scope) | freed when its `RNode` is missing from a pack; `_Arena`s repacked when garbage outweighs live records |
-| `ResourceCache.view()` | `WGPURenderer` | the texture (weak key) | its texture |
-| `ResourceCache.bind_group()` | `WGPURenderer` | the layout plus the identities of the bound resources | LRU, 512 entries |
-| `RenderTargets` | `WGPURenderer` | size, MSAA samples, mask capacity | the next size change |
-| pipelines and shader modules | `WGPURenderer`, `FrameComposer` | variant | their owner |
-| `FrameComposer` | `RenderService` | the tuple of effects | the `RenderService` |
-
-**`FrameComposer.compose_texture()`** first calls the scene function for
-every time of `MotionBlur.sample_times(t)` (or just `t`) and keys the
-views with `_TreeKeys`: a leaf by its identity, a group by its placement
-and its children's keys, a node of the frame before by the key it had. If
-every sub-frame matches the frame before and the config is the same apart
-from its time, nothing is rendered: `FrameComposer.held` is set, the
-output texture still holds the frame, and `FramePipeline` gives that
-frame the previous image without a copy or a readback. With a
-`ShaderEffect` (which may read `frame.time`) every frame is rendered.
-Otherwise, for every sub-frame it
-- calls `RenderService.render_layers()` (flatten, pack, render);
-- applies `Bloom` and `ShaderEffect(stage="lit")` to `RenderLayers.lit`;
-- composites `RenderLayers.lit` and `RenderLayers.vector` over the background
-  into the HDR accumulator, weighted by the sample (`ToneMap` for the lit
-  part);
-- submits one command encoder per sample.
-
-Finally it applies `ShaderEffect(stage="frame")` and encodes to sRGB in the
-output texture.
+The renderer is part of the core (`core/src/gpu/`, section 9); how a
+frame is drawn, pass by pass, with pictures, what it keeps between
+frames and why it is built this way is in
+[manimx/renderer/README.md](manimx/renderer/README.md). The Python
+package `manimx.renderer` holds what Python gives it: `RenderConfig`,
+the effect settings, the camera's Frame record, the functions the core
+calls back, and the WGSL shaders.
 
 ## 9. The core: `manimx._core`
 
@@ -709,8 +563,8 @@ flowchart LR
     functions are called back with the input values;
   - the `SceneGraph`: every node of the scene with its class, children
     and slots. A node of a class whose render state the core does not
-    know (a subclass overriding `_build_snapshot`) makes the plan's graph
-    None, and that clip is drawn from snapshots.
+    know (a subclass overriding `_build_snapshot`) is refused with a
+    `TypeError`.
 - **`Evaluator.evaluate(t, scene_time, global_time)`** sets every slot like
   `PreparedScene.evaluate()` sets the signals; a slot's version increases
   exactly when its value changes. `Evaluator.state()` returns a
@@ -723,35 +577,33 @@ flowchart LR
   scene.
 - **`Packer`** flattens the graph with a state (`SceneGraph.flatten`: world
   matrices, alphas, clip scopes, lights) and packs the records of a
-  `FramePacket`: retained vector records (`vectors.rs`, `RetainedVectors`),
+  `Packet`: retained vector records (`vectors.rs`),
   meshes, materials and particles (`meshes.rs`), lights, shadow views,
   bounds and changed shadow layers. Records built from geometry or style
   alone (triangulated fills, stroke curves, interleaved meshes, material
   entries, linear light colors, texture mips) come from the reference
   functions in `renderer/core_callbacks.py`, once per version of their
-  signals. `CorePacker` wraps the result for the Python renderer.
-- **`FrameRenderer`** (gpu/) is the Python renderer and composer ported
-  to wgpu with the same WGSL, read from the Python package: passes,
-  render targets, bloom, shader effects, tone mapping, finalize, and a
-  ring of staging buffers. `CoreFramePipeline` (drivers/core_pipeline.py)
-  drives it with `FramePipeline`'s interface; it holds frames whose views
-  have the keys of the frame before. One wgpu device per process.
+  signals.
+- **`FrameRenderer`** (gpu/) renders on wgpu with the WGSL shaders of
+  the Python package: passes, render targets, bloom, shader effects,
+  tone mapping, finalize, and a ring of staging buffers.
+  `CoreFramePipeline` (drivers/core_pipeline.py) drives it; it holds
+  frames whose views have the keys of the frame before. One wgpu device
+  per process.
 
-**Equal results.** Every operation the core ports computes in the same
-order as the Python it ports; tests/test_plan.py compares every signal
-(within 1e-12), tests/test_core_render.py and tests/test_core_pipeline.py
-compare pixels (bit-identical), across the example scenes, a scene with
-every node type, every built-in animation, motion blur, bloom, shader
-effects, several views and empty frames.
+**Equal results.** The evaluator computes in the same order as
+`PreparedScene.evaluate()`; tests/test_plan.py compares every signal
+(within 1e-12). Rendered frames are compared with reference images
+(tests/test_rendering.py, tests/test_render_features.py), across the
+example scenes, a scene with every node type, every built-in animation,
+motion blur, bloom, shader effects, several views and every renderer
+feature.
 
-**When it is used.** `RenderSettings.core` (the project setting
-`performance.core`, on by default): `load_source()` takes a source's
-frames from `planned_frames()`, and `drivers.render()` (and its workers)
-renders with `CoreFramePipeline` when every frame comes from the core
-(`FrameSource.core`). `manimx ui` takes its frames from the core and
-draws them with the Python renderer (frames at the page's width).
+**When it is used.** Always: `load_source()` takes a source's frames
+from `planned_frames()`, and `drivers.render()`, its workers,
+`render_image()` and `manimx ui` render with `CoreFramePipeline`.
 
-## 10. Drivers: `FramePipeline`, processes, `FrameSink`, audio
+## 10. Drivers: `CoreFramePipeline`, processes, `FrameSink`, audio
 
 ```mermaid
 flowchart LR
@@ -763,17 +615,16 @@ flowchart LR
     Sink -->|"VideoFile: stdin pipe"| FF["ffmpeg process"]
     Sink -->|"ImageSequence: PNG threads"| Files["frame_00000.png …"]
     subgraph Workers["_worker_main processes (workers > 1, spawn)"]
-        W1["load_source(spec)<br/>RenderService.shared()<br/>FramePipeline<br/>chunks of frame indices"]
+        W1["load_source(spec)<br/>CoreFramePipeline<br/>chunks of frame indices"]
     end
     W1 -->|"SharedMemory slots per worker"| Loop
     Loop -->|"free slot ids"| W1
 ```
 
-- **`FramePipeline`:** keeps up to `in_flight` frames on the GPU, with one
-  staging buffer per frame mapped through `map_async`. `submit()` returns a
+- **`CoreFramePipeline`:** keeps up to `in_flight` frames on the GPU,
+  with one staging buffer per frame mapped while the next frames are
+  prepared (section 9). `submit()` returns a
   `concurrent.futures.Future`, completed in submission order.
-  `CoreFramePipeline` does the same on the core (section 9); `_pipeline()`
-  picks it when `FrameSource.core` is set.
 - **Worker processes:** each runs `_worker_main`, which rebuilds the source
   with `load_source()` from a `"module:Class"` string or a `ProjectSource`.
   Because `state_at` is pure, every process renders identical frames.
@@ -842,11 +693,12 @@ flowchart LR
   and shows the time the user chose (clamped while it does not fit), or
   the error with the user's own frames only. The first build goes through
   the reloader too, so a broken scene does not stop `manimx ui`. Frames are rendered
-  under one lock (the `RenderService` is not thread-safe) with the
+  under one lock (its `StillRenderer` is not thread-safe) with the
   project's settings without motion blur, at the page's width, as JPEG.
   HTTP/1.1 keeps the connection open between frames. The time is part of
   the page's URL (`#t=`). A frame of the benchmark project takes 9.7 ms
-  (2D) to 19.7 ms (3D) at 960 pixels, request included.
+  (2D) to 19.7 ms (3D) at 960 pixels, request included (measured with
+  the Python renderer).
 - **`cli.ui`** prompts (questionary) only for missing arguments in a
   terminal. A `ProjectError` is printed as a panel with its `hint`. A
   `SceneError` comes with a rich traceback of the user's frames.

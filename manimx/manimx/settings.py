@@ -178,7 +178,6 @@ class PerformanceSettings:
 
     workers: int = setting(1, "Render processes; more use more CPU cores.", minimum=1)
     frames_in_flight: int = setting(3, "Frames queued on the GPU per process.", minimum=1)
-    core: bool = setting(True, "Evaluate and pack frames in the native core; off: the Python reference path (same pixels, slower).")
 
 
 @dataclass
@@ -318,11 +317,18 @@ def parse(text: str, item: dataclasses.Field, where: str) -> Any:
     return check(item, value, where)
 
 
+RETIRED = frozenset({"performance.core"})
+"""Settings manimx no longer has: ignored when a file still has them, and
+gone from it the next time it is saved. ``performance.core`` chose the
+Python renderer, which was removed."""
+
+
 def from_json(data: Any, kind: type = Settings, where: str = "") -> Any:
     """Settings of ``kind`` from JSON data, every key and value checked."""
     if not isinstance(data, dict):
         raise SettingsError(f'"{where}" must be an object')
     items = {item.name: item for item in fields(kind)}
+    data = {key: value for key, value in data.items() if (f"{where}.{key}" if where else key) not in RETIRED}
     for key in data:
         if key not in items:
             close = difflib.get_close_matches(key, items, n=1)

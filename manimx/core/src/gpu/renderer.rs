@@ -1,12 +1,13 @@
-//! The renderer: a packet in, the lit and vector layers out. Ports
-//! `WGPURenderer.render_layers` (manimx/renderer/webgpu/renderer.py):
+//! The renderer: a packet in, the lit and vector layers out:
 //!
-//!     mask passes    one per clip scope (parents first), copied into its layer
-//!     shadow passes  one per changed shadow view
-//!     geometry pass  meshes into the multisampled G-buffer
-//!     lighting pass  every G-buffer sample x every light -> lit layer
-//!     vector pass    shapes and curves -> vector layer, depth-tested
-//!                    against the meshes
+//! ```text
+//! mask passes    one per clip scope (parents first), copied into its layer
+//! shadow passes  one per changed shadow view
+//! geometry pass  meshes into the multisampled G-buffer
+//! lighting pass  every G-buffer sample x every light -> lit layer
+//! vector pass    shapes and curves -> vector layer, depth-tested
+//!                against the meshes
+//! ```
 //!
 //! It decides nothing about the scene: what to draw and what changed is in
 //! the packet and the packer's arenas.
@@ -15,6 +16,7 @@ use pyo3::prelude::*;
 
 use super::buffer::Records;
 use super::context::Gpu;
+use super::inspect::TextureKind;
 use super::lighting_pass::LightingPass;
 use super::mesh_pass::{MeshData, MeshPass};
 use super::profiler::GpuProfiler;
@@ -60,6 +62,55 @@ impl Renderer {
     /// Layer `layer` of the camera view texture, to render a picture into.
     pub fn camera_view_layer(&self, layer: usize) -> wgpu::TextureView {
         self.vector_pass.camera_views.layer(layer).clone()
+    }
+
+    /// A texture of the last render to look at (`inspect.rs`): its view,
+    /// how to read it and its size, by name.
+    pub fn inspected(&self, name: &str) -> Option<(wgpu::TextureView, TextureKind, (u32, u32))> {
+        let targets = self.targets.as_ref()?;
+        let size = (targets.width, targets.height);
+        let multisampled =
+            |view: &wgpu::TextureView| Some((view.clone(), TextureKind::FloatMultisampled, size));
+        match name {
+            "lit" => Some((
+                targets.lit.create_view(&Default::default()),
+                TextureKind::Float,
+                size,
+            )),
+            "vector" => Some((
+                targets.vector.create_view(&Default::default()),
+                TextureKind::Float,
+                size,
+            )),
+            "albedo" => multisampled(&targets.gbuffer_views[0]),
+            "normal" => multisampled(&targets.gbuffer_views[1]),
+            "emissive" => multisampled(&targets.gbuffer_views[2]),
+            "scope" => multisampled(&targets.gbuffer_views[3]),
+            "depth" => Some((
+                targets.depth_view.clone(),
+                TextureKind::DepthMultisampled,
+                size,
+            )),
+            "masks" => Some((
+                targets.mask_layers_view.clone(),
+                TextureKind::FloatArray,
+                size,
+            )),
+            "shadow_maps" => {
+                let side = self.shadow_pass.resolution();
+                Some((
+                    self.shadow_pass.maps_view.clone(),
+                    TextureKind::DepthArray,
+                    (side, side),
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    /// How many shadow map layers the last render drew into.
+    pub fn shadow_layers(&self) -> u32 {
+        self.shadow_pass.layer_count()
     }
 
     pub fn new(py: Python<'_>, gpu: &Gpu, profile: bool) -> PyResult<Renderer> {
@@ -132,7 +183,7 @@ impl Renderer {
         ];
         let mut ranges = ranges.into_iter();
         let buffers = arenas.map(|arena| Records {
-            bytes: arena.bytes(py),
+            bytes: arena.bytes(),
             record_size: arena.record_size,
             written: ranges.next().unwrap(),
         });
@@ -162,12 +213,12 @@ impl Renderer {
                 objects: bytemuck::cast_slice(&meshes.output.objects),
                 materials: bytemuck::cast_slice(&meshes.output.materials),
                 vertices: Records {
-                    bytes: mesh_arenas.vertices.bytes(py),
+                    bytes: mesh_arenas.vertices.bytes(),
                     record_size: mesh_arenas.vertices.record_size,
                     written: vertex_ranges,
                 },
                 indices: Records {
-                    bytes: mesh_arenas.indices.bytes(py),
+                    bytes: mesh_arenas.indices.bytes(),
                     record_size: mesh_arenas.indices.record_size,
                     written: index_ranges,
                 },

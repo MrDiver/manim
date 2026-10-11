@@ -1,6 +1,5 @@
 //! Shadow map rendering: one depth layer per shadow view, casters drawn
-//! with the mesh and vector pipelines seen from the light. Ports
-//! `ShadowPass` (manimx/renderer/webgpu/shadow_pass.py).
+//! with the mesh and vector pipelines seen from the light.
 //!
 //! Layers whose views say they are unchanged keep their depth from the
 //! previous render and get no pass, unless the maps were just made again.
@@ -64,6 +63,16 @@ impl ShadowPass {
             scopes: Vec::new(),
             draw_layers: Vec::new(),
         }
+    }
+
+    /// Width and height of every shadow map.
+    pub fn resolution(&self) -> u32 {
+        self.resolution
+    }
+
+    /// How many layers the last render's shadow views use.
+    pub fn layer_count(&self) -> u32 {
+        self.scopes.len() as u32
     }
 
     /// Upload the views. Returns whether bind groups that refer to the

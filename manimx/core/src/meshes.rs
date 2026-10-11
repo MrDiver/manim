@@ -1,9 +1,18 @@
-//! The mesh records of `Shape3D` and `Particles` nodes. Ports `MeshBatch`
-//! and `RetainedMeshes` (manimx/renderer/webgpu/mesh_batch.py).
+//! The mesh records of `Shape3D` and `Particles` nodes, in the buffers
+//! mesh.wgsl reads:
+//!
+//! ```text
+//! objects    per mesh: model and normal matrix, material, clip scope
+//! vertices   all mesh vertices, interleaved
+//! indices    all triangle indices, relative to each mesh's first vertex
+//! materials  material factors, one per material
+//! ```
 //!
 //! Vertices and indices are large and change only with a node's mesh, so
-//! they stay in arenas, a range per node. Objects, materials and draws are
-//! small and built per frame. A mesh's interleaved vertices and a
+//! they stay in arenas, a range per node, and only the written ranges are
+//! uploaded. Objects, materials and draws are small and built per frame.
+//! Draws are grouped by the material's texture set (textures are bound per
+//! group): one `multi_draw_indexed_indirect` per group. A mesh's interleaved vertices and a
 //! material's entry are built by Python once per version
 //! (manimx/renderer/core_callbacks.py).
 
@@ -45,7 +54,7 @@ pub struct DrawGroup {
     pub draws: Vec<DrawIndexed>,
 }
 
-/// `MeshBatch` without its arenas.
+/// A frame's mesh records, without the arenas.
 pub struct MeshOutput {
     pub objects: Vec<MeshObject>,
     pub materials: Vec<Material>,
@@ -66,10 +75,10 @@ pub struct MeshPacker {
 }
 
 impl MeshPacker {
-    pub fn new(py: Python<'_>) -> MeshPacker {
+    pub fn new() -> MeshPacker {
         MeshPacker {
-            vertices: Arena::new(py, records::MESH_VERTEX_SIZE),
-            indices: Arena::new(py, 4),
+            vertices: Arena::new(records::MESH_VERTEX_SIZE),
+            indices: Arena::new(4),
             slots: HashMap::new(),
             seen: HashSet::new(),
             geometry: HashMap::new(),
@@ -82,9 +91,9 @@ impl MeshPacker {
     }
 
     /// Start over with empty arenas (keeps the per-node caches).
-    pub fn repack(&mut self, py: Python<'_>) {
-        self.vertices = Arena::new(py, records::MESH_VERTEX_SIZE);
-        self.indices = Arena::new(py, 4);
+    pub fn repack(&mut self) {
+        self.vertices = Arena::new(records::MESH_VERTEX_SIZE);
+        self.indices = Arena::new(4);
         self.slots.clear();
     }
 
@@ -165,8 +174,8 @@ impl MeshPacker {
         Ok(&self.materials[&uid])
     }
 
-    /// `RetainedMeshes.place`: ``(first index, base vertex)`` of a node's mesh.
-    fn place(&mut self, py: Python<'_>, uid: u64) -> (usize, usize) {
+    /// `(first index, base vertex)` of a node's mesh, placed in the arenas.
+    fn place(&mut self, uid: u64) -> (usize, usize) {
         self.seen.insert(uid);
         let geometry = &self.geometry[&uid];
         if let Some(slot) = self.slots.get(&uid) {
@@ -175,8 +184,8 @@ impl MeshPacker {
             }
         }
         let old = self.slots.get(&uid).copied().unwrap_or((0, 0, 0, 0, 0));
-        let first_vertex = self.vertices.place(py, &geometry.vertices, old.1, old.2);
-        let first_index = self.indices.place(py, &geometry.indices, old.3, old.4);
+        let first_vertex = self.vertices.place(&geometry.vertices, old.1, old.2);
+        let first_index = self.indices.place(&geometry.indices, old.3, old.4);
         let vertex_count = geometry.vertices.len() / records::MESH_VERTEX_SIZE;
         self.slots.insert(
             uid,
@@ -191,7 +200,7 @@ impl MeshPacker {
         (first_index, first_vertex)
     }
 
-    /// `RetainedMeshes.finish`: free the ranges of meshes not placed since
+    /// Free the ranges of meshes not placed since
     /// the last call.
     pub fn finish(&mut self) {
         let gone: Vec<u64> = self
@@ -208,7 +217,7 @@ impl MeshPacker {
         self.seen.clear();
     }
 
-    /// `MeshBatch.build` without the lights.
+    /// The frame's mesh records, without the lights.
     pub fn pack(
         &mut self,
         py: Python<'_>,
@@ -296,7 +305,7 @@ impl MeshPacker {
                     groups.len() - 1
                 }
             };
-            let (first_index, base_vertex) = self.place(py, node.uid);
+            let (first_index, base_vertex) = self.place(node.uid);
             let draw = DrawIndexed {
                 index_count: self.geometry[&node.uid].index_count,
                 instance_count: count as u32,

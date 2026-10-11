@@ -1,7 +1,6 @@
-//! GPU records, field for field as the numpy dtypes in
-//! manimx/renderer/webgpu/vector_batch.py, mesh_batch.py, frame.py and
-//! shadow_views.py declare them (which mirror the WGSL structs). Matrices
-//! are column-major f32, as WGSL reads them: `glam::Mat4::to_cols_array()`.
+//! GPU records, field for field as the WGSL structs in
+//! manimx/renderer/shaders/ declare them. Matrices are column-major f32,
+//! as WGSL reads them: `glam::Mat4::to_cols_array()`.
 
 use bytemuck::{Pod, Zeroable};
 use glam::DMat4;

@@ -1,8 +1,7 @@
 //! Deferred lighting: G-buffer and lights in, the linear HDR "lit" layer
 //! out: fullscreen triangles shade once per pixel where all MSAA samples
 //! hold one surface, once per sample on edges, which a first triangle
-//! marks in a stencil (shaders/deferred_lighting.wgsl). Ports
-//! `LightingPass` (manimx/renderer/webgpu/lighting_pass.py).
+//! marks in a stencil (shaders/deferred_lighting.wgsl).
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;

@@ -1,69 +1,77 @@
 # manimx.renderer
 
-A WebGPU renderer for manimx scenes. It takes a scene at one time plus a
-`RenderConfig` and produces an image. It keeps no scene state of its own,
-so frames can be rendered in any order and in parallel processes.
+How manimx turns a scene at one time into an image. The renderer itself
+is Rust on [wgpu](https://wgpu.rs), in the core
+([core/src/gpu/](../../core/src/gpu/mod.rs), `manimx._core.FrameRenderer`);
+this package holds what Python gives it:
 
-There are two implementations with the same WGSL shaders:
+- `RenderConfig` and `Camera` (config.py): size, background, camera,
+  MSAA, lighting and shadow settings;
+- the effect settings (effects.py): motion blur, bloom, tone mapping,
+  custom WGSL;
+- the camera's Frame record (frame.py), the uniform block every shader
+  reads;
+- the functions the core calls back for what it builds once per version
+  (core_callbacks.py);
+- the WGSL shaders (shaders/), which the core loads from here.
 
-- **The Python renderer** (this package, on
-  [wgpu-py](https://github.com/pygfx/wgpu-py)) renders trees of render
-  objects (`RNode`s). It is the reference: tests compare the other one
-  with it. `RenderService` and the web UI (`manimx ui`) use it.
-- **The core's renderer** (`manimx._core.FrameRenderer`, Rust on wgpu,
-  see [core/src/gpu/](../../core/src/gpu/mod.rs)) renders frames the
-  core evaluated and packed (`PlannedFrame`s, see
-  [CORE.md](../../CORE.md)). `CoreFramePipeline`
-  (manimx/drivers/core_pipeline.py) drives it; `manimx render`,
-  `manimx still` and render workers use it when `performance.core` is on
-  (the default).
-
-Both produce the same pixels (tests/test_core_pipeline.py). Everything
-below describes the Python renderer; the core's ports it module by
-module (the table in core/src/gpu/mod.rs maps them).
+`CoreFramePipeline` (manimx/drivers/core_pipeline.py) drives the
+renderer; `manimx render`, `manimx still`, the render workers, the web UI
+and `render_image` all go through it. The renderer keeps no scene state
+of its own beyond caches, so frames can be rendered in any order and in
+parallel processes.
 
 What it draws:
 
-- **RShape2D**: vector shapes (the snapshots of `Shape2D`). Exact curved fills,
-  strokes with per-point color, opacity and width, all joint and cap
-  styles, painter's order.
-- **RCurve3D**: stroke-only Bezier curves in 3D, always facing the camera,
-  thinner with distance.
-- **RShape3D**: lit triangle meshes with glTF metallic-roughness materials
-  and textures. glTF/GLB files are imported with `manimx.userland.load_gltf`, which
-  builds scene nodes; their snapshots are `RShape3D`s.
+- **`Shape2D`**: vector shapes. Exact curved fills, strokes with
+  per-point color, opacity and width, all joint and cap styles, painter's
+  order.
+- **`Curve3D`**: stroke-only Bezier curves in 3D, always facing the
+  camera, thinner with distance.
+- **`Shape3D`** and **`Particles`**: lit triangle meshes with glTF
+  metallic-roughness materials, textures and custom surface shaders.
+  glTF/GLB files are imported with `manimx.userland.load_gltf`, which
+  builds scene nodes.
 - **Lights**: directional, point and spot, with shadows: PCF (a fixed
   narrow soft edge) or PCSS (soft edges that widen with the distance to
   the caster).
-- **RClippingGroup**: soft alpha masks, optionally one-sided (portals), with
-  lights scoped to the group; casters inside one cast only the shadow of
-  what their masks let through.
-- **Camera views**: another camera's picture on a plane (`CameraView`).
-- **Effects**: motion blur, depth of field (a camera's `aperture`), bloom,
-  tone mapping and custom WGSL shaders, chained by a `FrameComposer`.
+- **`ClippingGroup`**: soft alpha masks, optionally one-sided (portals),
+  with lights scoped to the group; casters inside one cast only the
+  shadow of what their masks let through.
+- **`CameraView`**: another camera's picture on a plane.
+- **Effects**: motion blur, depth of field (a camera's `aperture`),
+  bloom, tone mapping and custom WGSL shaders.
 
 ---
 
 ## Usage
 
-### Render a scene
+### Render a still
 
 ```python
 from PIL import Image
 
-from manimx import Fill, RGroup, RShape2D, Stroke, Transform
-from manimx.userland.geometry import arc_points, rectangle_points
-from manimx.renderer import RenderConfig, RenderService
+from manimx.drivers import render_image
+from manimx.renderer import RenderConfig
+from manimx.userland import Circle, Square
 
-scene = RGroup(children=[
-    RShape2D(points=rectangle_points(2.0, 2.0), fill=Fill("#525893", opacity=1.0), stroke=Stroke("#525893")),
-    RShape2D(points=arc_points(1.0), fill=Fill("#87c2a5", opacity=1.0), transform=Transform(position=(1.5, 0.0, 0.0))),
-])
+shapes = [
+    Square(2.0, color="#525893", fill_opacity=1.0),
+    Circle(1.0, color="#87c2a5", fill_opacity=1.0).move_to((1.5, 0.0, 0.0)),
+]
+config = RenderConfig(pixel_width=1920, pixel_height=1080, background_color="#ece6e2")
+image = render_image(shapes, config=config)  # (H, W, 4) uint8 RGBA, straight alpha
+Image.fromarray(image).save("frame.png")
 
-service = RenderService.shared()  # one per process: it keeps GPU resources and caches
-image = service.render(scene, RenderConfig(pixel_width=1920, pixel_height=1080, background_color="#ece6e2"))
-Image.fromarray(image).save("frame.png")  # (H, W, 4) uint8 RGBA, straight alpha
+image = render_image(MyScene, time=2.5, config=config)  # a scene at a time
 ```
+
+`render_image` takes a `Scene` class or instance, a prepared scene, a
+timeline, or nodes (seen through `config.camera`). It keeps one
+`CoreFramePipeline` per configuration (`StillRenderer`,
+manimx/drivers/stills.py), so frames of the same size reuse its GPU
+resources. Videos are rendered with `manimx render` (manimx/drivers/offline.py),
+which keeps several frames on the GPU at once.
 
 `RenderConfig` holds everything that is not part of the scene: size,
 background, camera, MSAA, time, lighting and shadow settings.
@@ -76,19 +84,18 @@ config = RenderConfig(
     pixel_width=1280, pixel_height=720,
     camera=Camera.look_at((9, -12, 7), (0, 0, 1), field_of_view=math.radians(45)),  # perspective
     msaa_samples=4,
-    shadows=True, shadow_resolution=2048, shadow_softness=1.0, shadow_samples=16, shadow_method="pcf",
+    shadows=True, shadow_resolution=2048, shadow_samples=16, shadow_method="pcf",
     ambient_intensity=0.15, exposure=1.0,
 )
 ```
 
 Without `field_of_view` the camera is orthographic and shows
 `frame_height` world units vertically (8, like Manim). World `+z` is up in
-3D scenes, as in Blender and Manim's 3D scenes.
+3D scenes, as in Blender and Manim's 3D scenes. A scene renders through
+its own camera (`Scene.camera`); `config.camera` is for nodes rendered
+on their own.
 
 ### 3D: meshes, lights, glTF
-
-Scenes are written with scene nodes (manimx.animation), and their
-snapshots are the render objects below:
 
 ```python
 from manimx.animation import DirectionalLight, PointLight, SpotLight
@@ -99,59 +106,55 @@ ball = Sphere(1.0, name="ball", material=PbrMaterial("#FC6255", roughness=0.3)).
 sun = DirectionalLight(direction=(-1, 1, -2), intensity=3.0, size=0.03)  # size: softness
 lamp = PointLight(position=(-2, -2, 2), color="#58C4DD", intensity=15)
 spot = SpotLight(position=(0, -4, 6), target=(0, 0, 0), outer_cone_angle=0.4)
-# ball.snapshot() is an RShape3D, sun.snapshot() an RDirectionalLight, ...
 ```
 
-Only `RShape3D` meshes are lit. 2D shapes and curves keep their exact Manim
-colors, but they still cast shadows onto meshes. Shadows can be turned off
+Only meshes are lit. 2D shapes and curves keep their exact Manim colors,
+but they still cast shadows onto meshes. Shadows can be turned off
 globally (`RenderConfig.shadows`), per light (`cast_shadows`) and per
-object (`cast_shadows` on any shape). If a scene has no lights at all, a
+node (`cast_shadows` on any shape). If a scene has no lights at all, a
 default key light is used.
 
 `shadow_method` picks the filter: `"pcf"` (projects and previews by
 default) blurs every shadow edge by a fixed 1.5 texels; `"pcss"` makes
 edges sharp where an object touches the surface and softer with distance,
-by the light's `size` (Randima Fernando's percentage-closer soft shadows).
+by the light's `size` (Randima Fernando's
+[percentage-closer soft shadows](https://developer.download.nvidia.com/shaderlibrary/docs/shadow_PCSS.pdf)).
 
 ### Clipping and portals
 
 ```python
-from manimx import RClippingGroup
+from manimx.animation import ClippingGroup
 
-portal = RClippingGroup(mask=square_face, content=world, one_sided=True)
+portal = ClippingGroup(square_face, world, one_sided=True)  # mask, content
 ```
 
 The content is shown multiplied by the mask's alpha. The mask counts its
 fill and stroke as they would be drawn, so a 40% opaque mask lets 40%
 through. `one_sided=True` opens the mask only where it faces the camera.
-Lights inside `content` only light that content. See
+Lights inside the content only light that content. See
 `manimx/examples/portal_cube.py` for four worlds inside one cube.
 
-### Effects: the frame composer
+### Effects
 
 ```python
-from manimx.renderer import Bloom, FrameComposer, MotionBlur, ShaderEffect, ToneMap, ToneMapOperator
+from manimx.renderer import Bloom, MotionBlur, ShaderEffect, ToneMap, ToneMapOperator
 
-composer = FrameComposer(service, [
+effects = [
     MotionBlur(samples=16, shutter=1 / 120),
     Bloom(threshold=1.0, intensity=0.1),
     ToneMap(ToneMapOperator.ACES),
-])
-image = composer.compose(lambda t: scene_at(t), RenderConfig(time=2.0))
+]
+image = render_image(MyScene, time=2.0, config=config, effects=effects)
 ```
 
-The composer is the last stage of the render chain and drives the others.
-`MotionBlur` asks the chain for one frame per sub-frame time inside the
-shutter and averages them. Without it, or when the scene is a fixed object
-instead of a function of time, the chain runs once.
+`MotionBlur` renders the scene at several times inside the shutter and
+averages them. Every sub-frame is a full render, so motion blur
+multiplies the cost of a frame by its samples; projects leave it off
+unless asked (`effects.motion_blur.enabled`).
 
 Depth of field is not an effect in the list but the camera's lens: with a
 `Camera.aperture` above 0, its view is blurred by each pixel's distance from
-`focus_distance` (thin lens, see shaders/depth_of_field.wgsl).
-
-Every sub-frame is a full render, so motion blur multiplies the cost of a
-frame by its samples; projects leave it off unless asked
-(`effects.motion_blur.enabled`).
+`focus_distance` (a thin lens, see shaders/depth_of_field.wgsl).
 
 `ShaderEffect` runs your own WGSL on the lit 3D layer (`stage="lit"`,
 linear HDR) or on the final frame (`stage="frame"`):
@@ -165,24 +168,15 @@ vignette = ShaderEffect("""
 """, values=(1.5,))
 ```
 
-### Objects leaving the scene
-
-The renderer caches derived data per object (fill triangulations, packed
-vertices). When objects are deleted, tell it with a command:
-
-```python
-from manimx.renderer import ClearScene, RemoveObjects
-
-service.submit(RemoveObjects.subtree(old_group))
-service.submit(ClearScene())
-```
-
 ### Profiling
 
 ```python
-service = RenderService(profile=True)
-service.render(scene, config)
-print(service.renderer.profiler.read())  # {"shadows": 0.4, "geometry": 0.2, "lighting": 0.6, ...} ms on the GPU
+from manimx.animation.plan import planned_frames
+from manimx.drivers import CoreFramePipeline
+
+pipeline = CoreFramePipeline((), config, profile=True)
+pipeline.render(planned_frames(MyScene().prepare()).frame_at, 1.0)
+print(pipeline.gpu_timings())  # {"shadows": 0.4, "geometry": 0.2, "lighting": 0.6, ...} ms on the GPU
 ```
 
 ---
@@ -259,127 +253,68 @@ red ball.
 
 ## Architecture
 
-### The render chain
-
-A tree becomes a frame through four stages. Each is its own object with
-one input and one output:
+### From a scene to a frame
 
 ```mermaid
 flowchart LR
-    T["RNode tree"] -->|"SceneFlattener.flatten()"| F["FlatScene<br/>DrawItems, ClipScopes, LightItems"]
-    F -->|"FramePacker.pack()"| P["FramePacket<br/>GPU-ready numpy records"]
-    P -->|"WGPURenderer.render_layers()"| L["RenderLayers<br/>lit, vector (GPU textures)"]
-    L -->|"FrameComposer"| Out["frame"]
+    S["Scene"] -->|"prepare()"| P["PreparedScene"]
+    P -->|"ScenePlan"| Plan["Evaluator + SceneGraph<br/>(the core)"]
+    Plan -->|"frame_at(t)"| V["ViewState<br/>PlannedFrame + camera"]
+    V -->|"CoreFramePipeline"| FR["FrameRenderer<br/>(the core)"]
+    FR --> Out["frame"]
 ```
 
-- **`SceneFlattener`** (`scene_graph.py`) resolves the hierarchy: world
-  matrices, painter's order, clip scopes, lights.
-- **`FramePacker`** (`webgpu/packer.py`) builds the records the shaders read
-  and owns every per-object cache (`RNodeDataCache`, `RetainedVectors`). It
-  never touches the GPU.
-- **`WGPURenderer`** (`webgpu/renderer.py`) only uploads, binds and encodes
-  passes. It never sees an `RNode`: what to draw and what changed are in
-  the packet.
-- **`FrameComposer`** (`webgpu/composer.py`) runs the chain once per
-  sub-frame and view, applies effects and composites.
+- **`ScenePlan`** (manimx/animation/plan.py) gives every signal of a
+  prepared scene a slot in the core's `Evaluator` and describes the node
+  tree as a `SceneGraph` (which node reads which slot). `frame_at(t)`
+  sets every slot to its value at `t` and returns a `ViewState` whose
+  root is a `PlannedFrame`: the graph, the `FrameState` (the slot
+  values), and a key of the versions of every slot a node reads.
+- **`CoreFramePipeline`** (manimx/drivers/core_pipeline.py) asks for the
+  views of each sub-frame (one, or the motion blur samples), builds each
+  camera's Frame record, and hands them to the `FrameRenderer`.
+- **`FrameRenderer`** (core/src/gpu/frame_renderer.rs) does the rest in
+  Rust: for each sub-frame and view, the `Packer` (core/src/packer.rs)
+  turns the graph and state into records, the `Renderer`
+  (core/src/gpu/renderer.rs) draws them into two layers, and the
+  `Composer` (core/src/gpu/composer.rs) applies effects and composites
+  them into the frame. The frame is copied into a buffer that is read
+  back while the next frames are prepared; up to `in_flight` frames are
+  on the GPU at once.
 
-The core replaces the first two stages for frames it evaluated: its
-`Packer` (core/src/packer.rs) turns a scene graph and a frame state into
-the same records, and Python's `CorePacker` (`webgpu/core_packer.py`)
-wraps it as a `FramePacker` for the Python renderer. The core's
-`FrameRenderer` then does the last two in Rust.
-
-`RenderService` (`webgpu/service.py`) owns one of each stage, plus a
-composer per effect chain, and implements the `Renderer` interface.
-`RenderService.shared()` is the process's instance. A `WGPURenderer` can
-render packets from any packer: a packet's dirty ranges are relative to
-the previous packet of the same packer, and a packet from another packer
-is uploaded in full.
-
-### Components
-
-```mermaid
-flowchart LR
-    subgraph Scene["scene (manimx.robjects)"]
-        Tree["render object tree<br/>RGroup, RClippingGroup,<br/>RShape2D, RCurve3D, RShape3D, RLight"]
-    end
-
-    subgraph Backend["backend-independent (manimx.renderer)"]
-        Interface["Renderer<br/>render(), submit()"]
-        Graph["scene_graph<br/>SceneFlattener"]
-        Tess["tessellation<br/>fills -> triangles"]
-        Cache["RNodeDataCache<br/>(uid, kind) -> (version, data)"]
-        Commands["commands<br/>RemoveObjects, ClearScene"]
-        Config["RenderConfig, Camera"]
-        Effects["effects<br/>MotionBlur, Bloom, ToneMap, ShaderEffect"]
-    end
-
-    subgraph WebGPU["manimx.renderer.webgpu"]
-        Service["RenderService"]
-        Packer["FramePacker"]
-        Renderer["WGPURenderer"]
-        Composer["FrameComposer"]
-        Batches["RetainedVectors, MeshBatch,<br/>shadow_views"]
-        Passes["VectorPass, MeshPass,<br/>LightingPass, ShadowPass"]
-        Targets["RenderTargets"]
-        Profiler["GpuProfiler"]
-        Shaders["shaders/*.wgsl"]
-    end
-
-    Tree --> Graph
-    Interface -. implemented by .-> Service
-    Commands --> Cache
-    Service --> Graph & Packer & Renderer & Composer
-    Packer --> Batches
-    Batches --> Tess
-    Packer --> Cache
-    Renderer --> Passes --> Shaders
-    Passes --> Targets
-    Composer --> Effects
-    Config --> Packer
-    Profiler -.-> Passes
-```
-
-The `Renderer` interface (`base.py`) is all a backend has to implement. The
-scene graph, tessellation, cache, commands, config and effect settings are
-backend independent, so a path tracer or a Blender bridge could reuse them.
-
-### One frame
+### One view
 
 ```mermaid
 flowchart TD
-    A["scene tree + RenderConfig"] --> B["SceneFlattener.flatten():<br/>world matrices, painter's order,<br/>clip scopes, lights"]
-    B --> C["FramePacker.pack(): RetainedVectors.build():<br/>patch per-object slots<br/>(records from the cache)<br/>+ this frame's indirect draws"]
-    B --> D["MeshBatch.build():<br/>vertices, materials, lights<br/>(skipped without meshes)"]
-    D --> E["build_shadow_views():<br/>one view per directional or spot light,<br/>six per point light"]
-    C & D & E --> K["FramePacket"]
-    K --> F["WGPURenderer.render_layers():<br/>upload changed ranges to<br/>persistent GPU buffers"]
+    A["SceneGraph + FrameState + Frame record"] --> B["SceneGraph.flatten():<br/>world matrices, painter's order,<br/>clip scopes, lights"]
+    B --> C["vectors.rs: patch per-node slots<br/>in the arenas + this frame's draw lists"]
+    B --> D["meshes.rs, lights.rs:<br/>mesh objects, materials, lights<br/>(skipped without meshes)"]
+    D --> E["shadows.rs: one view per directional or spot light,<br/>six per point light; which layers changed"]
+    C & D & E --> K["Packet"]
+    K --> F["Renderer: upload the changed ranges<br/>to persistent GPU buffers"]
     F --> P1
 
-    subgraph GPU["one command encoder (the composer's, per sub-frame)"]
-        P1["shadow passes (only with meshes)<br/>casters' depth per shadow view;<br/>clip masks first into the stencil"] --> P2
-        P2["mask passes<br/>one per clip scope -> mask layer"] --> P3
-        P3["geometry pass<br/>meshes -> MSAA G-buffer + depth<br/>(without meshes: cleared once, then skipped)"] --> P4
+    subgraph GPU["one command encoder per frame"]
+        P1["mask passes<br/>one per clip scope -> mask layer"] --> P2
+        P2["shadow passes (only with meshes)<br/>casters' depth per changed shadow view;<br/>clip masks first into the stencil"] --> P3
+        P3["geometry pass<br/>meshes -> MSAA G-buffer + depth"] --> P4
         P4["lighting pass<br/>marks edge pixels in a stencil, lights other<br/>pixels once, edge pixels per sample -> lit layer (HDR)"] --> P5
         P5["vector pass<br/>2D shapes and curves -> vector layer,<br/>own depth + test against mesh depth"]
     end
 
-    P5 --> L["RenderLayers<br/>lit (rgba16float), vector (rgba8)"]
+    P5 --> L["lit (rgba16float), vector (rgba8)"]
+    L --> Comp["Composer: lit-stage effects, composite,<br/>depth of field, accumulate"]
 ```
-
-`WGPURenderer.render_layers()` stops at the layers.
-`RenderService.render()` adds a default composer (tone mapping only) and a
-read-back.
 
 ### Data flow into the GPU
 
 ```mermaid
 flowchart LR
-    subgraph CPU
-        S["RShape2D / RCurve3D"] -->|"points, styles"| VB["VectorBatch"]
-        S -->|"fill, cached per (uid, version)"| T["tessellate_fill()"] --> VB
-        M["RShape3D"] -->|"mesh, cached per version"| MB["MeshBatch"]
-        Li["Lights"] --> MB
+    subgraph CPU["the core"]
+        S["Shape2D / Curve3D"] -->|"points, styles"| VB["vectors.rs"]
+        S -->|"fill, cached per points version"| T["tessellation.rs"] --> VB
+        M["Shape3D / Particles"] -->|"mesh, cached per version"| MB["meshes.rs"]
+        Li["lights"] --> MB
     end
     subgraph Buffers["shared storage buffers (vertex pulling)"]
         VB --> O["objects<br/>model, layer, clip, flags"]
@@ -400,40 +335,39 @@ a single `multi_draw_indirect` call, and so is the transparent list.
 Strokes are expanded on the GPU: one instance per cubic curve, with ribbon,
 joint and cap triangles generated in the vertex shader.
 
-### The frame composer
+### The composer
 
 ```mermaid
 sequenceDiagram
-    participant User
-    participant Composer as FrameComposer
-    participant Service as RenderService
-    participant Renderer as WGPURenderer
+    participant Py as CoreFramePipeline
+    participant FR as FrameRenderer
     participant GPU
 
-    User->>Composer: compose(scene_at, config)
-    loop each sub-frame (1, or MotionBlur.samples), each view
-        opt the view shows camera views
-            Composer->>Service: each camera view's picture, rendered and<br/>composited into its layer of the camera view texture
+    Py->>FR: render(index, sub-frames: weight and views)
+    alt the frame's key equals the last frame's
+        FR-->>Py: held (the previous image again)
+    else
+        loop each sub-frame, each view
+            opt the view shows camera views
+                FR->>GPU: each camera view's picture into its layer
+            end
+            FR->>GPU: pack, then masks, shadows, G-buffer, lighting, vectors
+            FR->>GPU: lit-stage effects (Bloom, ShaderEffect)
+            FR->>GPU: composite: tone map and dither lit, over background,<br/>vector over it in sRGB
+            opt camera aperture > 0
+                FR->>GPU: depth of field: view distances, blur tiles, blur
+            end
+            FR->>GPU: accumulate weight x linear
         end
-        Composer->>Service: render_layers(scene_at(t), config at t)
-        Service->>Service: flatten, pack
-        Service->>Renderer: render_layers(packet, encoder)
-        Renderer->>GPU: masks, shadows, G-buffer, lighting, vectors
-        Renderer-->>Composer: RenderLayers (lit, vector)
-        Composer->>GPU: lit-stage effects (Bloom, ShaderEffect)
-        Composer->>GPU: composite: tone map and dither lit, over background,<br/>vector over it in sRGB, accumulate weight x linear
-        opt camera aperture > 0
-            Composer->>GPU: depth of field: view distances, blur tiles,<br/>blur, accumulate weight x result
-        end
+        FR->>GPU: frame-stage effects, encode to sRGB, copy for read-back
+        FR-->>Py: finished frames, in submission order
     end
-    Composer->>GPU: frame-stage effects, encode to sRGB
-    Composer-->>User: (H, W, 4) uint8
 ```
 
 ### Shader modules
 
-WGSL has no module system. `GPUContext.shader()` expands
-`#include "file.wgsl"` lines (each file at most once per shader).
+WGSL has no module system. The core expands `#include "file.wgsl"` lines
+(each file at most once per shader, core/src/gpu/context.rs).
 
 ```mermaid
 flowchart BT
@@ -468,69 +402,41 @@ is as large as the largest blur), and `depth_of_field.wgsl` gathers each
 pixel's blur from as far as the tiles around it say anything blurred
 reaches.
 
-### Caching and object lifecycle
+### What is kept between frames
 
-The render chain is a long-lived service: `RenderService.shared()` is the
-process's instance, and everything its stages build is kept across calls.
-
-```mermaid
-flowchart LR
-    Obj["RNode<br/>uid (never reused)<br/>versioned fields"] -->|"assigning points, fill, stroke, mesh..."| V["version +1"]
-    V --> Key["cache key (uid, kind, version)"]
-    Key -->|hit| Reuse["reuse triangulation, stroke records,<br/>packed vertices"]
-    Key -->|miss| Build["rebuild and replace the entry"]
-    Obj --> Slot["retained slot (uid, mask role)"]
-    Slot -->|"same versions, same matrix"| Nothing["nothing written"]
-    Slot -->|"new matrix"| Patch["patch the 80-byte object entry"]
-    Slot -->|"new versions"| Repack["rewrite its records, upload the range"]
-    Mgr["scene manager"] -->|"RemoveObjects / ClearScene"| R["service.submit()"] --> C["the cache drops the entries"]
-    Gen["every 1024 renders"] --> Sweep["drop entries unused for 1024 renders"]
-```
+A `FrameRenderer` lives as long as its pipeline, and keeps:
 
 | What | Kept by | Key | Dropped |
 |---|---|---|---|
-| derived data (tessellations, stroke topology and points, centers, mesh vertices) | `RNodeDataCache` (owned by `FramePacker`) | (uid, kind) + version | on a new version, after 1024 unused renders, or by command |
-| mesh vertices and indices on the GPU | `RetainedMeshes` (`mesh_batch.py`, owned by `FramePacker`) | uid + mesh version | when the mesh is absent from a pack with meshes; repacked when garbage outweighs live data |
-| packed vector records on the GPU | `RetainedVectors` (`retained.py`, owned by `FramePacker`) | (uid, mask role) | when the shape is absent from a render; arenas repacked when garbage outweighs live records |
-| shadow views of a light | `RNodeDataCache` (light uid) | world matrix, light settings, scope bounds, config | when any of them changes |
-| shadow map layers | `ShadowLayers` (`shadow_views.py`) decides, `ShadowPass` keeps the depth | the layer's frame record and its scope's casters (identity, versions, world matrix) | rendered again when the key changes, the maps are recreated, or another packer fed the renderer |
-| texture views, bind groups | `ResourceCache` (`gpu.py`) | texture (weak) / layout + resource identities | with their texture / LRU (512) |
-| render targets and attachments | `RenderTargets` | size, MSAA, mask capacity | on a size change |
-| composers (pipelines, texture pool) | `RenderService.composer(effects)` | effect chain | with the service |
+| a path's fill triangles, stroke links, colors | `PathCache` (vectors.rs) | node uid + versions of the signals they come from | when the node is not drawn for 1024 packs |
+| a mesh's interleaved vertices | `MeshPacker` (meshes.rs) | node uid + mesh version | when the node is not drawn for 1024 packs |
+| a material's entry | `MeshPacker` (meshes.rs) | node uid + material versions | with the renderer |
+| vector records on the GPU | the arenas of `VectorPacker` (vectors.rs, arena.rs) | (node uid, drawn as a mask) | when the node leaves the scene; everything packed again when garbage outweighs live records |
+| mesh vertices and indices on the GPU | the arenas of `MeshPacker` | node uid + mesh version | when the mesh is not placed in a frame with meshes; packed again when garbage outweighs live data |
+| shadow map layers | `ShadowLayers` (shadows.rs) decides, the shadow pass keeps the depth | the layer's Frame record and its scope's casters (identity, versions, world matrix) | rendered again when the key changes or the maps are made again |
+| textures | the mesh pass | texture and color space | when no frame uses them |
+| render targets | `RenderTargets` (gpu/targets.rs) | size, MSAA, mask layers | on a size change |
+| the last frame | `FrameRenderer` | every view's graph id, state key, Frame record (without the time) and lens | when a frame with another key is rendered |
 
-Fields declared with `versioned()` count their assignments, unless the
-producer passes explicit tokens (the animation engine derives them from
-signal versions). Moving an object (its `transform`) never invalidates its
-data; it only patches its object entry. Replacing its `points` does.
-Versioned arrays are read-only, so mutating them in place is an error rather
-than a stale cache.
+Every node has a uid and every signal a version that grows exactly when
+its value changes (core/src/evaluator.rs), so the caches never need to
+be told what changed. Every `SceneGraph` gets an id of its own when it is
+made, never reused, so a frame of one scene is never mistaken for a frame
+of another. Moving a node (its world matrix) never invalidates its
+records; it only patches its object entry. Changing its points does.
 
 ### Module map
 
 | Module | Role |
 |---|---|
-| `base.py` | `Renderer` interface |
-| `config.py` | `RenderConfig`, `Camera` |
-| `scene_graph.py` | `SceneFlattener`: transforms, painter's order, clip scopes, lights |
-| `tessellation.py` | fill triangulation with exact curves (computed by the core, core/src/tessellation.rs, for both renderers) |
-| `core_callbacks.py` | what the core's packer asks Python for (the stroke records are built in Rust whenever the style is plain numbers, core/src/strokes.rs) |
-| `cache.py`, `commands.py` | per-object data cache and lifecycle commands |
-| `effects.py` | effect settings for the composer |
-| `webgpu/service.py` | `RenderService`: the render chain of a process |
-| `webgpu/packer.py` | `FramePacker`, `FramePacket`: flat scene to GPU-ready records |
-| `webgpu/core_packer.py` | `CorePacker`: the core's packer as a `FramePacker` |
-| `webgpu/renderer.py` | `WGPURenderer`: uploads a packet, encodes the passes |
-| `webgpu/composer.py` | `FrameComposer`: sub-frames, effects, compositing |
-| `webgpu/vector_batch.py`, `vector_pass.py` | 2D shapes and curves: record layout, draw lists, the pass |
-| `webgpu/retained.py` | `RetainedVectors`: per-object slots in persistent arenas, patched per render |
-| `webgpu/arena.py` | `Arena`: growable record arrays mirroring GPU buffers, with written ranges |
-| `webgpu/mesh_batch.py`, `mesh_pass.py` | meshes, materials, lights (geometry pass) |
-| `webgpu/lighting_pass.py` | deferred lighting |
-| `webgpu/shadow_views.py`, `shadow_pass.py` | shadow map views and rendering |
-| `webgpu/targets.py` | all render targets of a frame, `RenderLayers` |
-| `webgpu/frame.py` | the per-frame uniform block |
-| `webgpu/gpu.py` | device, formats, growable buffers (full or ranged uploads), `ResourceCache`, WGSL includes |
-| `webgpu/profiler.py` | GPU timestamp queries per pass |
+| `config.py` | `RenderConfig`, `Camera`, `ViewState`, `CameraViewState` |
+| `frame.py` | the camera's Frame record (the per-frame uniform block), `config_values` for the core |
+| `effects.py` | effect settings |
+| `core_callbacks.py` | what the core asks Python for, once per version (stroke records of styles that are not plain numbers, fill colors, meshes, materials, texture levels) |
+| `shaders/` | every WGSL shader |
+| core/src/packer.rs, graph.rs, vectors.rs, meshes.rs, lights.rs, shadows.rs | records of a frame (core/README.md maps them) |
+| core/src/gpu/ | the passes, the composer, the `FrameRenderer` (its `mod.rs` maps them) |
+| manimx/drivers/core_pipeline.py | `CoreFramePipeline`: views and Frame records to the `FrameRenderer` |
 
 ---
 
@@ -548,8 +454,8 @@ needs two passes per object and batches poorly.
 **Strokes expanded on the GPU.** One instance per cubic curve, sampled in
 24 segments, with miter, bevel and round joints and butt, square and round
 caps. Widths are in world units (Manim's width 4 is 0.04 units) and ignore
-the object's scale, like Manim. RShape2D ribbons lie in the shape's plane;
-RCurve3D ribbons face the camera. Both are the same code with a different
+the object's scale, like Manim. `Shape2D` ribbons lie in the shape's plane;
+`Curve3D` ribbons face the camera. Both are the same code with a different
 "ribbon normal".
 
 **Painter's order with real depth.** Instead of drawing strictly in tree
@@ -590,13 +496,13 @@ back to front by the depth of their center along the view direction,
 not by the distance to the camera, which ordered shapes on a common
 plane wrongly away from the screen's center.
 
-**Alpha masks, not stencil clipping.** A RClippingGroup multiplies its
+**Alpha masks, not stencil clipping.** A `ClippingGroup` multiplies its
 content by the mask's rendered alpha, so masks can be soft or gradients.
 Each scope's mask is a texture layer; nested masks are clipped by their
 parent, so one lookup covers all enclosing groups. Clipped content goes
 into the transparent list and keeps correct depth.
 
-**Lights scoped to clipping groups.** A light inside an RClippingGroup only
+**Lights scoped to clipping groups.** A light inside a `ClippingGroup` only
 lights, and only gets shadows from, objects in that group. The G-buffer
 stores each pixel's scope, and shadow casters and bounds are built per
 scope. This is what lets each portal world have its own lighting.
@@ -640,18 +546,16 @@ vectors. The composer renders the scene at several times inside the
 shutter and averages them in linear light. That is exact for any change,
 including morphing points, at the cost of one render per sample.
 
-**Stateless renderer, versioned objects.** The renderer receives the whole
-tree every frame. Per-object data is cached by runtime-unique uid and per
-field versions, and invalidated by assignment or by lifecycle commands, so
-caching never needs the renderer to track the scene.
+**Stateless renderer, versioned signals.** The renderer receives the
+whole scene every frame: a scene graph and the values of its signals.
+Per-node data is cached by node uid and signal versions and dropped when
+a node is not drawn for a while, so caching never needs the renderer to
+track the scene.
 
 ---
 
 ## Known limitations
 
-- **The Python renderer is CPU-bound with many objects**: it walks the
-  tree and packs in Python every frame. The core packs in Rust; render
-  through it (`performance.core`) for large scenes.
 - **Motion blur and depth of field cost per sub-frame:** 16 motion blur
   samples are 16 full renders, and depth of field runs in each of them.
 - **Camera views render the scene once more per view**, at the frame's
@@ -677,24 +581,22 @@ caching never needs the renderer to track the scene.
 
 ---
 
-## Tests and benchmarks
+## Tests
 
 ```bash
-uv run pytest                                      # all tests, including the renderer's
-uv run pytest manimx/renderer/tests                # only the renderer
-uv run pytest -m visual --update-references        # regenerate reference images (review them!)
-uv run pytest manimx/renderer/benchmarks --no-cov  # benchmarks with GPU time per pass
+uv run pytest                              # all tests
+uv run pytest --update-references          # write the reference images again (review them!)
+uv run python scripts/render_internals.py  # the pictures of "A frame, step by step"
 ```
 
-- `tests/test_render_pipeline.py`: scene graph, cache, commands,
-  tessellation, batch layout, cameras (no GPU needed)
-- `tests/test_webgpu_renderer.py`, `test_composer.py`, `test_shadows.py`,
-  `test_portals.py`: behavior checked through rendered pixels
-- `tests/test_portal_cube.py`: why the portal cube is correct, by
-  rendering it twice with one change (isolation, corners, light leakage,
-  depth regression)
-- `tests/test_visual.py`: reference images in `tests/references/`. On a
-  mismatch, `*.actual.png` and `*.diff.png` are written next to the
-  reference.
+- `tests/test_render_features.py`: every feature checked through
+  rendered pixels (order, strokes, masks, portals, lights, shadows), and
+  pictures of each against reference images.
+- `tests/test_rendering.py`: scenes, effects and projects against
+  reference images; held frames.
+- `tests/test_camera_view.py`, `test_depth_of_field.py`,
+  `test_surface_shader.py`, `test_3d.py`: one feature each.
 
-GPU tests are skipped when no adapter is available.
+Reference images live in `tests/references/`. On a mismatch,
+`*.actual.png` and `*.diff.png` are written next to the reference. GPU
+tests are skipped when no adapter is available.

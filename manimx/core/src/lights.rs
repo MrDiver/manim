@@ -1,6 +1,6 @@
-//! The lights of a frame and their GPU records. Ports `light_array` and
-//! `default_lights` (manimx/renderer/webgpu/mesh_batch.py) and the light
-//! fields of `Light._build_snapshot` (manimx/animation/light.py).
+//! The lights of a frame and their GPU records (the `Light` struct of
+//! lighting.wgsl), and the default lights of a scene without any. The
+//! fields come from the light nodes (manimx/animation/light.py).
 
 use std::collections::HashMap;
 use std::f64::consts::FRAC_PI_2;

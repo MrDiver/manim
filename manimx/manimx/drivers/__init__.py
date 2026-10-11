@@ -6,14 +6,23 @@ view into a video file or an image sequence, pipelined on the GPU and
 optionally across worker processes.
 """
 
+from .core_pipeline import CoreFramePipeline
 from .offline import FrameSource, RenderSettings, RenderStats, load_source, render
-from .pipeline import FramePipeline
-from .sinks import FrameFormat, FrameList, FrameSink, ImageSequence, Tee, VideoFile, Window
+from .sinks import (
+    FrameFormat,
+    FrameList,
+    FrameSink,
+    ImageSequence,
+    Tee,
+    VideoFile,
+    Window,
+)
+from .stills import StillRenderer, render_image
 
 __all__ = [
     "FrameFormat",
     "FrameList",
-    "FramePipeline",
+    "CoreFramePipeline",
     "FrameSink",
     "FrameSource",
     "ImageSequence",
@@ -21,7 +30,9 @@ __all__ = [
     "RenderStats",
     "Tee",
     "VideoFile",
+    "StillRenderer",
     "Window",
     "load_source",
     "render",
+    "render_image",
 ]

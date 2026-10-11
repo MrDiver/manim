@@ -1,34 +1,26 @@
-from .base import Renderer
-from .cache import RNodeDataCache
-from .commands import CacheCommand, ClearScene, RemoveObjects
+"""The Python side of the renderer: how a frame is configured.
+
+Rendering itself happens in the core (``manimx._core.FrameRenderer``,
+core/src/gpu/), driven by :mod:`manimx.drivers`. This package holds what
+Python gives it: :class:`RenderConfig` and :class:`Camera` (size,
+lighting, shadows, the point of view), the effect settings, the camera's
+Frame record, the functions the core calls back, and the WGSL shaders
+(``shaders/``). See README.md.
+"""
+
 from .config import Camera, CameraViewState, Frame, RenderConfig, ViewState
 from .effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap, ToneMapOperator
-from .scene_graph import FlatScene, SceneFlattener
-from .webgpu import FrameComposer, FramePacker, FramePacket, RenderLayers, RenderService, WGPURenderer
 
 __all__ = [
     "Bloom",
-    "CacheCommand",
     "Camera",
-    "ClearScene",
-    "Effect",
-    "FlatScene",
-    "Frame",
-    "FrameComposer",
-    "FramePacker",
-    "FramePacket",
-    "RNodeDataCache",
-    "MotionBlur",
-    "RemoveObjects",
     "CameraViewState",
+    "Effect",
+    "Frame",
+    "MotionBlur",
     "RenderConfig",
-    "RenderLayers",
-    "RenderService",
-    "Renderer",
-    "SceneFlattener",
     "ShaderEffect",
     "ToneMap",
     "ToneMapOperator",
     "ViewState",
-    "WGPURenderer",
 ]

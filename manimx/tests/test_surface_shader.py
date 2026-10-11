@@ -3,14 +3,14 @@
 
 from __future__ import annotations
 
-import dataclasses
 
 import numpy as np
 import pytest
 from manimx.animation import Scene, Shape3D
 from manimx.animation.plan import planned_frames
 from manimx.drivers.core_pipeline import CoreFramePipeline
-from manimx.renderer import RenderConfig, RenderService
+from manimx.drivers import render_image
+from manimx.renderer import RenderConfig
 from manimx.userland.geometry import box_mesh
 
 from manimx import SurfaceShader
@@ -37,14 +37,6 @@ fn shade(surface: Surface, in: SurfaceInput) -> Surface {
 """)
 
 
-@pytest.fixture(scope="module")
-def service() -> RenderService:
-    try:
-        return RenderService.shared()
-    except Exception as error:  # pragma: no cover - depends on the machine
-        pytest.skip(f"no usable GPU: {error}")
-
-
 def _scene(shader: SurfaceShader | None, switch_to: SurfaceShader | None = None) -> Scene:
     class Shaded(Scene):
         def construct(self) -> None:
@@ -58,8 +50,8 @@ def _scene(shader: SurfaceShader | None, switch_to: SurfaceShader | None = None)
     return Shaded()
 
 
-def _render(service, frames, time: float) -> np.ndarray:
-    return service.render(frames.frame_at(time), dataclasses.replace(CONFIG, time=time))
+def _render(frames, time: float) -> np.ndarray:
+    return render_image(frames, time, CONFIG)
 
 
 def test_surface_shader_arguments() -> None:
@@ -71,36 +63,31 @@ def test_surface_shader_arguments() -> None:
     assert "return shade(surface, in);" in RED.wgsl()
 
 
-def test_the_shader_changes_the_surface(service) -> None:
-    plain = _render(service, _scene(None).prepare(), 0.0)
-    red = _render(service, _scene(RED).prepare(), 0.0)
+def test_the_shader_changes_the_surface() -> None:
+    plain = _render(_scene(None).prepare(), 0.0)
+    red = _render(_scene(RED).prepare(), 0.0)
     center = red[27, 48]
     assert center[0] > 200 and center[1] < 60 and center[2] < 60  # tone mapping desaturates a little
     assert not np.array_equal(plain[27, 48], center)
 
 
-def test_frames_with_a_shader_follow_the_time_on_every_path(service) -> None:
-    prepared = _scene(BLINK).prepare()
-    planned = planned_frames(prepared)
+def test_frames_with_a_shader_follow_the_time() -> None:
+    planned = planned_frames(_scene(BLINK).prepare())
     pipeline = CoreFramePipeline((), CONFIG)
     for time, lit in ((0.2, False), (0.8, True)):
-        reference = _render(service, prepared, time)
-        assert bool(reference[27, 48, 1] > 150) is lit  # never held from the frame before
-        np.testing.assert_array_equal(_render(service, planned, time), reference)
-        future = pipeline.submit(0, time, planned.frame_at(time))
+        future = pipeline.submit(0, time, planned.frame_at)
         pipeline.flush()
-        np.testing.assert_array_equal(future.result(), reference)
+        assert bool(future.result()[27, 48, 1] > 150) is lit  # never held from the frame before
 
 
-def test_the_shader_is_a_signal(service) -> None:
+def test_the_shader_is_a_signal() -> None:
     prepared = _scene(None, switch_to=RED).prepare()
-    before, after = _render(service, prepared, 0.5), _render(service, prepared, 1.5)
+    before, after = _render(prepared, 0.5), _render(prepared, 1.5)
     assert after[27, 48, 0] > 200 and after[27, 48, 1] < 60
     assert not np.array_equal(before, after)
-    np.testing.assert_array_equal(_render(service, planned_frames(prepared), 1.5), after)
 
 
-def test_wgsl_errors_are_reported(service) -> None:
+def test_wgsl_errors_are_reported() -> None:
     broken = SurfaceShader("fn shade(surface: Surface, in: SurfaceInput) -> Surface { return nothing; }")
     planned = planned_frames(_scene(broken).prepare())
     pipeline = CoreFramePipeline((), CONFIG)

@@ -4,25 +4,25 @@ images a frame of it goes through on the way.
     uv run python scripts/render_internals.py [output folder]
 
 The default output folder is manimx/renderer/images/. The scene is
-rendered by the Python renderer (the reference; the core's renderer
-draws the same), and its textures are read back after the frame: the
-shadow maps, the clip masks, the G-buffer, the lit and vector layers and
-the depth of field's distances and tiles. Textures the GPU cannot copy
-out (multisampled ones, depth) are drawn into a plain image first by a
-fullscreen pass of this script, which also maps their values to colors.
-The lighting pass's edge stencil is shown by rendering once more with
-the per-sample shading replaced by a flat color.
+rendered once, and the renderer's textures are read back after the frame
+(``FrameRenderer.inspect``, core/src/gpu/inspect.rs): the shadow maps,
+the clip masks, the G-buffer, the lit and vector layers and the depth of
+field's distances and tiles. This script turns their values into colors.
+The lighting pass's edge pixels are shown by rendering once more, in a
+second process, with shaders whose per-sample shading is a flat color.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import math
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
-import wgpu
 from manimx.animation import (
     ClippingGroup,
     DirectionalLight,
@@ -30,8 +30,10 @@ from manimx.animation import (
     Scene,
     SpotLight,
 )
-from manimx.renderer import RenderConfig, RenderService
-from manimx.renderer.webgpu import gpu as gpu_module
+from manimx.animation.plan import planned_frames
+from manimx.drivers import core_pipeline
+from manimx.drivers.core_pipeline import CoreFramePipeline
+from manimx.renderer import RenderConfig
 from manimx.userland import Box, Circle, Sphere, Star, Torus
 from PIL import Image
 
@@ -63,116 +65,6 @@ class Internals(Scene):
         self.wait(1.0)
 
 
-# What a texture holds and how its values become colors: `load` reads
-# `value` (vec4) at `pixel` from `source`, `color` maps it to RGB.
-_SHOW = """
-@group(0) @binding(0) var source: {texture};
-@group(0) @binding(1) var<uniform> params: vec4<f32>;
-
-struct Out {{ @builtin(position) position: vec4<f32> }};
-
-@vertex
-fn vs(@builtin(vertex_index) index: u32) -> Out {{
-    let uv = vec2<f32>(f32((index << 1u) & 2u), f32(index & 2u));
-    return Out(vec4<f32>(uv * 2.0 - 1.0, 0.0, 1.0));
-}}
-
-@fragment
-fn fs(in: Out) -> @location(0) vec4<f32> {{
-    let size = vec2<f32>(textureDimensions(source));
-    let pixel = vec2<i32>(floor(in.position.xy / params.zw * size));
-    let value = {load};
-    return vec4<f32>({color}, 1.0);
-}}
-"""
-
-_LOAD = {
-    "float": ("texture_2d<f32>", "textureLoad(source, pixel, 0)"),
-    "float_msaa": ("texture_multisampled_2d<f32>", "textureLoad(source, pixel, 0)"),
-    "depth_msaa": ("texture_depth_multisampled_2d", "vec4<f32>(textureLoad(source, pixel, 0))"),
-    "depth_layer": ("texture_depth_2d_array", "vec4<f32>(textureLoad(source, pixel, i32(params.x), 0))"),
-    "float_layer": ("texture_2d_array<f32>", "textureLoad(source, pixel, i32(params.x), 0)"),
-}
-
-_COLOR = {
-    "rgb": "value.rgb",
-    "alpha": "vec3<f32>(value.a)",
-    "normal": "value.xyz * 0.5 + 0.5",
-    "raw": "value.rgb",
-    # Linear HDR: a simple tone curve, then sRGB-ish gamma.
-    "hdr": "pow(value.rgb / (1.0 + value.rgb), vec3<f32>(1.0 / 2.2)) + vec3<f32>(0.07) * (1.0 - value.a)",
-    # Premultiplied sRGB over a dark checkerboard.
-    "vector": "value.rgb + checker(pixel) * (1.0 - value.a)",
-    "radius": "vec3<f32>(value.r / params.y, value.r / params.y * 0.6, 0.2)",
-}
-
-_CHECKER = """
-fn checker(pixel: vec2<i32>) -> vec3<f32> {
-    let cell = (pixel.x / 16 + pixel.y / 16) % 2;
-    return vec3<f32>(select(0.16, 0.22, cell == 0));
-}
-"""
-
-
-class Reader:
-    """Draws any texture into an rgba8 image with a color mapping and
-    reads it back."""
-
-    def __init__(self, device: wgpu.GPUDevice) -> None:
-        self.device = device
-        self.pipelines: dict[tuple[str, str], wgpu.GPURenderPipeline] = {}
-        self.params = device.create_buffer(size=16, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
-
-    def image(self, view: wgpu.GPUTextureView, load: str, color: str, size: tuple[int, int], x: float = 0.0, y: float = 1.0) -> np.ndarray:
-        """``size`` RGB pixels of the texture behind ``view``, its values
-        mapped by ``color`` (see _COLOR); ``x`` and ``y`` are parameters
-        of the mapping (``x``: the layer of an array)."""
-        return self._draw(view, load, color, size, x, y, wgpu.TextureFormat.rgba8unorm)[..., :3]
-
-    def values(self, view: wgpu.GPUTextureView, load: str, size: tuple[int, int], layer: int = 0) -> np.ndarray:
-        """The first channel of the texture as floats."""
-        return self._draw(view, load, "raw", size, float(layer), 1.0, wgpu.TextureFormat.rgba32float)[..., 0]
-
-    def _draw(self, view: wgpu.GPUTextureView, load: str, color: str, size: tuple[int, int], x: float, y: float, texture_format: str) -> np.ndarray:
-        pipeline = self._pipeline(load, color, texture_format)
-        target = self.device.create_texture(
-            size=(*size, 1), format=texture_format, usage=wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.COPY_SRC
-        )
-        self.device.queue.write_buffer(self.params, 0, np.array([x, y, *size], np.float32))
-        bind_group = self.device.create_bind_group(
-            layout=pipeline.get_bind_group_layout(0),
-            entries=[{"binding": 0, "resource": view}, {"binding": 1, "resource": {"buffer": self.params}}],
-        )
-        encoder = self.device.create_command_encoder()
-        render = encoder.begin_render_pass(
-            color_attachments=[{"view": target.create_view(), "load_op": wgpu.LoadOp.clear, "store_op": wgpu.StoreOp.store, "clear_value": (0, 0, 0, 1)}]
-        )
-        render.set_pipeline(pipeline)
-        render.set_bind_group(0, bind_group)
-        render.draw(3)
-        render.end()
-        self.device.queue.submit([encoder.finish()])
-        dtype = np.uint8 if texture_format == wgpu.TextureFormat.rgba8unorm else np.float32
-        row = size[0] * 4 * np.dtype(dtype).itemsize
-        data = self.device.queue.read_texture({"texture": target}, {"bytes_per_row": row, "rows_per_image": size[1]}, (*size, 1))
-        return np.frombuffer(data, dtype).reshape(size[1], size[0], 4)
-
-    def _pipeline(self, load: str, color: str, texture_format: str) -> wgpu.GPURenderPipeline:
-        key = (load, color, texture_format)
-        if key not in self.pipelines:
-            texture, read = _LOAD[load]
-            mapping = _COLOR[color]
-            code = _CHECKER + _SHOW.format(texture=texture, load=read, color=mapping)
-            module = self.device.create_shader_module(code=code)
-            self.pipelines[key] = self.device.create_render_pipeline(
-                layout="auto",
-                vertex={"module": module, "entry_point": "vs"},
-                fragment={"module": module, "entry_point": "fs", "targets": [{"format": texture_format}]},
-                primitive={"topology": wgpu.PrimitiveTopology.triangle_list},
-            )
-        return self.pipelines[key]
-
-
 def gray(values: np.ndarray, empty: np.ndarray) -> np.ndarray:
     """``values`` stretched to black (nearest) to white (farthest) where
     not ``empty``, which is shown dark blue."""
@@ -184,48 +76,74 @@ def gray(values: np.ndarray, empty: np.ndarray) -> np.ndarray:
     return image
 
 
+def to_bytes(rgb: np.ndarray) -> np.ndarray:
+    return (np.clip(rgb, 0.0, 1.0) * 255 + 0.5).astype(np.uint8)
+
+
+def hdr(rgba: np.ndarray) -> np.ndarray:
+    """Linear HDR radiance with a simple tone curve, over dark gray."""
+    rgb = rgba[..., :3]
+    return to_bytes((rgb / (1.0 + rgb)) ** (1 / 2.2) + 0.07 * (1.0 - rgba[..., 3:4]))
+
+
+def over_checker(rgba: np.ndarray) -> np.ndarray:
+    """Premultiplied colors over a dark checkerboard."""
+    y, x = np.indices(rgba.shape[:2])
+    checker = np.where((x // 16 + y // 16) % 2 == 0, 0.22, 0.16)[..., None]
+    return to_bytes(rgba[..., :3] + checker * (1.0 - rgba[..., 3:4]))
+
+
 def save(image: np.ndarray, name: str) -> None:
     path = OUTPUT / f"{name}.png"
     Image.fromarray(np.ascontiguousarray(image)).save(path, optimize=True)
-    print(f"{path.relative_to(Path.cwd()) if path.is_relative_to(Path.cwd()) else path}")
+    print(path)
+
+
+class Frames:
+    """Renders the scene's frame and reads its textures."""
+
+    def __init__(self, config: RenderConfig) -> None:
+        self.planned = planned_frames(Internals().prepare())
+        self.config = config
+        self.pipeline = CoreFramePipeline((), config, in_flight=1)
+
+    def render(self, camera=None) -> np.ndarray:
+        frame_at = self.planned.frame_at
+        if camera is not None:
+            frame_at = lambda t: tuple(dataclasses.replace(view, camera=camera) for view in self.planned.frame_at(t))  # noqa: E731
+        return self.pipeline.render(frame_at, self.config.time)[..., :3]
+
+    def texture(self, name: str, layer: int = 0) -> np.ndarray:
+        width, height, data = self.pipeline.renderer.inspect(name, layer)
+        return np.frombuffer(data, np.float32).reshape(height, width, 4)
 
 
 def main() -> None:
     global OUTPUT
+    if len(sys.argv) > 1 and sys.argv[1] == "--edges":
+        return edges(Path(sys.argv[2]), Path(sys.argv[3]))
     if len(sys.argv) > 1:
         OUTPUT = Path(sys.argv[1]).resolve()
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    prepared = Internals().prepare()
-    (view,) = prepared.frame_at(0.5)
-    config = RenderConfig(pixel_width=WIDTH, pixel_height=HEIGHT, background_color="#20232b", shadow_method="pcss", camera=view.camera)
+    config = RenderConfig(pixel_width=WIDTH, pixel_height=HEIGHT, background_color="#20232b", shadow_method="pcss", time=0.5)
+    frames = Frames(config)
+    save(frames.render(), "frame")
 
-    service = RenderService()
-    save(service.render(view, config)[..., :3], "frame")
+    save(hdr(frames.texture("lit")), "lit_layer")
+    save(over_checker(frames.texture("vector")), "vector_layer")
+    save(to_bytes(frames.texture("albedo")[..., :3]), "gbuffer_albedo")
+    save(to_bytes(frames.texture("normal")[..., :3] * 0.5 + 0.5), "gbuffer_normal")
+    save(to_bytes(np.repeat(frames.texture("masks", 0)[..., 3:4], 3, axis=2)), "mask_layer")
 
-    # The layers and the textures behind them, from one more render.
-    renderer = service.renderer
-    reader = Reader(renderer.context.device)
-    layers = service.render_layers(view.root, config)
-    renderer.context.device.queue.submit([])
-    targets = renderer._targets
-    size = (WIDTH, HEIGHT)
-    save(reader.image(layers.lit.create_view(), "float", "hdr", size), "lit_layer")
-    save(reader.image(layers.vector.create_view(), "float", "vector", size), "vector_layer")
-    albedo, normal, emissive, scope = (texture.create_view() for texture in targets.gbuffer)
-    save(reader.image(albedo, "float_msaa", "rgb", size), "gbuffer_albedo")
-    save(reader.image(normal, "float_msaa", "normal", size), "gbuffer_normal")
-    save(reader.image(targets.mask_layers_view, "float_layer", "alpha", size, x=0.0), "mask_layer")
-
-    # Shadow maps: every layer, in a row (a point light has six).
-    shadows = renderer._shadow_pass
-    count = shadows._count
+    # Shadow maps: every layer, in rows of four (a point light has six).
     tile = 256
     maps = []
-    for layer in range(count):
-        depth = reader.values(shadows.maps_view, "depth_layer", (tile, tile), layer)
-        maps.append(gray(depth, depth >= 1.0))
+    for layer in range(frames.pipeline.renderer.shadow_layers()):
+        depth = frames.texture("shadow_maps", layer)[..., 0]
+        image = Image.fromarray(gray(depth, depth >= 1.0)).resize((tile, tile), Image.Resampling.BOX)
+        maps.append(np.asarray(image))
     columns = 4
-    rows = math.ceil(count / columns)
+    rows = math.ceil(len(maps) / columns)
     sheet = np.full((rows * (tile + 8) - 8, columns * (tile + 8) - 8, 3), 32, np.uint8)
     for index, image in enumerate(maps):
         top, left = (index // columns) * (tile + 8), (index % columns) * (tile + 8)
@@ -233,40 +151,43 @@ def main() -> None:
     save(sheet, "shadow_maps")
 
     # Depth of field: the camera's lens opened on the ball.
-    lens_camera = dataclasses.replace(view.camera, aperture=0.04, focus_distance=float(np.linalg.norm(np.subtract((7.0, -9.0, 6.0), (-2.3, 0.8, 1.0)))))
-    blurred = dataclasses.replace(config, camera=lens_camera)
-    save(service.render(dataclasses.replace(view, camera=lens_camera), blurred)[..., :3], "depth_of_field")
-    textures = service.composer()._textures._textures
-    distances = reader.values(textures["view distances"].create_view(), "float", size)
+    (view,) = frames.planned.frame_at(config.time)
+    eye = view.camera.position
+    lens = dataclasses.replace(view.camera, aperture=0.04, focus_distance=float(np.linalg.norm(np.subtract(eye, (-2.3, 0.8, 1.0)))))
+    save(frames.render(camera=lens), "depth_of_field")
+    distances = frames.texture("view distances")[..., 0]
     save(gray(np.log(np.minimum(distances, 1e6)), distances > 1e8), "view_distances")
-    tiles = textures["blur tiles"]
-    largest = 0.05 * HEIGHT
-    save(reader.image(tiles.create_view(), "float", "radius", size, y=largest), "blur_tiles")
+    radius = frames.texture("blur tiles")[..., 0] / (0.05 * HEIGHT)
+    tiles = to_bytes(np.stack([radius, radius * 0.6, np.full_like(radius, 0.2)], axis=-1))
+    save(np.asarray(Image.fromarray(tiles).resize((WIDTH, HEIGHT), Image.Resampling.NEAREST)), "blur_tiles")
 
-    # The lighting pass's edges: per-sample shading replaced by magenta.
-    original = gpu_module.load_wgsl
-
-    def marked(filename: str, included: set[str] | None = None) -> str:
-        code = original(filename, included)
-        if filename == "deferred_lighting.wgsl":
-            code = code.replace(
+    # The lighting pass's edges, from shaders that paint them magenta. The
+    # core loads its shaders once per process: render them in another one.
+    with tempfile.TemporaryDirectory() as folder:
+        shaders = Path(folder) / "shaders"
+        shutil.copytree(core_pipeline.SHADER_FOLDER, shaders)
+        lighting = shaders / "deferred_lighting.wgsl"
+        lighting.write_text(
+            lighting.read_text().replace(
                 "    return shade(pixel, position.xy, textureLoad(depth_samples, pixel, i32(sample)), i32(sample));",
                 "    return vec4<f32>(1.0, 0.0, 1.0, 1.0);",
             )
-        return code
+        )
+        subprocess.run([sys.executable, __file__, "--edges", str(shaders), str(OUTPUT)], check=True)
 
-    service.renderer.context.device.destroy()  # the adapter refuses a fourth device while two are alive
-    gpu_module.load_wgsl = marked
-    try:
-        edges = RenderService()
-        marked_frame = edges.render(view, config)[..., :3]
-        # The frame, and a part of it four times enlarged.
-        top, left, height, width = 300, 330, 110, 150
-        part = np.repeat(np.repeat(marked_frame[top : top + height, left : left + width], 4, axis=0), 4, axis=1)
-        save(marked_frame, "lighting_edges")
-        save(part, "lighting_edges_detail")
-    finally:
-        gpu_module.load_wgsl = original
+
+def edges(shaders: Path, output: Path) -> None:
+    """Render the frame with the shaders in ``shaders`` (see main)."""
+    global OUTPUT
+    OUTPUT = output
+    core_pipeline.SHADER_FOLDER = shaders
+    config = RenderConfig(pixel_width=WIDTH, pixel_height=HEIGHT, background_color="#20232b", shadow_method="pcss", time=0.5)
+    marked = Frames(config).render()
+    # The frame, and a part of it four times enlarged.
+    top, left, height, width = 300, 330, 110, 150
+    part = np.repeat(np.repeat(marked[top : top + height, left : left + width], 4, axis=0), 4, axis=1)
+    save(marked, "lighting_edges")
+    save(part, "lighting_edges_detail")
 
 
 if __name__ == "__main__":

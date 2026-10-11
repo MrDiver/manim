@@ -1,7 +1,7 @@
-//! The GPU device and shader loading. Ports `GPUContext` and `load_wgsl`
-//! (manimx/renderer/webgpu/gpu.py).
+//! The GPU device and shader loading (`#include "file.wgsl"` lines are
+//! expanded, each file at most once per shader).
 //!
-//! The WGSL files stay in the Python package (renderer/webgpu/shaders);
+//! The WGSL files stay in the Python package (renderer/shaders);
 //! the core reads them from there, so there is one copy of every shader.
 
 use std::collections::HashSet;
@@ -177,7 +177,7 @@ impl Gpu {
             })
     }
 
-    /// `load_wgsl`: a file's source with its `#include "file.wgsl"` lines
+    /// A file's source with its `#include "file.wgsl"` lines
     /// expanded, each file at most once.
     fn load_wgsl(&self, filename: &str, included: &mut HashSet<String>) -> PyResult<String> {
         included.insert(filename.to_string());

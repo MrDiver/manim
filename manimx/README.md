@@ -22,8 +22,9 @@ uv run mutmut results
 ```
 
 Pytest enforces 90% branch coverage. `tests/test_state.py` tests the state
-harness. `manimx/renderer/tests/test_visual.py` renders scenes with the WebGPU renderer and
-compares them with reference PNGs in `manimx/renderer/tests/references`
+harness. `tests/test_rendering.py` and `tests/test_render_features.py`
+render scenes with the core's renderer and compare them with reference
+PNGs in `tests/references`
 (`uv run pytest --update-references` regenerates them; review before
 committing).
 

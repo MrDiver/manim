@@ -33,7 +33,7 @@ from typing import Any
 from .. import _core
 from ..renderer.config import ViewState
 from ..robjects.planned_frame import PlannedFrame
-from .camera_view import camera_views, current_value, view_cameras
+from .camera_view import camera_views, view_cameras
 from .clipping_group import ClippingGroup
 from .contributions import (
     Between,
@@ -107,8 +107,7 @@ class ScenePlan:
             if isinstance(signal, DerivedSignal):
                 self.evaluator.add_derived(self.slot(signal), [self.slot(i) for i in signal.inputs], _derivation(signal))
         self.graph = self._scene_graph()
-        """The core's scene graph, or None when a node is of a class the
-        core cannot draw (its scene is then drawn from snapshots)."""
+        """The core's scene graph."""
         self._render_slots = _core.Slots(sorted({self._slots[s.id] for root in scene.roots for node in root.family() for s in node.signals()}))
         self._shader_slots = sorted({self.slot(node.surface_shader) for root in scene.roots for node in root.family() if isinstance(node, Shape3D)})
         """Slots of every surface shader: one in use makes a frame depend on time."""
@@ -163,7 +162,10 @@ class ScenePlan:
         for node in nodes:
             kind = _node_kind(node)
             if kind is None:
-                return None
+                raise TypeError(
+                    f"the renderer cannot draw {node!r}: {type(node).__name__} overrides how its class is drawn "
+                    "(_build_snapshot or _render_fields); build it from the classes the renderer draws instead"
+                )
             children: list[Node] = []
             if isinstance(node, Group):
                 children = node.children
@@ -188,9 +190,8 @@ class PlannedTimeline:
     """A :class:`~.timing.Timeline` whose frames come from the core.
 
     ``frame_at(t)`` returns the same views as ``Timeline.frame_at(t)``,
-    each with a :class:`PlannedFrame` instead of a tree. A clip whose
-    scene has a node the core cannot draw falls back to its snapshot.
-    Everything else (duration, audio, events) is the timeline's.
+    each with a :class:`PlannedFrame` instead of a tree. Everything else
+    (duration, audio, events) is the timeline's.
     """
 
     def __init__(self, timeline: Any) -> None:
@@ -199,14 +200,6 @@ class PlannedTimeline:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.timeline, name)
-
-    @property
-    def complete(self) -> bool:
-        """Whether every frame comes from the core: no clip falls back to
-        snapshots.
-        """
-        self.timeline._ensure_resolved()
-        return all(self.plan(clip.scene).graph is not None for clip in self.timeline.clips)
 
     def plan(self, scene: PreparedScene) -> ScenePlan:
         plan = self._plans.get(id(scene))
@@ -223,12 +216,7 @@ class PlannedTimeline:
             compiled = clip.compiled_time(t)
             if compiled is None:
                 continue
-            plan = self.plan(clip.scene)
-            if plan.graph is None:
-                state = clip.scene.state_at(compiled, global_time=t)
-                views.append(ViewState(clip._group(state.children), clip.scene.camera.render_camera(), camera_views(clip.scene.roots, current_value)))
-            else:
-                views.append(plan.frame_at(compiled, global_time=t))
+            views.append(self.plan(clip.scene).frame_at(compiled, global_time=t))
         return tuple(views)
 
 
@@ -287,16 +275,15 @@ def _node_fields(node: Node) -> Iterator[tuple[str, Signal]]:
 
 def planned_frames(source: Any) -> PlannedTimeline | PlannedScene | None:
     """The frames of a timeline or prepared scene through the core (an
-    object with ``frame_at`` and ``complete``); None for anything else, and
-    for a prepared scene the core cannot draw.
+    object with ``frame_at``); None for anything else. Raises TypeError
+    for a scene with a node the core cannot draw.
     """
     from .timing import Timeline
 
     if isinstance(source, Timeline):
         return PlannedTimeline(source)
     if isinstance(source, PreparedScene):
-        plan = ScenePlan(source)
-        return PlannedScene(plan) if plan.graph is not None else None
+        return PlannedScene(ScenePlan(source))
     return None
 
 
@@ -304,9 +291,6 @@ class PlannedScene:
     """A prepared scene's frames from the core, shaped like
     ``PreparedScene.frame_at`` (one view).
     """
-
-    complete = True
-    """Every frame comes from the core."""
 
     def __init__(self, plan: ScenePlan) -> None:
         self.plan = plan

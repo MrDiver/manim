@@ -1,10 +1,8 @@
 //! The packer: a scene graph and a frame state in, the records of a frame
-//! out. The core's counterpart of `SceneFlattener` plus `FramePacker`
-//! (manimx/renderer/webgpu/packer.py).
-//!
-//! `Packer::pack_frame` returns a `Packet` for the core's own renderer
-//! (gpu/); the Python method `pack` turns the same into a dict that
-//! core_packer.py wraps in a `FramePacket` for the Python renderer.
+//! out. `Packer::pack_frame` flattens the graph (graph.rs), builds the
+//! vector, mesh, light and shadow records (vectors.rs, meshes.rs,
+//! lights.rs, shadows.rs) and returns them as a `Packet` for the renderer
+//! (gpu/). It never touches the GPU.
 //!
 //! One packer lives as long as its renderer: its arenas mirror the
 //! renderer's buffers, and its caches keep what Python built per version.
@@ -13,7 +11,6 @@ use std::collections::HashMap;
 
 use glam::DMat4;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 
 use crate::callbacks::Callbacks;
 use crate::evaluator::FrameState;
@@ -44,7 +41,7 @@ pub struct MeshPacket {
 }
 
 /// What a pack needs from the `RenderConfig` (see `config_values` in
-/// core_packer.py).
+/// manimx/renderer/frame.py).
 pub struct PackSettings {
     pub frame: FrameSettings,
     pub default_lights: bool,
@@ -56,7 +53,6 @@ pub struct PackSettings {
     pub hide_camera_views: bool,
 }
 
-#[pyclass(module = "manimx._core")]
 pub struct Packer {
     callbacks: Callbacks,
     pub vectors: VectorPacker,
@@ -69,14 +65,12 @@ pub struct Packer {
     last_used: HashMap<u64, u64>,
 }
 
-#[pymethods]
 impl Packer {
-    #[new]
     pub fn new(py: Python<'_>) -> PyResult<Self> {
         Ok(Packer {
             callbacks: Callbacks::load(py)?,
-            vectors: VectorPacker::new(py),
-            meshes: MeshPacker::new(py),
+            vectors: VectorPacker::new(),
+            meshes: MeshPacker::new(),
             light_colors: LightColors::default(),
             bounds: Bounds::default(),
             shadow_layers: ShadowLayers::default(),
@@ -85,22 +79,6 @@ impl Packer {
         })
     }
 
-    /// Pack the scene `graph` shows with the values of `state`. `config`
-    /// is the tuple of `config_values()` in core_packer.py. Returns a dict
-    /// of numpy views and bytes that core_packer.py turns into a packet.
-    fn pack<'py>(
-        &mut self,
-        py: Python<'py>,
-        graph: &SceneGraph,
-        state: &FrameState,
-        config: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyDict>> {
-        let packet = self.pack_frame(py, graph, state, &parse_settings(config)?)?;
-        self.packet_dict(py, packet)
-    }
-}
-
-impl Packer {
     pub fn pack_frame(
         &mut self,
         py: Python<'_>,
@@ -154,7 +132,7 @@ impl Packer {
             });
         }
         if self.meshes.too_much_garbage() {
-            self.meshes.repack(py);
+            self.meshes.repack();
         }
         let output = self
             .meshes
@@ -195,104 +173,6 @@ impl Packer {
         })
     }
 
-    /// The packet as the dict core_packer.py reads (views of the arenas,
-    /// bytes of everything else); takes the arenas' dirty ranges.
-    fn packet_dict<'py>(
-        &mut self,
-        py: Python<'py>,
-        packet: Packet,
-    ) -> PyResult<Bound<'py, PyDict>> {
-        let draws = &packet.draws;
-        let result = PyDict::new(py);
-        let vectors = PyDict::new(py);
-        let dirty = PyDict::new(py);
-        for (name, arena) in self.vectors.arenas_mut() {
-            vectors.set_item(name, arena.view(py)?)?;
-            dirty.set_item(name, arena.ranges())?;
-        }
-        vectors.set_item("opaque_draws", PyBytes::new(py, &draws.opaque))?;
-        vectors.set_item("transparent_draws", PyBytes::new(py, &draws.transparent))?;
-        vectors.set_item(
-            "mask_draws",
-            PyList::new(py, draws.masks.iter().map(|m| PyBytes::new(py, m)))?,
-        )?;
-        vectors.set_item(
-            "shadow_draws",
-            shadow_list(
-                py,
-                draws
-                    .shadows
-                    .iter()
-                    .map(|(scope, d, runs)| (*scope, d.as_slice(), runs.as_slice())),
-            )?,
-        )?;
-        vectors.set_item("dirty", dirty)?;
-        result.set_item("vectors", vectors)?;
-        result.set_item("scope_parents", &packet.scope_parents)?;
-        let Some(meshes) = packet.meshes else {
-            result.set_item("light_count", 0)?;
-            result.set_item("meshes", py.None())?;
-            result.set_item("shadows", py.None())?;
-            return Ok(result);
-        };
-        let output = &meshes.output;
-        let mesh = PyDict::new(py);
-        mesh.set_item(
-            "objects",
-            PyBytes::new(py, bytemuck::cast_slice(&output.objects)),
-        )?;
-        mesh.set_item(
-            "materials",
-            PyBytes::new(py, bytemuck::cast_slice(&output.materials)),
-        )?;
-        mesh.set_item(
-            "lights",
-            PyBytes::new(py, bytemuck::cast_slice(&meshes.lights)),
-        )?;
-        mesh.set_item("vertices", self.meshes.vertices.view(py)?)?;
-        mesh.set_item("indices", self.meshes.indices.view(py)?)?;
-        let groups = PyList::empty(py);
-        for group in &output.groups {
-            let textures = PyTuple::new(py, group.textures.iter().map(|t| t.bind(py)))?;
-            groups.append((
-                textures,
-                group.surface_shader.bind(py),
-                PyBytes::new(py, bytemuck::cast_slice(&group.draws)),
-            ))?;
-        }
-        mesh.set_item("groups", groups)?;
-        mesh.set_item(
-            "shadow_draws",
-            shadow_list(
-                py,
-                output
-                    .shadow_draws
-                    .iter()
-                    .map(|(scope, d, runs)| (*scope, bytemuck::cast_slice(d), runs.as_slice())),
-            )?,
-        )?;
-        let mesh_dirty = PyDict::new(py);
-        mesh_dirty.set_item("vertices", self.meshes.vertices.ranges())?;
-        mesh_dirty.set_item("indices", self.meshes.indices.ranges())?;
-        mesh.set_item("dirty", mesh_dirty)?;
-        result.set_item("meshes", mesh)?;
-        result.set_item("light_count", meshes.lights.len())?;
-
-        let shadows = PyDict::new(py);
-        shadows.set_item(
-            "frames",
-            PyBytes::new(py, bytemuck::cast_slice(&meshes.shadows.frames)),
-        )?;
-        shadows.set_item(
-            "views",
-            PyBytes::new(py, bytemuck::cast_slice(&meshes.shadows.views)),
-        )?;
-        shadows.set_item("scopes", &meshes.shadows.scopes)?;
-        shadows.set_item("changed", &meshes.shadows.changed)?;
-        result.set_item("shadows", shadows)?;
-        Ok(result)
-    }
-
     /// Drop the per-node data of nodes not drawn for `CACHE_MAX_AGE` packs.
     fn sweep(&mut self) {
         let oldest = self.generation.saturating_sub(CACHE_MAX_AGE);
@@ -301,18 +181,6 @@ impl Packer {
         self.vectors.paths.retain(|uid, _| live.contains_key(uid));
         self.meshes.geometry.retain(|uid, _| live.contains_key(uid));
     }
-}
-
-/// `(light scope, draw bytes, clip runs)` per light scope, for Python.
-fn shadow_list<'py, 'a>(
-    py: Python<'py>,
-    draws: impl Iterator<Item = (i32, &'a [u8], &'a [(i32, u32)])>,
-) -> PyResult<Bound<'py, PyList>> {
-    let list = PyList::empty(py);
-    for (scope, bytes, runs) in draws {
-        list.append((scope, PyBytes::new(py, bytes), runs.to_vec()))?;
-    }
-    Ok(list)
 }
 
 /// A 4x4 matrix from 16 row-major values (numpy's layout).

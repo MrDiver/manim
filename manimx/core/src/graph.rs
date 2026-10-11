@@ -1,11 +1,11 @@
 //! The scene graph: which nodes a scene has, how they nest, and which
 //! signal slot feeds which field. Flattening it with the values of a
-//! `FrameState` gives the drawable leaves with their world matrices, like
-//! `Node.snapshot()` followed by `SceneFlattener.flatten()`
-//! (manimx/renderer/scene_graph.py) gives a `FlatScene`, without building
-//! render nodes.
+//! `FrameState` gives the drawable leaves with their world matrices,
+//! painter's order, clip scopes and lights (a `FlatScene`), without
+//! building render nodes.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use pyo3::exceptions::{PyNotImplementedError, PyValueError};
 use pyo3::prelude::*;
@@ -191,8 +191,15 @@ impl FlatScene {
 /// children)`.
 type NodeDescription = (String, u64, HashMap<String, usize>, Vec<usize>);
 
+/// The id the next `SceneGraph` gets.
+static NEXT_GRAPH_ID: AtomicU64 = AtomicU64::new(1);
+
 #[pyclass(module = "manimx._core", frozen)]
 pub struct SceneGraph {
+    /// Unique per graph made in this process, never reused: frames that
+    /// show the same graph are told apart from frames of another by it
+    /// (see `FrameRenderer::frame_key`).
+    pub id: u64,
     pub nodes: Vec<Node>,
     /// `(node, present slot)` of every root, in the order they were added.
     pub roots: Vec<(usize, usize)>,
@@ -210,7 +217,8 @@ impl SceneGraph {
             .into_iter()
             .map(|(kind, uid, fields, children)| parse_node(&kind, uid, &fields, children))
             .collect::<PyResult<Vec<_>>>()?;
-        Ok(SceneGraph { nodes, roots })
+        let id = NEXT_GRAPH_ID.fetch_add(1, Ordering::Relaxed);
+        Ok(SceneGraph { id, nodes, roots })
     }
 }
 
@@ -429,7 +437,7 @@ impl SceneGraph {
         Ok(scene)
     }
 
-    /// `_walk` in scene_graph.py, with the snapshot rules of the scene
+    /// The walk over the tree, with the snapshot rules of the scene
     /// side: a hidden node is skipped with its subtree, and a clipping
     /// group whose mask or content is hidden shows nothing.
     #[allow(clippy::too_many_arguments)]

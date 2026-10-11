@@ -3,6 +3,10 @@
 Measurements of the renderer and animation engine, one row per optimization
 step, so every change is justified by numbers and regressions show up.
 
+This is a log: older entries name the Python renderer (`RenderService`,
+`SceneFlattener`, `FramePacker`, `WGPURenderer`, `FrameComposer`), which
+the core's renderer replaced and which is removed now (FUTURE_IDEAS.md).
+
 ## How we measure
 
 ```sh

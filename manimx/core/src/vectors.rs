@@ -1,7 +1,36 @@
-//! The retained vector records of `Shape2D` and `Curve3D` nodes: one slot
-//! per node, records kept in arenas across frames, only what changed is
-//! written. Ports `RetainedVectors` (manimx/renderer/webgpu/retained.py);
-//! read its module docs first.
+//! The retained vector records of `Shape2D` and `Curve3D` nodes, in the
+//! buffers vector.wgsl reads:
+//!
+//! ```text
+//! objects        per node: model matrix, depth layer, clip, flags, alpha
+//!                (multiplied into every color on the GPU, so a fade
+//!                rewrites this entry only), camera view layer and size
+//! instances      what each draw instance makes (a fill or a stroke curve)
+//! fill_vertices  every fill's triangles (geometry only)
+//! fill_colors    per-point fill RGBA; vertices look their color up in it
+//! stroke_points  control points with per-point stroke width and color
+//! stroke_curves  one entry per cubic curve, linked to its neighbours
+//!                for joints
+//! ```
+//!
+//! From one frame to the next usually only a few transforms change, so the
+//! records stay in arenas that mirror the GPU buffers, with one slot per
+//! node (its uid, and whether it is drawn as a mask). Each frame compares
+//! the scene with the slots by signal versions:
+//!
+//! - same node, same placement: nothing is written;
+//! - new world matrix, layer, clip or alpha: its object entry;
+//! - new fill colors or stroke style: its color or point records, in place;
+//! - new points: its records go to a new range (the old one becomes
+//!   garbage), and the records pointing at them are written again.
+//!
+//! Only the written ranges are uploaded. The draw lists are built again
+//! every frame from the slots: an opaque list (any order, the depth test
+//! resolves overlaps), a transparent list sorted back to front, and one
+//! list per clip scope drawing its mask. Clipped content is always
+//! transparent, since its mask may let only part of it through. Nodes
+//! that leave the scene free their slots; when garbage outweighs live
+//! records, everything is packed again from scratch.
 //!
 //! What depends on geometry or style alone (a fill's triangles, a stroke's
 //! curve links, per-point colors) is built by Python once per version of
@@ -70,7 +99,7 @@ impl Slot {
 }
 
 /// Records built by Python for one path, each with the versions it was
-/// built from (`RNodeDataCache` entries of the reference path).
+/// built from.
 #[derive(Default)]
 pub struct PathCache {
     center: Option<(u64, [f64; 3])>,
@@ -100,7 +129,7 @@ pub struct Draw {
     pub clip: i32,
 }
 
-/// The draw lists of one frame (the rest of `VectorBatch` is the arenas).
+/// The draw lists of one frame (the records are in the arenas).
 #[derive(Default)]
 pub struct VectorDraws {
     pub opaque: Vec<u8>,
@@ -124,14 +153,14 @@ pub struct VectorPacker {
 }
 
 impl VectorPacker {
-    pub fn new(py: Python<'_>) -> VectorPacker {
+    pub fn new() -> VectorPacker {
         VectorPacker {
-            objects: Arena::new(py, size_of::<Object>()),
-            instances: Arena::new(py, size_of::<Instance>()),
-            fill_vertices: Arena::new(py, records::FILL_VERTEX_SIZE),
-            fill_colors: Arena::new(py, records::FILL_COLOR_SIZE),
-            stroke_points: Arena::new(py, records::STROKE_POINT_SIZE),
-            stroke_curves: Arena::new(py, size_of::<StrokeCurve>()),
+            objects: Arena::new(size_of::<Object>()),
+            instances: Arena::new(size_of::<Instance>()),
+            fill_vertices: Arena::new(records::FILL_VERTEX_SIZE),
+            fill_colors: Arena::new(records::FILL_COLOR_SIZE),
+            stroke_points: Arena::new(records::STROKE_POINT_SIZE),
+            stroke_curves: Arena::new(size_of::<StrokeCurve>()),
             slots: HashMap::new(),
             free_objects: Vec::new(),
             paths: HashMap::new(),
@@ -156,7 +185,6 @@ impl VectorPacker {
     }
 
     /// Update the records for `scene` and return the frame's draws
-    /// (`RetainedVectors.build`).
     #[allow(clippy::too_many_arguments)]
     pub fn pack(
         &mut self,
@@ -172,7 +200,7 @@ impl VectorPacker {
         if self.too_much_garbage() {
             // Repack everything from scratch (keeps the per-path cache).
             let paths = std::mem::take(&mut self.paths);
-            *self = VectorPacker::new(py);
+            *self = VectorPacker::new();
             self.paths = paths;
         }
         let mut draws = Vec::new();
@@ -239,7 +267,7 @@ impl VectorPacker {
         let key = (node.uid, mask_of);
         seen.insert(key);
         if !self.slots.contains_key(&key) {
-            let object = self.object_slot(context.py);
+            let object = self.object_slot();
             self.slots.insert(key, Slot::new(object));
         }
         let points_version = context.values.state.versions[fields.points];
@@ -270,7 +298,7 @@ impl VectorPacker {
             .unwrap_or(NOT_A_VIEW);
         let placement = (layer, item.clip, flags, item.alpha, view);
         if slot.world != Some(item.world) || slot.placement != placement {
-            let entry: &mut Object = self.objects.record_mut(context.py, slot.object);
+            let entry: &mut Object = self.objects.record_mut(slot.object);
             entry.model = records::gpu_matrix(&item.world);
             entry.layer = layer as f32;
             entry.clip = item.clip;
@@ -346,19 +374,19 @@ impl VectorPacker {
             return Ok(None);
         }
         if slot.fill_version != Some(points_version) {
-            slot.fill_first =
-                self.fill_vertices
-                    .place(context.py, vertices, slot.fill_first, slot.fill_count);
+            slot.fill_first = self
+                .fill_vertices
+                .place(vertices, slot.fill_first, slot.fill_count);
             slot.fill_count = vertices.len() / records::FILL_VERTEX_SIZE;
             slot.fill_version = Some(points_version);
         }
         if slot.colors_key.as_ref() != Some(&colors_key) {
             let colors = &cache.fill_colors.as_ref().unwrap().1;
-            let first =
-                self.fill_colors
-                    .place(context.py, colors, slot.colors_first, slot.colors_count);
+            let first = self
+                .fill_colors
+                .place(colors, slot.colors_first, slot.colors_count);
             if first != slot.colors_first || slot.colors_count == 0 {
-                let entry: &mut Object = self.objects.record_mut(context.py, slot.object);
+                let entry: &mut Object = self.objects.record_mut(slot.object);
                 entry.fill_colors = first as u32;
             }
             slot.colors_first = first;
@@ -366,15 +394,14 @@ impl VectorPacker {
             slot.colors_key = Some(colors_key);
         }
         if slot.fill_instance.is_none() {
-            let instance = self.instances.allocate(context.py, 1);
+            let instance = self.instances.allocate(1);
             let record = Instance {
                 kind: records::KIND_FILL,
                 object: slot.object as u32,
                 curve: 0,
                 _pad: 0,
             };
-            self.instances
-                .write(context.py, instance, bytemuck::bytes_of(&record));
+            self.instances.write(instance, bytemuck::bytes_of(&record));
             slot.fill_instance = Some(instance);
         }
         Ok(Some(Draw {
@@ -420,19 +447,16 @@ impl VectorPacker {
         }
         let opaque = stroke.opaque;
         if slot.stroke_key.as_ref() != Some(&stroke_key) {
-            slot.points_first = self.stroke_points.place(
-                context.py,
-                &stroke.points,
-                slot.points_first,
-                slot.points_count,
-            );
+            slot.points_first =
+                self.stroke_points
+                    .place(&stroke.points, slot.points_first, slot.points_count);
             slot.points_count = stroke.points.len() / records::STROKE_POINT_SIZE;
             let mut curves = stroke.curves.clone();
             offset_curves(&mut curves, slot.points_first);
             let count = curves.len() / size_of::<StrokeCurve>();
-            let first =
-                self.stroke_curves
-                    .place(context.py, &curves, slot.curves_first, slot.curves_count);
+            let first = self
+                .stroke_curves
+                .place(&curves, slot.curves_first, slot.curves_count);
             if first != slot.curves_first
                 || count != slot.curves_count
                 || slot.stroke_instances.is_none()
@@ -452,7 +476,6 @@ impl VectorPacker {
                     0
                 };
                 slot.stroke_instances = Some(self.instances.place(
-                    context.py,
                     rows,
                     slot.stroke_instances.unwrap_or(0),
                     old,
@@ -478,10 +501,10 @@ impl VectorPacker {
         }))
     }
 
-    fn object_slot(&mut self, py: Python<'_>) -> usize {
+    fn object_slot(&mut self) -> usize {
         self.free_objects
             .pop()
-            .unwrap_or_else(|| self.objects.allocate(py, 1))
+            .unwrap_or_else(|| self.objects.allocate(1))
     }
 
     fn free(&mut self, slot: &Slot) {
@@ -507,14 +530,14 @@ fn offset_curves(curves: &mut [u8], first_point: usize) {
     }
 }
 
-/// `RetainedVectors._batch`: opaque draws, transparent ones back to front,
+/// The draw lists: opaque draws, transparent ones back to front,
 /// mask draws per scope in painter's order, shadow casters per scope.
 fn batch(scene: &FlatScene, draws: Vec<Draw>) -> VectorDraws {
     let frame: Vec<&Draw> = draws.iter().filter(|d| d.mask_of == NO_CLIP).collect();
     let opaque: Vec<DrawIndirect> = frame.iter().filter(|d| d.opaque).map(|d| d.args).collect();
     let mut transparent: Vec<&&Draw> = frame.iter().filter(|d| !d.opaque).collect();
     // Farthest first; coplanar shapes in painter's order (distances
-    // rounded to 6 decimals, as the reference sorts them).
+    // rounded to 6 decimals, so equal depths keep their tree order).
     transparent.sort_by_key(|d| (-((d.camera_distance * 1e6).round() as i64), d.layer));
     let masks = (0..scene.clips.len() as i32)
         .map(|scope| {
@@ -549,8 +572,7 @@ fn draw_bytes(draws: impl IntoIterator<Item = DrawIndirect>) -> Vec<u8> {
 /// A camera view's layer and `1 / (width, height)` of its plane.
 pub type CameraView = (i32, [f32; 2]);
 
-/// The camera views of a frame by node uid (`camera_view_entries` in
-/// vector_batch.py).
+/// The camera views of a frame by node uid.
 pub type CameraViews = HashMap<u64, CameraView>;
 
 const NOT_A_VIEW: CameraView = (records::NO_VIEW, [0.0, 0.0]);
@@ -562,7 +584,7 @@ struct PathContext<'a> {
     values: &'a Values<'a>,
     callbacks: &'a Callbacks,
     /// World to view space: transparent draws sort by depth along the
-    /// view direction (`view_depth` in vector_batch.py).
+    /// view direction.
     view: DMat4,
     camera_views: &'a CameraViews,
     generation: u64,

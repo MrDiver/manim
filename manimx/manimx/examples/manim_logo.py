@@ -32,7 +32,7 @@ import numpy as np
 from ..animation import Group, Shape2D
 from ..userland import Circle, Square, Triangle
 from ..renderer.config import RenderConfig
-from ..renderer.scene_graph import bounding_box
+from ..userland.markers import bounds
 
 BACKGROUND = "#ece6e2"
 LOGO_GREEN = "#87c2a5"
@@ -55,7 +55,7 @@ def manim_logo() -> Group:
 
     logo = Group(triangle, square, circle, m, name="logo")  # later shapes are drawn on top
     # move_to(ORIGIN): shift the group so its bounding box is centered.
-    low, high = bounding_box(logo.snapshot())
+    low, high = np.asarray(bounds(logo).value)
     logo.shift(-(low + high) / 2)
     return logo
 

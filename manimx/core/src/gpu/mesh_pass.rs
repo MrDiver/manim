@@ -1,14 +1,12 @@
 //! GPU side of the mesh geometry pass: buffers, material textures,
-//! pipelines and draws into the G-buffer. Ports `MeshPass`
-//! (manimx/renderer/webgpu/mesh_pass.py).
+//! pipelines and draws into the G-buffer.
 //!
 //! Draws are grouped by the material's texture set and surface shader: one
 //! bind group and one `multi_draw_indexed_indirect` per group, and one
 //! pipeline per surface shader (mesh.wgsl with the shader's code in place
 //! of surface_shader.wgsl's default). Textures are uploaded once per
 //! (texture, color space) and kept while any frame uses them; their mip
-//! levels come from Python (core_callbacks.texture_levels), made as the
-//! reference makes them.
+//! levels come from Python (core_callbacks.texture_levels).
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};

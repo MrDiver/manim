@@ -23,7 +23,7 @@ from ..animation import ClippingGroup, Group, Shape2D
 from ..userland import Circle, Polyline, RegularPolygon, Square
 from ..userland.geometry import corner_points
 from ..renderer.config import Camera, RenderConfig
-from ..renderer.scene_graph import bounding_box
+from ..userland.markers import bounds
 from ..robjects import CapStyle, JointType
 from ..utils.color import BLUE, GREEN, ORANGE, PURPLE, RED, WHITE, YELLOW
 from .manim_logo import manim_logo
@@ -78,7 +78,7 @@ def _ground() -> Group:
 def _upright_logo() -> Group:
     """The logo standing on the ground at the origin, turned towards the default camera."""
     logo = manim_logo()
-    low, high = bounding_box(logo.snapshot())
+    low, high = np.asarray(bounds(logo).value)
     height = high[1] - low[1]
     scale = 1.6
     stand = Group(logo, name="upright-logo").move_to((0.0, 0.0, scale * height / 2 + 0.2)).set_scale(scale)

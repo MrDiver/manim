@@ -146,6 +146,6 @@ wgpu-py bindings (12%) and the remaining per-pass Python.
 | 2 Morph and Write | done: `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write` on the `Between` and `Partial` data forms |
 | 3 Core packs 2D | done: graph, retained vector records |
 | 4 Core packs 3D | done: meshes, particles, lights, shadow views and layers |
-| 5 Switch over | done: `performance.core` (on by default) for `drivers.render()`, workers and `manimx ui` |
-| 6 Renderer in Rust | done: passes, composer, effects, readback (`FrameRenderer`, `CoreFramePipeline`); drivers use it for frames of the core; `manimx ui` still composes with the Python renderer |
+| 5 Switch over | done: the CLI, workers and `manimx ui` render through the core |
+| 6 Renderer in Rust | done: passes, composer, effects, readback (`FrameRenderer`, `CoreFramePipeline`); the Python renderer is removed (FUTURE_IDEAS.md), and the renderer is tested against reference images |
 | 7 Later | |

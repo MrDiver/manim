@@ -1,7 +1,6 @@
 //! The pictures of a frame's camera views: one layer each of a 2D array
 //! texture, rendered before the frame and sampled by the vector pass.
-//! Ports the camera view texture of `WGPURenderer`
-//! (manimx/renderer/webgpu/renderer.py); see manimx/animation/camera_view.py.
+//! See manimx/animation/camera_view.py.
 
 use super::context::HDR_FORMAT;
 

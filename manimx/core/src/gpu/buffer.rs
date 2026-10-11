@@ -1,5 +1,4 @@
-//! A GPU buffer reused across frames that grows when needed. Ports
-//! `GrowableBuffer` (manimx/renderer/webgpu/gpu.py).
+//! A GPU buffer reused across frames that grows when needed.
 
 const MIN_SIZE: u64 = 256;
 

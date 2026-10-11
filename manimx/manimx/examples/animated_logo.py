@@ -6,7 +6,7 @@ logo pulses once. It exercises lagged fades with shifts, overlapping
 moves on independent axes, rotation, an absolute move_to, and Indicate.
 
     prepared = AnimatedLogo().prepare()
-    image = RenderService().render(prepared.state_at(2.0), config())
+    image = render_image(AnimatedLogo, time=2.0, config=config())
 """
 
 from __future__ import annotations

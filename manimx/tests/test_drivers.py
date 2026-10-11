@@ -9,8 +9,8 @@ from PIL import Image
 
 from manimx.animation import Scene, Sound
 from manimx.drivers import (
+    CoreFramePipeline,
     FrameList,
-    FramePipeline,
     FrameSink,
     FrameSource,
     ImageSequence,
@@ -20,29 +20,21 @@ from manimx.drivers import (
     Window,
     load_source,
     render,
+    render_image,
 )
 from manimx.examples.navigation import Navigation, config
-from manimx.renderer import FrameComposer, RenderService
 
 SOURCE = "manimx.examples.navigation:Navigation"
-
-
-@pytest.fixture(scope="module")
-def renderer() -> RenderService:
-    try:
-        return RenderService()
-    except Exception as error:  # pragma: no cover - depends on the machine
-        pytest.skip(f"no usable GPU: {error}")
 
 
 def settings(**options) -> RenderSettings:
     return RenderSettings(config(64, 36), fps=10, start=1.5, end=2.5, **options)
 
 
-def expected_frames(renderer: RenderService) -> list[np.ndarray]:
+def expected_frames() -> list[np.ndarray]:
+    """The frames rendered one by one, synchronously."""
     prepared = Navigation().prepare()
-    composer = FrameComposer(renderer)
-    return [composer.compose(prepared.frame_at(t), config(64, 36)) for t in settings().frame_times(prepared.duration)]
+    return [render_image(prepared, t, config(64, 36)) for t in settings().frame_times(prepared.duration)]
 
 
 def test_frame_times() -> None:
@@ -63,48 +55,41 @@ def test_sources_load_from_names_classes_factories_and_objects() -> None:
     assert load_source(fixed) is fixed
     with pytest.raises(ValueError, match="module:attr"):
         load_source("manimx.examples.navigation")
-    with pytest.raises(TypeError, match="duration and state_at"):
+    with pytest.raises(TypeError, match="give a Scene"):
         load_source(lambda: 42)
 
 
-def test_pipelined_frames_match_synchronous_renders(renderer: RenderService) -> None:
+def test_pipelined_frames_match_synchronous_renders() -> None:
     sink = FrameList()
     stats = render(SOURCE, sink, settings())
 
     assert stats.frames == 11 and stats.fps > 0
-    for frame, expected in zip(sink.frames, expected_frames(renderer), strict=True):
+    for frame, expected in zip(sink.frames, expected_frames(), strict=True):
         np.testing.assert_array_equal(frame, expected)
     with pytest.raises(ValueError, match="at least one"):
-        FramePipeline(FrameComposer(renderer), config(64, 36), in_flight=0)
+        CoreFramePipeline((), config(64, 36), in_flight=0)
 
 
-def test_the_python_renderer_gives_the_same_frames_without_the_core(renderer: RenderService) -> None:
-    sink = FrameList()
-    render(SOURCE, sink, settings(core=False))
-    for frame, expected in zip(sink.frames, expected_frames(renderer), strict=True):
-        np.testing.assert_array_equal(frame, expected)
-
-
-def test_worker_processes_give_the_same_frames_in_order(renderer: RenderService) -> None:
+def test_worker_processes_give_the_same_frames_in_order() -> None:
     sink = FrameList()
     progress = []
     render(SOURCE, sink, settings(chunk=3, in_flight=2), workers=2, progress=lambda done, total: progress.append((done, total)))
 
-    for frame, expected in zip(sink.frames, expected_frames(renderer), strict=True):
+    for frame, expected in zip(sink.frames, expected_frames(), strict=True):
         np.testing.assert_array_equal(frame, expected)
     assert progress[-1] == (11, 11)
     with pytest.raises(TypeError, match="picklable"):
         render(lambda: Navigation(), FrameList(), settings(), workers=2)
 
 
-def test_image_sequences_are_written_unordered(renderer: RenderService, tmp_path) -> None:
+def test_image_sequences_are_written_unordered(tmp_path) -> None:
     sink = ImageSequence(tmp_path / "frames", threads=2)
     assert not sink.ordered
     render(SOURCE, sink, settings())
 
     files = sorted((tmp_path / "frames").iterdir())
     assert [file.name for file in files[:2]] == ["frame_00000.png", "frame_00001.png"] and len(files) == 11
-    np.testing.assert_array_equal(np.asarray(Image.open(files[3])), expected_frames(renderer)[3])
+    np.testing.assert_array_equal(np.asarray(Image.open(files[3])), expected_frames()[3])
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
@@ -199,30 +184,34 @@ def test_tees_feed_every_sink_and_close_them_all() -> None:
     assert len(kept.frames) == 11  # closed although the first sink failed
 
 
-def test_held_frames_repeat_the_image_before_them(renderer: RenderService) -> None:
-    """Frames like the one before need no staging buffer, yet arrive in
+def test_held_frames_repeat_the_image_before_them() -> None:
+    """Frames like the one before are not rendered again, yet arrive in
     order with the same pixels as frames rendered on their own."""
-    from manimx.robjects import Fill, RGroup, RShape2D, Transform
-    from manimx.userland.geometry import rectangle_points
+    from manimx.userland import RIGHT, Square
 
-    still = RShape2D(points=rectangle_points(1.0, 1.0), fill=Fill("#e07a5f", opacity=1.0))
-    moved = RShape2D(points=rectangle_points(1.0, 1.0), fill=Fill("#e07a5f", opacity=1.0), transform=Transform(position=(1.0, 0.0, 0.0)))
-    shown = [still, still, still, moved, moved, still]
-    composer = FrameComposer(renderer)
-    pipeline = FramePipeline(composer, config(64, 36), in_flight=2)
-    futures, held = [], []
-    for index, shape in enumerate(shown):
-        futures.append(pipeline.submit(index, float(index), lambda t, shape=shape: RGroup(children=[shape])))
-        held.append(composer.held)
+    class StillMovedStill(Scene):
+        def construct(self) -> None:
+            square = Square(1.0, color="#e07a5f", fill_opacity=1.0)
+            self.add(square)
+            self.wait(2.9)
+            self.play(square.animate.shift(RIGHT), run_time=0.1)  # at 3: moved
+            self.wait(1.9)
+            self.play(square.animate.shift(-RIGHT), run_time=0.1)  # at 5: back
+
+    prepared = StillMovedStill().prepare()
+    frame_at = load_source(prepared).state_at
+    pipeline = CoreFramePipeline((), config(64, 36), in_flight=2)
+    futures = [pipeline.submit(index, float(index), frame_at) for index in range(6)]
     pipeline.flush()
+    images = [future.result() for future in futures]
 
+    held = [index > 0 and images[index] is images[index - 1] for index in range(6)]
     assert held == [False, True, True, False, True, False]
-    for future, shape in zip(futures, shown, strict=True):
-        np.testing.assert_array_equal(future.result(), FrameComposer(renderer).compose(RGroup(children=[shape]), config(64, 36)))
+    for index, image in enumerate(images):
+        np.testing.assert_array_equal(image, render_image(prepared, float(index), config(64, 36)))
 
 
-def test_sources_render_through_the_core_unless_turned_off() -> None:
-    from manimx.drivers.offline import load_source
+def test_sources_render_through_the_core() -> None:
     from manimx.robjects.planned_frame import PlannedFrame
     from manimx.userland import Square
 
@@ -231,7 +220,5 @@ def test_sources_render_through_the_core_unless_turned_off() -> None:
             self.add(Square())
             self.wait()
 
-    (core_view,) = load_source(Still).state_at(0.5)
-    (snapshot_view,) = load_source(Still, core=False).state_at(0.5)
-    assert isinstance(core_view.root, PlannedFrame)
-    assert not isinstance(snapshot_view.root, PlannedFrame)
+    (view,) = load_source(Still).state_at(0.5)
+    assert isinstance(view.root, PlannedFrame)

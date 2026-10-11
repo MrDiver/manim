@@ -10,7 +10,7 @@ import numpy as np
 import quaternion
 
 from ..robjects.material import linear_rgb
-from ..robjects.rnode import RNode
+from ..robjects.planned_frame import PlannedFrame
 from ..robjects.transform import Transform
 from ..utils.color import BLACK, WHITE, ManimColor, ParsableManimColor
 
@@ -202,22 +202,22 @@ class CameraViewState:
 
 @dataclass(frozen=True, slots=True)
 class ViewState:
-    """A scene tree together with the camera looking at it.
-
-    Scene functions passed to the :class:`~.webgpu.FrameComposer` may
-    return one instead of a bare tree; the camera then replaces
-    ``RenderConfig.camera`` for that render. With motion blur, every
-    sub-frame gets the camera of its own time, so camera moves blur too.
+    """One scene at one time together with the camera looking at it: what
+    a timeline's or prepared scene's ``frame_at`` returns per active clip
+    (through :func:`~manimx.animation.plan.planned_frames`). The camera
+    replaces ``RenderConfig.camera`` for that render. With motion blur,
+    every sub-frame gets the camera of its own time, so camera moves blur
+    too.
     """
 
-    root: RNode
+    root: PlannedFrame
+    """The core's scene graph and the values of its signals at the time."""
     camera: Camera
     camera_views: tuple[CameraViewState, ...] = ()
     """The camera views in the tree, rendered before it (see
     :class:`CameraViewState`)."""
 
 
-Frame = RNode | ViewState | Sequence[ViewState]
-"""What a frame shows: a tree (seen through ``RenderConfig.camera``), a tree
-with its camera, or several of those drawn over each other in order (the
-active clips of a timeline, lowest layer first)."""
+Frame = ViewState | Sequence[ViewState]
+"""What a frame shows: one view, or several drawn over each other in
+order (the active clips of a timeline, lowest layer first)."""

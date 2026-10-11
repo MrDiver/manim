@@ -1,10 +1,10 @@
 //! A path's stroke records from its points and stroke style: the curve
 //! records linked inside each subpath and the per-point position, width
-//! and color. Ports `stroke_records` (manimx/renderer/core_callbacks.py,
-//! with `_link_curves` and `_StrokeTopology` from vector_batch.py), so
-//! paths whose points change every frame (morphs, plots, anything
-//! derived) do not call Python for them. Every value is computed as numpy
-//! computes it, so both paths give the same bytes.
+//! and color, so paths whose points change every frame (morphs, plots,
+//! anything derived) do not call Python for them. `stroke_records` in
+//! manimx/renderer/core_callbacks.py builds them for styles that are not
+//! plain numbers; every value here is computed as numpy computes it there,
+//! so both give the same bytes (tests/test_core_strokes.py).
 //!
 //! The style comes as signal values: one color or a list (COLORS, rows of
 //! RGB), opacities and widths (SCALARS), joints (one per curve list,
@@ -127,7 +127,7 @@ pub fn stroke_records(points: &[f64], dimension: usize, style: &StrokeStyle) -> 
     }
 }
 
-/// `_link_curves`: one record per curve with the previous and next curve
+/// One record per curve with the previous and next curve
 /// of its subpath; a closed subpath links its last curve to its first.
 fn link_curves(
     count: usize,

@@ -1,6 +1,5 @@
-//! Optional GPU timing per render pass with timestamp queries. Ports
-//! `GpuProfiler` (manimx/renderer/webgpu/profiler.py): passes with the same
-//! name are summed; reading waits for the GPU, so it is meant for
+//! Optional GPU timing per render pass with timestamp queries: passes
+//! with the same name are summed; reading waits for the GPU, so it is meant for
 //! benchmarks, not for every frame.
 
 use std::collections::HashMap;

@@ -7,20 +7,12 @@ import numpy as np
 import pytest
 from manimx.animation import Camera, CameraView, ClippingGroup, Scene
 from manimx.animation.plan import planned_frames
-from manimx.drivers.core_pipeline import CoreFramePipeline
-from manimx.renderer import RenderConfig, RenderService
+from manimx.drivers import render_image
+from manimx.renderer import RenderConfig
 from manimx.userland import Circle, FadeOut, Square
 
 CONFIG = RenderConfig(pixel_width=160, pixel_height=90, background_color="#000000")
 RED = "#ff0000"
-
-
-@pytest.fixture(scope="module")
-def service() -> RenderService:
-    try:
-        return RenderService.shared()
-    except Exception as error:  # pragma: no cover - depends on the machine
-        pytest.skip(f"no usable GPU: {error}")
 
 
 class Monitor(Scene):
@@ -82,29 +74,17 @@ def test_camera_view_arguments() -> None:
         CameraView(Camera(), 0.0, 1.0)
 
 
-def test_the_picture_shows_the_other_camera(service) -> None:
+def test_the_picture_shows_the_other_camera() -> None:
     prepared = Monitor().prepare()
-    image = service.render(prepared.frame_at(0.0), CONFIG)
+    image = render_image(prepared, 0.0, CONFIG)
     assert tuple(_center(image)) == (255, 0, 0)  # the square, through the monitor
     assert tuple(image[5, 5, :3]) == (0, 0, 0)  # outside the monitor: nothing
-    moved = service.render(prepared.frame_at(1.5), CONFIG)
+    moved = render_image(prepared, 1.5, CONFIG)
     assert tuple(_center(moved)) == (0, 0, 0)  # the side camera left the square
 
 
-def test_every_path_draws_the_same(service) -> None:
-    prepared = Monitor().prepare()
-    planned = planned_frames(prepared)
-    pipeline = CoreFramePipeline((), CONFIG)
-    for time in (0.0, 0.9):
-        reference = service.render(prepared.frame_at(time), CONFIG)
-        np.testing.assert_array_equal(service.render(planned.frame_at(time), CONFIG), reference)
-        future = pipeline.submit(0, time, planned.frame_at(time))
-        pipeline.flush()
-        np.testing.assert_array_equal(future.result(), reference)
-
-
-def test_views_are_masked_and_never_show_views(service) -> None:
-    image = service.render(Masked().prepare().frame_at(0.0), CONFIG)
+def test_views_are_masked_and_never_show_views() -> None:
+    image = render_image(Masked().prepare(), 0.0, CONFIG)
     assert tuple(_center(image)) == (255, 0, 0)
     assert tuple(_center(image, 25)) == (0, 0, 0)  # inside the monitor, outside the mask
     # A camera looking at its own monitor sees the scene without monitors.
@@ -112,5 +92,5 @@ def test_views_are_masked_and_never_show_views(service) -> None:
         def construct(self) -> None:
             self.add(CameraView(self.camera, 4.0, 2.25))
 
-    mirror = service.render(Mirror().prepare().frame_at(0.0), CONFIG)
+    mirror = render_image(Mirror().prepare(), 0.0, CONFIG)
     assert not mirror[..., :3].any()

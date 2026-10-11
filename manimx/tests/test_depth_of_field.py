@@ -7,20 +7,11 @@ import dataclasses
 import numpy as np
 import pytest
 from manimx.animation import Camera, Scene
-from manimx.animation.plan import planned_frames
-from manimx.drivers.core_pipeline import CoreFramePipeline
-from manimx.renderer import RenderConfig, RenderService
+from manimx.drivers import render_image
+from manimx.renderer import RenderConfig
 from manimx.userland import Square
 
 CONFIG = RenderConfig(pixel_width=160, pixel_height=90, background_color="#000000")
-
-
-@pytest.fixture(scope="module")
-def service() -> RenderService:
-    try:
-        return RenderService.shared()
-    except Exception as error:  # pragma: no cover - depends on the machine
-        pytest.skip(f"no usable GPU: {error}")
 
 
 class TwoSquares(Scene):
@@ -63,11 +54,11 @@ def test_lens_signals_and_arguments() -> None:
         camera.set_aperture(-1.0)
 
 
-def test_things_out_of_focus_are_blurred(service) -> None:
+def test_things_out_of_focus_are_blurred() -> None:
     prepared = TwoSquares().prepare()
-    sharp = service.render(TwoSquares(aperture=0.0).prepare().frame_at(0.0), CONFIG)
-    near_focus = service.render(prepared.frame_at(0.0), CONFIG)
-    far_focus = service.render(prepared.frame_at(1.5), dataclasses.replace(CONFIG, time=1.5))
+    sharp = render_image(TwoSquares(aperture=0.0).prepare(), 0.0, CONFIG)
+    near_focus = render_image(prepared, 0.0, CONFIG)
+    far_focus = render_image(prepared, 1.5, dataclasses.replace(CONFIG, time=1.5))
     near, far = slice(0, 80), slice(80, 160)
     # Focused on the near square: it stays sharp, the far one blurs.
     assert _soft_pixels(near_focus, near) <= _soft_pixels(sharp, near) + 12
@@ -77,16 +68,3 @@ def test_things_out_of_focus_are_blurred(service) -> None:
     assert _soft_pixels(far_focus, far) < _soft_pixels(near_focus, far)
 
 
-@pytest.mark.parametrize("samples", [4, 1])
-def test_every_path_draws_the_same(service, samples) -> None:
-    config = dataclasses.replace(CONFIG, msaa_samples=samples)
-    prepared = TwoSquares().prepare()
-    planned = planned_frames(prepared)
-    pipeline = CoreFramePipeline((), config)
-    for time in (0.2, 0.8, 1.5):  # the scene stands still: only the focus moves
-        timed = dataclasses.replace(config, time=time)
-        reference = service.render(prepared.frame_at(time), timed)
-        np.testing.assert_array_equal(service.render(planned.frame_at(time), timed), reference)
-        future = pipeline.submit(0, time, planned.frame_at(time))
-        pipeline.flush()
-        np.testing.assert_array_equal(future.result(), reference)

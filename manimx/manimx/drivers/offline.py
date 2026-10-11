@@ -5,19 +5,20 @@ as the machine allows.
            RenderSettings(RenderConfig(), fps=60), workers=4)
 
 Rendering a frame has three parts that can all run at the same time:
-evaluating the scene and encoding GPU commands (CPU, Python), drawing
-(GPU), and writing the result (an encoder process or PNG threads). The
-driver overlaps them on three levels:
+evaluating the scene and encoding GPU commands (CPU), drawing (GPU), and
+writing the result (an encoder process or PNG threads). The driver
+overlaps them on three levels:
 
-1. **In a process**, a :class:`~.pipeline.FramePipeline` keeps several
-   frames in flight, so the CPU prepares the next frames while the GPU
-   draws the earlier ones.
+1. **In a process**, a :class:`~.core_pipeline.CoreFramePipeline` keeps
+   several frames in flight, so the CPU prepares the next frames while
+   the GPU draws the earlier ones.
 2. **Writing** happens on a separate thread behind a bounded queue, so a
    slow sink only slows rendering once the queue is full.
 3. **Across processes** (``workers > 1``), each worker prepares its own
    copy of the source and renders chunks of consecutive frames with its
    own GPU device. This scales the Python part, which a single process
-   cannot (the GIL). It is correct only because evaluation is pure:
+   cannot (the GIL, for the Python a scene runs per frame). It is
+   correct only because evaluation is pure:
    ``state_at(t)`` gives the same frame in every process (rule 4 of the
    render contract). Consecutive frames per chunk keep each worker's
    renderer caches warm.
@@ -30,8 +31,8 @@ contain only lower, already writable frames.
 
 Sources are given as ``"module:attr"`` (or any picklable callable) so
 worker processes can rebuild them. ``attr`` may be a Scene class (it is
-prepared), a factory function, or an object with ``duration`` and
-``state_at`` (a prepared scene, a timeline, a :class:`FrameSource`).
+prepared), a factory function, a prepared scene, a timeline or a
+:class:`FrameSource`.
 """
 
 from __future__ import annotations
@@ -64,13 +65,11 @@ class FrameSource:
     """Something to render: a function of time and how long it lasts."""
 
     state_at: Callable[[float], Frame]
-    """What to render at a time (a timeline's or scene's ``frame_at``)."""
+    """What to render at a time: the views of a planned timeline or scene
+    (:func:`~manimx.animation.plan.planned_frames`)."""
     duration: float
     audio: Callable[[float, float, int], np.ndarray] | None = None
     """``audio(start, end, sample_rate)``: stereo float32 samples, if any."""
-    core: bool = False
-    """Whether every frame comes from the core (views of PlannedFrames):
-    then the core's renderer (CoreFramePipeline) renders them."""
 
 
 @dataclass(frozen=True)
@@ -89,9 +88,6 @@ class RenderSettings:
     sample_rate: int = 48_000
     audio: bool = True
     """Pass the source's sounds to the sink (if it has any)."""
-    core: bool = True
-    """Evaluate and pack timelines and prepared scenes in the core
-    (CORE.md); False renders them from RNode snapshots."""
 
     def frame_times(self, duration: float) -> list[float]:
         end = duration if self.end is None else self.end
@@ -109,10 +105,9 @@ class RenderStats:
         return self.frames / self.seconds if self.seconds > 0 else math.inf
 
 
-def load_source(spec: Any, core: bool = True) -> FrameSource:
+def load_source(spec: Any) -> FrameSource:
     """A :class:`FrameSource` from ``"module:attr"``, a Scene class, a
-    factory, or an object with ``duration`` and ``state_at``. With
-    ``core``, a timeline's or prepared scene's frames come from the core
+    factory, a prepared scene or a timeline: its frames come from the core
     (:func:`~manimx.animation.plan.planned_frames`).
     """
     from ..animation.plan import planned_frames
@@ -130,13 +125,11 @@ def load_source(spec: Any, core: bool = True) -> FrameSource:
         target = target()
     if isinstance(target, FrameSource):
         return target
-    if hasattr(target, "state_at") and hasattr(target, "duration"):
-        audio = getattr(target, "audio", None)
-        # A timeline or prepared scene renders through its cameras.
-        planned = planned_frames(target) if core else None
-        frame_at = planned.frame_at if planned is not None else getattr(target, "frame_at", target.state_at)
-        return FrameSource(frame_at, target.duration, audio if callable(audio) else None, core=planned is not None and planned.complete)
-    raise TypeError(f"cannot render {target!r}: it needs duration and state_at")
+    planned = planned_frames(target)
+    if planned is None:
+        raise TypeError(f"cannot render {target!r}: give a Scene, a prepared scene or a timeline")
+    audio = getattr(target, "audio", None)
+    return FrameSource(planned.frame_at, target.duration, audio if callable(audio) else None)
 
 
 def _format(source: FrameSource, settings: RenderSettings, times: list[float]) -> FrameFormat:
@@ -160,7 +153,7 @@ def render(
     settings = settings or RenderSettings()
     started = time.perf_counter()
     if workers <= 1:
-        count = _render_here(load_source(source, settings.core), sink, settings, progress)
+        count = _render_here(load_source(source), sink, settings, progress)
     else:
         count = _render_in_workers(source, sink, settings, workers, progress)
     return RenderStats(count, time.perf_counter() - started)
@@ -245,22 +238,15 @@ def _release(release: Callable[[], None] | None) -> None:
 # --------------------------------------------------------------------------
 
 
-def _pipeline(source: FrameSource, settings: RenderSettings) -> Any:
-    """The core's renderer for frames of the core, else the Python one."""
-    if source.core:
-        from .core_pipeline import CoreFramePipeline
+def _pipeline(settings: RenderSettings) -> Any:
+    from .core_pipeline import CoreFramePipeline
 
-        return CoreFramePipeline(settings.effects, settings.config, settings.in_flight)
-    from ..renderer.webgpu import RenderService
-    from .pipeline import FramePipeline
-
-    return FramePipeline(RenderService.shared().composer(settings.effects), settings.config, settings.in_flight)
+    return CoreFramePipeline(settings.effects, settings.config, settings.in_flight)
 
 
 def _render_here(source: FrameSource, sink: FrameSink, settings: RenderSettings, progress: Progress | None) -> int:
     times = settings.frame_times(source.duration)
-    config = settings.config
-    pipeline = _pipeline(source, settings)
+    pipeline = _pipeline(settings)
     sink.open(_format(source, settings, times))
     try:
         writer = _Writer(sink, len(times), progress, capacity=2 * settings.in_flight + 4)
@@ -363,9 +349,9 @@ def _worker_main(
 ) -> None:  # pragma: no cover - runs in a child process
     memory = SharedMemory(name=memory_name)
     try:
-        source = load_source(spec, settings.core)
+        source = load_source(spec)
         times = settings.frame_times(source.duration)
-        pipeline = _pipeline(source, settings)
+        pipeline = _pipeline(settings)
 
         def deliver(index: int, image: np.ndarray) -> None:
             slot = free.get()  # waits while all of this worker's slots are queued

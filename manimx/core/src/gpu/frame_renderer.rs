@@ -1,7 +1,5 @@
-//! `FrameRenderer`: the core's whole render chain behind one Python class.
-//! The counterpart of `FrameComposer` plus `FramePipeline`
-//! (manimx/renderer/webgpu/composer.py, manimx/drivers/pipeline.py) for
-//! frames of the core (PlannedFrames), driven by `CoreFramePipeline`
+//! `FrameRenderer`: the core's whole render chain behind one Python class,
+//! for frames of the core (PlannedFrames), driven by `CoreFramePipeline`
 //! (manimx/drivers/core_pipeline.py).
 //!
 //! Per frame, Python hands over the sub-frames (time weight and views, each
@@ -24,6 +22,7 @@ use super::composer::{
     Blend, Bloom, Composer, CompositeTarget, DepthOfField, Effect, ShaderEffect,
 };
 use super::context::{Gpu, COLOR_FORMAT, HDR_FORMAT};
+use super::inspect::TextureKind;
 use super::renderer::{Renderer, TargetSettings};
 use crate::evaluator::FrameState;
 use crate::graph::SceneGraph;
@@ -296,6 +295,48 @@ impl FrameRenderer {
         Ok(done)
     }
 
+    /// A texture of the last frame as RGBA floats, to look at how it was
+    /// made (see inspect.rs): `(width, height, bytes)`. Names: "lit",
+    /// "vector", "albedo", "normal", "emissive", "scope", "depth",
+    /// "masks" and "shadow_maps" (with `layer`), and the composer's
+    /// "view distances" and "blur tiles". `shadow_layers()` says how many
+    /// shadow map layers there are.
+    #[pyo3(signature = (name, layer=0))]
+    fn inspect<'py>(
+        &mut self,
+        py: Python<'py>,
+        name: &str,
+        layer: u32,
+    ) -> PyResult<(u32, u32, Bound<'py, PyBytes>)> {
+        let _ = self.gpu.device.poll(wgpu::PollType::wait_indefinitely());
+        let (view, kind, size) = match self.renderer.inspected(name) {
+            Some(found) => found,
+            None => {
+                let texture =
+                    self.composer.textures.find(name).ok_or_else(|| {
+                        PyValueError::new_err(format!("no texture named {name:?}"))
+                    })?;
+                let size = (texture.width(), texture.height());
+                (
+                    texture.create_view(&Default::default()),
+                    TextureKind::Float,
+                    size,
+                )
+            }
+        };
+        let texels = super::inspect::read(&self.gpu, &view, kind, size, layer)?;
+        Ok((
+            size.0,
+            size.1,
+            PyBytes::new(py, bytemuck::cast_slice(&texels)),
+        ))
+    }
+
+    /// How many shadow map layers there are.
+    fn shadow_layers(&self) -> u32 {
+        self.renderer.shadow_layers()
+    }
+
     /// GPU milliseconds per pass name since the last call (with `profile`).
     fn gpu_timings<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let timings = PyDict::new(py);
@@ -311,7 +352,7 @@ impl FrameRenderer {
 }
 
 impl FrameRenderer {
-    /// Equal keys promise equal frames: every view's graph, state key and
+    /// Equal keys promise equal frames: every view's graph id, state key and
     /// Frame record (without the time). None with a shader effect or a
     /// surface shader in a view, which may read the time.
     fn frame_key(
@@ -334,7 +375,13 @@ impl FrameRenderer {
             key.extend(weight.to_le_bytes());
             key.extend((views.len() as u64).to_le_bytes());
             for view in views {
-                key.extend((view.get_item(0)?.as_ptr() as usize).to_le_bytes());
+                key.extend(
+                    view.get_item(0)?
+                        .cast::<SceneGraph>()?
+                        .get()
+                        .id
+                        .to_le_bytes(),
+                );
                 key.extend(view.get_item(2)?.cast::<PyBytes>()?.as_bytes());
                 let mut frame = frame_record(&view.get_item(4)?)?;
                 frame.time = 0.0;

@@ -1,5 +1,4 @@
-//! Fills of 2D paths as triangles with exact curves (`tessellate_fill` in
-//! renderer/tessellation.py, which calls this).
+//! Fills of 2D paths as triangles with exact curves.
 //!
 //! The approach is ManimGL's (Loop & Blinn 2005):
 //!
@@ -239,7 +238,7 @@ fn classify_rings(rings: Vec<Ring>) -> Vec<(Ring, Vec<Ring>)> {
     // around it is filled as an outer ring of its own.
     let mut groups: Vec<(usize, Ring, Vec<Ring>)> = Vec::new();
     for (i, ring) in rings.iter().enumerate() {
-        if depth[i] % 2 == 0 {
+        if depth[i].is_multiple_of(2) {
             groups.push((i, oriented(ring, true), Vec::new()));
         }
     }

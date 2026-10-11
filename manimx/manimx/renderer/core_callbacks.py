@@ -1,17 +1,16 @@
-"""What the core (manimx._core, see CORE.md) asks Python for while packing.
+"""What the core (manimx._core) asks Python for while packing.
 
 The core packs records per frame in Rust. A few records depend only on
-geometry or style and change rarely: a stroke's curve links, a mesh's
-interleaved vertices, a material entry. The core builds those once per
-version of the signals they come from by calling these functions, which
-reuse the reference implementation (so both paths produce the same
-bytes), and keeps the result until a version changes. Fills are
-tessellated in Rust for both (core/src/tessellation.rs), and the core
-builds stroke records itself (core/src/strokes.rs) whenever the style
-values are plain numbers; :func:`stroke_records` is the reference it is
-tested against and the fallback for other values. Every function
-returns plain bytes in the record layouts of vector_batch.py and
-mesh_batch.py.
+geometry or style and change rarely: a mesh's interleaved vertices, a
+material entry, a texture's mip levels. The core builds those once per
+version of the signals they come from by calling these functions, and
+keeps the result until a version changes. Fills are tessellated in Rust
+(core/src/tessellation.rs), and stroke records are built in Rust
+(core/src/strokes.rs) whenever the style values are plain numbers;
+:func:`stroke_records` builds them for other values and is what the
+Rust version is tested against. Every function returns plain bytes in
+the record layouts below (they mirror core/src/records.rs and the
+shaders).
 """
 
 from __future__ import annotations
@@ -19,19 +18,48 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from PIL import Image
 
 from ..animation import style
-from ..robjects import PbrMaterial, RCurve3D, RDirectionalLight, RShape2D
+from ..robjects import PbrMaterial, RDirectionalLight
 from ..robjects.material import (
     DEFAULT_SURFACE_SHADER,  # noqa: F401 - read by the core (mesh_pass.rs)
     linear_rgb,
 )
 from ..robjects.mesh import MeshData
 from ..robjects.transform import Transform, rotation_towards
-from .webgpu.mesh_batch import _interleave, _material_entry
-from .webgpu.mesh_pass import _mip_chain
-from .webgpu.shadow_views import _box
-from .webgpu.vector_batch import _StrokeTopology
+
+POINTS_PER_CURVE = 4
+TOLERANCE_FOR_POINT_EQUALITY = 1e-6
+STROKE_WIDTH_SCALE = 0.01
+"""World units per unit of stroke width (Manim: width 4 = 0.04 units)."""
+NO_NEIGHBOR = -1
+
+# Mirror the structs of core/src/records.rs (and the shaders reading them).
+STROKE_POINT_DTYPE = np.dtype([("position", "<f4", 3), ("width", "<f4"), ("color", "<f4", 4)])
+STROKE_CURVE_DTYPE = np.dtype(
+    [
+        ("first_point", "<u4"),
+        ("prev_point", "<i4"),
+        ("next_point", "<i4"),
+        ("start_joint", "<u4"),
+        ("end_joint", "<u4"),
+        ("start_cap", "<u4"),
+        ("end_cap", "<u4"),
+        ("_pad", "<u4"),
+    ]
+)
+MESH_VERTEX_DTYPE = np.dtype([("position", "<f4", 3), ("u", "<f4"), ("normal", "<f4", 3), ("v", "<f4"), ("tangent", "<f4", 4)])
+MATERIAL_DTYPE = np.dtype(
+    [
+        ("base_color", "<f4", 4),
+        ("emissive", "<f4", 4),
+        ("metallic", "<f4"),
+        ("roughness", "<f4"),
+        ("normal_scale", "<f4"),
+        ("occlusion_strength", "<f4"),
+    ]
+)
 
 
 def fill_colors(color: np.ndarray, opacity: np.ndarray, count: int) -> tuple[bytes, bool, bool]:
@@ -47,12 +75,59 @@ def stroke_records(points: np.ndarray, color: np.ndarray, opacity: np.ndarray, w
     is visible, and whether it is opaque.
     """
     stroke = style.stroke(color, opacity, width, joint, cap)
-    shape = (RShape2D if points.shape[1] == 2 else RCurve3D)(points=points, stroke=stroke)
     visible = bool(np.any(stroke.width > 0.0) and np.any(stroke.opacity > 0.0))
     if not visible:
         return b"", b"", False, False
-    topology = _StrokeTopology.build(shape)
-    return topology.curves.tobytes(), topology.points(shape).tobytes(), True, bool(np.all(stroke.opacity >= 1.0))
+    curves = _link_curves(points, [j.value for j in stroke.joints(len(points) // POINTS_PER_CURVE)], stroke.cap.value)
+    records = np.zeros(len(points), STROKE_POINT_DTYPE)
+    records["position"] = points if points.shape[1] == 3 else np.column_stack([points, np.zeros(len(points))])
+    records["width"] = stroke.widths(len(points)) * STROKE_WIDTH_SCALE
+    records["color"] = stroke.rgba(len(points))
+    # A resampled per-point style list assigns slightly different values
+    # to the end anchor of one curve and the start anchor of the next
+    # (separate entries in the point array). Averaging them avoids a
+    # visible step at every joint. Every anchor is in at most one pair.
+    linked = curves["next_point"] != NO_NEIGHBOR
+    ends = (curves["first_point"][linked] + POINTS_PER_CURVE - 1).astype(np.intp)
+    starts = curves["next_point"][linked].astype(np.intp)
+    for name in ("width", "color"):
+        values = records[name]
+        mean = (values[ends] + values[starts]) / 2
+        values[ends] = mean
+        values[starts] = mean
+    return curves.tobytes(), records.tobytes(), True, bool(np.all(stroke.opacity >= 1.0))
+
+
+def _link_curves(points: np.ndarray, joints: list[int], cap: int) -> np.ndarray:
+    """Stroke curve records with previous/next links inside each subpath
+    (a subpath continues while a curve starts where the last one ended).
+    Closed subpaths link their last curve back to the first one, so the
+    closing corner gets a joint instead of two caps.
+    """
+    count = len(points) // POINTS_PER_CURVE
+    curves = np.zeros(count, STROKE_CURVE_DTYPE)
+    starts = POINTS_PER_CURVE * np.arange(count)
+    curves["first_point"] = starts
+    curves["end_joint"] = joints
+    curves["start_cap"] = cap
+    curves["end_cap"] = cap
+    curves["prev_point"] = NO_NEIGHBOR
+    curves["next_point"] = NO_NEIGHBOR
+    corners = points.reshape(count, POINTS_PER_CURVE, -1)
+    gaps = np.linalg.norm(corners[1:, 0] - corners[:-1, -1], axis=1)
+    breaks = [0, *(np.flatnonzero(gaps > TOLERANCE_FOR_POINT_EQUALITY) + 1).tolist(), count]
+    for begin, end in zip(breaks[:-1], breaks[1:], strict=True):
+        for curve in range(begin, end):
+            if curve > begin:
+                curves["prev_point"][curve] = starts[curve - 1]
+                curves["start_joint"][curve] = joints[curve - 1]
+            if curve < end - 1:
+                curves["next_point"][curve] = starts[curve + 1]
+        if np.linalg.norm(corners[begin, 0] - corners[end - 1, -1]) <= TOLERANCE_FOR_POINT_EQUALITY:
+            curves["prev_point"][begin] = starts[end - 1]
+            curves["start_joint"][begin] = joints[end - 1]
+            curves["next_point"][end - 1] = starts[begin]
+    return curves
 
 
 def path_center(points: np.ndarray) -> tuple[float, float, float]:
@@ -128,6 +203,47 @@ def texture_levels(texture: Any) -> list[tuple[int, int, bytes]]:
     return [(level.shape[1], level.shape[0], np.ascontiguousarray(level).tobytes()) for level in _mip_chain(texture.image)]
 
 
+def _mip_chain(image: np.ndarray) -> list[np.ndarray]:
+    """The image and successive half-size versions down to 1x1."""
+    levels = [image]
+    current = Image.fromarray(image)
+    while current.width > 1 or current.height > 1:
+        current = current.resize((max(1, current.width // 2), max(1, current.height // 2)), Image.Resampling.BOX)
+        levels.append(np.asarray(current))
+    return levels
+
+
 def default_texture_levels(rgba: tuple[int, int, int, int]) -> list[tuple[int, int, bytes]]:
     """A 1x1 texture of one color (missing material textures)."""
     return [(1, 1, bytes(rgba))]
+
+
+def _box(points: np.ndarray) -> np.ndarray:
+    """The 8 corners of the axis-aligned box around ``points``."""
+    low, high = points.min(axis=0), points.max(axis=0)
+    return np.array([[x, y, z] for x in (low[0], high[0]) for y in (low[1], high[1]) for z in (low[2], high[2])])
+
+
+def _interleave(mesh: MeshData) -> np.ndarray:
+    """A mesh's vertices as MESH_VERTEX_DTYPE records (tangents computed
+    when it has none)."""
+    mesh = mesh.with_tangents()
+    vertices = np.zeros(mesh.vertex_count, MESH_VERTEX_DTYPE)
+    vertices["position"] = mesh.positions
+    vertices["normal"] = mesh.normals
+    if mesh.uvs is not None:
+        vertices["u"], vertices["v"] = mesh.uvs[:, 0], mesh.uvs[:, 1]
+    if mesh.tangents is not None:
+        vertices["tangent"] = mesh.tangents
+    return vertices
+
+
+def _material_entry(material: PbrMaterial) -> np.ndarray:
+    entry = np.zeros((), MATERIAL_DTYPE)
+    entry["base_color"] = material.base_color_linear
+    entry["emissive"][:3] = material.emissive_linear
+    entry["metallic"] = material.metallic
+    entry["roughness"] = material.roughness
+    entry["normal_scale"] = material.normal_scale
+    entry["occlusion_strength"] = material.occlusion_strength
+    return entry

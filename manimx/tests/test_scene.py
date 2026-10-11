@@ -6,7 +6,6 @@ import math
 import numpy as np
 import pytest
 import quaternion
-from manimx.renderer.scene_graph import flatten_scene
 
 from manimx.robjects import RShape2D
 from manimx.animation import Camera, Group, Scene, derive
@@ -236,7 +235,6 @@ def test_groups_move_their_children_and_pass_alpha_on() -> None:
     assert list(by_name(group.children, prepared.roots)) == ["a", "b"]
     # The renderer multiplies the group's alpha into its children.
     assert group.alpha == pytest.approx(0.5) and group.children[1].alpha == 1.0
-    assert flatten_scene(group).items[1].alpha == pytest.approx(0.5)
 
 
 def test_derived_signals_follow_animated_ones() -> None:

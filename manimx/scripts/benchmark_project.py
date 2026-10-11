@@ -1,24 +1,20 @@
-"""Benchmark rendering a manimx project, stage by stage.
+"""Benchmark rendering a manimx project.
 
     uv run python scripts/benchmark_project.py tests/projects/benchmark
     uv run python scripts/benchmark_project.py tests/projects/benchmark --save-reference /tmp/ref.npz
     uv run python scripts/benchmark_project.py tests/projects/benchmark --check-reference /tmp/ref.npz
-    uv run python scripts/benchmark_project.py tests/projects/benchmark --core
 
 Renders the project's timeline in one process with the project's output
 settings (and once without motion blur), and prints:
 
 * frames per second and milliseconds per frame,
-* the wall time of each renderer stage (measured by wrapping the stage
-  functions, no profiler, so Python is not slowed down),
+* the wall time of evaluating frames and of handing them to the core
+  (measured by wrapping those functions, no profiler),
 * the GPU time of each render pass (timestamp queries, when supported).
 
 ``--save-reference`` / ``--check-reference`` store or compare a set of
 small frames across the timeline, so optimizations can be checked to be
-bit-identical. ``--core`` renders the timeline's frames through the core
-(PlannedTimeline and CoreFramePipeline, see CORE.md) instead of RNode
-trees and the Python renderer. Results go to
-PERFORMANCE.md by hand, one row per step.
+bit-identical. Results go to PERFORMANCE.md by hand, one row per step.
 """
 
 from __future__ import annotations
@@ -31,29 +27,16 @@ import time
 from collections import defaultdict
 
 import numpy as np
-from manimx.animation import plan, timing
+from manimx.animation import plan
 from manimx.drivers.core_pipeline import CoreFramePipeline
-from manimx.drivers.pipeline import FramePipeline
+from manimx.drivers.stills import StillRenderer
 from manimx.project import Project
-from manimx.renderer import FrameComposer, RenderService, SceneFlattener
-from manimx.renderer.webgpu import composer as composer_module
-from manimx.renderer.webgpu import core_packer, mesh_batch, packer, renderer, retained
 
-# Stages of the render chain and their parts (indented).
+# Stages that are timed.
 STAGES = [
-    (timing.Timeline, "frame_at", "frame_at (evaluate + snapshot)"),
-    (plan.PlannedTimeline, "frame_at", "frame_at (core: evaluate)"),
-    (core_packer.CorePacker, "pack", "pack (core: flatten + pack)"),
-    (SceneFlattener, "flatten", "flatten"),
-    (packer.FramePacker, "pack", "pack (all)"),
-    (retained.RetainedVectors, "build", "  vector records (retained)"),
-    (mesh_batch.MeshBatch, "build", "  mesh batch"),
-    (packer, "build_shadow_views", "  shadow views"),
-    (renderer.WGPURenderer, "render_layers", "render (GPU encoding)"),
-    (composer_module.FrameComposer, "_composite", "composite"),
-    (FramePipeline, "_finish_oldest", "wait + readback"),
-    (CoreFramePipeline, "submit", "core: submit (pack, render, composite)"),
-    (CoreFramePipeline, "flush", "core: flush"),
+    (plan.PlannedTimeline, "frame_at", "frame_at (evaluate)"),
+    (CoreFramePipeline, "submit", "submit (pack, render, composite)"),
+    (CoreFramePipeline, "flush", "flush"),
 ]
 
 
@@ -72,33 +55,25 @@ def wrap_stages(spent: dict[str, float]) -> None:
         setattr(owner, name, timed)
 
 
-def render_all(timeline, settings, times, profile: bool = False, core: bool = False) -> tuple[float, object]:
-    if core:
-        pipeline = CoreFramePipeline(settings.effects, settings.config, settings.in_flight, profile=profile)
-        service = pipeline
-    else:
-        service = RenderService(profile=profile)
-        pipeline = FramePipeline(FrameComposer(service, settings.effects), settings.config, settings.in_flight)
+def render_all(frame_at, settings, times) -> float:
+    pipeline = CoreFramePipeline(settings.effects, settings.config, settings.in_flight)
     for t in times[:5]:  # warm up: shaders, caches, buffers
-        pipeline.submit(0, t, timeline.frame_at)
+        pipeline.submit(0, t, frame_at)
     pipeline.flush()
     start = time.perf_counter()
     for index, t in enumerate(times):
-        pipeline.submit(index, t, timeline.frame_at)
+        pipeline.submit(index, t, frame_at)
     pipeline.flush()
-    return time.perf_counter() - start, service
+    return time.perf_counter() - start
 
 
-def reference_frames(project: Project, timeline) -> np.ndarray:
+def reference_frames(project: Project, frame_at, duration: float) -> np.ndarray:
     small = copy.deepcopy(project.settings)
     small.output.width, small.output.height = 320, 180
     settings = project.render_settings(small)
-    times = np.linspace(0, timeline.duration, 48)
-    service = RenderService()
-    composer = FrameComposer(service, settings.effects)
-    frames = np.stack([composer.compose(timeline.frame_at, dataclasses.replace(settings.config, time=float(t))) for t in times])
-    service.renderer.context.device.destroy()  # the adapter refuses a fourth device while this one is alive
-    return frames
+    renderer = StillRenderer()
+    configs = (dataclasses.replace(settings.config, time=float(t)) for t in np.linspace(0, duration, 48))
+    return np.stack([renderer.render(frame_at, config, settings.effects) for config in configs])
 
 
 def main() -> None:
@@ -106,18 +81,15 @@ def main() -> None:
     parser.add_argument("project")
     parser.add_argument("--save-reference")
     parser.add_argument("--check-reference")
-    parser.add_argument("--core", action="store_true", help="render through the core (PlannedTimeline)")
     args = parser.parse_args()
 
     project = Project.load(args.project)
     started = time.perf_counter()
-    timeline = project.build_timeline()
-    if args.core:
-        timeline = plan.PlannedTimeline(timeline)
+    timeline = plan.PlannedTimeline(project.build_timeline())
     print(f"prepare: {time.perf_counter() - started:.2f} s")
 
     if args.save_reference or args.check_reference:
-        frames = reference_frames(project, timeline)
+        frames = reference_frames(project, timeline.frame_at, timeline.duration)
         if args.save_reference:
             np.savez_compressed(args.save_reference, frames=frames)
             print(f"saved {len(frames)} reference frames")
@@ -132,32 +104,25 @@ def main() -> None:
     times = settings.frame_times(timeline.duration)
     sharp_settings = copy.deepcopy(project.settings)
     sharp_settings.effects.motion_blur.enabled = False
-    sharp = project.render_settings(sharp_settings)
-    sharp_wall, _ = render_all(timeline, sharp, times, core=args.core)
+    sharp_wall = render_all(timeline.frame_at, project.render_settings(sharp_settings), times)
 
     spent: dict[str, float] = defaultdict(float)
     wrap_stages(spent)
-    wall, _ = render_all(timeline, settings, times, core=args.core)
+    wall = render_all(timeline.frame_at, settings, times)
     count = len(times)
     out = project.output
     print(f"{out.width}x{out.height}, {count} frames, motion blur {project.settings.motion_blur_samples}: {count / wall:6.1f} fps  {wall / count * 1e3:6.2f} ms/frame")
     print(f"{out.width}x{out.height}, {count} frames, no motion blur: {count / sharp_wall:6.1f} fps  {sharp_wall / count * 1e3:6.2f} ms/frame")
     for label, seconds in ((label, spent[label]) for _, _, label in STAGES if label in spent):
-        print(f"  {label:<32} {seconds / count * 1e3:6.2f} ms/frame  {seconds / wall * 100:5.1f}%")
+        print(f"  {label:<36} {seconds / count * 1e3:6.2f} ms/frame  {seconds / wall * 100:5.1f}%")
 
     gpu: dict[str, float] = defaultdict(float)
     sample = times[:: max(1, count // 60)]
-    if args.core:
-        pipeline = CoreFramePipeline(settings.effects, settings.config, 1, profile=True)
-        read = pipeline.gpu_timings
-    else:
-        profiled = RenderService(profile=True)
-        pipeline = FramePipeline(FrameComposer(profiled, settings.effects), settings.config, 1)
-        read = profiled.renderer.profiler.read
+    pipeline = CoreFramePipeline(settings.effects, settings.config, 1, profile=True)
     for t in sample:
         pipeline.submit(0, t, timeline.frame_at)
         pipeline.flush()
-        for name, ms in read().items():
+        for name, ms in pipeline.gpu_timings().items():
             gpu[name] += ms
     if gpu:
         total = sum(gpu.values()) / len(sample)

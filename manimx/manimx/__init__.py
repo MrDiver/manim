@@ -1,4 +1,7 @@
-"""Parallel package for incremental Manim experiments."""
+"""manimx: animations written in Python, rendered on the GPU.
+
+Scenes are written with the classes this module exports (see
+GETTING_STARTED.md); README.md maps the packages."""
 
 __version__ = "0.1.0"
 
@@ -8,7 +11,8 @@ __version__ = "0.1.0"
 # manimx.robjects.
 from .animation import *  # noqa: F403
 from .animation import __all__ as _animation_all
-from .renderer import RenderConfig, Renderer, RenderService
+from .drivers import render_image
+from .renderer import RenderConfig
 from .robjects import CapStyle, JointType, MeshData, PbrMaterial, SurfaceShader, Texture
 from .testing import assert_snapshot, visual_test
 from .userland import *  # noqa: F403
@@ -27,12 +31,11 @@ __all__ = [
     "MeshData",
     "PbrMaterial",
     "RenderConfig",
-    "Renderer",
     "Texture",
-    "RenderService",
     "SurfaceShader",
     "__version__",
     "assert_snapshot",
     "package_name",
+    "render_image",
     "visual_test",
 ]

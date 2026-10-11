@@ -8,22 +8,13 @@ import pytest
 from gltf_fixtures import GlbWriter
 from manimx.animation import Group, Scene
 from manimx.userland import Rotate
-from manimx.userland.geometry import box_mesh, corner_points, parametric_points, sphere_mesh, torus_mesh
+from manimx.userland.geometry import box_mesh, parametric_points, sphere_mesh, torus_mesh
 from manimx.userland.rate_functions import linear
 from manimx.userland import load_gltf
-from manimx.renderer import RenderConfig, RNodeDataCache
-from manimx.renderer.scene_graph import flatten, flatten_scene
-from manimx.renderer.webgpu.mesh_batch import (
-    LIGHT_DIRECTIONAL,
-    LIGHT_POINT,
-    LIGHT_SPOT,
-    MeshBatch,
-)
-from manimx.renderer.webgpu.vector_batch import FLAG_CAMERA_FACING, VectorBatch
 from manimx.robjects.transform import rotation_towards
 
 from manimx import MeshData, PbrMaterial, Texture
-from manimx.robjects import RCurve3D, RDirectionalLight, RGroup, RPointLight, RShape2D, RShape3D, RSpotLight, Stroke, Transform
+from manimx.robjects import RCurve3D, RDirectionalLight, RShape3D, RSpotLight, Transform
 
 # --- meshes ---------------------------------------------------------------------
 
@@ -91,81 +82,10 @@ def test_lights_point_along_their_local_minus_z() -> None:
         RDirectionalLight(transform=Transform(rotation=rotation_towards((0.0, 0.0, 0.0))))
 
 
-def test_scene_collects_lights_in_world_space() -> None:
-    lamp = RPointLight(transform=Transform(position=(1.0, 0.0, 0.0)))
-    root = RGroup(children=[lamp], transform=Transform(position=(0.0, 2.0, 0.0)))
-
-    scene = flatten_scene(root)
-
-    assert scene.items == [] and [item.light for item in scene.lights] == [lamp]
-    np.testing.assert_allclose(scene.lights[0].world[:3, 3], [1.0, 2.0, 0.0])
-
-
-def test_light_records() -> None:
-    root = RGroup(
-        children=[
-            RDirectionalLight(transform=Transform(rotation=rotation_towards((0, 0, -1))), intensity=2.0),
-            RPointLight(color="#FF0000", intensity=3.0, range=5.0),
-            RSpotLight(transform=Transform(position=(0, 0, 2), rotation=rotation_towards(tuple(np.subtract((0, 0, 0), (0, 0, 2))))), inner_cone_angle=0.1, outer_cone_angle=0.2),
-        ],
-    )
-
-    lights = MeshBatch.build(flatten_scene(root), RNodeDataCache(), RenderConfig()).lights
-
-    assert list(lights["kind"]) == [LIGHT_DIRECTIONAL, LIGHT_POINT, LIGHT_SPOT]
-    np.testing.assert_allclose(lights["direction"][0], [0, 0, -1], atol=1e-6)
-    np.testing.assert_allclose(lights["color"][1], [3.0, 0.0, 0.0])
-    assert lights["range"][1] == 5.0
-    assert lights["outer_cone_cos"][2] == pytest.approx(math.cos(0.2))
-
-
-def test_default_light_only_without_scene_lights() -> None:
-    empty = flatten_scene(RGroup())
-
-    assert len(MeshBatch.build(empty, RNodeDataCache(), RenderConfig()).lights) == 1
-    assert len(MeshBatch.build(empty, RNodeDataCache(), RenderConfig(default_lights=False)).lights) == 0
-
-
 # --- mesh batch -------------------------------------------------------------------
 
 
-def test_mesh_batch_groups_draws_by_texture_set() -> None:
-    texture = Texture(np.zeros((2, 2, 4), np.uint8))
-    plain, textured = PbrMaterial(), PbrMaterial(base_color_texture=texture)
-    shapes = [
-        RShape3D(mesh=box_mesh(), material=plain),
-        RShape3D(mesh=sphere_mesh(), material=textured),
-        RShape3D(mesh=box_mesh(), material=plain),
-    ]
-
-    batch = MeshBatch.build(flatten_scene(RGroup(children=shapes)), RNodeDataCache(), RenderConfig())
-
-    assert len(batch.materials) == 2
-    assert [len(group.draws) for group in batch.groups] == [2, 1]
-    draws = batch.draws
-    assert list(draws["first_instance"]) == [0, 2, 1]
-    assert draws["base_vertex"][1] == box_mesh().vertex_count + sphere_mesh().vertex_count
-    assert len(batch.indices) == 2 * len(box_mesh().indices) + len(sphere_mesh().indices)
-
-
-def test_meshes_cannot_be_masks() -> None:
-    from manimx.robjects import RClippingGroup
-
-    with pytest.raises(NotImplementedError, match="mask"):
-        flatten(RClippingGroup(mask=RShape3D(), content=RShape2D()))
-
-
 # --- RCurve3D ----------------------------------------------------------------------
-
-
-def test_curve3d_is_a_camera_facing_stroke() -> None:
-    curve = RCurve3D(points=corner_points([(0, 0, 0), (1, 0, 1), (2, 0, 0)]), stroke=Stroke(width=10))
-
-    batch = VectorBatch.build(flatten_scene(curve), RNodeDataCache(), np.eye(4))
-
-    assert batch.objects["flags"][0] == FLAG_CAMERA_FACING
-    assert len(batch.fill_vertices) == 0  # curves have no fill
-    np.testing.assert_allclose(batch.stroke_points["position"][3], [1, 0, 1])
 
 
 def test_parametric_curve_passes_through_samples() -> None:
@@ -179,6 +99,22 @@ def test_parametric_curve_passes_through_samples() -> None:
 
 
 # --- glTF import ------------------------------------------------------------------
+
+
+class _Leaf:
+    """A drawn node of a snapshot and its world matrix."""
+
+    def __init__(self, obj, world: np.ndarray) -> None:
+        self.obj, self.world = obj, world
+
+
+def flatten(root, parent: np.ndarray | None = None) -> list[_Leaf]:
+    """The leaves of a snapshot tree with their world matrices."""
+    world = (np.eye(4) if parent is None else parent) @ root.transform.matrix()
+    children = getattr(root, "children", None)
+    if children is None:
+        return [_Leaf(root, world)]
+    return [leaf for child in children for leaf in flatten(child, world)]
 
 
 def test_gltf_import_builds_hierarchy_and_converts_to_z_up(tmp_path: Path) -> None:

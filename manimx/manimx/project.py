@@ -34,7 +34,13 @@ from typing import Any
 
 from .animation.scene import PreparedScene, Scene
 from .animation.timing import NEVER, Timeline
-from .settings import OutputSettings, PerformanceSettings, Settings, SettingsError, UnknownSetting
+from .settings import (
+    OutputSettings,
+    PerformanceSettings,
+    Settings,
+    SettingsError,
+    UnknownSetting,
+)
 from .settings import from_json as settings_from_json
 from .settings import schema as settings_schema
 from .settings import to_json as settings_to_json
@@ -182,7 +188,6 @@ class Project:
             fps=output.fps,
             effects=settings.effects_chain(),
             in_flight=settings.performance.frames_in_flight,
-            core=settings.performance.core,
             sample_rate=output.sample_rate,
             audio=output.audio,
         )

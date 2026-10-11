@@ -1,14 +1,15 @@
-//! The composer: turns the renderer's layers into a frame. Ports the GPU
-//! side of `FrameComposer` (manimx/renderer/webgpu/composer.py):
+//! The composer: turns the renderer's layers into a frame:
 //!
-//!     for each sub-frame (one, or the MotionBlur samples):
-//!         for each view (one per active clip, lowest first):
-//!             layers = render the view
-//!             lit = lit-stage effects (Bloom, custom shaders) on layers.lit
-//!             image = composite(tone_map(lit), layers.vector) over image
-//!         accumulator += weight * image
-//!     frame = frame-stage effects on the accumulator
-//!     output = encode to sRGB
+//! ```text
+//! for each sub-frame (one, or the MotionBlur samples):
+//!     for each view (one per active clip, lowest first):
+//!         layers = render the view
+//!         lit = lit-stage effects (Bloom, custom shaders) on layers.lit
+//!         image = composite(tone_map(lit), layers.vector) over image
+//!     accumulator += weight * image
+//! frame = frame-stage effects on the accumulator
+//! output = encode to sRGB
+//! ```
 //!
 //! Which sub-frames and views there are is decided in Python (they come
 //! from the timeline); `compose` gets them ready to render.
@@ -150,6 +151,11 @@ pub struct TexturePool {
 }
 
 impl TexturePool {
+    /// The texture named `name`, if one was made.
+    pub fn find(&self, name: &str) -> Option<&wgpu::Texture> {
+        self.textures.get(name)
+    }
+
     pub fn get(
         &mut self,
         device: &wgpu::Device,
@@ -539,7 +545,7 @@ impl Composer {
 
     /// `fs_composite`: tone mapped lit layer and vector layer over the
     /// background, `weight` times into `target`; through `depth_of_field`
-    /// when given (`FrameComposer._composite`).
+    /// when given.
     #[allow(clippy::too_many_arguments)]
     pub fn composite(
         &mut self,

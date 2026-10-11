@@ -7,12 +7,20 @@ import math
 
 import numpy as np
 import pytest
-from manimx.animation import Curve3D, DirectionalLight, Group, Light, PointLight, Scene, Shape3D, Simulation, SpotLight, derive
-from manimx.userland import OUT, RIGHT, UP, Box, Circle, FadeIn, Indicate, ParametricCurve3D, ParametricSurface, Rotate, Sphere, Torus
-from manimx.userland.geometry import box_mesh, sphere_mesh, surface_mesh
-from manimx.userland.rate_functions import linear
-from manimx.renderer import RenderConfig, RenderService
-from manimx.renderer.scene_graph import flatten_scene
+from manimx.animation import (
+    Curve3D,
+    DirectionalLight,
+    Group,
+    Light,
+    PointLight,
+    Scene,
+    Shape3D,
+    Simulation,
+    SpotLight,
+    derive,
+)
+from manimx.drivers import render_image
+from manimx.renderer import RenderConfig
 from manimx.robjects import (
     MeshData,
     PbrMaterial,
@@ -24,6 +32,22 @@ from manimx.robjects import (
     RSpotLight,
     Texture,
 )
+from manimx.userland import (
+    OUT,
+    RIGHT,
+    UP,
+    Box,
+    Circle,
+    FadeIn,
+    Indicate,
+    ParametricCurve3D,
+    ParametricSurface,
+    Rotate,
+    Sphere,
+    Torus,
+)
+from manimx.userland.geometry import box_mesh, sphere_mesh, surface_mesh
+from manimx.userland.rate_functions import linear
 
 
 def prepare(construct):
@@ -80,7 +104,7 @@ def test_alpha_multiplies_opacity_and_factors_are_clamped() -> None:
     root = group.snapshot()
     material = root.children[0].material
     assert material.opacity == pytest.approx(0.8)  # alphas travel on their own...
-    assert flatten_scene(root).items[0].alpha == pytest.approx(0.25)  # ...multiplied when flattened
+    assert root.alpha * root.children[0].alpha == pytest.approx(0.25)  # ...the core multiplies them
     assert (material.metallic, material.roughness, material.emissive_strength) == (1.0, 0.0, 0.0)
     shape.set_emissive("#0000FF")
     assert shape.emissive.value == (0.0, 0.0, 1.0)
@@ -227,15 +251,7 @@ def test_simulation_moves_a_shape3d() -> None:
 # --- rendering ----------------------------------------------------------------------
 
 
-@pytest.fixture(scope="module")
-def renderer() -> RenderService:
-    try:
-        return RenderService.shared()
-    except Exception as error:  # pragma: no cover - depends on the machine
-        pytest.skip(f"no usable GPU: {error}")
-
-
-def test_a_faded_light_darkens_the_mesh(renderer: RenderService) -> None:
+def test_a_faded_light_darkens_the_mesh() -> None:
     ball = Sphere(name="ball", color="#FFFFFF", roughness=1.0)
     sun = DirectionalLight("sun", direction=(0, 0, -1))
 
@@ -245,17 +261,16 @@ def test_a_faded_light_darkens_the_mesh(renderer: RenderService) -> None:
 
     prepared = prepare(construct)
     config = RenderConfig(pixel_width=64, pixel_height=36, ambient_intensity=0.0)
-    lit, dark = (renderer.render(prepared.state_at(t), config) for t in (0.0, 1.0))
-    assert len(flatten_scene(prepared.state_at(1.0)).lights) == 1  # still there, at intensity 0
+    lit, dark = (render_image(prepared, t, config) for t in (0.0, 1.0))
     assert lit[18, 32, :3].mean() > 100 and dark[18, 32, :3].max() < lit[18, 32, :3].max() / 4
 
 
-def test_meshes_are_interleaved_once_while_shapes_move(renderer: RenderService, monkeypatch: pytest.MonkeyPatch) -> None:
-    from manimx.renderer.webgpu import mesh_batch
+def test_meshes_are_interleaved_once_while_shapes_move(monkeypatch: pytest.MonkeyPatch) -> None:
+    from manimx.renderer import core_callbacks
 
     calls = []
-    original = mesh_batch._interleave
-    monkeypatch.setattr(mesh_batch, "_interleave", lambda mesh: calls.append(mesh) or original(mesh))
+    original = core_callbacks._interleave
+    monkeypatch.setattr(core_callbacks, "_interleave", lambda mesh: calls.append(mesh) or original(mesh))
     box = Box(name="box")
 
     def construct(scene):
@@ -265,7 +280,7 @@ def test_meshes_are_interleaved_once_while_shapes_move(renderer: RenderService, 
     prepared = prepare(construct)
     config = RenderConfig(pixel_width=32, pixel_height=18)
     for t in np.linspace(0.0, 1.0, 5):
-        renderer.render(prepared.state_at(t), config)
+        render_image(prepared, t, config)
     assert len(calls) == 1
 
 
@@ -298,38 +313,31 @@ def test_particles_snapshot_to_one_rparticles_and_animate_their_arrays() -> None
         sparks.set_scales([[1.0, 1.0, 1.0]])
 
 
-def test_meshes_after_particles_keep_their_own_material(renderer: RenderService) -> None:
+def test_meshes_after_particles_keep_their_own_material() -> None:
     from manimx.animation import Particles
-    from manimx.renderer.webgpu.mesh_batch import MeshBatch
-    from manimx.robjects import RGroup
-
-    sparks = Particles(3, box_mesh(1.0, 1.0, 1.0), color="#ffffff")
-    after = Shape3D(box_mesh(1.0, 1.0, 1.0), color="#ff0000")
-    root = RGroup(children=[sparks.snapshot(), after.snapshot()])
-    batch = MeshBatch.build(flatten_scene(root), renderer.cache, RenderConfig(shadows=False))
 
     # A particle block adds one material row per particle: the mesh after
     # it must point past all of them, at its own (red) material.
-    material = batch.materials[batch.objects["material"][-1]]
-    assert batch.objects["material"].tolist() == [0, 1, 2, 3]
-    assert material["base_color"][0] > 0.9 and material["base_color"][1] < 0.1
+    sparks = Particles(3, box_mesh(1.0, 1.0, 1.0), color="#ffffff")
+    sparks.set_positions([[-3.0, 0.0, 0.0], [-2.0, 0.0, 0.0], [-1.0, 0.0, 0.0]])
+    after = Shape3D(box_mesh(1.0, 1.0, 1.0), color="#ff0000").move_to((2.0, 0.0, 0.0))
+    config = RenderConfig(pixel_width=160, pixel_height=90, background_color="#000000", shadows=False)
+    image = render_image([sparks, after], config=config)
+    scale = 90 / 8  # pixels per unit with the default camera
+    red = image[45, int(80 + 2.0 * scale), :3]
+    assert red[0] > 120 and red[1] < red[0] / 4
 
 
-def test_particles_draw_as_instances_with_their_color_and_hide_at_scale_zero(renderer: RenderService) -> None:
+def test_particles_draw_as_instances_with_their_color_and_hide_at_scale_zero() -> None:
     from manimx.animation import Particles
-    from manimx.renderer.webgpu.mesh_batch import MeshBatch
 
     sparks = Particles(3, box_mesh(1.0, 1.0, 1.0), color="#000000", emissive="#ffffff", emissive_strength=1.0)
     sparks.set_positions([[-2.0, 0.0, 0.0], [0.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
     sparks.set_colors([[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0]])
     sparks.set_scales([[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [0.0, 1.0, 1.0]])  # the third is hidden
-    root = sparks.snapshot()
     config = RenderConfig(pixel_width=160, pixel_height=90, background_color="#000000", shadows=False)
+    image = render_image(sparks, config=config)
 
-    batch = MeshBatch.build(flatten_scene(root), renderer.cache, config)
-    image = renderer.render(root, config)
-
-    assert len(batch.objects) == 2 and batch.draws["instance_count"].tolist() == [2]
     scale = 90 / 8  # pixels per unit with the default camera
     red, green, hidden = (image[45, int(80 + x * scale), :3] for x in (-2.0, 0.0, 2.0))
     assert red[0] > 200 and red[0] > 4 * red[1]

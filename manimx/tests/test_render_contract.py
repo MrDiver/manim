@@ -5,16 +5,12 @@ share its uid, and their versioned fields carry tokens derived from
 signals, so renderer caches survive any number of snapshots.
 """
 
-import numpy as np
 import pytest
 from manimx.animation import PATH, RootSignal, Vector3Signal, derive, version_token
 from manimx.userland.geometry import arc_points
 from manimx.robjects import new_uid
-from manimx.renderer import RNodeDataCache
-from manimx.renderer.scene_graph import flatten_scene
-from manimx.renderer.webgpu.vector_batch import VectorBatch
 
-from manimx.robjects import Fill, RGroup, RShape2D, RSpotLight, Stroke
+from manimx.robjects import RShape2D, RSpotLight
 
 
 def test_uid_can_be_given_and_is_unique_otherwise() -> None:
@@ -67,37 +63,3 @@ def test_version_token_follows_signal_changes() -> None:
     assert version_token(radius) != version_token(position.x)  # ids differ
 
 
-def test_snapshots_from_unchanged_signals_share_cached_triangulations() -> None:
-    """Rebuilding the render object every frame must not re-tessellate."""
-    uid = new_uid()
-    radius = RootSignal(1.0)
-    x = RootSignal(0.0)
-    points = derive(lambda r: arc_points(r), radius, kind=PATH)
-    cache = RNodeDataCache()
-
-    def snapshot() -> RGroup:
-        from manimx.robjects import Transform
-
-        shape = RShape2D(
-            uid=uid,
-            points=points.value,
-            fill=Fill(opacity=1.0),
-            stroke=Stroke(width=0),
-            transform=Transform(position=(x.value, 0.0, 0.0)),
-            versions={"points": version_token(points), "fill": "fill-0", "stroke": "stroke-0"},
-        )
-        VectorBatch.build(flatten_scene(RGroup(children=[shape])), cache, np.eye(4))
-        return shape
-
-    first = snapshot()
-    mesh = cache.get(uid, "fill-mesh", first.version("points"))
-    assert mesh is not None
-
-    x.set(3.0)  # moving never touches the triangulation
-    moved = snapshot()
-    assert cache.get(uid, "fill-mesh", moved.version("points")) is mesh
-
-    radius.set(2.0)  # changing the shape does
-    grown = snapshot()
-    assert cache.get(uid, "fill-mesh", grown.version("points")) is not mesh
-    assert len(cache) == 2  # fill mesh and center: stale entries were replaced, not kept

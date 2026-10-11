@@ -33,13 +33,14 @@ Design decisions:
   the standard library. Live presentation and editing may want pushes
   later; the endpoints stay the same.
 * **One renderer, one frame at a time.** ``ThreadingHTTPServer`` answers
-  requests on threads, but the render service is not thread-safe, so
-  every frame is rendered under one lock. Static files and the timeline
+  requests on threads, but the renderer (a
+  :class:`~manimx.drivers.StillRenderer`) is not thread-safe, so every
+  frame is rendered under one lock. Static files and the timeline
   are answered without it.
 * **Preview settings.** Frames come from the project's render settings
   without motion blur, scaled to the requested width (at most the output
   width), so a frame costs one render. A frame like the one before is
-  held by the composer and not rendered again.
+  held by the renderer and not rendered again.
 """
 
 from __future__ import annotations
@@ -62,7 +63,8 @@ from PIL import Image
 from ..animation.plan import planned_frames
 from ..animation.timing import NEVER, Timeline
 from ..drivers.offline import RenderSettings
-from ..renderer import MotionBlur, RenderService
+from ..drivers.stills import StillRenderer
+from ..renderer import MotionBlur
 from .labels import index_labels
 from .tracks import clip_nodes
 
@@ -82,10 +84,10 @@ class PreviewServer:
         title: str = "manimx",
         host: str = "127.0.0.1",
         port: int = 0,
-        service: RenderService | None = None,
+        renderer: StillRenderer | None = None,
     ) -> None:
         self.title = title
-        self._service = service or RenderService.shared()
+        self._renderer = renderer or StillRenderer()
         self._lock = threading.Lock()
         """Held while rendering or replacing the timeline."""
         self._changed = threading.Condition()
@@ -137,10 +139,8 @@ class PreviewServer:
     def _use(self, timeline: Timeline, settings: RenderSettings) -> None:
         self.timeline = timeline
         self.settings = settings
-        planned = planned_frames(timeline) if settings.core else None
-        self._frame_at = planned.frame_at if planned is not None else timeline.frame_at
-        effects = tuple(effect for effect in settings.effects if not isinstance(effect, MotionBlur))
-        self._composer = self._service.composer(effects)
+        self._frame_at = planned_frames(timeline).frame_at
+        self._effects = tuple(effect for effect in settings.effects if not isinstance(effect, MotionBlur))
 
     def _bump(self, error: str | None) -> None:
         with self._changed:
@@ -210,7 +210,7 @@ class PreviewServer:
             height = max(1, round(width * full_height / full_width))
             time = min(max(float(time), 0.0), self.timeline.duration)
             frame_config = dataclasses.replace(config, pixel_width=width, pixel_height=height, time=time)
-            pixels = self._composer.compose(self._frame_at, frame_config)
+            pixels = self._renderer.render(self._frame_at, frame_config, self._effects)
         pil_format, _ = FORMATS[image_format]
         image = Image.fromarray(pixels, "RGBA")
         if pil_format == "JPEG":
