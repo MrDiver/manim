@@ -1,3 +1,7 @@
+"""Transform: where a node sits, as position, rotation (a unit
+quaternion) and scale, and the 4x4 matrix they make
+(``T @ R @ S``: scale first, then rotate, then move)."""
+
 from __future__ import annotations
 
 import math

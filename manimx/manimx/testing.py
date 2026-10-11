@@ -1,45 +1,12 @@
+"""Helpers for tests: compare a rendered image with a reference PNG
+(:func:`assert_image_matches`, with :class:`ImageTolerance`)."""
+
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from functools import wraps
-from inspect import Parameter, Signature, signature
 from pathlib import Path
-from typing import Any, TypeVar
 
 import numpy as np
-
-TestFunction = TypeVar("TestFunction", bound=Callable[..., Any])
-
-
-def assert_snapshot(value: object, snapshot: Any) -> None:
-    """Compare rendered test content with Syrupy's stored snapshot."""
-    assert value == snapshot
-
-
-def visual_test(function: TestFunction) -> TestFunction:
-    """Turn a rendered-content test into a Syrupy visual snapshot test.
-
-    Decorated functions must accept the pytest/Syrupy ``snapshot`` fixture and
-    return rendered content such as SVG text or PNG bytes.
-    """
-    import pytest
-
-    @pytest.mark.visual
-    @wraps(function)
-    def wrapped(*args: Any, **kwargs: Any) -> None:
-        snapshot = kwargs.pop("snapshot")
-        rendered_content = function(*args, **kwargs)
-        assert_snapshot(rendered_content, snapshot)
-
-    parameters = list(signature(function).parameters.values())
-    if "snapshot" not in signature(function).parameters:
-        parameters.append(
-            Parameter("snapshot", kind=Parameter.KEYWORD_ONLY),
-        )
-    wrapped.__signature__ = Signature(parameters=parameters)
-
-    return wrapped  # type: ignore[return-value]
 
 
 @dataclass(frozen=True, slots=True)

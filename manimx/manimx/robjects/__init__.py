@@ -1,3 +1,26 @@
+"""Render state and the values nodes are made of.
+
+``PreparedScene.state_at(t)`` turns the scene nodes (manimx.animation)
+into a tree of render objects, one class per node class: an ``R`` and
+the node's name (``RShape2D`` is the snapshot of a ``Shape2D``). The
+tree is what a scene shows at one time, for tests and tools; frames are
+rendered by the core, which reads the signals itself.
+
+| Module | What it holds |
+|---|---|
+| ``rnode`` | ``RNode``, the base: uid, transform, alpha |
+| ``rgroup``, ``rclipping_group`` | the containers |
+| ``rbezier_path``, ``rshape2d``, ``rcurve3d`` | paths of cubic Bezier curves |
+| ``rshape3d``, ``rparticles``, ``rlight`` | meshes and lights |
+| ``planned_frame`` | ``PlannedFrame``: a frame as the core renders it |
+| ``style`` | ``Fill``, ``Stroke``, ``JointType``, ``CapStyle`` |
+| ``transform`` | ``Transform`` and quaternion helpers |
+| ``material``, ``mesh`` | ``PbrMaterial``, ``Texture``, ``SurfaceShader``, ``MeshData`` |
+
+The value types (styles, materials, meshes, transforms) are also what
+scene nodes take as arguments.
+"""
+
 from .material import PbrMaterial, SurfaceShader, Texture
 from .mesh import MeshData
 from .rclipping_group import RClippingGroup

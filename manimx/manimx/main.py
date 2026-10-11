@@ -1,3 +1,5 @@
+"""``python -m manimx.main``: render Manim's logo and show it, to check an install."""
+
 from __future__ import annotations
 
 from PIL import Image

@@ -38,7 +38,6 @@ test = [
     "pytest>=8.3.0",
     "pytest-benchmark>=5.3.0",
     "pytest-cov>=6.0.0",
-    "syrupy>=4.8.0",
 ]
 
 [tool.uv]
@@ -54,10 +53,6 @@ addopts = [
     "--cov-branch",
     "--cov-fail-under=90",
     "--cov-report=term-missing",
-]
-markers = [
-    "visual: deterministic visual regression tests",
-    "state: immutable state and timeline tests",
 ]
 
 [tool.coverage.run]

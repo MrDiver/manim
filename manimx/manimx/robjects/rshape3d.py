@@ -1,3 +1,5 @@
+"""RShape3D: the snapshot of a ``Shape3D``."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

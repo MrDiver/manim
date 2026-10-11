@@ -1,3 +1,5 @@
+"""RClippingGroup: the snapshot of a ``ClippingGroup``."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

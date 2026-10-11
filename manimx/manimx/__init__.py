@@ -14,13 +14,8 @@ from .animation import __all__ as _animation_all
 from .drivers import render_image
 from .renderer import RenderConfig
 from .robjects import CapStyle, JointType, MeshData, PbrMaterial, SurfaceShader, Texture
-from .testing import assert_snapshot, visual_test
 from .userland import *  # noqa: F403
 from .userland import __all__ as _userland_all
-
-
-def package_name() -> str:
-    return "manimx"
 
 
 __all__ = [
@@ -34,8 +29,5 @@ __all__ = [
     "Texture",
     "SurfaceShader",
     "__version__",
-    "assert_snapshot",
-    "package_name",
     "render_image",
-    "visual_test",
 ]

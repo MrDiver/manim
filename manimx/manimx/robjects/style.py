@@ -1,3 +1,8 @@
+"""Fill and stroke values: colors, opacities and widths per point,
+stroke joints and caps (``Fill``, ``Stroke``, ``JointType``,
+``CapStyle``), and how lists of them are spread over a path's points
+(:func:`resample`)."""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
