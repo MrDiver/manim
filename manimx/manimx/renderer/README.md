@@ -1,10 +1,26 @@
 # manimx.renderer
 
-A WebGPU renderer for manimx scenes, written in Python and WGSL on top of
-[wgpu-py](https://github.com/pygfx/wgpu-py). It takes a tree of render
-objects plus a `RenderConfig` and produces an image. It keeps no scene
-state of its own, so frames can be rendered in any order and in parallel
-processes.
+A WebGPU renderer for manimx scenes. It takes a scene at one time plus a
+`RenderConfig` and produces an image. It keeps no scene state of its own,
+so frames can be rendered in any order and in parallel processes.
+
+There are two implementations with the same WGSL shaders:
+
+- **The Python renderer** (this package, on
+  [wgpu-py](https://github.com/pygfx/wgpu-py)) renders trees of render
+  objects (`RNode`s). It is the reference: tests compare the other one
+  with it. `RenderService` and the web UI (`manimx ui`) use it.
+- **The core's renderer** (`manimx._core.FrameRenderer`, Rust on wgpu,
+  see [core/src/gpu/](../../core/src/gpu/mod.rs)) renders frames the
+  core evaluated and packed (`PlannedFrame`s, see
+  [CORE.md](../../CORE.md)). `CoreFramePipeline`
+  (manimx/drivers/core_pipeline.py) drives it; `manimx render`,
+  `manimx still` and render workers use it when `performance.core` is on
+  (the default).
+
+Both produce the same pixels (tests/test_core_pipeline.py). Everything
+below describes the Python renderer; the core's ports it module by
+module (the table in core/src/gpu/mod.rs maps them).
 
 What it draws:
 
@@ -16,12 +32,15 @@ What it draws:
 - **RShape3D**: lit triangle meshes with glTF metallic-roughness materials
   and textures. glTF/GLB files are imported with `manimx.userland.load_gltf`, which
   builds scene nodes; their snapshots are `RShape3D`s.
-- **Lights**: directional, point and spot, with soft contact-hardening
-  shadows.
+- **Lights**: directional, point and spot, with shadows: PCF (a fixed
+  narrow soft edge) or PCSS (soft edges that widen with the distance to
+  the caster).
 - **RClippingGroup**: soft alpha masks, optionally one-sided (portals), with
-  lights scoped to the group.
-- **Effects**: motion blur, bloom, tone mapping and custom WGSL shaders,
-  chained by a `FrameComposer`.
+  lights scoped to the group; casters inside one cast only the shadow of
+  what their masks let through.
+- **Camera views**: another camera's picture on a plane (`CameraView`).
+- **Effects**: motion blur, depth of field (a camera's `aperture`), bloom,
+  tone mapping and custom WGSL shaders, chained by a `FrameComposer`.
 
 ---
 
@@ -57,7 +76,7 @@ config = RenderConfig(
     pixel_width=1280, pixel_height=720,
     camera=Camera.look_at((9, -12, 7), (0, 0, 1), field_of_view=math.radians(45)),  # perspective
     msaa_samples=4,
-    shadows=True, shadow_resolution=2048, shadow_softness=1.0, shadow_samples=16,
+    shadows=True, shadow_resolution=2048, shadow_softness=1.0, shadow_samples=16, shadow_method="pcf",
     ambient_intensity=0.15, exposure=1.0,
 )
 ```
@@ -88,6 +107,11 @@ colors, but they still cast shadows onto meshes. Shadows can be turned off
 globally (`RenderConfig.shadows`), per light (`cast_shadows`) and per
 object (`cast_shadows` on any shape). If a scene has no lights at all, a
 default key light is used.
+
+`shadow_method` picks the filter: `"pcf"` (projects and previews by
+default) blurs every shadow edge by a fixed 1.5 texels; `"pcss"` makes
+edges sharp where an object touches the surface and softer with distance,
+by the light's `size` (Randima Fernando's percentage-closer soft shadows).
 
 ### Clipping and portals
 
@@ -120,6 +144,14 @@ The composer is the last stage of the render chain and drives the others.
 `MotionBlur` asks the chain for one frame per sub-frame time inside the
 shutter and averages them. Without it, or when the scene is a fixed object
 instead of a function of time, the chain runs once.
+
+Depth of field is not an effect in the list but the camera's lens: with a
+`Camera.aperture` above 0, its view is blurred by each pixel's distance from
+`focus_distance` (thin lens, see shaders/depth_of_field.wgsl).
+
+Every sub-frame is a full render, so motion blur multiplies the cost of a
+frame by its samples; projects leave it off unless asked
+(`effects.motion_blur.enabled`).
 
 `ShaderEffect` runs your own WGSL on the lit 3D layer (`stage="lit"`,
 linear HDR) or on the final frame (`stage="frame"`):
@@ -155,6 +187,76 @@ print(service.renderer.profiler.read())  # {"shadows": 0.4, "geometry": 0.2, "li
 
 ---
 
+## A frame, step by step
+
+One scene from [scripts/render_internals.py](../../scripts/render_internals.py),
+which renders these pictures by reading the renderer's textures back: a
+floor, three meshes, a 2D star standing up, a box seen through a round
+clip mask, a sun, a warm spot light and a blue point light.
+
+![The finished frame](images/frame.png)
+
+**1. Shadow maps.** Every light that casts shadows renders the casters'
+depth as seen from it (black is near). A directional light and a spot
+light have one map each, a point light six, the faces of a cube around
+it; an empty face stays empty. The 2D star casts its exact outline. The
+box behind the round mask casts only what the mask lets through (the
+ellipse in the sun's map, top left): the mask is drawn into the map's
+stencil first, and the box only where the stencil allows.
+
+![Shadow maps: the sun, the spot light, the point light's six faces](images/shadow_maps.png)
+
+**2. Clip masks.** Every clip scope draws its mask into a layer of a
+texture array; content inside the scope is multiplied by it.
+
+![The round mask's layer](images/mask_layer.png)
+
+**3. G-buffer.** The geometry pass draws the meshes once and stores what
+lighting needs per MSAA sample: base color, normal (shown as color),
+roughness and metallic, emission, the clip scope, and depth. No light is
+computed yet.
+
+| base color | normal |
+|---|---|
+| ![G-buffer base color](images/gbuffer_albedo.png) | ![G-buffer normals](images/gbuffer_normal.png) |
+
+**4. Lighting.** A fullscreen pass lights the G-buffer with every light,
+looking shadows up in the maps. Most pixels hold one surface in all
+their samples and are lit once; only the pixels where samples differ,
+marked magenta here, are lit per sample, which keeps their edges
+antialiased.
+
+| pixels lit per sample | four times enlarged |
+|---|---|
+| ![Edge pixels in magenta](images/lighting_edges.png) | ![Detail](images/lighting_edges_detail.png) |
+
+**5. Two layers.** Lit meshes end up in a linear HDR layer; 2D shapes
+and curves in a separate layer of exact sRGB colors (here only the star,
+over a checkerboard). The star is in the lit layer only as its shadow.
+
+| lit layer | vector layer |
+|---|---|
+| ![The lit layer](images/lit_layer.png) | ![The vector layer](images/vector_layer.png) |
+
+**6. Composite.** The lit layer is tone mapped and dithered, put over the
+background, and the vector layer over it in sRGB values: the frame at
+the top.
+
+**7. Depth of field.** With the camera's `aperture` open, three more
+passes blur the composited view: the distance of every pixel from the
+camera (black is near), the largest blur radius per tile (dark: sharp,
+orange: the largest blur), and the blur, which gathers each pixel from
+as far as the tiles around it say blur reaches. Here the focus is on the
+red ball.
+
+| view distances | blur per tile |
+|---|---|
+| ![View distances](images/view_distances.png) | ![Blur tiles](images/blur_tiles.png) |
+
+![Focused on the ball](images/depth_of_field.png)
+
+---
+
 ## Architecture
 
 ### The render chain
@@ -180,6 +282,12 @@ flowchart LR
   the packet.
 - **`FrameComposer`** (`webgpu/composer.py`) runs the chain once per
   sub-frame and view, applies effects and composites.
+
+The core replaces the first two stages for frames it evaluated: its
+`Packer` (core/src/packer.rs) turns a scene graph and a frame state into
+the same records, and Python's `CorePacker` (`webgpu/core_packer.py`)
+wraps it as a `FramePacker` for the Python renderer. The core's
+`FrameRenderer` then does the last two in Rust.
 
 `RenderService` (`webgpu/service.py`) owns one of each stage, plus a
 composer per effect chain, and implements the `Renderer` interface.
@@ -249,10 +357,10 @@ flowchart TD
     F --> P1
 
     subgraph GPU["one command encoder (the composer's, per sub-frame)"]
-        P1["mask passes<br/>one per clip scope -> mask layer"] --> P2
-        P2["shadow passes<br/>casters' depth per shadow view<br/>(only with meshes)"] --> P3
+        P1["shadow passes (only with meshes)<br/>casters' depth per shadow view;<br/>clip masks first into the stencil"] --> P2
+        P2["mask passes<br/>one per clip scope -> mask layer"] --> P3
         P3["geometry pass<br/>meshes -> MSAA G-buffer + depth<br/>(without meshes: cleared once, then skipped)"] --> P4
-        P4["lighting pass<br/>every sample x every light,<br/>PCSS shadows -> lit layer (HDR)"] --> P5
+        P4["lighting pass<br/>marks edge pixels in a stencil, lights other<br/>pixels once, edge pixels per sample -> lit layer (HDR)"] --> P5
         P5["vector pass<br/>2D shapes and curves -> vector layer,<br/>own depth + test against mesh depth"]
     end
 
@@ -303,14 +411,20 @@ sequenceDiagram
     participant GPU
 
     User->>Composer: compose(scene_at, config)
-    loop each sub-frame (1, or MotionBlur.samples)
+    loop each sub-frame (1, or MotionBlur.samples), each view
+        opt the view shows camera views
+            Composer->>Service: each camera view's picture, rendered and<br/>composited into its layer of the camera view texture
+        end
         Composer->>Service: render_layers(scene_at(t), config at t)
         Service->>Service: flatten, pack
         Service->>Renderer: render_layers(packet, encoder)
         Renderer->>GPU: masks, shadows, G-buffer, lighting, vectors
         Renderer-->>Composer: RenderLayers (lit, vector)
         Composer->>GPU: lit-stage effects (Bloom, ShaderEffect)
-        Composer->>GPU: composite: tone map lit, over background,<br/>vector over it in sRGB, accumulate weight x linear
+        Composer->>GPU: composite: tone map and dither lit, over background,<br/>vector over it in sRGB, accumulate weight x linear
+        opt camera aperture > 0
+            Composer->>GPU: depth of field: view distances, blur tiles,<br/>blur, accumulate weight x result
+        end
     end
     Composer->>GPU: frame-stage effects, encode to sRGB
     Composer-->>User: (H, W, 4) uint8
@@ -341,7 +455,18 @@ flowchart BT
     composite["composite.wgsl"] --> fullscreen & color
     finalize["finalize.wgsl"] --> fullscreen & color
     bloom["bloom.wgsl"] --> fullscreen
+    lens["lens.wgsl<br/>blur radius of a distance"]
+    distance["view_distance.wgsl"] --> fullscreen & frame
+    tiles["depth_of_field_tiles.wgsl"] --> fullscreen & frame & lens
+    dof["depth_of_field.wgsl"] --> fullscreen & frame & lens
 ```
+
+Depth of field runs three of them per view: `view_distance.wgsl`
+resolves each pixel's distance from the MSAA depth buffers once,
+`depth_of_field_tiles.wgsl` finds the largest blur in every tile (a tile
+is as large as the largest blur), and `depth_of_field.wgsl` gathers each
+pixel's blur from as far as the tiles around it say anything blurred
+reaches.
 
 ### Caching and object lifecycle
 
@@ -387,11 +512,13 @@ than a stale cache.
 | `base.py` | `Renderer` interface |
 | `config.py` | `RenderConfig`, `Camera` |
 | `scene_graph.py` | `SceneFlattener`: transforms, painter's order, clip scopes, lights |
-| `tessellation.py` | fill triangulation with exact curves |
+| `tessellation.py` | fill triangulation with exact curves (computed by the core, core/src/tessellation.rs, for both renderers) |
+| `core_callbacks.py` | what the core's packer asks Python for (the stroke records are built in Rust whenever the style is plain numbers, core/src/strokes.rs) |
 | `cache.py`, `commands.py` | per-object data cache and lifecycle commands |
 | `effects.py` | effect settings for the composer |
 | `webgpu/service.py` | `RenderService`: the render chain of a process |
 | `webgpu/packer.py` | `FramePacker`, `FramePacket`: flat scene to GPU-ready records |
+| `webgpu/core_packer.py` | `CorePacker`: the core's packer as a `FramePacker` |
 | `webgpu/renderer.py` | `WGPURenderer`: uploads a packet, encodes the passes |
 | `webgpu/composer.py` | `FrameComposer`: sub-frames, effects, compositing |
 | `webgpu/vector_batch.py`, `vector_pass.py` | 2D shapes and curves: record layout, draw lists, the pass |
@@ -438,18 +565,30 @@ explicit, unbiased per-sample test against the mesh depth. Before this was
 separated, a late shape with a large layer could be pulled through a mesh
 surface it was behind.
 
-**Deferred shading with an MSAA G-buffer.** Lighting runs once per sample
-in a fullscreen pass, so overdraw does not multiply lighting cost, and
-lighting and screen-space effects are separate passes. The G-buffer is
-multisampled to keep the crisp MSAA edges that vector graphics need, at
-about 100 MB at 1080p. Material evaluation and lighting live in separate
-shader modules, so moving lighting between passes does not touch materials.
+**Deferred shading with an MSAA G-buffer.** Lighting runs in fullscreen
+passes, so overdraw does not multiply lighting cost, and lighting and
+screen-space effects are separate passes. The G-buffer is multisampled to
+keep the crisp MSAA edges that vector graphics need, at about 100 MB at
+1080p. Inside a surface the geometry pass writes the same values to all
+samples of a pixel, so the lighting pass first marks the pixels whose
+samples differ (depth, normal, colors or clip scope, with small
+tolerances) in a stencil, lights the others once where their first sample
+lies, and only the marked ones per sample. Material evaluation and
+lighting live in separate shader modules, so moving lighting between
+passes does not touch materials.
 
 **2D colors stay exact.** Lit meshes render to a linear HDR layer and 2D
 content to a separate sRGB layer. The composer tone-maps only the lit
 layer, then blends the vector layer over it in sRGB values, which is how
 Manim blends. A `#FC6255` square comes out as `#FC6255` under any tone
-mapping operator.
+mapping operator. Only the tone-mapped lit layer is dithered (half a
+level of noise), which breaks the bands of smooth 3D gradients in 8 bits
+without touching 2D colors.
+
+**Transparent shapes sort by view depth.** Transparent draws are sorted
+back to front by the depth of their center along the view direction,
+not by the distance to the camera, which ordered shapes on a common
+plane wrongly away from the screen's center.
 
 **Alpha masks, not stencil clipping.** A RClippingGroup multiplies its
 content by the mask's rendered alpha, so masks can be soft or gradients.
@@ -462,11 +601,38 @@ lights, and only gets shadows from, objects in that group. The G-buffer
 stores each pixel's scope, and shadow casters and bounds are built per
 scope. This is what lets each portal world have its own lighting.
 
-**PCSS shadows from the existing pipelines.** Shadow maps are rendered by
+**Shadows from the existing pipelines.** Shadow maps are rendered by
 the normal mesh and vector pipelines with a light as "camera", so 2D
-shapes cast exact curved shadows and curves face the light. Softness comes
-from the light's physical size (blocker search, then a penumbra from
-similar triangles), sharp at contact and softer with distance.
+shapes cast exact curved shadows and curves face the light. A point
+light has six maps, the faces of a cube.
+
+- **Taps in the receiver's plane.** Every soft-shadow tap is a point on
+  a disk in the surface's plane, lifted off it by 1.5 texels, projected
+  into whichever map (cube face) it falls in and compared with its own
+  depth. So a surface never shadows itself at any angle to the light,
+  and soft edges continue across the faces of a point light.
+- **PCF or PCSS.** PCF averages the taps over a fixed radius. PCSS first
+  searches for blockers and widens the radius by the light's size and
+  the blocker's distance (similar triangles), so shadows are sharp at
+  contact and softer with distance.
+- **Shared taps across a frame's renders.** With motion blur each
+  sub-frame takes a share of the taps (`shadow_samples / shadow_share`,
+  at least 4) with its pattern turned differently, and the frame's
+  average gets them all. The pattern is also turned per pixel and MSAA
+  sample by white noise, which averages away instead of leaving a
+  pattern.
+- **Clipped casters cast clipped shadows.** Before the casters inside a
+  clip scope are drawn into a map, the masks between the light and them
+  are drawn into the map's stencil (depth32float-stencil8), and the
+  casters only where the stencil says all masks cover. A light inside a
+  clip scope is behind that scope's masks, so those do not apply.
+
+**Depth of field by gathering.** The blur of a pixel is a thin lens's
+circle of confusion. Each pixel gathers taps on a turned golden-angle
+spiral, and a tap counts where its own blur reaches the pixel ("scatter
+as gather"); a tap behind the pixel counts only as far as the pixel's
+own blur, so sharp things never get a blurred background over them,
+while blurred things in front spread over sharp things behind.
 
 **Motion blur by sub-frames.** The renderer is stateless and frames can be
 rendered in any order, so it cannot remember the previous frame for motion
@@ -483,21 +649,25 @@ caching never needs the renderer to track the scene.
 
 ## Known limitations
 
-- **CPU batch building dominates large scenes.** 10 000 circles at 1080p
-  take about 1.2 s per frame, against 26 ms of GPU time. Persistent GPU
-  buffers with incremental updates would remove most of this.
-- **Motion blur cost scales with samples:** 16 samples are 16 full renders.
-- **The lighting pass shades every MSAA sample.** With several
-  shadow-casting lights, PCSS costs lights x samples x taps per pixel.
+- **The Python renderer is CPU-bound with many objects**: it walks the
+  tree and packs in Python every frame. The core packs in Rust; render
+  through it (`performance.core`) for large scenes.
+- **Motion blur and depth of field cost per sub-frame:** 16 motion blur
+  samples are 16 full renders, and depth of field runs in each of them.
+- **Camera views render the scene once more per view**, at the frame's
+  size.
 - **Directional shadows use one map** fitted to the scope's bounds; very
-  large scenes need cascades. Shadow maps ignore clip masks.
+  large scenes need cascades.
+- **8-bit video encoders smooth the dithering** of 3D gradients away;
+  banding can come back in H.264 output.
 - **Self-intersecting fills** are triangulated as simple polygons, like
   ManimGL.
 - **Painter's order between non-coplanar 2D planes:** where two 2D planes
   intersect, their layer bias can flip single pixels along the
   intersection.
-- **Meshes are opaque** (no glTF alpha modes), clip at 50% mask coverage,
-  and cannot be masks themselves.
+- **Meshes are opaque** (no glTF alpha modes, and the deferred lighting
+  has no place for translucent ones), clip at 50% mask coverage, and
+  cannot be masks themselves.
 - **glTF import** skips animations, skins, morph targets, cameras, lights,
   sparse accessors, vertex colors, a second UV set, samplers and
   extensions.

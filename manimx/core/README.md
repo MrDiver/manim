@@ -23,7 +23,7 @@ Python first, then the module.
 | Module | What it is | Python counterpart |
 |---|---|---|
 | `lib.rs` | the Python module `manimx._core` | |
-| `evaluator.rs` | `Evaluator`: all signals of a scene in slots, set to their values at a time | `PreparedScene.evaluate()`, `ScenePlan` (animation/plan.py) |
+| `evaluator.rs` | `Evaluator`: all signals of a scene in slots, set to their values at a time; `FrameState`, `Slots` | `PreparedScene.evaluate()`, `ScenePlan` (animation/plan.py) |
 | `track.rs` | one signal's track and its entries, folded at a time | `SignalTrack`, `Entry`, `Placement` (animation/signal_tracks.py) |
 | `contribution.rs` | what one animation does to one signal at a progress | `Animation.contribution()`, animation/contributions.py |
 | `rates.rs` | rate functions | animation/rates.py |
@@ -38,6 +38,8 @@ Python first, then the module.
 | `records.rs` | the GPU record structs (bytemuck) | the dtypes of vector_batch.py, mesh_batch.py, frame.py |
 | `callbacks.rs` | the Python functions called once per version | renderer/core_callbacks.py |
 | `paths.rs` | the part of a path drawn so far | animation/paths.py |
+| `tessellation.rs` | fills triangulated with exact curves, for both renderers | renderer/tessellation.py |
+| `strokes.rs` | a path's stroke records (curve links, per-point width and color) | `stroke_records` (renderer/core_callbacks.py) |
 | `gpu/` | the renderer: passes, composer, readback (its `mod.rs` maps it) | renderer/webgpu/, drivers/pipeline.py |
 
 Math is [glam](https://docs.rs/glam) (`DMat4`, `DQuat`, `DVec3` in f64,
