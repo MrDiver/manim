@@ -182,8 +182,18 @@ def test_create_draws_paths_one_after_another_and_uncreate_removes() -> None:
 def test_write_draws_the_outline_then_fills_with_manims_timing() -> None:
     glyphs = Group(*(Square(side_length=0.5, fill_opacity=1.0).shift(RIGHT * i) for i in range(20)))
     write = Write(glyphs)
-    assert write.run_time == 2.0 and write.lag_ratio == pytest.approx(0.2)
+    assert write.run_time == 2.0
+    windows = [window for _, window in write._windows()]
+    assert windows[1][0] == pytest.approx(0.2 / (19 * 0.2 + 1))  # lagged by 0.2, as Manim
     assert Write(Square()).run_time == 1.0
+    # A group's parts are written side by side: a long part (a bracket)
+    # gets as much time as the others together.
+    entries = Group(*(Square(0.5).shift(RIGHT * i) for i in range(4)))
+    bracket = Square(2.0)
+    parts = dict((path.uid, window) for path, window in Write(Group(entries, bracket))._windows())
+    assert parts[bracket.uid] == pytest.approx((0.2 / 1.2, 1.0))
+    flat = dict((path.uid, window) for path, window in Write(Group(entries, bracket), lag_ratio=0.5)._windows())
+    assert flat[bracket.uid][0] == pytest.approx(2.0 / 3.0)
 
     square = Square(fill_opacity=1.0, stroke_width=0.0, stroke_opacity=0.0)  # like a glyph: no stroke
     prepared = prepare(lambda s: s.play(DrawBorderThenFill(square, run_time=2, rate=lambda t: t)))

@@ -765,9 +765,13 @@ class DrawBorderThenFill(_PlannedAnimation):
 
     def __post_init__(self) -> None:
         self._plan()
-        paths = _drawn_paths(self.node)
-        for path, window in zip(paths, _lagged(len(paths), self.lag_ratio), strict=True):
+        for path, window in self._windows():
             self._draw_border_then_fill(path, window)
+
+    def _windows(self) -> list[tuple[Node, tuple[float, float]]]:
+        """Each path and the stretch of the progress it is drawn in."""
+        paths = _drawn_paths(self.node)
+        return list(zip(paths, _lagged(len(paths), self.lag_ratio), strict=True))
 
     def _draw_border_then_fill(self, path: Node, window: tuple[float, float]) -> None:
         lower, upper = window
@@ -791,8 +795,15 @@ class DrawBorderThenFill(_PlannedAnimation):
 class Write(DrawBorderThenFill):
     """Write a node like a hand would (Manim's ``Write``):
     :class:`DrawBorderThenFill` shape after shape, at a constant speed. The
-    lag and the run time follow from the number of shapes, as in Manim:
-    1 second below 15 shapes, else 2.
+    run time follows from the number of shapes, as in Manim: 1 second
+    below 15 shapes, else 2.
+
+    Without a ``lag_ratio``, a group's parts are written side by side,
+    each starting a little after the one before (a matrix's entries and
+    brackets, the lines of a list), and the shapes within a part one after
+    another; the lag is ``min(4 / count, 0.2)`` of the parts or shapes
+    there are, as Manim lags shapes. With a ``lag_ratio`` all shapes are
+    lagged by it in one row.
     """
 
     run_time: float | None = None  # type: ignore[assignment]
@@ -803,9 +814,31 @@ class Write(DrawBorderThenFill):
         count = len(_drawn_paths(self.node))
         if self.run_time is None:
             self.run_time = 1.0 if count < 15 else 2.0
-        if self.lag_ratio is None:
-            self.lag_ratio = min(4.0 / max(1.0, count), 0.2)
         super().__post_init__()
+
+    def _windows(self) -> list[tuple[Node, tuple[float, float]]]:
+        if self.lag_ratio is not None:
+            return super()._windows()
+        return _nested_windows(self.node, 0.0, 1.0)
+
+
+def _nested_windows(node: Node, lower: float, upper: float) -> list[tuple[Node, tuple[float, float]]]:
+    """Write's windows of the paths under ``node`` within ``[lower, upper]``:
+    parts holding paths side by side with a lag, the paths of a part (or
+    of a group of paths only) one after another."""
+    if isinstance(node, (Shape2D, Curve3D)):
+        return [(node, (lower, upper))]
+    parts = [child for child in _children(node) if _drawn_paths(child)]
+    if not parts:
+        return []
+    if len(parts) == 1:
+        return _nested_windows(parts[0], lower, upper)
+    span = upper - lower
+    if all(isinstance(part, (Shape2D, Curve3D)) for part in parts):
+        windows = _lagged(len(parts), min(4.0 / len(parts), 0.2))
+        return [(part, (lower + a * span, lower + b * span)) for part, (a, b) in zip(parts, windows, strict=True)]
+    windows = _lagged(len(parts), min(4.0 / len(parts), 0.2))
+    return [entry for part, (a, b) in zip(parts, windows, strict=True) for entry in _nested_windows(part, lower + a * span, lower + b * span)]
 
 
 @dataclass(eq=False)
