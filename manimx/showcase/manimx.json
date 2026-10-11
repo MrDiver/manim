@@ -112,6 +112,10 @@
     "Cornell": {
       "module": "scenes.cornell",
       "class": "Cornell"
+    },
+    "Code": {
+      "module": "scenes.code",
+      "class": "Fibonacci"
     }
   },
   "timeline": {
@@ -160,6 +164,9 @@
       },
       {
         "scene": "Cornell"
+      },
+      {
+        "scene": "Code"
       },
       {
         "scene": "LowerThird",
