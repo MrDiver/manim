@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 import numpy as np
 
-from .rbezier_path import POINTS_PER_CURVE, TOLERANCE_FOR_POINT_EQUALITY, RBezierPath, is_closed
+from .rbezier_path import (
+    POINTS_PER_CURVE,
+    TOLERANCE_FOR_POINT_EQUALITY,
+    RBezierPath,
+    is_closed,
+)
 from .style import Fill
-from .versioning import versioned
 
 __all__ = ["POINTS_PER_CURVE", "TOLERANCE_FOR_POINT_EQUALITY", "RShape2D", "is_closed"]
 
@@ -23,14 +27,11 @@ class RShape2D(RBezierPath):
     ``points`` is ``(N, 2)`` in the :class:`RBezierPath` layout (see
     :class:`RBezierPath`). Points live in the local XY plane; :attr:`transform`
     places the plane in 3D, and the stroke is a flat ribbon in that plane.
-
-    ``points``, ``fill`` and ``stroke`` are versioned: replace them instead of
-    mutating them.
     """
 
     DIMENSION: ClassVar[int] = 2
 
-    fill: Fill = versioned(default_factory=Fill)
+    fill: Fill = field(default_factory=Fill)
 
     def fill_rgba(self) -> np.ndarray:
         """Fill RGBA per control point, shape ``(N, 4)``."""

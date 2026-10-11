@@ -18,7 +18,7 @@ import numpy as np
 import quaternion
 
 from .kinds import ARRAY, PATH, SCALAR
-from .signals import DerivedSignal, RootSignal, Signal
+from .signal import DerivedSignal, RootSignal, Signal
 
 POINTS_PER_CURVE = 4
 
@@ -176,7 +176,7 @@ class PointAt:
 class PointSignal:
     """A point that follows signals: ``x``, ``y`` and ``z`` derived from
     one ARRAY signal ``point`` (shape ``(1, 3)``). A node keeps to it with
-    :meth:`~manimx.animation.node.PositionMixin.follow`."""
+    :meth:`~manimx.animation.nodes.node.PositionMixin.follow`."""
 
     __slots__ = ("point", "x", "y", "z")
 

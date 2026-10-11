@@ -10,7 +10,7 @@ position are derived from the shapes' parameter signals.
 from __future__ import annotations
 
 from manimx.animation import Group, Scene, derive
-from manimx.animation.node import Offset
+from manimx.animation.nodes.node import Offset
 from manimx.userland import (
     DOWN,
     LEFT,

@@ -18,7 +18,7 @@ from typing import Any
 
 from ..animation import ClippingGroup, Group, Node
 from ..animation.animations import ChangeSignals, SetValue
-from ..animation.signal_tracks import Placement, SignalTrack
+from ..animation.signals.signal_tracks import Placement, SignalTrack
 from ..animation.timing import Clip
 
 

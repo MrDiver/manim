@@ -41,7 +41,7 @@ import numpy as np
 from ..renderer.config import ViewState
 from ..robjects import RGroup, new_uid
 from .audio import DEFAULT_SAMPLE_RATE, Sound, mix
-from .camera_view import camera_views, current_value
+from .nodes.camera_view import camera_views, current_value
 from .scene import PreparedScene, Segment
 from .time_map import MonotoneMap
 

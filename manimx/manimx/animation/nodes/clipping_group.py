@@ -5,8 +5,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 
-from ..robjects import RClippingGroup, RNode
-from .kinds import DISCRETE
+from ...robjects import RClippingGroup, RNode
+from ..signals.kinds import DISCRETE
+from ..signals.signal import RootSignal, Signal
 from .node import (
     ABS,
     ChangeList,
@@ -18,7 +19,6 @@ from .node import (
     find,
     find_all,
 )
-from .signals import RootSignal, Signal
 
 
 class ClippingGroup(PositionMixin, RotationMixin, ScalableMixin, Node):
@@ -58,21 +58,13 @@ class ClippingGroup(PositionMixin, RotationMixin, ScalableMixin, Node):
         yield from self.mask.family()
         yield from self.content.family()
 
-    def snapshot(self) -> RNode | None:
-        """Reused like a Group's: while its own signals hold and the mask
-        and the content returned the same render nodes as before."""
+    def _build_snapshot(self) -> RNode | None:
         if self._hidden():
             return None
         mask, content = self.mask.snapshot(), self.content.snapshot()
         if mask is None or content is None:
             return None  # nothing to show through
-        token = (self._snapshot_token(), id(mask), id(content))
-        last = self._last_snapshot
-        if last is not None and last[0] == token:
-            return last[1]
-        snapshot = RClippingGroup(mask=mask, content=content, one_sided=bool(self.one_sided.value), transform=self._transform(), alpha=self.alpha.value, uid=self.uid)
-        self._last_snapshot = (token, snapshot)
-        return snapshot
+        return RClippingGroup(mask=mask, content=content, one_sided=bool(self.one_sided.value), transform=self._transform(), alpha=self.alpha.value, uid=self.uid)
 
 
 __all__ = ["ClippingGroup"]

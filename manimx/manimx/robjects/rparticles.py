@@ -23,7 +23,7 @@ class RParticles(RShape3D):
     is ``r, g, b, glow``: the color multiplies the material's base and
     emissive color (in linear light), the glow its emissive strength. A
     particle scaled to nothing on any axis is not drawn. The arrays are
-    read-only, like every versioned array.
+    read-only.
     """
 
     positions: np.ndarray = field(default_factory=lambda: _none(3))

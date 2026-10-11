@@ -34,8 +34,8 @@ from ..animation import (
     Vector3Signal,
 )
 from ..animation.authoring import current
-from ..animation.node import ABS, ChangeList, animatable, follow_point
-from ..animation.paths import PointSignal, partial_path
+from ..animation.nodes.node import ABS, ChangeList, animatable, follow_point
+from ..animation.signals.paths import PointSignal, partial_path
 from .geometry import arc_between_points, corner_points, dashes_points, tip_points
 
 TIP_LENGTH = 0.35
@@ -421,7 +421,7 @@ class _ArcTipPoints:
 def _arc_length(arc: np.ndarray) -> float:
     """The length of an arc of equal curves, from its anchors' chords
     (exact enough for the tip's place)."""
-    from ..animation.paths import point_at
+    from ..animation.signals.paths import point_at
 
     samples = np.array([point_at(arc, t, by_length=False) for t in np.linspace(0.0, 1.0, 33)])
     return float(np.linalg.norm(np.diff(samples, axis=0), axis=1).sum())

@@ -7,9 +7,18 @@ import dataclasses
 
 import numpy as np
 import pytest
-from manimx.animation import COLORS, SCALARS, ClippingGroup, Curve3D, DirectionalLight, PointLight, Scene, Shape2D, Shape3D, SpotLight
-from manimx.userland import Circle, Square
-from manimx.userland.rate_functions import linear
+from manimx.animation import (
+    COLORS,
+    SCALARS,
+    ClippingGroup,
+    Curve3D,
+    DirectionalLight,
+    PointLight,
+    Scene,
+    Shape2D,
+    Shape3D,
+    SpotLight,
+)
 from manimx.robjects import (
     CapStyle,
     Fill,
@@ -25,9 +34,11 @@ from manimx.robjects import (
     Stroke,
     Texture,
 )
+from manimx.userland import Circle, Square
+from manimx.userland.rate_functions import linear
 
 # Render fields that are not signals: identity, structure and placement.
-NOT_SIGNALS = {"uid", "transform", "visible", "children", "mask", "content"}
+NOT_SIGNALS = {"uid", "transform", "children", "mask", "content"}
 
 
 def render_fields(cls: type) -> set[str]:
@@ -146,12 +157,10 @@ def test_shape3d_carries_every_material_field() -> None:
     assert (material.normal_scale, material.occlusion_strength, material.emissive_texture) == (0.5, 0.25, texture)
 
     other = Texture(np.full((2, 2, 4), 255, np.uint8))
-    before = shape.snapshot().version("material")
     shape.set_material(normal_scale=2.0, occlusion_strength=1.5).set_textures(base_color=other, emissive=None)
     snapshot = shape.snapshot()
     assert snapshot.material.normal_scale == 2.0 and snapshot.material.occlusion_strength == 1.0  # clamped
     assert snapshot.material.base_color_texture is other and snapshot.material.emissive_texture is None
-    assert snapshot.version("material") != before
     with pytest.raises(TypeError, match="Shape3D has no glow_texture"):
         shape.set_textures(glow=other)
     with pytest.raises(TypeError, match="a texture must be a Texture or None"):

@@ -30,7 +30,8 @@ from ..animation import (
 )
 from ..animation.authoring import active_compiler
 from ..animation.authoring import current as authoring_current
-from ..animation.contributions import (
+from ..animation.nodes.node import require
+from ..animation.signals.contributions import (
     Between,
     Contribution,
     Partial,
@@ -39,10 +40,9 @@ from ..animation.contributions import (
     Turn,
     evaluate,
 )
-from ..animation.node import require
-from ..animation.paths import point_at
-from ..animation.rates import linear, smooth
-from ..animation.signal_tracks import RateFunction
+from ..animation.signals.paths import point_at
+from ..animation.signals.rates import linear, smooth
+from ..animation.signals.signal_tracks import RateFunction
 from ..robjects import Transform
 from ..robjects.transform import quaternion_from_axis_angle
 from .geometry import align_paths
@@ -336,7 +336,7 @@ class Morph(_PlannedAnimation, Generic[MorphTarget]):
                 getattr(shape, name).set(begin)
                 self._between(getattr(shape, name), begin, finish)
         (start_position, start_rotation, start_scale), (end_position, end_rotation, end_scale) = (
-            _decomposed(self._worlds[id(start)]), _decomposed(self._worlds[id(end)])
+            _decomposed(self._worlds[start.uid]), _decomposed(self._worlds[end.uid])
         )  # fmt: skip
         for axis, begin, finish, offset in zip(shape.position.axes, start_position, end_position, shift, strict=True):
             axis.set(begin)
@@ -395,29 +395,29 @@ class MorphMatching(Morph[MorphTarget]):
         chosen = [(_path_of(sources, source, "source"), _path_of(targets, target, "target")) for source, target in self.pairs]
         for source, target in chosen:
             self._inbetween(source, target)
-        taken = {id(path) for pair in chosen for path in pair}
-        sources = [source for source in sources if id(source) not in taken]
-        targets = [target for target in targets if id(target) not in taken]
+        taken = {path.uid for pair in chosen for path in pair}
+        sources = [source for source in sources if source.uid not in taken]
+        targets = [target for target in targets if target.uid not in taken]
         free = [(target, self._normalized_points(target)) for target in targets]
         matched: dict[int, Node] = {}
         for source in sources:
             points = self._normalized_points(source)
-            target = next((t for t, other in free if id(t) not in {id(m) for m in matched.values()} and self._same(points, other)), None)
+            target = next((t for t, other in free if t.uid not in {m.uid for m in matched.values()} and self._same(points, other)), None)
             if target is not None:
-                matched[id(source)] = target
-        gone = [source for source in sources if id(source) not in matched]
+                matched[source.uid] = target
+        gone = [source for source in sources if source.uid not in matched]
         new = [target for target in targets if target not in matched.values()]
         drift = self._center(new) - self._center(gone) if gone and new else np.zeros(3)
         for source in sources:
-            if id(source) in matched:
-                self._inbetween(source, matched[id(source)])
+            if source.uid in matched:
+                self._inbetween(source, matched[source.uid])
             else:
                 self._inbetween(source, source, (_world_alpha(source), 0.0), shift=drift)
         for target in new:
             self._inbetween(target, target, (0.0, _world_alpha(target)))
 
     def _world_points(self, path: Node) -> np.ndarray:
-        return _in_space_of(_points(path), self._worlds[id(path)], np.eye(4), 3)
+        return _in_space_of(_points(path), self._worlds[path.uid], np.eye(4), 3)
 
     def _normalized_points(self, path: Node) -> np.ndarray:
         """The path's points in world space, relative to their lowest
@@ -457,9 +457,9 @@ class MoveAlongPath(Animation):
         require(self.node, PositionMixin, "MoveAlongPath")
         if not isinstance(self.path, (Shape2D, Curve3D)):
             raise TypeError(f"MoveAlongPath needs a Shape2D or Curve3D path, got {type(self.path).__name__}")
-        node_world = _world_matrices(self.node)[id(self.node)]
+        node_world = _world_matrices(self.node)[self.node.uid]
         parent = node_world @ np.linalg.inv(_local_matrix(self.node))
-        self._points = _in_space_of(_points(self.path), _world_matrices(self.path)[id(self.path)], parent, 3)
+        self._points = _in_space_of(_points(self.path), _world_matrices(self.path)[self.path.uid], parent, 3)
         self._last: tuple[float, np.ndarray] | None = None
 
     def targets(self) -> Sequence[Target]:
@@ -662,7 +662,7 @@ def _local_matrix(node: Node) -> np.ndarray:
 
 
 def _world_matrices(root: Node) -> dict[int, np.ndarray]:
-    """World matrices of ``root`` and everything below it, by ``id``:
+    """World matrices of ``root`` and everything below it, by node uid:
     through the groups that hold ``root`` in the scene, if any.
     """
     world = np.eye(4)
@@ -671,9 +671,9 @@ def _world_matrices(root: Node) -> dict[int, np.ndarray]:
     worlds: dict[int, np.ndarray] = {}
 
     def visit(node: Node, parent: np.ndarray) -> None:
-        worlds[id(node)] = parent @ _local_matrix(node)
+        worlds[node.uid] = parent @ _local_matrix(node)
         for child in _children(node):
-            visit(child, worlds[id(node)])
+            visit(child, worlds[node.uid])
 
     visit(root, world)
     return worlds

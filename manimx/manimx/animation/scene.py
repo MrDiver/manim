@@ -45,7 +45,7 @@ from pathlib import Path
 import numpy as np
 
 from ..renderer.config import ViewState
-from ..robjects import RGroup
+from ..robjects import RGroup, new_uid
 from .animations import (
     Animation,
     AnimationBuilder,
@@ -55,11 +55,11 @@ from .animations import (
 )
 from .audio import DEFAULT_SAMPLE_RATE, Sound, SoundEvent, mix
 from .authoring import _active
-from .camera import Camera
-from .camera_view import camera_views, current_value
-from .node import Node
-from .signal_tracks import Change, Placement, RateFunction, SignalTrack, linear
-from .signals import RootSignal, Signal, TimeSignals
+from .nodes.camera import Camera
+from .nodes.camera_view import camera_views, current_value
+from .nodes.node import Node
+from .signals.signal import RootSignal, Signal, TimeSignals
+from .signals.signal_tracks import Change, Placement, RateFunction, SignalTrack, linear
 from .simulation import Simulation
 
 SEGMENT_GAP = 1.0
@@ -396,6 +396,8 @@ class PreparedScene:
     """The scene's camera; its signals are set by :meth:`evaluate` like all others."""
     placements: list[Placement] = field(default_factory=list)
     segments: list[Segment] = field(default_factory=list)
+    uid: int = field(default_factory=new_uid, init=False, repr=False)
+    """Unique per prepared scene in a process; plans are kept by it."""
 
     @property
     def playing_time(self) -> float:

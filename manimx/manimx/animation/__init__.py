@@ -11,27 +11,59 @@ the glTF loader, ...) lives in manimx.userland. It produces render state
 See docs/animation_engine_design.md.
 """
 
-from .animations import Animation, AnimationBuilder, ChangeSignals, SetValue, SignalChange, Target
+from .animations import (
+    Animation,
+    AnimationBuilder,
+    ChangeSignals,
+    SetValue,
+    SignalChange,
+    Target,
+)
 from .audio import Sound, SoundEvent, mix, write_wav
-from .camera import Camera
-from .camera_view import CameraView
-from .clipping_group import ClippingGroup
-from .curve3d import Curve3D
-from .group import Group
-from .kinds import ARRAY, COLOR, COLORS, DISCRETE, FACTOR, PATH, ROTATION, SCALAR, SCALARS, SignalKind
-from .light import DirectionalLight, Light, PointLight, SpotLight
-from .node import Node, PositionMixin, RotationMixin, ScalableMixin, animatable
-from .particles import Particles
-from .rates import linear, smooth
+from .nodes.camera import Camera
+from .nodes.camera_view import CameraView
+from .nodes.clipping_group import ClippingGroup
+from .nodes.curve3d import Curve3D
+from .nodes.group import Group
+from .nodes.light import DirectionalLight, Light, PointLight, SpotLight
+from .nodes.node import Node, PositionMixin, RotationMixin, ScalableMixin, animatable
+from .nodes.particles import Particles
+from .nodes.shape2d import Shape2D
+from .nodes.shape3d import Shape3D
 from .scene import SEGMENT_GAP, Cue, Emit, PreparedScene, Scene, Segment
-from .shape2d import Shape2D
-from .shape3d import Shape3D
-from .signal_tracks import Change, Entry, Placement, SignalTrack
-from .signals import DerivedSignal, RootSignal, Signal, TimeSignals, Vector3Signal, derive
+from .signals.kinds import (
+    ARRAY,
+    COLOR,
+    COLORS,
+    DISCRETE,
+    FACTOR,
+    PATH,
+    ROTATION,
+    SCALAR,
+    SCALARS,
+    SignalKind,
+)
+from .signals.rates import linear, smooth
+from .signals.signal import (
+    DerivedSignal,
+    RootSignal,
+    Signal,
+    TimeSignals,
+    Vector3Signal,
+    derive,
+)
+from .signals.signal_tracks import Change, Entry, Placement, SignalTrack
 from .simulation import Simulation
-from .snapshot import version_token
 from .time_map import MonotoneMap
-from .timing import NEVER, Clip, InvalidCue, Ramp, SegmentTiming, Timeline, UnresolvedEvents
+from .timing import (
+    NEVER,
+    Clip,
+    InvalidCue,
+    Ramp,
+    SegmentTiming,
+    Timeline,
+    UnresolvedEvents,
+)
 
 __all__ = [
     "ARRAY",
@@ -97,6 +129,5 @@ __all__ = [
     "linear",
     "mix",
     "smooth",
-    "version_token",
     "write_wav",
 ]

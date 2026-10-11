@@ -44,7 +44,7 @@ pub struct MeshGeometry {
 struct MaterialEntry {
     versions: Vec<u64>,
     entry: Material,
-    texture_key: Vec<usize>,
+    texture_key: Vec<u64>,
 }
 
 /// Meshes sharing one texture set and surface shader: one bind group, one
@@ -162,8 +162,8 @@ impl MeshPacker {
                 .textures
                 .iter()
                 .chain([&fields.surface_shader])
-                .map(|&slot| texture_identity(values, slot))
-                .collect();
+                .map(|&slot| texture_uid(values, slot))
+                .collect::<PyResult<_>>()?;
             self.materials.insert(
                 uid,
                 MaterialEntry {
@@ -230,7 +230,7 @@ impl MeshPacker {
     ) -> PyResult<MeshOutput> {
         let mut objects = Vec::new();
         let mut materials = Vec::new();
-        let mut groups: Vec<(Vec<usize>, DrawGroup)> = Vec::new();
+        let mut groups: Vec<(Vec<u64>, DrawGroup)> = Vec::new();
         let mut shadow_draws: Vec<(DrawIndexed, i32)> = Vec::new();
         // A node drawn more than once (it sits in several groups) shares
         // its material entry while its alpha is the same.
@@ -330,13 +330,14 @@ impl MeshPacker {
     }
 }
 
-/// A texture's identity, 0 for none (draws are grouped by texture sets).
-fn texture_identity(values: &Values, slot: usize) -> usize {
+/// The `uid` of a texture or surface shader, 0 for none (draws are
+/// grouped by texture sets).
+fn texture_uid(values: &Values, slot: usize) -> PyResult<u64> {
     match values.get(slot) {
         crate::evaluation::value::Value::Object(object) if !object.is_none(values.py) => {
-            object.as_ptr() as usize
+            object.bind(values.py).getattr("uid")?.extract()
         }
-        _ => 0,
+        _ => Ok(0),
     }
 }
 

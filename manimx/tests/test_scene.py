@@ -6,10 +6,26 @@ import math
 import numpy as np
 import pytest
 import quaternion
-
-from manimx.robjects import RShape2D
 from manimx.animation import Camera, Group, Scene, derive
-from manimx.userland import DOWN, LEFT, ORIGIN, RIGHT, TAU, UP, Circle, Dot, FadeIn, FadeOut, Indicate, Rectangle, RegularPolygon, Rotate, Square, Triangle
+from manimx.robjects import RShape2D
+from manimx.userland import (
+    DOWN,
+    LEFT,
+    ORIGIN,
+    RIGHT,
+    TAU,
+    UP,
+    Circle,
+    Dot,
+    FadeIn,
+    FadeOut,
+    Indicate,
+    Rectangle,
+    RegularPolygon,
+    Rotate,
+    Square,
+    Triangle,
+)
 from manimx.userland.rate_functions import linear
 from naming import by_name
 
@@ -288,7 +304,7 @@ def test_state_at_is_pure_and_order_independent() -> None:
     assert forward == [shuffled[t] for t in times]
 
 
-def test_snapshots_keep_identity_and_cache_versions() -> None:
+def test_snapshots_keep_identity() -> None:
     def construct(scene):
         square = Square(name="square", fill_opacity=1.0)
         scene.add(square)
@@ -298,7 +314,7 @@ def test_snapshots_keep_identity_and_cache_versions() -> None:
     first, second = objects(prepared, 0.2)["square"], objects(prepared, 0.7)["square"]
 
     assert isinstance(first, RShape2D) and first.uid == second.uid
-    assert first.version("points", "fill") == second.version("points", "fill")  # only moved
+    np.testing.assert_array_equal(first.points, second.points)  # only moved
     assert first.transform.position != second.transform.position
 
 
@@ -359,8 +375,8 @@ def test_grow_from_center_and_shrink_to_center() -> None:
 
 
 def test_clipping_groups_snapshot_to_render_clipping_groups() -> None:
-    from manimx.robjects import RClippingGroup
     from manimx.animation import ClippingGroup
+    from manimx.robjects import RClippingGroup
     from manimx.userland import Polyline
 
     def construct(scene):

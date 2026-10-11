@@ -34,7 +34,7 @@ from ..animation import (
     animatable,
 )
 from ..animation.authoring import current
-from ..animation.node import ABS, ChangeList, require
+from ..animation.nodes.node import ABS, ChangeList, require
 from .geometry import (
     annular_sector_points,
     annulus_points,

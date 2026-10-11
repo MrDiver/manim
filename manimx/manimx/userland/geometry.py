@@ -21,7 +21,7 @@ from typing import Any
 
 import numpy as np
 
-from ..animation.paths import POINTS_PER_CURVE, partial_curve
+from ..animation.signals.paths import POINTS_PER_CURVE, partial_curve
 from ..robjects import MeshData
 from ..robjects.rbezier_path import TOLERANCE_FOR_POINT_EQUALITY
 

@@ -50,9 +50,9 @@ from ..animation import (
     Signal,
 )
 from ..animation.authoring import current
-from ..animation.node import ABS, ChangeList, animatable
-from ..animation.paths import PointSignal
-from ..animation.signals import derive
+from ..animation.nodes.node import ABS, ChangeList, animatable
+from ..animation.signals.paths import PointSignal
+from ..animation.signals.signal import derive
 from .geometry import corner_points, tip_points
 from .lines import TIP_LENGTH, _tip_style
 from .numbers import DecimalNumber

@@ -11,10 +11,12 @@ from typing import Any
 
 import numpy as np
 
-from ..robjects import CapStyle, JointType, RCurve3D, RNode
-from ..utils.color import WHITE
+from ...robjects import CapStyle, JointType, RCurve3D, RNode
+from ...utils.color import WHITE
+from ..signals.kinds import COLORS, DISCRETE, PATH, SCALARS
+from ..signals.paths import PointSignal, drawn_part, point_signal
+from ..signals.signal import RootSignal, Signal
 from . import style
-from .kinds import COLORS, DISCRETE, PATH, SCALARS
 from .node import (
     ABS,
     ChangeList,
@@ -24,9 +26,6 @@ from .node import (
     ScalableMixin,
     animatable,
 )
-from .paths import PointSignal, drawn_part, point_signal
-from .signals import RootSignal, Signal
-from .snapshot import version_token
 from .style import Colors, Scalars
 
 
@@ -136,12 +135,6 @@ class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
             cast_shadows=bool(self.cast_shadows.value),
             transform=self._transform(),
             alpha=self.alpha.value,
-            versions={
-                "points": version_token(self.drawn_points),
-                "stroke": version_token(
-                    self.stroke_color, self.stroke_width, self.stroke_opacity, self.stroke_joint, self.stroke_cap
-                ),
-            },
         )
 
 

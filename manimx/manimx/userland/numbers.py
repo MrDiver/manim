@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 
 from ..animation import SCALAR, Group, RootSignal, Shape2D, Signal
-from ..animation.node import ABS, ChangeList, animatable
+from ..animation.nodes.node import ABS, ChangeList, animatable
 from .constants import ORIGIN
 from .svg import UNITS_PER_INCH, _inches, read_svg
 from .typst import PAGE, compile_typst

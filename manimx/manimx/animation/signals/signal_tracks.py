@@ -53,7 +53,7 @@ from typing import Any, Protocol
 
 from .kinds import SignalKind
 from .rates import linear, smooth
-from .signals import RootSignal
+from .signal import RootSignal
 
 RateFunction = Callable[[float], float]
 Contribution = Callable[[float, Any], Any]

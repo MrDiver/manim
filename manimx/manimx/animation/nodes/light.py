@@ -21,11 +21,12 @@ from collections.abc import Iterable, Iterator, Sequence
 
 import numpy as np
 
-from ..robjects import RDirectionalLight, RLight, RNode, RPointLight, RSpotLight
-from ..robjects.transform import rotation_towards
-from ..utils.color import WHITE, ParsableManimColor
-from . import authoring
-from .kinds import COLOR, DISCRETE, SCALAR
+from ...robjects import RDirectionalLight, RLight, RNode, RPointLight, RSpotLight
+from ...robjects.transform import rotation_towards
+from ...utils.color import WHITE, ParsableManimColor
+from .. import authoring
+from ..signals.kinds import COLOR, DISCRETE, SCALAR
+from ..signals.signal import RootSignal, Signal
 from .node import (
     ABS,
     ChangeList,
@@ -36,7 +37,6 @@ from .node import (
     _vector,
     animatable,
 )
-from .signals import RootSignal, Signal
 
 
 class Light(Node):

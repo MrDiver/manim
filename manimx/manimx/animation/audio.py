@@ -88,11 +88,11 @@ def mix(
     (it was cut). The result is not clipped."""
     count = max(0, round((end - start) * sample_rate))
     output = np.zeros((count, 2), dtype=np.float32)
-    converted: dict[int, np.ndarray] = {}  # one sound often plays many times
+    converted: dict[Sound, np.ndarray] = {}  # one sound often plays many times
     for time, skip, sound, volume in placed:
-        samples = converted.get(id(sound))
+        samples = converted.get(sound)
         if samples is None:
-            samples = converted[id(sound)] = sound.as_stereo(sample_rate)
+            samples = converted[sound] = sound.as_stereo(sample_rate)
         first = round((time - start) * sample_rate) - round(skip * sample_rate)
         lo, hi = max(first, 0), min(first + len(samples), count)
         if lo < hi:

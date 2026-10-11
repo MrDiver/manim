@@ -15,8 +15,8 @@ from typing import Any
 
 import numpy as np
 
-from ..robjects import CapStyle, Fill, JointType, Stroke
-from ..utils.color import ManimColor, ParsableManimColor
+from ...robjects import CapStyle, Fill, JointType, Stroke
+from ...utils.color import ManimColor, ParsableManimColor
 
 Colors = ParsableManimColor | Sequence[ParsableManimColor]
 """One color or a list of colors (a gradient along the path)."""

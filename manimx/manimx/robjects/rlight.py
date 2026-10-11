@@ -6,7 +6,7 @@ Manim colors.
 
 The three kinds follow glTF's KHR_lights_punctual. Lights that have a
 direction shine along their local ``-z`` axis (the glTF and Blender
-convention). Scene lights (manimx.animation.light) point them with
+convention). Scene lights (manimx.animation.nodes.light) point them with
 ``direction=``, ``target=``, ``point_along()`` and ``point_at()``; a render
 light only holds the resulting rotation in its transform.
 """
@@ -14,7 +14,6 @@ light only holds the resulting rotation in its transform.
 from __future__ import annotations
 
 import math
-from collections.abc import Hashable, Mapping
 from dataclasses import dataclass
 
 from ..utils.color import WHITE, ParsableManimColor
@@ -78,7 +77,6 @@ class RSpotLight(RLight):
     inner_cone_angle: float = 0.0
     outer_cone_angle: float = math.pi / 4
 
-    def __post_init__(self, versions: Mapping[str, Hashable] | None = None) -> None:
-        RLight.__post_init__(self, versions)
+    def __post_init__(self) -> None:
         if not 0.0 <= self.inner_cone_angle < self.outer_cone_angle <= math.pi / 2:
             raise ValueError("cone angles need 0 <= inner < outer <= pi / 2")

@@ -2,42 +2,42 @@ import math
 
 import numpy as np
 import pytest
-from manimx.userland.geometry import arc_points, corner_points, rectangle_points, regular_polygon_points
+from manimx.robjects import (
+    Fill,
+    Quaternion,
+    RClippingGroup,
+    RGroup,
+    RNode,
+    RShape2D,
+    RShape3D,
+    Stroke,
+    Transform,
+    quaternion_from_axis_angle,
+)
 from manimx.robjects.rshape2d import is_closed
 from manimx.robjects.style import resample, to_rgb_array
+from manimx.userland.geometry import (
+    arc_points,
+    corner_points,
+    rectangle_points,
+    regular_polygon_points,
+)
 from manimx.utils.color import BLUE, RED
 
 from manimx import CapStyle, JointType
-from manimx.robjects import Fill, Quaternion, RClippingGroup, RGroup, RNode, RShape2D, RShape3D, Stroke, Transform, quaternion_from_axis_angle
 
-# --- RNode: identity and versioning ------------------------------------
+# --- RNode: identity ------------------------------------
 
 
 def test_render_object_defaults_to_identity_transform() -> None:
     obj = RNode()
 
     assert obj.transform.rotation == Quaternion(1.0, 0.0, 0.0, 0.0)
-    assert obj.visible is True
+    assert obj.alpha == 1.0
 
 
 def test_uids_are_unique() -> None:
     assert len({RNode().uid for _ in range(100)}) == 100
-
-
-def test_only_versioned_fields_bump_versions() -> None:
-    shape = RShape2D(points=corner_points([(0, 0), (1, 0)]))
-    before = shape.version("points", "fill", "stroke")
-
-    shape.transform = shape.transform.translated((1.0, 0.0, 0.0))
-    assert shape.version("points", "fill", "stroke") == before
-
-    shape.stroke = Stroke(width=1.0)
-    assert shape.version("points", "fill", "stroke") == (before[0], before[1], before[2] + 1)
-
-
-def test_version_rejects_unversioned_field() -> None:
-    with pytest.raises(ValueError, match="transform is not versioned"):
-        RShape2D().version("transform")
 
 
 def test_shape_points_are_read_only() -> None:
@@ -173,17 +173,6 @@ def test_geometry_matches_manim() -> None:
     assert RShape2D(points=arc_points()).num_curves == 8
     np.testing.assert_allclose(RShape2D(points=rectangle_points(2.0, 2.0)).points[0], [1.0, 1.0])
     np.testing.assert_allclose(RShape2D(points=rectangle_points(4, 2)).points[0], [2.0, 1.0])
-
-
-def test_shape3d_versions_mesh_and_material() -> None:
-    from manimx import PbrMaterial
-    from manimx.userland.geometry import sphere_mesh
-
-    shape = RShape3D()
-    before = shape.version("mesh", "material")
-    shape.material = PbrMaterial(roughness=0.1)
-    shape.mesh = sphere_mesh()
-    assert shape.version("mesh", "material") == (before[0] + 1, before[1] + 1)
 
 
 # --- reference image helper ---------------------------------------------------

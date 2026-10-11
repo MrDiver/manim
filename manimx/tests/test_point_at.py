@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from manimx.animation import Group, Scene
-from manimx.animation.paths import point_at
+from manimx.animation.signals.paths import point_at
 from manimx.userland import RIGHT, UP, Circle, Dot, MoveAlongPath, Polyline
 from manimx.userland.geometry import arc_points, corner_points
 

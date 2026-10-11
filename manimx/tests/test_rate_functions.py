@@ -5,7 +5,6 @@ import math
 
 import numpy as np
 import pytest
-
 from manimx.userland import rate_functions as rates
 
 # Rate functions that do not end at 1: they return to the start, or decay.
@@ -16,7 +15,7 @@ ENDS_ELSEWHERE = {"there_and_back", "there_and_back_with_pause", "wiggle", "runn
 NAMES = sorted(
     name
     for name, function in inspect.getmembers(rates, inspect.isfunction)
-    if function.__module__ in (rates.__name__, "manimx.animation.rates") and list(inspect.signature(function).parameters)[:1] == ["t"]
+    if function.__module__ in (rates.__name__, "manimx.animation.signals.rates") and list(inspect.signature(function).parameters)[:1] == ["t"]
 )
 
 

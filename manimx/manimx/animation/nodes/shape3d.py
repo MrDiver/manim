@@ -38,7 +38,7 @@ from collections.abc import Iterable, Iterator
 
 import numpy as np
 
-from ..robjects import (
+from ...robjects import (
     MeshData,
     PbrMaterial,
     RNode,
@@ -46,8 +46,9 @@ from ..robjects import (
     SurfaceShader,
     Texture,
 )
-from ..utils.color import ParsableManimColor
-from .kinds import COLOR, DISCRETE, SCALAR, SignalKind
+from ...utils.color import ParsableManimColor
+from ..signals.kinds import COLOR, DISCRETE, SCALAR, SignalKind
+from ..signals.signal import RootSignal, Signal
 from .node import (
     ABS,
     ChangeList,
@@ -58,8 +59,6 @@ from .node import (
     _rgb,
     animatable,
 )
-from .signals import RootSignal, Signal
-from .snapshot import version_token
 
 
 class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
@@ -223,10 +222,6 @@ class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
             cast_shadows=bool(self.cast_shadows.value),
             transform=self._transform(),
             alpha=self.alpha.value,
-            versions={
-                "mesh": version_token(self.mesh),
-                "material": version_token(*self._material_signals()),
-            },
         )
 
 

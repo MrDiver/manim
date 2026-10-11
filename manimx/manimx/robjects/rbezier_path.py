@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 import numpy as np
 
 from .rnode import RNode
 from .style import JointType, Stroke
-from .versioning import versioned
 
 POINTS_PER_CURVE = 4
 TOLERANCE_FOR_POINT_EQUALITY = 1e-6
@@ -25,16 +24,14 @@ class RBezierPath(RNode):
 
     ``points`` is ``(N, DIMENSION)`` with four points per cubic Bezier curve
     ``(anchor, handle, handle, anchor)``. A new subpath starts wherever a
-    curve's start differs from the previous curve's end.
-
-    ``points`` and ``stroke`` are versioned: replace them instead of mutating
-    them (``points`` is stored read-only to enforce this).
+    curve's start differs from the previous curve's end. ``points`` is
+    stored read-only.
     """
 
     DIMENSION: ClassVar[int] = 2
 
-    points: np.ndarray = versioned(default_factory=_no_points)
-    stroke: Stroke = versioned(default_factory=Stroke)
+    points: np.ndarray = field(default_factory=_no_points)
+    stroke: Stroke = field(default_factory=Stroke)
     cast_shadows: bool = True
     """Whether this path blocks light for lit meshes behind it."""
 

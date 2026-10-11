@@ -19,11 +19,12 @@ from typing import Any
 import numpy as np
 import quaternion
 
-from ..renderer.config import DEFAULT_FRAME_HEIGHT
-from ..renderer.config import Camera as RenderCamera
-from ..robjects import RNode, Transform
-from . import authoring
-from .kinds import DISCRETE, FACTOR, SCALAR
+from ...renderer.config import DEFAULT_FRAME_HEIGHT
+from ...renderer.config import Camera as RenderCamera
+from ...robjects import RNode, Transform
+from .. import authoring
+from ..signals.kinds import DISCRETE, FACTOR, SCALAR
+from ..signals.signal import RootSignal, Signal
 from .node import (
     ABS,
     REL,
@@ -34,7 +35,6 @@ from .node import (
     _vector,
     animatable,
 )
-from .signals import RootSignal, Signal
 
 
 def _current(signal: Signal) -> Any:

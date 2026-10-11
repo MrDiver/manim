@@ -29,11 +29,11 @@ from typing import Any
 
 import numpy as np
 
-from ..robjects import MeshData, RNode, RParticles
-from .kinds import ARRAY
+from ...robjects import MeshData, RNode, RParticles
+from ..signals.kinds import ARRAY
+from ..signals.signal import RootSignal, Signal
 from .node import ABS, ChangeList, animatable
 from .shape3d import Shape3D
-from .signals import RootSignal, Signal
 
 
 class Particles(Shape3D):
@@ -92,7 +92,6 @@ class Particles(Shape3D):
             cast_shadows=shape.cast_shadows,
             transform=shape.transform,
             alpha=shape.alpha,
-            versions={"mesh": shape.version("mesh"), "material": shape.version("material")},
             positions=self.positions.value,
             rotations=self.rotations.value,
             scales=self.scales.value,

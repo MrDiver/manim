@@ -1,5 +1,5 @@
 """Camera views: other cameras' pictures on planes in the scene
-(manimx.animation.camera_view and the renderers' camera view texture)."""
+(manimx.animation.nodes.camera_view and the renderers' camera view texture)."""
 
 from __future__ import annotations
 

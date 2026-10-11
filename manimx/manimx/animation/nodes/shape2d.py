@@ -13,10 +13,12 @@ from typing import Any
 
 import numpy as np
 
-from ..robjects import CapStyle, Fill, JointType, RNode, RShape2D, Stroke
-from ..utils.color import WHITE
+from ...robjects import CapStyle, Fill, JointType, RNode, RShape2D, Stroke
+from ...utils.color import WHITE
+from ..signals.kinds import COLORS, DISCRETE, PATH, SCALARS
+from ..signals.paths import PointSignal, drawn_part, point_signal
+from ..signals.signal import DerivedSignal, RootSignal, Signal
 from . import style
-from .kinds import COLORS, DISCRETE, PATH, SCALARS
 from .node import (
     ABS,
     ChangeList,
@@ -26,9 +28,6 @@ from .node import (
     ScalableMixin,
     animatable,
 )
-from .paths import PointSignal, drawn_part, point_signal
-from .signals import DerivedSignal, RootSignal, Signal
-from .snapshot import version_token
 from .style import Colors, Scalars
 
 
@@ -90,7 +89,6 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         self.stroke_joint = RootSignal(style.joints(stroke_joint), DISCRETE, name=f"{prefix}.stroke_joint")
         self.stroke_cap = RootSignal(style.cap(stroke_cap), DISCRETE, name=f"{prefix}.stroke_cap")
         self.cast_shadows = RootSignal(cast_shadows, DISCRETE, name=f"{prefix}.cast_shadows")
-        self._styles: tuple[tuple[object, Fill | None], tuple[object, Stroke | None]] = ((None, None), (None, None))
         """The last snapshot's (token, Fill) and (token, Stroke)."""
 
     def _derive_points(self, function: Callable[..., Any], *parameters: Signal) -> None:
@@ -162,32 +160,18 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
     def _build_snapshot(self) -> RNode | None:
         if self._hidden():
             return None
-        fill_token = version_token(self.fill_color, self.fill_opacity)
-        stroke_token = version_token(self.stroke_color, self.stroke_width, self.stroke_opacity, self.stroke_joint, self.stroke_cap)
-        # Fill and Stroke are immutable values of the signals in their
-        # token: while the token holds, the previous value is still right.
-        # alpha is not part of them: it becomes the snapshot's alpha.
-        cached_fill, cached_stroke = self._styles
-        if cached_fill[0] != fill_token:
-            cached_fill = (fill_token, style.fill(self.fill_color.value, self.fill_opacity.value))
-        if cached_stroke[0] != stroke_token:
-            cached_stroke = (
-                stroke_token,
-                style.stroke(
-                    self.stroke_color.value, self.stroke_opacity.value, self.stroke_width.value,
-                    self.stroke_joint.value, self.stroke_cap.value,
-                ),  # fmt: skip
-            )
-        self._styles = (cached_fill, cached_stroke)
+        # alpha is not part of the fill and stroke: it becomes the snapshot's alpha.
         return RShape2D(
             uid=self.uid,
             points=self.drawn_points.value,
-            fill=cached_fill[1],
-            stroke=cached_stroke[1],
+            fill=style.fill(self.fill_color.value, self.fill_opacity.value),
+            stroke=style.stroke(
+                self.stroke_color.value, self.stroke_opacity.value, self.stroke_width.value,
+                self.stroke_joint.value, self.stroke_cap.value,
+            ),  # fmt: skip
             cast_shadows=bool(self.cast_shadows.value),
             transform=self._transform(),
             alpha=self.alpha.value,
-            versions={"points": version_token(self.drawn_points), "fill": fill_token, "stroke": stroke_token},
         )
 
 

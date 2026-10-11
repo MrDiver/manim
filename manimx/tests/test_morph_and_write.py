@@ -7,7 +7,7 @@ import math
 import numpy as np
 import pytest
 from manimx.animation import Group, Scene
-from manimx.animation.paths import partial_curve, partial_path
+from manimx.animation.signals.paths import partial_curve, partial_path
 from manimx.robjects import RShape2D
 from manimx.userland import (
     DOWN,

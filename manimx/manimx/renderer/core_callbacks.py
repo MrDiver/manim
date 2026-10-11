@@ -20,7 +20,7 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-from ..animation import style
+from ..animation.nodes import style
 from ..robjects import PbrMaterial, RDirectionalLight
 from ..robjects.material import (
     DEFAULT_SURFACE_SHADER,  # noqa: F401 - read by the core (mesh_pass.rs)

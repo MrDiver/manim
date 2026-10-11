@@ -57,12 +57,12 @@ import numpy as np
 from .animations import Animation, Target
 from .audio import DEFAULT_SAMPLE_RATE, Sound
 from .authoring import _active
-from .contributions import Contribution, Keyframes
-from .signal_tracks import Change, linear
-from .signals import RootSignal
+from .signals.contributions import Contribution, Keyframes
+from .signals.signal import RootSignal
+from .signals.signal_tracks import Change, linear
 
 if TYPE_CHECKING:
-    from .node import Node
+    from .nodes.node import Node
     from .scene import SceneCompiler
 
 DEFAULT_KEYFRAME_RATE = 60.0

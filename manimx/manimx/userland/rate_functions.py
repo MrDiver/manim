@@ -111,7 +111,14 @@ from typing import Any
 
 import numpy as np
 
-from ..animation.rates import RateFunction, linear, sigmoid, smooth, unit_interval, zero
+from ..animation.signals.rates import (
+    RateFunction,
+    linear,
+    sigmoid,
+    smooth,
+    unit_interval,
+    zero,
+)
 
 
 @unit_interval

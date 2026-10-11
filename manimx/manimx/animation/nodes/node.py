@@ -35,15 +35,15 @@ from typing import Any
 import numpy as np
 import quaternion
 
-from ..robjects import RNode, Transform, new_uid
-from ..robjects.transform import quaternion_from_axis_angle
-from ..utils.color import ManimColor, ParsableManimColor
-from . import authoring
-from .animations import AnimationBuilder
-from .kinds import DISCRETE, FACTOR, ROTATION, SCALAR
-from .paths import PointSignal
-from .signal_tracks import Change
-from .signals import RootSignal, Signal, Vector3Signal, derive
+from ...robjects import RNode, Transform, new_uid
+from ...robjects.transform import quaternion_from_axis_angle
+from ...utils.color import ManimColor, ParsableManimColor
+from .. import authoring
+from ..animations import AnimationBuilder
+from ..signals.kinds import DISCRETE, FACTOR, ROTATION, SCALAR
+from ..signals.paths import PointSignal
+from ..signals.signal import RootSignal, Signal, Vector3Signal, derive
+from ..signals.signal_tracks import Change
 
 ChangeList = list[tuple[RootSignal, Change, Any]]
 
@@ -96,7 +96,6 @@ class Node:
         self.tags = _tag_set(tags)
         self.alpha = RootSignal(1.0, SCALAR, name=f"{self.name}.alpha")
         self.present = RootSignal(False, DISCRETE, name=f"{self.name}.present")
-        self._last_snapshot: tuple[Hashable, RNode | None] | None = None
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.name!r})"
@@ -136,26 +135,11 @@ class Node:
     def snapshot(self) -> RNode | None:
         """Render state for the current signal values (None if invisible).
 
-        While no signal of the node changed, the previous snapshot is
-        returned again: render nodes are immutable, and the renderer's
-        caches then hit on the same object. Versions, not values, are
-        compared (a revisited time builds once more). A snapshot depends
-        on this node's signals alone: ``alpha`` becomes its
-        ``RNode.alpha``, and the renderer multiplies the alphas of the
-        enclosing groups in.
+        A snapshot depends on this node's signals alone: ``alpha`` becomes
+        its ``RNode.alpha``; the alphas of the enclosing groups are
+        multiplied in by whoever reads the tree.
         """
-        token = self._snapshot_token()
-        last = self._last_snapshot
-        if last is not None and last[0] == token:
-            return last[1]
-        snapshot = self._build_snapshot()
-        self._last_snapshot = (token, snapshot)
-        return snapshot
-
-    def _snapshot_token(self) -> Hashable:
-        """Changes whenever a snapshot could: a version of any signal of
-        this node."""
-        return tuple(signal.version for signal in self.signals())
+        return self._build_snapshot()
 
     def _build_snapshot(self) -> RNode | None:
         """Build the render state (see :meth:`snapshot`)."""

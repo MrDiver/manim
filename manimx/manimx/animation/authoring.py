@@ -27,8 +27,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Protocol
 
-from .signal_tracks import Change
-from .signals import DerivedSignal, RootSignal, Signal
+from .signals.signal import DerivedSignal, RootSignal, Signal
+from .signals.signal_tracks import Change
 
 if TYPE_CHECKING:
     from .scene import SceneCompiler

@@ -33,9 +33,17 @@ from typing import Any
 from .. import _core
 from ..renderer.config import ViewState
 from ..robjects.planned_frame import PlannedFrame
-from .camera_view import camera_views, view_cameras
-from .clipping_group import ClippingGroup
-from .contributions import (
+from .nodes.camera_view import camera_views, view_cameras
+from .nodes.clipping_group import ClippingGroup
+from .nodes.curve3d import Curve3D
+from .nodes.group import Group
+from .nodes.light import DirectionalLight, PointLight, SpotLight
+from .nodes.node import Node, Offset, PositionMixin, RotationMixin, ScalableMixin
+from .nodes.particles import Particles
+from .nodes.shape2d import Shape2D
+from .nodes.shape3d import Shape3D
+from .scene import PreparedScene
+from .signals.contributions import (
     Between,
     By,
     Contribution,
@@ -46,9 +54,7 @@ from .contributions import (
     To,
     Turn,
 )
-from .curve3d import Curve3D
-from .group import Group
-from .kinds import (
+from .signals.kinds import (
     ArrayKind,
     ColorKind,
     ColorsKind,
@@ -60,16 +66,10 @@ from .kinds import (
     ScalarsKind,
     SignalKind,
 )
-from .light import DirectionalLight, PointLight, SpotLight
-from .node import Node, Offset, PositionMixin, RotationMixin, ScalableMixin
-from .particles import Particles
-from .paths import DrawnPart
-from .rates import linear, smooth
-from .scene import PreparedScene
-from .shape2d import Shape2D
-from .shape3d import Shape3D
-from .signal_tracks import Change, Entry, RateFunction, SignalTrack
-from .signals import DerivedSignal, Signal
+from .signals.paths import DrawnPart
+from .signals.rates import linear, smooth
+from .signals.signal import DerivedSignal, Signal
+from .signals.signal_tracks import Change, Entry, RateFunction, SignalTrack
 
 _KIND_CODES: dict[type, str] = {
     ScalarKind: "scalar",
@@ -149,14 +149,14 @@ class ScenePlan:
 
     def _scene_graph(self) -> Any:
         nodes: list[Node] = []
-        index: dict[int, int] = {}
+        index: dict[int, int] = {}  # node uid -> position in nodes
         # Nodes that are never drawn (cameras, values) can be roots too,
         # when animated; their signals reach the plan as inputs.
         drawn_roots = [root for root in self.scene.roots if root.drawn]
         for root in drawn_roots:
             for node in root.family():
-                if id(node) not in index:
-                    index[id(node)] = len(nodes)
+                if node.uid not in index:
+                    index[node.uid] = len(nodes)
                     nodes.append(node)
         described = []
         for node in nodes:
@@ -172,8 +172,8 @@ class ScenePlan:
             elif isinstance(node, ClippingGroup):
                 children = [node.mask, node.content]
             fields = {name: self.slot(signal) for name, signal in _node_fields(node)}
-            described.append((kind, node.uid, fields, [index[id(child)] for child in children]))
-        roots = [(index[id(root)], self.slot(root.present)) for root in drawn_roots]
+            described.append((kind, node.uid, fields, [index[child.uid] for child in children]))
+        roots = [(index[root.uid], self.slot(root.present)) for root in drawn_roots]
         return _core.SceneGraph(described, roots)
 
     def _add_signal(self, signal: Signal) -> None:
@@ -196,15 +196,15 @@ class PlannedTimeline:
 
     def __init__(self, timeline: Any) -> None:
         self.timeline = timeline
-        self._plans: dict[int, ScenePlan] = {}
+        self._plans: dict[int, ScenePlan] = {}  # by PreparedScene.uid
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.timeline, name)
 
     def plan(self, scene: PreparedScene) -> ScenePlan:
-        plan = self._plans.get(id(scene))
-        if plan is None or plan.scene is not scene:
-            plan = self._plans[id(scene)] = ScenePlan(scene)
+        plan = self._plans.get(scene.uid)
+        if plan is None:
+            plan = self._plans[scene.uid] = ScenePlan(scene)
         return plan
 
     def frame_at(self, t: float) -> tuple[ViewState, ...]:
@@ -221,8 +221,8 @@ class PlannedTimeline:
 
 
 _NODE_KINDS: tuple[tuple[type, str, str], ...] = (
-    (Group, "group", "snapshot"),
-    (ClippingGroup, "clipping_group", "snapshot"),
+    (Group, "group", "_build_snapshot"),
+    (ClippingGroup, "clipping_group", "_build_snapshot"),
     (Particles, "particles", "_build_snapshot"),
     (Shape3D, "shape3d", "_build_snapshot"),
     (Shape2D, "shape2d", "_build_snapshot"),

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 from manimx.animation import Scene, derive
-from manimx.animation.kinds import COLORS
+from manimx.animation.signals.kinds import COLORS
 from manimx.userland import (
     DOWN,
     LEFT,

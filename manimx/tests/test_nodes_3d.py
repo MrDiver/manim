@@ -76,20 +76,20 @@ def test_shape3d_snapshots_to_rshape3d_with_its_material() -> None:
     assert material.base_color_texture is texture  # constants come from the template
 
 
-def test_moving_keeps_mesh_and_material_tokens() -> None:
+def test_moving_keeps_mesh_and_material() -> None:
     shape = Box()
     first = shape.snapshot()
     shape.shift(RIGHT).rotate(1.0).scale_by(2.0)
     moved = shape.snapshot()
-    assert moved.version("mesh", "material") == first.version("mesh", "material")
+    assert moved.mesh is first.mesh and moved.material.roughness == first.material.roughness
     assert moved.transform.position == (1.0, 0.0, 0.0)
 
     shape.set_material(roughness=0.9)
     recolored = shape.snapshot()
-    assert recolored.version("mesh") == first.version("mesh") and recolored.version("material") != first.version("material")
+    assert recolored.mesh is first.mesh and recolored.material.roughness == 0.9
 
     shape.set_mesh(sphere_mesh())
-    assert shape.snapshot().version("mesh") != first.version("mesh")
+    assert shape.snapshot().mesh is not first.mesh
     shape.set_mesh(shape.mesh.value)  # the same MeshData is no change
     with pytest.raises(TypeError, match="a mesh must be a MeshData"):
         shape.set_mesh("sphere")
@@ -128,17 +128,19 @@ def test_solids_and_surfaces() -> None:
 # --- Curve3D ----------------------------------------------------------------------
 
 
-def test_curve3d_snapshots_with_stroke_and_tokens() -> None:
+def test_curve3d_snapshots_with_stroke() -> None:
     helix = ParametricCurve3D(lambda t: (math.cos(t), math.sin(t), 0.1 * t), (0.0, math.tau), samples=8, color="#FF0000", stroke_width=0.1)
     snapshot = helix.snapshot()
     assert isinstance(snapshot, RCurve3D) and snapshot.points.shape == (32, 3) and snapshot.cast_shadows
     assert snapshot.stroke.width[0] == pytest.approx(0.1)
 
     helix.shift(UP)
-    assert helix.snapshot().version("points", "stroke") == snapshot.version("points", "stroke")
+    moved = helix.snapshot()
+    np.testing.assert_array_equal(moved.points, snapshot.points)  # points are local: moving changes the transform
+    assert moved.transform.position != snapshot.transform.position
     helix.set_stroke(color="#00FF00", width=0.2, opacity=0.5).set_color("#0000FF").set_cast_shadows(False)
     changed = helix.snapshot()
-    assert changed.version("stroke") != snapshot.version("stroke") and not changed.cast_shadows
+    assert changed.stroke != snapshot.stroke and not changed.cast_shadows
     assert changed.stroke.opacity[0] == pytest.approx(0.5)
     assert Curve3D().snapshot().points.shape == (0, 3)
 
@@ -228,7 +230,7 @@ def test_fade_animate_rotate_derive_and_follow_on_3d_nodes() -> None:
     assert end[lamp.uid].transform.position == (2.0, 0.0, 2.0)  # followed the ball
     assert end[sun.uid].intensity == pytest.approx(2.8)  # derived from the roughness
     mid = {child.uid: child for child in prepared.state_at(1.5).children}
-    assert mid[ball.uid].version("mesh") == end[ball.uid].version("mesh")  # the mesh never changed
+    assert mid[ball.uid].mesh is end[ball.uid].mesh  # the mesh never changed
 
 
 def test_simulation_moves_a_shape3d() -> None:

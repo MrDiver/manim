@@ -5,11 +5,10 @@ import math
 import numpy as np
 import pytest
 import quaternion
-
 from manimx.animation import DISCRETE, FACTOR, ROTATION, RootSignal
 from manimx.animation.animations import SignalChange
+from manimx.animation.signals.signal_tracks import Change, Placement, SignalTrack
 from manimx.userland.rate_functions import linear, there_and_back
-from manimx.animation.signal_tracks import Change, Placement, SignalTrack
 
 REL, ABS = Change.RELATIVE, Change.ABSOLUTE
 

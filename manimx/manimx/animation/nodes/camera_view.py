@@ -25,11 +25,11 @@ from typing import Any
 
 import numpy as np
 
-from ..renderer.config import CameraViewState
+from ...renderer.config import CameraViewState
+from ..signals.signal import Signal
 from .camera import Camera
 from .node import Node
 from .shape2d import Shape2D
-from .signals import Signal
 
 
 class CameraView(Shape2D):

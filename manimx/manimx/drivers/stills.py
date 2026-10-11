@@ -17,7 +17,7 @@ from typing import Any
 
 import numpy as np
 
-from ..animation.node import Node
+from ..animation.nodes.node import Node
 from ..animation.plan import planned_frames
 from ..animation.scene import PreparedScene, Scene
 from ..renderer.config import Frame, RenderConfig

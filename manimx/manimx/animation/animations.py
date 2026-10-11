@@ -21,13 +21,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from . import authoring
-from .contributions import By, Contribution, To
-from .rates import smooth
-from .signal_tracks import Change, RateFunction
-from .signals import RootSignal, Signal
+from .signals.contributions import By, Contribution, To
+from .signals.rates import smooth
+from .signals.signal import RootSignal, Signal
+from .signals.signal_tracks import Change, RateFunction
 
 if TYPE_CHECKING:
-    from .node import Node
+    from .nodes.node import Node
 
 
 @dataclass(slots=True)
