@@ -12,6 +12,7 @@ here, ``line_style`` a table's lines.
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
@@ -23,7 +24,8 @@ from .constants import ORIGIN
 from .lines import Line
 from .markers import current_bounds
 from .numbers import DecimalNumber
-from .typst import Typst, TypstMath
+from .svg import read_svg
+from .typst import PAGE, Typst, TypstMath, compile_typst
 
 Entry = Node | str | float | None
 """What a cell holds: a node, text or a number (made into Typst), or
@@ -183,8 +185,8 @@ class Table(Group):
         return _in_parent(self, np.array([(left + right) / 2, (top + bottom) / 2, 0.0])), float((right - left) * scale[0]), float((top - bottom) * scale[1])
 
 
-BRACKETS = ("[", "(", "|", "")
-"""The brackets a Matrix can have; "" for none."""
+BRACKETS = {"[": "]", "(": ")", "{": "}", "|": "|", "‖": "‖", "": ""}
+"""The brackets a Matrix can have (left: right); "" for none."""
 
 
 class Matrix(Group):
@@ -192,8 +194,9 @@ class Matrix(Group):
 
     Text and numbers become Typst math set with ``preamble`` (``"x^2"``,
     ``"pi"``), other entries are nodes; ``style`` reaches the entries made
-    here and the brackets. ``bracket`` is one of "[", "(", "|" or "" for
-    none, drawn as strokes ``bracket_width`` wide around the entries.
+    here and the brackets. ``bracket`` is the left one of "[", "(", "{",
+    "|", "‖" or "" for none: Typst's delimiter stretched to the entries'
+    height, compiled once per bracket, height and preamble.
     ``entries`` are the rows of entries; :meth:`row` and :meth:`column`
     are lists of them; ``brackets`` the left and right one.
     """
@@ -205,7 +208,6 @@ class Matrix(Group):
         h_buff: float = 0.8,
         v_buff: float = 0.4,
         bracket: str = "[",
-        bracket_width: float = 0.12,
         name: str | None = None,
         **style: Any,
     ) -> None:
@@ -221,13 +223,13 @@ class Matrix(Group):
                 if entry is not None:
                     self.grid.place(entry, r, c)
                     self.add(entry)
-        self.brackets: list[Shape2D] = []
+        self.brackets: list[Group] = []
         if bracket:
-            shape = _bracket_points(bracket, bracket_width, self.grid.top * 2)
-            bracket_style = {"fill_opacity": 0.0} | style
-            left, right = self.grid.lefts[0] + h_buff / 4, self.grid.lefts[-1] - h_buff / 4
-            for side, points in (("left", shape + [left, 0.0]), ("right", shape * [-1.0, 1.0] + [right, 0.0])):
-                self.brackets.append(Shape2D(points, f"{self.name}.{side}_bracket", **bracket_style))
+            (left, right), bracket_style = typst_brackets(bracket, round(float(self.grid.top * 2), 3), preamble)
+            inner_left, inner_right = self.grid.lefts[0] + h_buff / 4, self.grid.lefts[-1] - h_buff / 4
+            for side, pieces, x in (("left", left, inner_left), ("right", right, inner_right)):
+                shapes = (Shape2D(piece + [x, 0.0], f"{self.name}.{side}_bracket{index}", **(bracket_style | style)) for index, piece in enumerate(pieces))
+                self.brackets.append(Group(*shapes, name=f"{self.name}.{side}_bracket"))
             self.add(*self.brackets)
 
     def _entry(self, entry: Entry, preamble: str, name: str, style: dict[str, Any]) -> Node | None:
@@ -254,12 +256,11 @@ class DecimalMatrix(Matrix):
         h_buff: float = 0.8,
         v_buff: float = 0.4,
         bracket: str = "[",
-        bracket_width: float = 0.12,
         name: str | None = None,
         **style: Any,
     ) -> None:
         self.decimals = int(decimals)
-        super().__init__(values, preamble, h_buff, v_buff, bracket, bracket_width, name, **style)  # type: ignore[arg-type]
+        super().__init__(values, preamble, h_buff, v_buff, bracket, name, **style)  # type: ignore[arg-type]
 
     def _entry(self, entry: Entry, preamble: str, name: str, style: dict[str, Any]) -> Node | None:
         number_style = {key: value for key, value in style.items() if key in ("color", "fill_color", "fill_opacity")}
@@ -292,11 +293,10 @@ class IntegerMatrix(DecimalMatrix):
         h_buff: float = 0.8,
         v_buff: float = 0.4,
         bracket: str = "[",
-        bracket_width: float = 0.12,
         name: str | None = None,
         **style: Any,
     ) -> None:
-        super().__init__(values, 0, preamble, h_buff, v_buff, bracket, bracket_width, name, **style)
+        super().__init__(values, 0, preamble, h_buff, v_buff, bracket, name, **style)
 
 
 def _entry(entry: Entry, typeset: Any) -> Node | None:
@@ -312,17 +312,27 @@ def _number_text(value: float) -> str:
     return text.replace("-", "−")
 
 
-def _bracket_points(bracket: str, width: float, height: float) -> np.ndarray:
-    """A left bracket's stroke, its left edge at x = 0, centered on y = 0."""
-    from .geometry import corner_points
+@lru_cache(maxsize=256)
+def typst_brackets(bracket: str, height: float, preamble: str = "") -> tuple[tuple[tuple[np.ndarray, ...], tuple[np.ndarray, ...]], dict[str, Any]]:
+    """The left ``bracket`` and its right partner as Typst stretches them
+    to ``height`` (``lr(size: ...)``): the points of each one's pieces (a
+    tall delimiter is built from overlapping glyphs, so they stay
+    separate paths), centered on y = 0, the left one ending at x = 0 on
+    its right and the right one starting at x = 0; and the style the
+    document gives them. Compiled once per bracket, height and preamble."""
+    right = BRACKETS[bracket]
+    escape = lambda delimiter: "\\" + delimiter if delimiter in "[](){}" else delimiter  # noqa: E731
+    source = f"{PAGE}{preamble}\n$ lr(size: #{height * 72:.3f}pt, {escape(bracket)} #h(1in) {escape(right)}) $"
+    paths = read_svg(compile_typst(source), centered=False)
+    everything = np.vstack([path.points for path in paths])
+    middle = everything[:, 0].mean()
+    center = (everything[:, 1].min() + everything[:, 1].max()) / 2
+    sides = [[path.points - [0.0, center] for path in paths if (path.points[:, 0].mean() < middle) == is_left] for is_left in (True, False)]
+    left_edge = max(float(piece[:, 0].max()) for piece in sides[0])
+    right_edge = min(float(piece[:, 0].min()) for piece in sides[1])
+    left = tuple(piece - [left_edge, 0.0] for piece in sides[0])
+    right_pieces = tuple(piece - [right_edge, 0.0] for piece in sides[1])
+    return (left, right_pieces), paths[0].style()
 
-    top, bottom = height / 2, -height / 2
-    if bracket == "[":
-        return corner_points([(width, top), (0.0, top), (0.0, bottom), (width, bottom)])
-    if bracket == "|":
-        return corner_points([(0.0, top), (0.0, bottom)])
-    # A parenthesis: one cubic curve whose middle touches x = 0.
-    return np.array([(width, top), (-width / 3, top * 0.45), (-width / 3, bottom * 0.45), (width, bottom)])
 
-
-__all__ = ["BRACKETS", "DecimalMatrix", "Entry", "IntegerMatrix", "Matrix", "Table"]
+__all__ = ["BRACKETS", "DecimalMatrix", "Entry", "IntegerMatrix", "Matrix", "Table", "typst_brackets"]

@@ -78,12 +78,16 @@ def test_matrices_have_brackets_around_their_entries() -> None:
     assert [entry is None for row in matrix.entries for entry in row] == [False, False, False, True]
     left, right = matrix.brackets
     entries = current_bounds(matrix.entries[0][0])
-    assert left.points.value[:, 0].max() < entries[0, 0] and right.points.value[:, 0].min() > current_bounds(matrix.entries[0][1])[1, 0]
+    assert current_bounds(left)[1, 0] < entries[0, 0] and current_bounds(right)[0, 0] > current_bounds(matrix.entries[0][1])[1, 0]
     assert matrix.row(1) == [matrix.entries[1][0]] and matrix.column(1) == [matrix.entries[0][1]]
-    assert len(Matrix([[1]], bracket="(").brackets[0].points.value) == 4
-    assert len(Matrix([[1]], bracket="|").brackets) == 2 and Matrix([[1]], bracket="").brackets == []
+    for bracket in ("(", "{", "|", "‖"):
+        left, right = Matrix([[1], [2]], bracket=bracket).brackets
+        assert current_bounds(left)[1, 0] < current_bounds(right)[0, 0]
+    assert Matrix([[1]], bracket="").brackets == []
+    height = float(np.ptp(current_bounds(left)[:, 1]))
+    assert height == pytest.approx(Matrix([[1], [2]], bracket="‖").grid.top * 2, abs=1e-3)  # stretched to the rows
     with pytest.raises(ValueError, match="bracket"):
-        Matrix([[1]], bracket="{")
+        Matrix([[1]], bracket="<")
 
 
 def test_decimal_matrices_follow_values_and_signals() -> None:
