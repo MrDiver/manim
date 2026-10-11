@@ -32,7 +32,14 @@ from manimx.examples.animated_logo import AnimatedLogo
 from manimx.examples.bouncing import Bouncing
 from manimx.examples.navigation import Navigation
 from manimx.project import Project
-from manimx.renderer import Bloom, MotionBlur, RenderConfig, ShaderEffect, ToneMap, ToneMapOperator
+from manimx.renderer import (
+    Bloom,
+    MotionBlur,
+    RenderConfig,
+    ShaderEffect,
+    ToneMap,
+    ToneMapOperator,
+)
 from manimx.testing import assert_image_matches
 from manimx.userland import Circle, FadeIn, Rotate, Square
 from manimx.userland.geometry import box_mesh, sphere_mesh

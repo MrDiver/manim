@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from manimx import _core
 from manimx.renderer.core_callbacks import stroke_records
 from manimx.robjects import CapStyle, JointType
 from manimx.userland.geometry import corner_points
+
+from manimx import _core
 
 SQUARE = corner_points([(0, 0), (1, 0), (1, 1), (0, 1)], closed=True)
 OPEN_AND_CLOSED = np.concatenate([corner_points([(0, 0), (2, 1), (3, 0)]), SQUARE + 5])

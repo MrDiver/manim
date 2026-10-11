@@ -20,11 +20,11 @@ import math
 import numpy as np
 
 from ..animation import ClippingGroup, Group, Shape2D
+from ..renderer.config import Camera, RenderConfig
+from ..robjects import CapStyle, JointType
 from ..userland import Circle, Polyline, RegularPolygon, Square
 from ..userland.geometry import corner_points
-from ..renderer.config import Camera, RenderConfig
 from ..userland.markers import bounds
-from ..robjects import CapStyle, JointType
 from ..utils.color import BLUE, GREEN, ORANGE, PURPLE, RED, WHITE, YELLOW
 from .manim_logo import manim_logo
 

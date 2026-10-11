@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from ...robjects import CapStyle, Fill, JointType, RNode, RShape2D, Stroke
+from ...robjects import CapStyle, JointType, RNode, RShape2D
 from ...utils.color import WHITE
 from ..signals.kinds import COLORS, DISCRETE, PATH, SCALARS
 from ..signals.paths import PointSignal, drawn_part, point_signal

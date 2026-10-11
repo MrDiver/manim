@@ -7,14 +7,18 @@ import numpy as np
 import pytest
 from gltf_fixtures import GlbWriter
 from manimx.animation import Group, Scene
-from manimx.userland import Rotate
-from manimx.userland.geometry import box_mesh, parametric_points, sphere_mesh, torus_mesh
-from manimx.userland.rate_functions import linear
-from manimx.userland import load_gltf
+from manimx.robjects import RCurve3D, RDirectionalLight, RShape3D, RSpotLight, Transform
 from manimx.robjects.transform import rotation_towards
+from manimx.userland import Rotate, load_gltf
+from manimx.userland.geometry import (
+    box_mesh,
+    parametric_points,
+    sphere_mesh,
+    torus_mesh,
+)
+from manimx.userland.rate_functions import linear
 
 from manimx import MeshData, PbrMaterial, Texture
-from manimx.robjects import RCurve3D, RDirectionalLight, RShape3D, RSpotLight, Transform
 
 # --- meshes ---------------------------------------------------------------------
 

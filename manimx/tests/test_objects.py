@@ -9,7 +9,6 @@ from manimx.robjects import (
     RGroup,
     RNode,
     RShape2D,
-    RShape3D,
     Stroke,
     Transform,
     quaternion_from_axis_angle,

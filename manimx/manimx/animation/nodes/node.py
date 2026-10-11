@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import difflib
 import functools
-from collections.abc import Callable, Hashable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Any
 
 import numpy as np

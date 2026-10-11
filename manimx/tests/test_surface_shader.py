@@ -3,13 +3,12 @@
 
 from __future__ import annotations
 
-
 import numpy as np
 import pytest
 from manimx.animation import Scene, Shape3D
 from manimx.animation.plan import planned_frames
-from manimx.drivers.core_pipeline import CoreFramePipeline
 from manimx.drivers import render_image
+from manimx.drivers.core_pipeline import CoreFramePipeline
 from manimx.renderer import RenderConfig
 from manimx.userland.geometry import box_mesh
 

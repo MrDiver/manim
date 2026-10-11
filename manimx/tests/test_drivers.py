@@ -5,8 +5,6 @@ import subprocess
 
 import numpy as np
 import pytest
-from PIL import Image
-
 from manimx.animation import Scene, Sound
 from manimx.drivers import (
     CoreFramePipeline,
@@ -23,6 +21,7 @@ from manimx.drivers import (
     render_image,
 )
 from manimx.examples.navigation import Navigation, config
+from PIL import Image
 
 SOURCE = "manimx.examples.navigation:Navigation"
 

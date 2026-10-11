@@ -7,11 +7,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from PIL import Image
-
 from manimx.cli import main
 from manimx.cli.scaffold import SceneName
 from manimx.project import Project, ProjectError, ProjectSource
+from PIL import Image
 
 needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
 TINY = ["--width", "64", "--height", "36", "--fps", "5", "--motion-blur", "1"]

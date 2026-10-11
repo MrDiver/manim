@@ -30,8 +30,8 @@ from pathlib import Path
 import numpy as np
 
 from ..animation import Group, Shape2D
-from ..userland import Circle, Square, Triangle
 from ..renderer.config import RenderConfig
+from ..userland import Circle, Square, Triangle
 from ..userland.markers import bounds
 
 BACKGROUND = "#ece6e2"
