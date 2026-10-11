@@ -264,7 +264,7 @@ opens a menu with every setting (see below).
 | `effects.tone_map` | how lit 3D colors map to the screen (`pbr_neutral`, `aces`, `agx`, `reinhard`, `none`) and their `exposure`. 2D colors always stay exact |
 | `lighting` | ambient light for 3D objects, and a default key light for scenes without lights |
 | `performance` | speed only, never the image: render processes, frames queued on the GPU |
-| `timeline.clips` | clips in order. Without `start` a clip begins when the previous one ends. `layer` draws on top; `cut` keeps only that part of the scene, in seconds |
+| `timeline.clips` | clips in order. Without `start` a clip begins when the previous one ends. `layer` draws on top; `cut` keeps only that part of the scene, in seconds; `speed` plays it faster (2) or in slow motion (0.5) |
 | `timeline.events` | times of the events scenes `wait_for` |
 
 The camera is not a project setting: every scene has its own `self.camera`.
@@ -331,7 +331,19 @@ Shift+→ one second, Home and End jump to the ends. Saving a scene or
 failing `construct()`) is shown above the frame until the next save fixes
 it (`--no-reload` turns this off). The page's address
 keeps the time (`#t=2.5`), so a link opens at the same place. Frames are
-rendered without motion blur, at the size of the page.
+rendered once each (no motion blur or render samples), at the size of the
+page. Ctrl+wheel, + and − zoom the timeline; 0 shows all of it.
+
+The page also edits the project, and every edit is saved to `manimx.json`
+at once (the file's history is the undo):
+
+- drag a clip to move it, drag its ends to cut it; click it to type its
+  start, layer, cut and `speed` (2 plays twice as fast, 0.5 is slow
+  motion);
+- a clip that waits for an event (`wait_for`) holds until the event has a
+  time: set one at the playhead in the clip or events panel, or drag an
+  event's marker on the ruler;
+- **Settings** changes everything `manimx settings` changes.
 
 Options on the command line override `manimx.json` for that run. Rendering
 keeps several frames queued on the GPU, and with `-w` it spreads over

@@ -293,6 +293,12 @@ class Timeline:
         self.events[event] = time
         self._dirty = True
 
+    def event_times(self) -> dict[str, float]:
+        """The time of every event known so far: set (:meth:`fire`) or
+        emitted by a placed segment. Unlike :meth:`resolve`, never raises
+        for events that do not fire."""
+        return self._resolve(strict=False)
+
     def resolve(self) -> dict[str, float]:
         """Resolve all timing; returns the event times.
 

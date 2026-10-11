@@ -344,3 +344,155 @@ button.toggle:focus-visible {
   font: 600 10px/1.4 ui-monospace, monospace;
   pointer-events: auto;
 }
+
+/* -- editing (editing.js) ---------------------------------------------------- */
+
+.clip-body.editable {
+  cursor: grab;
+  z-index: 1;
+}
+
+.clip-body.editable:hover {
+  outline: 1px solid var(--segment);
+}
+
+.clip-body.selected {
+  outline: 2px solid var(--segment);
+}
+
+.ruler-row .lane {
+  overflow: visible;
+}
+
+.event {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  z-index: 2;
+  padding: 0 5px;
+  border-left: 2px solid var(--playhead);
+  background: color-mix(in srgb, var(--playhead) 14%, var(--surface));
+  border-radius: 0 3px 3px 0;
+  font-size: 10px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.event.fixed {
+  cursor: ew-resize;
+}
+
+#editor {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+#editor > div,
+#settings form {
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+#edit-message {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#edit-message.problem {
+  color: var(--playhead);
+}
+
+#editor h2,
+#settings h2,
+#settings h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#settings h3 {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.field {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  align-items: center;
+  gap: 2px 10px;
+  margin: 6px 0;
+}
+
+.field-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field small {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.field input[type="number"],
+.field input[type="text"],
+.field select {
+  width: 120px;
+  font: inherit;
+}
+
+.unit {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#settings {
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+#settings::backdrop {
+  background: rgb(0 0 0 / 0.4);
+}
+
+#settings header {
+  position: sticky;
+  top: -12px;
+  padding: 4px 0 8px;
+  border: 0;
+  background: var(--surface);
+}
+
+@media (max-width: 720px) {
+  #editor {
+    grid-template-columns: 1fr;
+  }
+}
+
+.segment {
+  z-index: 2;
+  pointer-events: none;
+}
+
+#settings form {
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+}

@@ -16,6 +16,7 @@
         <button id="zoom-fit" type="button" title="Show the whole timeline (0)">Fit</button>
         <button id="zoom-in" type="button" title="Zoom the timeline in (+)">+</button>
       </div>
+      <button id="settings-button" type="button" hidden title="Change the project's settings (saved to manimx.json)">Settings</button>
       <button id="indices" type="button" aria-pressed="false" title="Show the index of every path in its group (for MorphMatching pairs)">Indices</button>
       <output id="time" aria-live="off">0.00 s</output>
     </div>
@@ -35,7 +36,18 @@
       <div id="rows" role="tree" aria-label="Clips, nodes, signals and animations"></div>
       <div id="overlay"><div id="playhead"></div></div>
     </section>
-    <p class="hint">Drag on the tracks to scrub. ← → one frame, Shift+← → one second, Home and End. Ctrl+wheel or + and − zoom, 0 fits. Click a name to open its tracks.</p>
+    <section id="editor" aria-label="Edit the project" hidden>
+      <p id="edit-message" role="status" aria-live="polite">Edits are saved to manimx.json.</p>
+      <div id="clip-editor"></div>
+      <div id="events-editor"></div>
+    </section>
+    <p class="hint">Drag on the tracks to scrub; drag a clip to move it, its ends to cut it. ← → one frame, Shift+← → one second, Home and End. Ctrl+wheel or + and − zoom, 0 fits. Click a name to open its tracks.</p>
   </main>
+  <dialog id="settings" aria-label="Project settings">
+    <form method="dialog">
+      <header><h2>Settings</h2><button type="submit">Close</button></header>
+      <div id="settings-form"></div>
+    </form>
+  </dialog>
 </body>
 </html>

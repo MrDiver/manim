@@ -24,6 +24,8 @@
 // under its sticky labels. Ctrl+wheel zooms around the pointer, the keys
 // and buttons around the playhead; a moved playhead is scrolled into view.
 
+import { clipBar, eventMarkers, initEditing, timelineLoaded } from "./editing.js";
+
 const elements = {
   problem: document.getElementById("problem"),
   title: document.getElementById("title"),
@@ -129,6 +131,7 @@ function drawRuler() {
     tick.textContent = `${Number(t.toFixed(3))} s`;
     elements.ruler.append(tick);
   }
+  eventMarkers(elements.ruler);
 }
 
 function drawTimeline() {
@@ -148,6 +151,7 @@ function drawTimeline() {
     body.style.width = `${percent(end - clip.start)}%`;
     body.title = `${clip.name}: ${clip.start.toFixed(2)} – ${clip.end === null ? "waits" : `${end.toFixed(2)} s`}`;
     lane.append(body);
+    clipBar(body, clip, index);
     for (const segment of segments.filter((segment) => segment.clip === index)) {
       const bar = document.createElement("div");
       bar.className = "segment";
@@ -426,6 +430,7 @@ async function loadTimeline() {
   elements.problem.textContent = error ?? "";
   elements.problem.hidden = !error;
   drawTimeline();
+  timelineLoaded();
 }
 
 /** Wait for the server's rebuilds, forever; show each one at the same time. */
@@ -445,6 +450,7 @@ async function followChanges() {
 }
 
 async function start() {
+  initEditing({ state, elements, percent, snap, timeAt, redraw: drawTimeline });
   showIndices(state.indices);
   await loadTimeline();
   listen();

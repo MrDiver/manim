@@ -19,6 +19,16 @@ request, answered by the standard library's HTTP server:
                              `since` (or 25 s), then answers the version
                              and the last build error
 
+With a project editor (editing.py, given by ``manimx ui``) the page can
+change the project; each edit is saved to ``manimx.json``, and the
+reloader's rebuild then shows it:
+
+    GET  /api/settings       every setting, its value and limits
+    POST /api/clip           {"index", and any of "start", "layer",
+                             "cut", "speed"}
+    POST /api/event          {"name", "time"} (time null: remove it)
+    POST /api/setting        {"path": [...], "value"}
+
 The timeline can be replaced while serving (:meth:`PreviewServer.replace`,
 used by reload.py when a scene file is saved); every replacement or
 failed rebuild (:meth:`PreviewServer.report`) bumps the version, and the
@@ -64,6 +74,7 @@ from ..animation.timing import NEVER, Timeline
 from ..drivers.offline import RenderSettings
 from ..drivers.stills import StillRenderer
 from ..renderer import RenderSamples
+from .editing import EditError, ProjectEditor
 from .labels import index_labels
 from .tracks import clip_nodes
 
@@ -84,8 +95,11 @@ class PreviewServer:
         host: str = "127.0.0.1",
         port: int = 0,
         renderer: StillRenderer | None = None,
+        editor: ProjectEditor | None = None,
     ) -> None:
         self.title = title
+        self.editor = editor
+        """Changes the project when the page edits it (None: read only)."""
         self._renderer = renderer or StillRenderer()
         self._lock = threading.Lock()
         """Held while rendering or replacing the timeline."""
@@ -166,10 +180,18 @@ class PreviewServer:
     def _describe(self) -> dict[str, Any]:
         config = self.settings.config
         clips = list(self.timeline.clips)
+        entries = self.editor.clips() if self.editor is not None else []
+        if len(entries) != len(clips):
+            entries = [None] * len(clips)  # not the project's timeline: nothing to edit
+        known = self.timeline.event_times()
+        fixed = self.timeline.events
+        waited = sorted({segment.waits_for for clip in clips for segment in clip.scene.segments if segment.waits_for})
         return {
             "title": self.title,
             "version": self.version,
             "error": self.error,
+            "editable": self.editor is not None,
+            "events": [{"name": name, "time": known.get(name), "fixed": name in fixed} for name in sorted({*waited, *fixed})],
             "duration": self.timeline.duration,
             "fps": self.settings.fps,
             "width": config.pixel_width,
@@ -180,9 +202,15 @@ class PreviewServer:
                     "start": clip.start,
                     "end": None if clip.end == NEVER else clip.end,
                     "layer": clip.layer,
+                    "entry": entry,
+                    "waits": [
+                        segment.waits_for
+                        for segment, timing in zip(clip.scene.segments, clip.timings, strict=True)
+                        if segment.waits_for and timing is None and clip._compiled_range(segment) is not None
+                    ],
                     "nodes": clip_nodes(clip),
                 }
-                for clip in clips
+                for clip, entry in zip(clips, entries, strict=True)
             ],
             "segments": [
                 {"clip": clips.index(clip), "index": index, "start": start, "end": None if end == NEVER else end}
@@ -241,6 +269,7 @@ class _Handler(BaseHTTPRequestHandler):
             "/api/frame": self._frame,
             "/api/labels": self._labels,
             "/api/changes": self._changes,
+            "/api/settings": self._settings,
         }
         route = routes.get(url.path)
         try:
@@ -252,6 +281,33 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
         except Exception as error:  # a scene that fails at this time: show it in the page
             self._json({"error": f"{type(error).__name__}: {error}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def do_POST(self) -> None:  # noqa: N802 - the name http.server calls
+        editor = self.preview.editor
+        routes: dict[str, Callable[[ProjectEditor, dict[str, Any]], None]] = {
+            "/api/clip": lambda editor, body: editor.edit_clip(_field(body, "index", int), {k: v for k, v in body.items() if k != "index"}),
+            "/api/event": lambda editor, body: editor.set_event(_field(body, "name", str), body.get("time")),
+            "/api/setting": lambda editor, body: editor.set_setting(_field(body, "path", list), body.get("value")),
+        }
+        route = routes.get(urlparse(self.path).path)
+        try:
+            if route is None:
+                self._json({"error": f"not found: {self.path}"}, HTTPStatus.NOT_FOUND)
+                return
+            if editor is None:
+                self._json({"error": "this preview cannot edit its project"}, HTTPStatus.FORBIDDEN)
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError as error:
+                raise _BadRequest(f"the body is not JSON: {error}") from None
+            if not isinstance(body, dict):
+                raise _BadRequest("the body must be a JSON object")
+            route(editor, body)
+            self._json({"ok": True})
+        except (_BadRequest, EditError) as error:
+            self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - http.server's signature
         pass  # one request per scrub step: too many to print
@@ -271,6 +327,12 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _labels(self, query: dict[str, list[str]]) -> None:
         self._json(self.preview.labels(_number(query, "t", float)))
+
+    def _settings(self, query: dict[str, list[str]]) -> None:
+        if self.preview.editor is None:
+            self._json({"error": "this preview has no project settings"}, HTTPStatus.NOT_FOUND)
+            return
+        self._json(self.preview.editor.settings())
 
     def _changes(self, query: dict[str, list[str]]) -> None:
         version, error = self.preview.wait_for_change(_number(query, "since", int))
@@ -303,6 +365,13 @@ class _Handler(BaseHTTPRequestHandler):
 
 class _BadRequest(ValueError):
     pass
+
+
+def _field(body: dict[str, Any], name: str, kind: type) -> Any:
+    value = body.get(name)
+    if isinstance(value, bool) or not isinstance(value, kind):
+        raise _BadRequest(f"{name!r} must be a {kind.__name__}")
+    return value
 
 
 def _number(query: dict[str, list[str]], name: str, kind: type, required: bool = True) -> Any:

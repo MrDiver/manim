@@ -393,17 +393,20 @@ def ui_command(
     open_: Annotated[bool, typer.Option("--open/--no-open", help="Open the page in the browser.")] = True,
     reload: Annotated[bool, typer.Option("--reload/--no-reload", help="Rebuild when a scene file or manimx.json is saved.")] = True,
 ) -> None:
-    """Preview the timeline in the browser and scrub through it."""
+    """Preview the timeline in the browser: scrub through it, move, cut and
+    retime clips, set event times and change the settings."""
     import webbrowser
 
-    from ..web import PreviewServer, ProjectReloader
+    from ..web import PreviewServer, ProjectEditor, ProjectReloader
 
     project = Project.find()
     # With reload, a scene that fails to build is shown in the page (and
-    # fixed by saving) instead of stopping the command.
+    # fixed by saving) instead of stopping the command. Edits in the page
+    # are saved to manimx.json, so they show only with reload.
     timeline = Timeline() if reload else _build(project)
+    editor = ProjectEditor(project.root) if reload else None
     try:
-        server = PreviewServer(timeline, _preview_settings(project), title=project.name, port=port)
+        server = PreviewServer(timeline, _preview_settings(project), title=project.name, port=port, editor=editor)
     except OSError as error:
         raise ProjectError(f"cannot serve on port {port}: {error.strerror}", hint="pick another one with --port, or 0 for any free port") from None
     reloader = ProjectReloader(server, project.root, _preview_settings) if reload else None

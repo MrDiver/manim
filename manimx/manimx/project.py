@@ -86,6 +86,8 @@ class ClipEntry:
     layer: int = 0
     cut: tuple[float | None, float | None] | None = None
     """In and out points in the scene's playing time."""
+    speed: float = 1.0
+    """How fast the clip plays: 2 is twice as fast, 0.5 slow motion."""
 
 
 @dataclass(eq=False)
@@ -149,7 +151,7 @@ class Project:
                 scenes[name] = SceneEntry(entry["module"], entry.get("class", name))
             clips = []
             for index, entry in enumerate(timeline.get("clips", [])):
-                _check_keys(entry, ["scene", "start", "name", "layer", "cut"], f"timeline.clips[{index}]")
+                _check_keys(entry, ["scene", "start", "name", "layer", "cut", "speed"], f"timeline.clips[{index}]")
                 clips.append(_clip_entry(entry))
             events = {name: float(time) for name, time in timeline.get("events", {}).items()}
         except (KeyError, TypeError, ValueError, AttributeError) as error:
@@ -243,19 +245,23 @@ class Project:
         timeline = Timeline(events=dict(self.events))
         previous_end = 0.0
         used: set[str] = set()
+        previous_name = ""
         for entry in self.timeline:
             if progress is not None:
                 progress(entry)
+            if entry.start is None and previous_end == NEVER:
+                raise ProjectError(
+                    f"clip {previous_name!r} waits for an event that never fires, so the next clip has no start",
+                    hint="give the next clip an explicit start, or set the event's time under \"events\" in manimx.json",
+                )
             start = previous_end if entry.start is None else entry.start
             clip = timeline.add(self.prepare(entry.scene), start=start, name=_unique(entry.name or entry.scene, used), layer=entry.layer)
             if entry.cut is not None:
                 clip.cut(*entry.cut)
-            previous_end = clip.end
-            if previous_end == NEVER:
-                raise ProjectError(
-                    f"clip {clip.name!r} waits for an event that never fires, so the next clip has no start",
-                    hint="give the next clip an explicit start, or set the event's time under \"events\" in manimx.json",
-                )
+            if entry.speed != 1.0:
+                for index in range(len(clip.scene.segments)):
+                    clip.set_scale(index, 1.0 / entry.speed)
+            previous_end, previous_name = clip.end, clip.name
         return timeline
 
     def source(self, scene: str | None = None) -> ProjectSource:
@@ -424,6 +430,11 @@ def project_schema() -> dict[str, Any]:
                                     "maxItems": 2,
                                     "description": "In and out points in the scene's playing time.",
                                 },
+                                "speed": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0,
+                                    "description": "How fast the clip plays: 2 is twice as fast, 0.5 slow motion (default 1).",
+                                },
                             },
                         },
                     },
@@ -446,7 +457,15 @@ def _clip_entry(data: dict[str, Any]) -> ClipEntry:
         name=data.get("name"),
         layer=data.get("layer", 0),
         cut=None if cut is None else (cut[0], cut[1]),
+        speed=_speed(data.get("speed", 1.0)),
     )
+
+
+def _speed(value: Any) -> float:
+    speed = float(value)
+    if not speed > 0.0:
+        raise ValueError(f"a clip's speed must be positive, not {value!r}")
+    return speed
 
 
 def _clip_json(entry: ClipEntry) -> dict[str, Any]:
@@ -459,4 +478,6 @@ def _clip_json(entry: ClipEntry) -> dict[str, Any]:
         data["layer"] = entry.layer
     if entry.cut is not None:
         data["cut"] = list(entry.cut)
+    if entry.speed != 1.0:
+        data["speed"] = entry.speed
     return data
