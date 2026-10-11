@@ -6,8 +6,12 @@ interleaved vertices, a material entry. The core builds those once per
 version of the signals they come from by calling these functions, which
 reuse the reference implementation (so both paths produce the same
 bytes), and keeps the result until a version changes. Fills are
-tessellated in Rust for both (core/src/tessellation.rs). Every function returns plain bytes in the record layouts of
-vector_batch.py and mesh_batch.py.
+tessellated in Rust for both (core/src/tessellation.rs), and the core
+builds stroke records itself (core/src/strokes.rs) whenever the style
+values are plain numbers; :func:`stroke_records` is the reference it is
+tested against and the fallback for other values. Every function
+returns plain bytes in the record layouts of vector_batch.py and
+mesh_batch.py.
 """
 
 from __future__ import annotations

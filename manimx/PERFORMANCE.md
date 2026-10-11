@@ -651,6 +651,23 @@ Cornell differs by 0.07 levels on average (0.06% of pixels by more
 than 8), Solids by 0.06; the `shadows` reference image was updated.
 Python renderer and core still match.
 
+### V. Stroke records in the core
+
+The core asked Python (`stroke_records`) for a path's stroke records
+whenever its points or stroke style changed: for every morphing,
+plotted or otherwise derived path, in every sub-frame. The core now
+builds them in Rust (core/src/strokes.rs), byte for byte as the Python
+reference does (tests/test_core_strokes.py), and calls Python only for
+style values it does not read. Showcase, motion blur 8 and bloom
+forced on, power profile `balanced`, fps:
+
+| scene | before | after |
+|---|---|---|
+| Graphs | 88.8 | 109.9 |
+| Morphing | 155.4 | 203.3 |
+| Measures | 166.5 | 201.2 |
+| Lines | 148.4 | 184.5 |
+
 ## Where the time goes now
 
 Benchmark project with `PortalOrbit`, after steps L to O: 48.6 to about

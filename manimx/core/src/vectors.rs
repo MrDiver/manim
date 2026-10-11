@@ -18,7 +18,9 @@ use crate::graph::{
     DrawItem, FlatScene, Node, NodeData, PathFields, SceneGraph, ShadowList, Values, NO_CLIP,
 };
 use crate::records::{self, DrawIndirect, Instance, Object, StrokeCurve};
+use crate::strokes::{stroke_records, StrokeStyle};
 use crate::tessellation::tessellate_fill;
+use crate::value::Value;
 use glam::{DMat4, DVec2, DVec3};
 
 /// Where one path's records live, and what they were built from (`_Slot`).
@@ -637,6 +639,76 @@ impl PathContext<'_> {
         Ok(cache.fill_colors.as_ref().unwrap())
     }
 
+    /// The stroke records built in Rust (strokes.rs), or None for style
+    /// values it does not read (then `stroke_records` in Python builds
+    /// them).
+    fn native_stroke(&self, fields: &PathFields) -> PyResult<Option<StrokeRecords>> {
+        let (
+            Value::Array(points),
+            Value::Array(colors),
+            Value::Array(opacities),
+            Value::Array(widths),
+        ) = (
+            self.values.get(fields.points),
+            self.values.get(fields.stroke_color),
+            self.values.get(fields.stroke_opacity),
+            self.values.get(fields.stroke_width),
+        )
+        else {
+            return Ok(None);
+        };
+        let dimension = points.cols();
+        let rgb = colors.shape.last() == Some(&3) && colors.shape.len() <= 2;
+        if points.shape.len() != 2
+            || !(dimension == 2 || dimension == 3)
+            || !rgb
+            || colors.data.is_empty()
+        {
+            return Ok(None);
+        }
+        if opacities.data.is_empty() || widths.data.is_empty() || points.rows() % 4 != 0 {
+            return Ok(None);
+        }
+        let (Value::Object(joint), Value::Object(cap)) = (
+            self.values.get(fields.stroke_joint),
+            self.values.get(fields.stroke_cap),
+        ) else {
+            return Ok(None);
+        };
+        let joint = joint.bind(self.py);
+        let joints: Vec<u32> = if joint.hasattr("value")? {
+            vec![joint.getattr("value")?.extract()?]
+        } else {
+            joint
+                .try_iter()?
+                .map(|item| item?.getattr("value")?.extract())
+                .collect::<PyResult<_>>()?
+        };
+        if joints.is_empty() {
+            return Ok(None);
+        }
+        let cap: u32 = cap.bind(self.py).getattr("value")?.extract()?;
+        let colors: Vec<[f64; 3]> = colors
+            .data
+            .chunks_exact(3)
+            .map(|c| [c[0], c[1], c[2]])
+            .collect();
+        let style = StrokeStyle {
+            colors: &colors,
+            opacities: &opacities.data,
+            widths: &widths.data,
+            joints: &joints,
+            cap,
+        };
+        let stroke = stroke_records(&points.data, dimension, &style);
+        Ok(Some(StrokeRecords {
+            curves: stroke.curves,
+            points: stroke.points,
+            visible: stroke.visible,
+            opaque: stroke.opaque,
+        }))
+    }
+
     fn stroke<'c>(
         &self,
         cache: &'c mut PathCache,
@@ -644,6 +716,10 @@ impl PathContext<'_> {
         key: &[u64],
     ) -> PyResult<&'c StrokeRecords> {
         if cache.stroke.as_ref().map(|entry| entry.0.as_slice()) != Some(key) {
+            if let Some(records) = self.native_stroke(fields)? {
+                cache.stroke = Some((key.to_vec(), records));
+                return Ok(&cache.stroke.as_ref().unwrap().1);
+            }
             let arguments = (
                 self.python(fields.points)?,
                 self.python(fields.stroke_color)?,
