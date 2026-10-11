@@ -15,11 +15,13 @@ def test_defaults_render_like_before() -> None:
 
     assert (config.pixel_width, config.pixel_height, config.msaa_samples) == (1920, 1080, 4)
     assert config.shadows and config.shadow_resolution == 2048 and config.default_lights
-    assert settings.effects_chain() == (MotionBlur(samples=8, shutter=1 / 120), ToneMap(ToneMapOperator.PBR_NEUTRAL))
+    assert settings.effects_chain() == (ToneMap(ToneMapOperator.PBR_NEUTRAL),)  # effects that cost renders are off
+    assert settings.effects.shadows.method == "pcf"
 
 
 def test_effects_follow_their_settings() -> None:
     settings = Settings()
+    settings.effects.motion_blur.enabled = True
     settings.effects.motion_blur.shutter_angle = 720.0  # two frames of exposure
     settings.effects.bloom.enabled = True
     settings.effects.bloom.intensity = 0.4

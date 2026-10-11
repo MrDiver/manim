@@ -234,9 +234,9 @@ opens a menu with every setting (see below).
     "directory": "renders"
   },
   "effects": {
-    "motion_blur": { "enabled": true, "samples": 8, "shutter_angle": 180.0 },
+    "motion_blur": { "enabled": false, "samples": 8, "shutter_angle": 180.0 },
     "bloom": { "enabled": false, "intensity": 0.1, "threshold": 1.0, "knee": 0.5, "radius": 1.0, "levels": 6 },
-    "shadows": { "enabled": true, "softness": 1.0, "samples": 16, "resolution": 2048 },
+    "shadows": { "enabled": true, "softness": 1.0, "samples": 16, "resolution": 2048, "method": "pcf" },
     "tone_map": { "operator": "pbr_neutral", "exposure": 1.0 }
   },
   "lighting": { "ambient_color": "#ffffff", "ambient_intensity": 0.15, "default_lights": true },
@@ -257,9 +257,9 @@ opens a menu with every setting (see below).
 | Setting | Meaning |
 |---|---|
 | `output` | how the video looks: resolution, frame rate, background, antialiasing, audio |
-| `effects.motion_blur` | renders averaged per frame (`samples`) over the exposure. `shutter_angle` is the exposure as a share of a frame: 360 is one frame, 180 half (the film default), 720 two frames, so the smear grows with it. Long exposures need more samples, or they show separate images |
+| `effects.motion_blur` | off by default, since every frame then costs `samples` renders: renders averaged per frame over the exposure. `shutter_angle` is the exposure as a share of a frame: 360 is one frame, 180 half (the film default), 720 two frames, so the smear grows with it. Long exposures need more samples, or they show separate images |
 | `effects.bloom` | glow around bright parts of lit 3D objects |
-| `effects.shadows` | shadows of 3D objects: `softness` (0 is hard), `samples` (smoother edges), `resolution` (sharper detail) |
+| `effects.shadows` | shadows of 3D objects: `softness` (0 is hard), `samples` (smoother edges), `resolution` (sharper detail), `method`: `pcf` (default, a fixed narrow soft edge) or `pcss` (edges soften with the distance to the caster, slower) |
 | `effects.tone_map` | how lit 3D colors map to the screen (`pbr_neutral`, `aces`, `agx`, `reinhard`, `none`) and their `exposure`. 2D colors always stay exact |
 | `lighting` | ambient light for 3D objects, and a default key light for scenes without lights |
 | `performance` | speed only, never the image: render processes, frames queued on the GPU |

@@ -21,7 +21,7 @@ def test_motion_blur_renders_share_the_taps_with_turned_patterns() -> None:
     assert RenderConfig(shadow_samples=2, shadow_share=4).shadow_filter[1] == 2.0  # never more than asked for
 
 
-def test_full_renders_use_pcss_and_previews_pcf() -> None:
+def test_projects_and_previews_use_pcf() -> None:
     from manimx.cli import app
     from manimx.settings import Settings
 
@@ -31,5 +31,6 @@ def test_full_renders_use_pcss_and_previews_pcf() -> None:
         def render_settings(self, chosen):
             return chosen
 
-    assert Settings().effects.shadows.method == "pcss"
+    assert Settings().effects.shadows.method == "pcf"  # pcss when asked for
+    Project.settings.effects.shadows.method = "pcss"
     assert app._preview_settings(Project()).effects.shadows.method == "pcf"

@@ -42,7 +42,7 @@ def test_new_creates_a_project_with_example_scenes(capsys, project) -> None:
     assert data["format"] == 2 and data["$schema"] == "./.manimx/project.schema.json"
     assert data["output"]["width"] == 1280 and data["output"]["fps"] == 30 and "camera" not in data
     assert data["performance"] == {"workers": 1, "frames_in_flight": 3, "core": True}
-    assert data["effects"]["motion_blur"] == {"enabled": True, "samples": 8, "shutter_angle": 180.0}
+    assert data["effects"]["motion_blur"] == {"enabled": False, "samples": 8, "shutter_angle": 180.0}
     assert data["effects"]["bloom"]["enabled"] is False and data["lighting"]["default_lights"] is True
     assert list(data["scenes"]) == ["Intro", "Bounce"] and [c["scene"] for c in data["timeline"]["clips"]] == ["Intro", "Bounce"]
     schema = json.loads((project / ".manimx" / "project.schema.json").read_text())

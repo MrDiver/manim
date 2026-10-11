@@ -100,7 +100,7 @@ class MotionBlurSettings:
     """Average several renders spread over the exposure, like a camera
     whose shutter stays open. Every sample is a full render."""
 
-    enabled: bool = setting(True, "Blur moving things over the exposure time.")
+    enabled: bool = setting(False, "Blur moving things over the exposure time (every frame costs samples renders).")
     samples: int = setting(8, "Renders averaged per frame; long exposures need more, or they show separate images.", minimum=1, note=_spacing)
     shutter_angle: float = setting(
         180.0,
@@ -132,8 +132,8 @@ class ShadowSettings:
     samples: int = setting(16, "Lookups per shadowed pixel; more give smoother soft edges.", minimum=1, maximum=64)
     resolution: int = setting(2048, "Width and height of each shadow map; more give sharper detail.", choices=(512, 1024, 2048, 4096), unit="px")
     method: str = setting(
-        "pcss",
-        "pcss: edges soften with the distance to the caster and the light's size; pcf: a fixed narrow soft edge, much faster (previews use it).",
+        "pcf",
+        "pcf: a fixed narrow soft edge, fast; pcss: edges soften with the distance to the caster and the light's size, slower.",
         choices=("pcss", "pcf"),
     )
 

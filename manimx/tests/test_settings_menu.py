@@ -79,7 +79,7 @@ def test_switches_choices_and_edits() -> None:
 
     go_to(menu, "effects.motion_blur")
     press(menu, "space")
-    assert not menu.settings.effects.motion_blur.enabled
+    assert menu.settings.effects.motion_blur.enabled
 
 
 def test_values_of_every_type_switch() -> None:
@@ -176,7 +176,7 @@ def test_hints_say_what_the_keys_do_here() -> None:
     menu = SettingsMenu(Settings(), expanded={("effects",), ("effects", "motion_blur"), ("effects", "shadows"), ("output",)})
 
     go_to(menu, "effects.motion_blur")
-    assert menu.hints() == [[("space", "switch off"), ("←", "close")], [("↑↓", "move"), ("q", "quit")]]
+    assert menu.hints() == [[("space", "switch on"), ("←", "close")], [("↑↓", "move"), ("q", "quit")]]
     go_to(menu, "lighting")
     assert menu.hints()[0] == [("→", "open")]
     go_to(menu, "effects.shadows.resolution")
