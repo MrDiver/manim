@@ -85,8 +85,6 @@ thought about from scratch again.
 
 ## Web UI and editing
 
-- Move and retime clips (cuts, slow motion, scaling), zoom the
-  timeline, edit fps and every project setting in the UI.
 - Then editing scenes in the UI: keyframes, whole clips made in the UI,
   positioning with gizmos.
 - Live presentation: clicks calling `Timeline.fire()`.
