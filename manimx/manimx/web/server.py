@@ -63,7 +63,7 @@ from PIL import Image
 from ..animation.timing import NEVER, Timeline
 from ..drivers.offline import RenderSettings
 from ..drivers.stills import StillRenderer
-from ..renderer import MotionBlur
+from ..renderer import RenderSamples
 from .labels import index_labels
 from .tracks import clip_nodes
 
@@ -139,7 +139,7 @@ class PreviewServer:
         self.timeline = timeline
         self.settings = settings
         self._frame_at = timeline.frame_at
-        self._effects = tuple(effect for effect in settings.effects if not isinstance(effect, MotionBlur))
+        self._effects = tuple(effect for effect in settings.effects if not isinstance(effect, RenderSamples))
 
     def _bump(self, error: str | None) -> None:
         with self._changed:

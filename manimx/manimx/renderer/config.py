@@ -137,12 +137,15 @@ class RenderConfig:
     casts them and the light's ``size`` (contact hardening). ``"pcf"``: a
     fixed narrow soft edge, much cheaper (previews)."""
     shadow_share: int = 1
-    """How many renders a frame averages (motion blur sub-frames). Each takes
+    """How many renders a frame averages (``RenderSamples``). Each takes
     ``shadow_samples / shadow_share`` taps (at least MIN_SHADOW_TAPS), rotated
     differently per render, so the average still gets them all."""
     shadow_index: int = 0
     """Which of the ``shadow_share`` renders this is: it turns the tap
     pattern (the same in every frame, so unchanged frames stay equal)."""
+    jitter: tuple[float, float] = (0.0, 0.0)
+    """Moves the picture by this many pixels (right, up), for the renders
+    of ``RenderSamples`` to cover each pixel."""
     camera_views: tuple[CameraViewState, ...] = ()
     """The camera views of the frame (see :class:`CameraViewState`): the
     shape with the uid of entry ``i`` shows layer ``i`` of the renderer's

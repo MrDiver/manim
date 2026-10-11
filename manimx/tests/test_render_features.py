@@ -28,7 +28,7 @@ from manimx.examples.manim_logo import config as logo_config
 from manimx.examples.manim_logo import manim_logo
 from manimx.examples.portal_cube import portal_cube
 from manimx.examples.portal_cube import views as portal_views
-from manimx.renderer import Camera, RenderConfig
+from manimx.renderer import Camera, RenderConfig, RenderSamples
 from manimx.testing import ImageTolerance, assert_image_matches
 from manimx.userland import Circle, Polyline, RegularPolygon, Square
 from manimx.userland.geometry import (
@@ -126,6 +126,28 @@ def test_the_back_side_looks_like_the_front() -> None:
 
 def test_without_msaa() -> None:
     assert pixel(render(square(2.0), msaa_samples=1), 0, 0) == RED_PIXEL
+
+
+def test_render_samples_cover_each_pixel_at_spread_points() -> None:
+    offsets = [RenderSamples(16).jitter(index) for index in range(16)]
+    assert len(set(offsets)) == 16
+    assert all(-0.5 <= x < 0.5 and -0.5 <= y < 0.5 for x, y in offsets)
+    assert RenderSamples(1).jitter(0) == (0.0, 0.0)  # one render: the plain picture
+
+
+def test_render_samples_smooth_edges_without_msaa() -> None:
+    tilted = square(3.0)
+    tilted.rotate(0.3)
+    config = RenderConfig(pixel_width=WIDTH, pixel_height=HEIGHT, msaa_samples=1)
+    one = render_image([tilted], config=config)
+    many = render_image([tilted], config=config, effects=(RenderSamples(16),))
+
+    def partly_covered(image: np.ndarray) -> int:
+        return int(((image[..., 0] > 10) & (image[..., 0] < 245)).sum())
+
+    assert partly_covered(one) == 0  # one sample per pixel: in or out
+    assert partly_covered(many) > 40
+    assert pixel(many, 0, 0) == RED_PIXEL
 
 
 # -- clipping -----------------------------------------------------------------

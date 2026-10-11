@@ -103,7 +103,7 @@ def main() -> None:
     settings = project.render_settings()
     times = settings.frame_times(timeline.duration)
     sharp_settings = copy.deepcopy(project.settings)
-    sharp_settings.effects.motion_blur.enabled = False
+    sharp_settings.output.samples = 1
     sharp_wall = render_all(timeline.frame_at, project.render_settings(sharp_settings), times)
 
     spent: dict[str, float] = defaultdict(float)
@@ -111,8 +111,8 @@ def main() -> None:
     wall = render_all(timeline.frame_at, settings, times)
     count = len(times)
     out = project.output
-    print(f"{out.width}x{out.height}, {count} frames, motion blur {project.settings.motion_blur_samples}: {count / wall:6.1f} fps  {wall / count * 1e3:6.2f} ms/frame")
-    print(f"{out.width}x{out.height}, {count} frames, no motion blur: {count / sharp_wall:6.1f} fps  {sharp_wall / count * 1e3:6.2f} ms/frame")
+    print(f"{out.width}x{out.height}, {count} frames, {project.settings.output.samples} samples: {count / wall:6.1f} fps  {wall / count * 1e3:6.2f} ms/frame")
+    print(f"{out.width}x{out.height}, {count} frames, 1 sample: {count / sharp_wall:6.1f} fps  {sharp_wall / count * 1e3:6.2f} ms/frame")
     for label, seconds in ((label, spent[label]) for _, _, label in STAGES if label in spent):
         print(f"  {label:<36} {seconds / count * 1e3:6.2f} ms/frame  {seconds / wall * 100:5.1f}%")
 

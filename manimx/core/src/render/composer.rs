@@ -1,7 +1,7 @@
 //! The composer: turns the renderer's layers into a frame:
 //!
 //! ```text
-//! for each sub-frame (one, or the MotionBlur samples):
+//! for each sub-frame (one, or the RenderSamples renders):
 //!     for each view (one per active clip, lowest first):
 //!         layers = render the view
 //!         lit = lit-stage effects (Bloom, custom shaders) on layers.lit

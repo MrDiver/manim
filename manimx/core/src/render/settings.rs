@@ -2,7 +2,7 @@
 //! besides the render object tree: the camera, the camera views, and the
 //! lighting and shadow settings of one view.
 
-use glam::DMat4;
+use glam::{DMat4, DVec3};
 
 use crate::render::packing::packer::PackSettings;
 use crate::render::packing::records::Frame;
@@ -98,6 +98,9 @@ pub struct ViewSettings {
     pub hide_camera_views: bool,
     /// The width / height of the picture (None: of the pixels).
     pub view_aspect: Option<f64>,
+    /// Moves the picture by this many pixels (right, up): each render of
+    /// `RenderSamples` covers its pixels at another point.
+    pub jitter: [f64; 2],
     /// Seconds, `frame.time` in shaders.
     pub time: f64,
     pub layer_depth_step: f64,
@@ -156,9 +159,18 @@ impl ViewSettings {
     /// The camera's Frame record for a picture of `size` pixels.
     pub fn camera_frame(&self, size: (u32, u32), light_count: u32) -> Frame {
         let camera = &self.camera;
+        // A shift in normalized device coordinates (2 per picture width),
+        // applied after the projection: x_clip + shift * w_clip.
+        let shift = DVec3::new(
+            2.0 * self.jitter[0] / size.0 as f64,
+            2.0 * self.jitter[1] / size.1 as f64,
+            0.0,
+        );
+        let projection =
+            DMat4::from_translation(shift) * camera.projection_matrix(self.aspect_ratio(size));
         frame_record(
             &camera.view_matrix(),
-            &camera.projection_matrix(self.aspect_ratio(size)),
+            &projection,
             camera.transform.position,
             size,
             &self.frame_settings(),
@@ -188,6 +200,8 @@ impl ViewSettings {
         into.extend([
             self.hide_camera_views as u64,
             self.view_aspect.map_or(u64::MAX, f64::to_bits),
+            self.jitter[0].to_bits(),
+            self.jitter[1].to_bits(),
             self.layer_depth_step.to_bits(),
             self.exposure.to_bits(),
             self.default_lights as u64,

@@ -137,20 +137,25 @@ Lights inside the content only light that content. See
 ### Effects
 
 ```python
-from manimx.renderer import Bloom, MotionBlur, ShaderEffect, ToneMap, ToneMapOperator
+from manimx.renderer import Bloom, RenderSamples, ShaderEffect, ToneMap, ToneMapOperator
 
 effects = [
-    MotionBlur(samples=16, shutter=1 / 120),
+    RenderSamples(count=16, shutter=1 / 120),
     Bloom(threshold=1.0, intensity=0.1),
     ToneMap(ToneMapOperator.ACES),
 ]
 image = render_image(MyScene, time=2.0, config=config, effects=effects)
 ```
 
-`MotionBlur` renders the scene at several times inside the shutter and
-averages them. Every sub-frame is a full render, so motion blur
-multiplies the cost of a frame by its samples; projects leave it off
-unless asked (`effects.motion_blur.enabled`).
+`RenderSamples` averages `count` renders of a frame. Each moves the
+camera by a fraction of a pixel (the Halton sequence in bases 2 and 3:
+the projection is shifted in normalized device coordinates, so meshes,
+2D shapes and their shadows all move together) and turns the shadow
+taps, so edges and soft shadows come out smooth even from few taps per
+render. With a `shutter` above 0 the renders are spread over it, and
+moving things blur. Every render is a full render, so the cost of a
+frame grows with `count`; projects render once per frame unless asked
+(`output.samples`, with `effects.motion_blur` to spread them).
 
 Depth of field is not an effect in the list but the camera's lens: with a
 `Camera.aperture` above 0, its view is blurred by each pixel's distance from
@@ -549,8 +554,8 @@ light has six maps, the faces of a cube.
   searches for blockers and widens the radius by the light's size and
   the blocker's distance (similar triangles), so shadows are sharp at
   contact and softer with distance.
-- **Shared taps across a frame's renders.** With motion blur each
-  sub-frame takes a share of the taps (`shadow_samples / shadow_share`,
+- **Shared taps across a frame's renders.** With `RenderSamples` each
+  render takes a share of the taps (`shadow_samples / shadow_share`,
   at least 4) with its pattern turned differently, and the frame's
   average gets them all. The pattern is also turned per pixel and MSAA
   sample by white noise, which averages away instead of leaving a

@@ -13,7 +13,7 @@ import argparse
 import sys
 
 from manimx.drivers import ImageSequence, RenderSettings, VideoFile, render
-from manimx.renderer import MotionBlur, RenderConfig
+from manimx.renderer import RenderConfig, RenderSamples
 
 
 def main() -> None:
@@ -25,7 +25,7 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
     parser.add_argument("--background", default="#ece6e2")
-    parser.add_argument("--blur-samples", type=int, default=8, help="1 disables motion blur")
+    parser.add_argument("--samples", type=int, default=8, help="renders per frame, spread over half a frame (1: no motion blur)")
     parser.add_argument("--workers", type=int, default=1, help="render processes")
     parser.add_argument("--in-flight", type=int, default=3, help="frames on the GPU at once per process")
     args = parser.parse_args()
@@ -37,7 +37,7 @@ def main() -> None:
             background_color=args.background,
         ),
         fps=args.fps,
-        effects=(MotionBlur(samples=args.blur_samples, shutter=0.5 / args.fps),),
+        effects=(RenderSamples(count=args.samples, shutter=0.5 / args.fps),),
         in_flight=args.in_flight,
     )
     sink = ImageSequence(args.output) if args.png else VideoFile(args.output)

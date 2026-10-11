@@ -1,7 +1,7 @@
 //! The effects of the frame composer, each with its settings (from
-//! manimx/renderer/effects.py) and the GPU work it does. `MotionBlur` is
-//! not here: the caller decides the sub-frames (their times and weights), and
-//! the composer averages them.
+//! manimx/renderer/effects.py) and the GPU work it does. `RenderSamples`
+//! is not here: the caller decides the sub-frames (their times, camera
+//! offsets and weights), and the composer averages them.
 //!
 //! | Module | What it does |
 //! |---|---|

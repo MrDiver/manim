@@ -47,7 +47,7 @@ from .settings import to_json as settings_to_json
 
 PROJECT_FILE = "manimx.json"
 SCHEMA_FILE = ".manimx/project.schema.json"
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 """Version of the manimx.json format; bumped (with a migration) on breaking changes."""
 SECTIONS = [item.name for item in fields(Settings)]
 """The settings sections at the top level of manimx.json."""
@@ -125,7 +125,7 @@ class Project:
             data = json.loads((root / PROJECT_FILE).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise ProjectError(f"cannot read {root / PROJECT_FILE}: {error}") from error
-        if isinstance(data, dict) and data.get("format") in _MIGRATIONS:
+        while isinstance(data, dict) and data.get("format") in _MIGRATIONS:
             data = _MIGRATIONS[data["format"]](data)
         if not isinstance(data, dict) or data.get("format") != FORMAT_VERSION:
             found = data.get("format") if isinstance(data, dict) else None
@@ -354,7 +354,22 @@ def _from_format_1(data: dict[str, Any]) -> dict[str, Any]:
     return {**data, "format": 2}
 
 
-_MIGRATIONS = {1: _from_format_1}
+def _from_format_2(data: dict[str, Any]) -> dict[str, Any]:
+    """Format 2 had the renders per frame in "effects.motion_blur.samples",
+    used only with motion blur on; they are "output.samples" now."""
+    effects = data.get("effects")
+    blur = effects.get("motion_blur") if isinstance(effects, dict) else None
+    if isinstance(blur, dict) and "samples" in blur:
+        blur = dict(blur)
+        samples = blur.pop("samples")
+        data = {**data, "effects": {**effects, "motion_blur": blur}}
+        if blur.get("enabled") and isinstance(samples, int):
+            output = data.get("output")
+            data["output"] = {**(output if isinstance(output, dict) else {}), "samples": samples}
+    return {**data, "format": 3}
+
+
+_MIGRATIONS = {1: _from_format_1, 2: _from_format_2}
 """Format version -> function turning it into the next one."""
 
 

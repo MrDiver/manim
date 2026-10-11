@@ -37,9 +37,9 @@ def test_sections_open_and_close() -> None:
     assert "effects.motion_blur.shutter_angle" in labels(menu)
     assert "effects.motion_blur.enabled" not in labels(menu)  # shown on the section's line
 
-    go_to(menu, "effects.motion_blur.samples")
+    go_to(menu, "effects.motion_blur.shutter_angle")
     press(menu, "left")  # from a value: close its section, select it
-    assert labels(menu)[menu.cursor] == "effects.motion_blur" and "effects.motion_blur.samples" not in labels(menu)
+    assert labels(menu)[menu.cursor] == "effects.motion_blur" and "effects.motion_blur.shutter_angle" not in labels(menu)
     press(menu, "up", "left")
     assert labels(menu) == ["output", "effects", "lighting", "performance"]
     press(menu, "up", "up", "up", "down")
@@ -138,7 +138,7 @@ def test_print_documents_every_setting() -> None:
     printed = print_settings(Settings())
     assert "shutter_angle = 180.0°  Exposure as a share of a frame" in printed
     assert "resolution = 2048px" in printed and "one of 512, 1024, 2048, 4096" in printed
-    assert "  motion_blur: Average renders over the exposure time." in printed
+    assert "  motion_blur: Spread the frame's renders over the exposure time." in printed
 
 
 def test_settings_command_prints_without_a_terminal(tmp_path, monkeypatch, capsys) -> None:

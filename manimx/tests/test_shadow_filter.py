@@ -10,7 +10,7 @@ def test_one_render_takes_every_tap_unturned() -> None:
     assert RenderConfig(shadow_samples=16, shadow_method="pcf").shadow_filter[0] == 0.0
 
 
-def test_motion_blur_renders_share_the_taps_with_turned_patterns() -> None:
+def test_renders_of_a_frame_share_the_taps_with_turned_patterns() -> None:
     filters = [RenderConfig(shadow_samples=16, shadow_share=8, shadow_index=index).shadow_filter for index in range(8)]
     assert {f[1] for f in filters} == {float(MIN_SHADOW_TAPS)}  # 16 / 8 = 2, but at least 4
     turns = sorted(f[2] for f in filters)

@@ -7,9 +7,6 @@ thought about from scratch again.
 
 ## Rendering
 
-- **Render samples.** Average several renders of a frame with jittered
-  cameras and tap patterns even without motion blur, like Blender
-  Eevee's samples: smooth soft shadows and antialiasing for stills.
 - **Screen-space global illumination.** Colored light bounced off
   nearby surfaces, traced in the depth buffer of the frame (Eevee's
   "ray tracing" works like this, with light probes for what the screen

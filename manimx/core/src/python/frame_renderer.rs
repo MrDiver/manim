@@ -169,11 +169,13 @@ fn view_settings(config: &Bound<'_, PyAny>) -> PyResult<ViewSettings> {
         .collect::<PyResult<Vec<_>>>()?;
     let ambient: (f64, f64, f64) = get("ambient_linear")?.extract()?;
     let filter: (f32, f32, f32, f32) = get("shadow_filter")?.extract()?;
+    let jitter: (f64, f64) = get("jitter")?.extract()?;
     Ok(ViewSettings {
         camera: camera(&get("camera")?)?,
         camera_views,
         hide_camera_views: get("hide_camera_views")?.extract()?,
         view_aspect: get("view_aspect")?.extract()?,
+        jitter: [jitter.0, jitter.1],
         time: get("time")?.extract()?,
         layer_depth_step: get("layer_depth_step")?.extract()?,
         exposure: get("exposure")?.extract()?,

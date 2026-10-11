@@ -25,7 +25,7 @@ import numpy as np
 
 from .. import _core
 from ..renderer.config import Frame, RenderConfig, ViewState
-from ..renderer.effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap
+from ..renderer.effects import Bloom, Effect, RenderSamples, ShaderEffect, ToneMap
 
 SHADER_FOLDER = Path(__file__).resolve().parents[1] / "renderer" / "shaders"
 
@@ -46,7 +46,7 @@ class CoreFramePipeline:
             in_flight,
             profile,
         )
-        self._blur = next((effect for effect in effects if isinstance(effect, MotionBlur)), None)
+        self._samples = next((effect for effect in effects if isinstance(effect, RenderSamples)), RenderSamples(1))
         self._futures: dict[int, Future[np.ndarray]] = {}
         """Futures of the frames on the GPU, by submission number (the
         caller's indices need not be unique)."""
@@ -57,8 +57,7 @@ class CoreFramePipeline:
         """Queue the frame at ``time``; the future gets its ``(H, W, 4)``
         uint8 RGBA pixels.
         """
-        times = self._sub_frames(scene, time)
-        sub_frames = [(weight, self._views(scene(t) if callable(scene) else scene, t, len(times), index)) for index, (t, weight) in enumerate(times)]
+        sub_frames = self._sub_frames(scene, time)
         future: Future[np.ndarray] = Future()
         future.set_running_or_notify_cancel()
         number = self._submitted
@@ -91,27 +90,26 @@ class CoreFramePipeline:
         for number, image in finished:
             self._futures.pop(number).set_result(image)
 
-    def _sub_frames(self, scene: object, time: float) -> list[tuple[float, float]]:
-        blur = self._blur
-        if blur is None or not callable(scene) or blur.shutter == 0:
-            return [(time, 1.0)]
-        return blur.sample_times(time)
+    def _sub_frames(self, scene: Frame | Callable[[float], Frame], time: float) -> list[tuple[float, list[tuple]]]:
+        """``(weight, views)`` of each render of the frame at ``time``."""
+        samples = self._samples
+        moving = callable(scene) and samples.shutter > 0
+        times = samples.sample_times(time) if moving else [(time, 1 / samples.count)] * samples.count
+        still = None if moving else (scene(time) if callable(scene) else scene)
+        return [
+            (weight, self._views(scene(t) if still is None else still, t, samples.count, index, samples.jitter(index)))
+            for index, (t, weight) in enumerate(times)
+        ]
 
-    def _views(self, frame: Frame, time: float, share: int = 1, index: int = 0) -> list[tuple]:
+    def _views(self, frame: Frame, time: float, share: int = 1, index: int = 0, jitter: tuple[float, float] = (0.0, 0.0)) -> list[tuple]:
         """Each view as every renderer takes it: the render object tree and
         the ``RenderConfig`` to see it with (the view's camera and camera
-        views, the time, the sub-frame's share of the shadow taps).
+        views, the time, the render's share of the shadow taps and its
+        camera offset).
         """
         views = [frame] if isinstance(frame, ViewState) else list(frame)
-        return [
-            (
-                view.root,
-                dataclasses.replace(
-                    self.config, time=time, shadow_share=share, shadow_index=index, camera=view.camera or self.config.camera, camera_views=view.camera_views
-                ),
-            )
-            for view in views
-        ]
+        config = dataclasses.replace(self.config, time=time, shadow_share=share, shadow_index=index, jitter=jitter)
+        return [(view.root, dataclasses.replace(config, camera=view.camera or self.config.camera, camera_views=view.camera_views)) for view in views]
 
 
 def _effect_tuple(effect: Bloom | ShaderEffect) -> tuple:

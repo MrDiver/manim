@@ -1,6 +1,6 @@
 {
   "$schema": "./.manimx/project.schema.json",
-  "format": 2,
+  "format": 3,
   "name": "benchmark",
   "output": {
     "width": 1920,
@@ -9,6 +9,7 @@
     "background": "#0b1020",
     "background_opacity": 1.0,
     "antialiasing": 4,
+    "samples": 8,
     "audio": true,
     "sample_rate": 48000,
     "directory": "renders"
@@ -16,7 +17,6 @@
   "effects": {
     "motion_blur": {
       "enabled": true,
-      "samples": 8,
       "shutter_angle": 180.0
     },
     "bloom": {

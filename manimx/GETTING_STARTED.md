@@ -224,17 +224,17 @@ opens a menu with every setting (see below).
 ```json
 {
   "$schema": "./.manimx/project.schema.json",
-  "format": 2,
+  "format": 3,
   "name": "my-video",
   "output": {
     "width": 1920, "height": 1080, "fps": 60,
     "background": "#0b1020", "background_opacity": 1.0,
-    "antialiasing": 4,
+    "antialiasing": 4, "samples": 1,
     "audio": true, "sample_rate": 48000,
     "directory": "renders"
   },
   "effects": {
-    "motion_blur": { "enabled": false, "samples": 8, "shutter_angle": 180.0 },
+    "motion_blur": { "enabled": false, "shutter_angle": 180.0 },
     "bloom": { "enabled": false, "intensity": 0.1, "threshold": 1.0, "knee": 0.5, "radius": 1.0, "levels": 6 },
     "shadows": { "enabled": true, "softness": 1.0, "samples": 16, "resolution": 2048, "method": "pcf" },
     "tone_map": { "operator": "pbr_neutral", "exposure": 1.0 }
@@ -257,7 +257,8 @@ opens a menu with every setting (see below).
 | Setting | Meaning |
 |---|---|
 | `output` | how the video looks: resolution, frame rate, background, antialiasing, audio |
-| `effects.motion_blur` | off by default, since every frame then costs `samples` renders: renders averaged per frame over the exposure. `shutter_angle` is the exposure as a share of a frame: 360 is one frame, 180 half (the film default), 720 two frames, so the smear grows with it. Long exposures need more samples, or they show separate images |
+| `output.samples` | renders averaged per frame (1 by default, since every frame then costs `samples` renders), each with the camera moved by a fraction of a pixel and the shadow taps turned: smoother edges and soft shadows, like Blender Eevee's render samples |
+| `effects.motion_blur` | spreads the `output.samples` renders over the exposure. `shutter_angle` is the exposure as a share of a frame: 360 is one frame, 180 half (the film default), 720 two frames, so the smear grows with it. Long exposures need more samples, or they show separate images |
 | `effects.bloom` | glow around bright parts of lit 3D objects |
 | `effects.shadows` | shadows of 3D objects: `softness` (0 is hard), `samples` (smoother edges), `resolution` (sharper detail), `method`: `pcf` (default, a fixed narrow soft edge) or `pcss` (edges soften with the distance to the caster, slower) |
 | `effects.tone_map` | how lit 3D colors map to the screen (`pbr_neutral`, `aces`, `agx`, `reinhard`, `none`) and their `exposure`. 2D colors always stay exact |
@@ -302,7 +303,7 @@ value, r puts it back to its default, s saves to `manimx.json`, q quits.
 ## 9. Render
 
 ```sh
-uv run manimx render --preview          # 960×540, 30 fps, no motion blur: fast
+uv run manimx render --preview          # 960×540, 30 fps, one render per frame: fast
 uv run manimx render                    # the full timeline with the project's settings
 uv run manimx render Bounce             # one scene
 uv run manimx render -w 4               # four render processes (more CPU cores)
@@ -312,8 +313,8 @@ uv run manimx still -t 2.5              # one frame as a PNG
 uv run manimx render --window           # watch it render instead of writing a file
 uv run manimx render --window --write   # both
 uv run manimx render --open             # open the video when done
-uv run manimx render --motion-blur 1    # no motion blur (renders averaged per frame)
-uv run manimx render --shutter-angle 720
+uv run manimx render --samples 16       # renders averaged per frame
+uv run manimx render --motion-blur --shutter-angle 720
 ```
 
 To look at the timeline without rendering a video, preview it in the

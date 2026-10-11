@@ -4,9 +4,10 @@ Effects are plain settings; the composer turns them into GPU work. There
 are two kinds:
 
 * **Temporal** effects decide how often and when the renderer is called.
-  :class:`MotionBlur` renders several sub-frames inside the shutter
-  interval and averages them. Removing it from the chain means one render
-  per frame.
+  :class:`RenderSamples` averages several renders per frame, each with
+  the camera moved by a fraction of a pixel and the shadow taps turned,
+  and spreads them over the shutter for motion blur. Removing it from
+  the chain means one render per frame.
 * **Image** effects run shaders on textures, either on the lit 3D layer in
   linear HDR before tone mapping (``stage="lit"``: :class:`Bloom`, custom
   shaders) or on the final linear frame (``stage="frame"``: custom shaders).
@@ -30,32 +31,56 @@ class Effect:
 
 
 @dataclass(frozen=True, slots=True)
-class MotionBlur(Effect):
-    """Average ``samples`` renders spread over the shutter interval.
+class RenderSamples(Effect):
+    """Average ``count`` renders per frame, like the samples of Blender's
+    Eevee: smoother edges, and soft shadows from fewer taps per render.
+
+    Every render moves the camera by a different fraction of a pixel (the
+    Halton sequence in bases 2 and 3, spread evenly over the pixel) and
+    turns the shadow taps (``RenderConfig.shadow_index``). This is the
+    accumulation buffer's antialiasing (Haeberli and Akeley 1990,
+    https://doi.org/10.1145/97880.97913).
 
     ``shutter`` is the exposure time in seconds, centered on the frame's
-    time (``RenderConfig.time``). Film's "180 degree shutter" at 60 fps is
-    ``shutter=1/120``. Because every sub-frame is a full render of the scene
+    time (``RenderConfig.time``); above 0, the renders are spread over it
+    and moving things blur. Film's "180 degree shutter" at 60 fps is
+    ``shutter=1/120``. Because every render is a full render of the scene
     at its own time, the blur is exact for any change: movement, morphing
-    points, colors, even objects appearing. This is the accumulation
-    buffer's motion blur (Haeberli and Akeley 1990,
-    https://doi.org/10.1145/97880.97913).
+    points, colors, even objects appearing.
     """
 
-    samples: int = 16
-    shutter: float = 1 / 120
+    count: int = 16
+    shutter: float = 0.0
 
     def __post_init__(self) -> None:
-        if self.samples < 1:
-            raise ValueError("motion blur needs at least one sample")
+        if self.count < 1:
+            raise ValueError("render samples need at least one render")
         if self.shutter < 0:
             raise ValueError("shutter time must not be negative")
 
     def sample_times(self, time: float) -> list[tuple[float, float]]:
-        """``(time, weight)`` of each sub-frame; the weights sum to one."""
-        weight = 1 / self.samples
+        """``(time, weight)`` of each render; the weights sum to one."""
+        weight = 1 / self.count
         start = time - self.shutter / 2
-        return [(start + self.shutter * (i + 0.5) / self.samples, weight) for i in range(self.samples)]
+        return [(start + self.shutter * (i + 0.5) / self.count, weight) for i in range(self.count)]
+
+    def jitter(self, index: int) -> tuple[float, float]:
+        """Render ``index``'s camera offset in pixels, in [-0.5, 0.5);
+        none with one render."""
+        if self.count == 1:
+            return (0.0, 0.0)
+        return (_halton(index + 1, 2) - 0.5, _halton(index + 1, 3) - 0.5)
+
+
+def _halton(index: int, base: int) -> float:
+    """Element ``index`` of the van der Corput sequence in ``base``
+    (https://en.wikipedia.org/wiki/Halton_sequence)."""
+    result, fraction = 0.0, 1.0
+    while index > 0:
+        fraction /= base
+        result += fraction * (index % base)
+        index //= base
+    return result
 
 
 class ToneMapOperator(Enum):

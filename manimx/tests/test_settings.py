@@ -5,7 +5,7 @@ import json
 import pytest
 
 from manimx.project import Project, ProjectError
-from manimx.renderer.effects import Bloom, MotionBlur, ToneMap, ToneMapOperator
+from manimx.renderer.effects import Bloom, RenderSamples, ToneMap, ToneMapOperator
 from manimx.settings import Settings, SettingsError, entries, from_json, get, parse, set_value, to_json
 
 
@@ -28,16 +28,19 @@ def test_effects_follow_their_settings() -> None:
     settings.effects.tone_map.operator = "agx"
     settings.effects.shadows.enabled = False
     settings.output.fps = 30
+    settings.output.samples = 8
 
-    blur, bloom, tone_map = settings.effects_chain()
-    assert blur.shutter == pytest.approx(2 / 30)
+    samples, bloom, tone_map = settings.effects_chain()
+    assert samples.count == 8
+    assert samples.shutter == pytest.approx(2 / 30)
     assert bloom == Bloom(intensity=0.4)
     assert tone_map.operator is ToneMapOperator.AGX
     assert not settings.render_config().shadows
 
     settings.effects.motion_blur.enabled = False
-    assert settings.motion_blur_samples == 1
-    assert not any(isinstance(effect, MotionBlur) for effect in settings.effects_chain())
+    assert settings.effects_chain()[0] == RenderSamples(count=8)  # jittered renders, all at the frame's time
+    settings.output.samples = 1
+    assert not any(isinstance(effect, RenderSamples) for effect in settings.effects_chain())
 
 
 def test_values_are_checked_against_their_setting() -> None:
@@ -94,9 +97,21 @@ def test_format_1_projects_are_migrated(tmp_path) -> None:
     project = Project.load(tmp_path)
 
     assert project.output.fps == 30
-    assert project.settings.effects.motion_blur.enabled is False and project.settings.motion_blur_samples == 1
+    assert project.settings.effects.motion_blur.enabled is False
+    assert project.settings.output.samples == 1
     project.save()
-    assert json.loads((tmp_path / "manimx.json").read_text())["format"] == 2
+    assert json.loads((tmp_path / "manimx.json").read_text())["format"] == 3
+
+
+def test_format_2_motion_blur_samples_become_render_samples(tmp_path) -> None:
+    blurred = {"enabled": True, "samples": 6, "shutter_angle": 90.0}
+    (tmp_path / "manimx.json").write_text(json.dumps({"format": 2, "name": "old", "effects": {"motion_blur": blurred}}))
+    settings = Project.load(tmp_path).settings
+    assert settings.output.samples == 6
+    assert settings.effects.motion_blur.shutter_angle == 90.0
+
+    (tmp_path / "manimx.json").write_text(json.dumps({"format": 2, "name": "old", "effects": {"motion_blur": {**blurred, "enabled": False}}}))
+    assert Project.load(tmp_path).settings.output.samples == 1  # the samples only counted with motion blur on
 
     (tmp_path / "manimx.json").write_text(json.dumps({"format": 2, "name": "x", "effects": {"shadows": {"samples": 0}}}))
     with pytest.raises(ProjectError, match='"effects.shadows.samples" must be at least 1'):

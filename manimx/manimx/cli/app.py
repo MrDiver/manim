@@ -254,7 +254,10 @@ def render(
     width: Annotated[int | None, typer.Option(show_default=False)] = None,
     height: Annotated[int | None, typer.Option(show_default=False)] = None,
     fps: Annotated[int | None, typer.Option(show_default=False)] = None,
-    motion_blur: Annotated[int | None, typer.Option(help="Renders averaged per frame (1: off).", show_default=False)] = None,
+    samples: Annotated[int | None, typer.Option(help="Renders averaged per frame (output.samples).", show_default=False)] = None,
+    motion_blur: Annotated[
+        bool | None, typer.Option("--motion-blur/--no-motion-blur", help="Spread the renders over the exposure.", show_default=False)
+    ] = None,
     shutter_angle: Annotated[
         float | None, typer.Option(help="Exposure in degrees of a frame: 180 half a frame, 720 two frames.", show_default=False)
     ] = None,
@@ -278,6 +281,7 @@ def render(
     chosen = copy.deepcopy(project.settings)
     if preview:
         chosen.output.width, chosen.output.height, chosen.output.fps = 960, 540, 30
+        chosen.output.samples = 1
         chosen.effects.motion_blur.enabled = False
         chosen.effects.shadows.method = "pcf"
     _override(chosen, ("output", "width"), width)
@@ -285,17 +289,17 @@ def render(
     _override(chosen, ("output", "fps"), fps)
     _override(chosen, ("output", "audio"), audio)
     _override(chosen, ("effects", "motion_blur", "shutter_angle"), shutter_angle)
-    if motion_blur is not None:
-        _override(chosen, ("effects", "motion_blur", "samples"), motion_blur)
-        chosen.effects.motion_blur.enabled = motion_blur > 1
+    _override(chosen, ("output", "samples"), samples)
+    _override(chosen, ("effects", "motion_blur", "enabled"), motion_blur)
     options = chosen.output
     workers = workers or project.performance.workers
     settings = dataclasses.replace(project.render_settings(chosen), start=start, end=end)
 
     what = scene or "timeline"
-    samples = chosen.motion_blur_samples
-    blur = f"motion blur ×{samples} · {chosen.effects.motion_blur.shutter_angle:g}°" if samples > 1 else "no motion blur"
-    ui.header(project.name, what, f"{options.width}×{options.height}", f"{options.fps} fps", blur, f"{workers} worker{'s' * (workers != 1)}")
+    renders = f"{options.samples} sample{'s' * (options.samples != 1)}"
+    if chosen.effects.motion_blur.enabled:
+        renders += f" · motion blur {chosen.effects.motion_blur.shutter_angle:g}°"
+    ui.header(project.name, what, f"{options.width}×{options.height}", f"{options.fps} fps", renders, f"{workers} worker{'s' * (workers != 1)}")
     if scene is None:
         source: Any = _build(project)
         ui.console.print(_timeline_table(project, source))
@@ -427,6 +431,7 @@ def _preview_settings(project: Project) -> Any:
     """The project's render settings for previews: one render per frame,
     PCF shadows."""
     chosen = copy.deepcopy(project.settings)
+    chosen.output.samples = 1
     chosen.effects.motion_blur.enabled = False
     chosen.effects.shadows.method = "pcf"
     chosen.output.audio = False

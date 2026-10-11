@@ -9,7 +9,7 @@ which :mod:`manimx.drivers` drives. See README.md.
 """
 
 from .config import Camera, CameraViewState, Frame, RenderConfig, ViewState
-from .effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap, ToneMapOperator
+from .effects import Bloom, Effect, RenderSamples, ShaderEffect, ToneMap, ToneMapOperator
 
 __all__ = [
     "Bloom",
@@ -17,8 +17,8 @@ __all__ = [
     "CameraViewState",
     "Effect",
     "Frame",
-    "MotionBlur",
     "RenderConfig",
+    "RenderSamples",
     "ShaderEffect",
     "ToneMap",
     "ToneMapOperator",

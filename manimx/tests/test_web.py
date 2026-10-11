@@ -20,7 +20,7 @@ from manimx.drivers import StillRenderer, render_image
 from manimx.drivers.offline import RenderSettings
 from manimx.examples.navigation import Navigation, config
 from manimx.project import Project
-from manimx.renderer import MotionBlur
+from manimx.renderer import RenderSamples
 from manimx.web import PreviewServer, ProjectReloader
 from PIL import Image
 
@@ -42,7 +42,7 @@ def timeline() -> Timeline:
 
 @pytest.fixture
 def server(renderer, timeline):
-    settings = RenderSettings(config(128, 72), fps=10, effects=(MotionBlur(samples=4),))
+    settings = RenderSettings(config(128, 72), fps=10, effects=(RenderSamples(count=4, shutter=1 / 20),))
     server = PreviewServer(timeline, settings, title="demo", renderer=renderer)
     server.start()
     yield server
@@ -79,7 +79,7 @@ def test_the_timeline_describes_clips_and_segments(server, timeline) -> None:
     assert data["segments"] and all(segment["clip"] == 0 for segment in data["segments"])
 
 
-def test_frames_are_rendered_at_the_asked_width_without_motion_blur(server, timeline) -> None:
+def test_frames_are_rendered_at_the_asked_width_with_one_render(server, timeline) -> None:
     status, kind, body = get(server, "/api/frame?t=1.5&w=64&format=png")
     image = np.asarray(Image.open(io.BytesIO(body)))
 

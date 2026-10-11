@@ -34,8 +34,8 @@ from manimx.examples.navigation import Navigation
 from manimx.project import Project
 from manimx.renderer import (
     Bloom,
-    MotionBlur,
     RenderConfig,
+    RenderSamples,
     ShaderEffect,
     ToneMap,
     ToneMapOperator,
@@ -122,7 +122,7 @@ def test_scenes_render_like_their_references(scene_class: type[Scene], update_re
 
 
 def test_effects_render_like_their_reference(update_references: bool) -> None:
-    effects = (MotionBlur(samples=3), Bloom(intensity=0.5), DARKEN_LIT, VIGNETTE, ToneMap(ToneMapOperator.ACES))
+    effects = (RenderSamples(count=3, shutter=1 / 120), Bloom(intensity=0.5), DARKEN_LIT, VIGNETTE, ToneMap(ToneMapOperator.ACES))
     check("EveryNode_effects", EveryNode().prepare().frame_at, [1.2], update_references, effects)
 
 

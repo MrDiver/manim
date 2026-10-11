@@ -31,7 +31,8 @@ next to the algorithm; this page lists them all in one place.
 | Bloom: 13-tap downsample and tent upsample over a mip chain | shaders/bloom.wgsl, core/src/render/effects/bloom.rs | Jorge Jimenez, [Next Generation Post Processing in Call of Duty: Advanced Warfare](https://www.iryoku.com/next-generation-post-processing-in-call-of-duty-advanced-warfare/) (SIGGRAPH 2014) |
 | Depth of field: the thin lens's circle of confusion | shaders/lens.wgsl, shaders/depth_of_field.wgsl | Potmesil and Chakravarty, A Lens and Aperture Camera Model for Synthetic Image Generation (SIGGRAPH 1981); derived in [PBR book, 6.2.3](https://pbr-book.org/3ed-2018/Camera_Models/Projective_Camera_Models#TheThinLensModelandDepthofField) |
 | Depth of field: scatter as gather, tiles of largest blur, interleaved gradient noise | shaders/depth_of_field*.wgsl, core/src/render/effects/depth_of_field.rs | Jorge Jimenez, [Next Generation Post Processing in Call of Duty: Advanced Warfare](https://www.iryoku.com/next-generation-post-processing-in-call-of-duty-advanced-warfare/) (SIGGRAPH 2014) |
-| Motion blur by averaging renders inside the shutter | manimx/renderer/effects.py (`MotionBlur`), core/src/render/composer.rs | Haeberli and Akeley, [The Accumulation Buffer](https://doi.org/10.1145/97880.97913) (SIGGRAPH 1990) |
+| Render samples and motion blur: averaging jittered renders, spread inside the shutter | manimx/renderer/effects.py (`RenderSamples`), core/src/render/composer.rs | Haeberli and Akeley, [The Accumulation Buffer](https://doi.org/10.1145/97880.97913) (SIGGRAPH 1990) |
+| Render samples: sub-pixel camera offsets from the Halton sequence (bases 2 and 3) | manimx/renderer/effects.py (`RenderSamples.jitter`), core/src/render/settings.rs | J. H. Halton, [On the efficiency of certain quasi-random sequences of points](https://doi.org/10.1007/BF01386213) (Numerische Mathematik 1960) |
 
 ## Geometry and animation
 

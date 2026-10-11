@@ -28,7 +28,7 @@ from dataclasses import dataclass, field, fields
 from typing import Any
 
 from .renderer.config import RenderConfig
-from .renderer.effects import Bloom, Effect, MotionBlur, ToneMap, ToneMapOperator
+from .renderer.effects import Bloom, Effect, RenderSamples, ToneMap, ToneMapOperator
 from .utils.color import ManimColor
 
 
@@ -78,6 +78,12 @@ class OutputSettings:
         1.0, "Background opacity; below 1 needs an output with alpha, e.g. --png.", minimum=0.0, maximum=1.0
     )
     antialiasing: int = setting(4, "Samples per pixel for smooth edges (1: off).", choices=(1, 4))
+    samples: int = setting(
+        1,
+        "Renders averaged per frame, each moved by a fraction of a pixel: smoother edges and soft shadows; motion blur spreads them over the exposure.",
+        minimum=1,
+        note=lambda settings: _spacing(settings) if settings.effects.motion_blur.enabled else "",
+    )
     audio: bool = setting(True, "Include the scenes' sounds.")
     sample_rate: int = setting(48_000, "Audio sample rate.", minimum=8000, unit="Hz")
     directory: str = setting("renders", "Where renders go, relative to the project.")
@@ -92,16 +98,15 @@ def _exposure(settings: Settings) -> str:
 def _spacing(settings: Settings) -> str:
     blur = settings.effects.motion_blur
     seconds = blur.shutter_angle / 360 / settings.output.fps
-    return f"one image every {seconds / blur.samples:.3g} s of the exposure"
+    return f"one image every {seconds / settings.output.samples:.3g} s of the exposure"
 
 
 @dataclass
 class MotionBlurSettings:
-    """Average several renders spread over the exposure, like a camera
-    whose shutter stays open. Every sample is a full render."""
+    """Spread the renders of a frame (output.samples) over the exposure,
+    like a camera whose shutter stays open."""
 
-    enabled: bool = setting(False, "Blur moving things over the exposure time (every frame costs samples renders).")
-    samples: int = setting(8, "Renders averaged per frame; long exposures need more, or they show separate images.", minimum=1, note=_spacing)
+    enabled: bool = setting(False, "Blur moving things over the exposure time; long exposures need more output.samples, or they show separate images.")
     shutter_angle: float = setting(
         180.0,
         "Exposure as a share of a frame: 360 is one frame, 180 half (film's default), 720 two frames.",
@@ -157,7 +162,7 @@ class ToneMapSettings:
 class EffectsSettings:
     """Camera and image effects."""
 
-    motion_blur: MotionBlurSettings = section(MotionBlurSettings, "Average renders over the exposure time.")
+    motion_blur: MotionBlurSettings = section(MotionBlurSettings, "Spread the frame's renders over the exposure time.")
     bloom: BloomSettings = section(BloomSettings, "Glow around bright lit pixels.")
     shadows: ShadowSettings = section(ShadowSettings, "Shadows of 3D objects.")
     tone_map: ToneMapSettings = section(ToneMapSettings, "Mapping of lit 3D colors to the screen.")
@@ -214,19 +219,15 @@ class Settings:
         """The frame composer's effects, in the order they apply."""
         chain: list[Effect] = []
         blur = self.effects.motion_blur
-        if blur.enabled and blur.samples > 1:
-            chain.append(MotionBlur(samples=blur.samples, shutter=blur.shutter_angle / 360 / self.output.fps))
+        shutter = blur.shutter_angle / 360 / self.output.fps if blur.enabled else 0.0
+        if self.output.samples > 1:
+            chain.append(RenderSamples(count=self.output.samples, shutter=shutter))
         bloom = self.effects.bloom
         if bloom.enabled:
             chain.append(Bloom(threshold=bloom.threshold, knee=bloom.knee, intensity=bloom.intensity, radius=bloom.radius, levels=bloom.levels))
         chain.append(ToneMap(ToneMapOperator[self.effects.tone_map.operator.upper()]))
         return tuple(chain)
 
-    @property
-    def motion_blur_samples(self) -> int:
-        """Renders per frame (1 when motion blur is off)."""
-        blur = self.effects.motion_blur
-        return blur.samples if blur.enabled else 1
 
 
 # --------------------------------------------------------------------------

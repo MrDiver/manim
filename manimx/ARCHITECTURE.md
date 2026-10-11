@@ -88,7 +88,7 @@ flowchart LR
 | `manimx.robjects` | the render object tree, implemented in the core: `RNode` and its subclasses `RGroup`, `RClippingGroup`, `RBezierPath` (→ `RShape2D`, `RCurve3D`), `RShape3D` (→ `RParticles`), `RLight` (→ `RDirectionalLight`, `RPointLight`, `RSpotLight`); `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`, `SurfaceShader`; `new_uid()`; in Python: `Transform`, `JointType`, `CapStyle` | `_core`, numpy |
 | `manimx.animation` (core; `signals/` and `nodes/` hold the signal and node classes) | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses (`Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D` (→ `Particles`), `Light` → `DirectionalLight`, `PointLight`, `SpotLight`; `animation.Camera`), `PositionMixin`, `RotationMixin`, `ScalableMixin`; the `Animation` contract (`Animation`, `SetValue`, `ChangeSignals`/`AnimationBuilder`) and the default rates `linear`, `smooth`; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `Simulation`; `Sound`; contributions as data (`signals/contributions.py`: `To`, `By`, `Ramp`, `Power`, `Turn`, `Keyframes`, `Between`, `Partial`), `paths.partial_path()`, `ScenePlan`, `scene_graph()`, `snapshot()` | robjects, `_core`; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
 | `manimx.userland` | everything a project could write on top of the core: shapes (`Circle`, `Dot`, `Square`, `Rectangle`, `RegularPolygon`, `Triangle`, `Polyline`, `ParametricCurve3D`, `Box`, `Sphere`, `Torus`, `ParametricSurface`), animations (`FadeIn`, `FadeOut`, `Rotate`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter`, `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`), `rate_functions`, `constants` (`UP`, `PI`, ...), `geometry` (every point and mesh generator, `align_paths()`), `load_gltf()` | animation, robjects |
-| `manimx.renderer` | what a renderer is given next to the tree: `RenderConfig`, `renderer.Camera`, `ViewState`, `CameraViewState`; `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; the WGSL shaders of the core's renderer | robjects |
+| `manimx.renderer` | what a renderer is given next to the tree: `RenderConfig`, `renderer.Camera`, `ViewState`, `CameraViewState`; `RenderSamples`, `Bloom`, `ToneMap`, `ShaderEffect`; the WGSL shaders of the core's renderer | robjects |
 | `manimx.drivers` | `render()`, `CoreFramePipeline`, `StillRenderer`, `render_image()`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation, `_core` |
 | `manimx.project` | `Project`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers, settings |
 | `manimx.settings` | `Settings` and its sections (`OutputSettings`, `EffectsSettings`, `LightingSettings`, `PerformanceSettings`), `setting()` | renderer (config, effects) |
@@ -122,7 +122,7 @@ sequenceDiagram
     D->>FF: VideoFile.open(FrameFormat with the audio)
     loop every time t of RenderSettings.frame_times()
         D->>CP: submit(index, t, timeline.frame_at)
-        loop every time s of MotionBlur.sample_times(t)
+        loop every time s of RenderSamples.sample_times(t)
             CP->>TL: frame_at(s): the core evaluates every signal and builds each clip's RNode tree
         end
         CP->>FR: render(index, sub-frames: per view the tree and its RenderConfig)
@@ -737,7 +737,7 @@ flowchart LR
 **Animation package**
 
 - **Two passes: `Scene.prepare()` once, `state_at()` anywhere.** Random
-  access is what makes scrubbing, retiming, cuts, previews, `MotionBlur` and
+  access is what makes scrubbing, retiming, cuts, previews, `RenderSamples` and
   worker processes simple. Replaying from the start on every query would
   rule them out.
 - **A `RootSignal` per property and per axis (`Vector3Signal`).**
@@ -798,8 +798,11 @@ flowchart LR
   GPU buffers, patched per frame; only changed ranges are uploaded. The
   cost follows what changed, not the size of the scene.
 - **No meshes in a frame, no 3D passes.** Most Manim content is 2D.
-- **`MotionBlur` renders real sub-frames.** Any change blurs correctly,
-  including camera moves and appearing `Node`s.
+- **`RenderSamples` renders real sub-frames.** Each moves the camera by a
+  fraction of a pixel and turns the shadow taps; with motion blur they
+  are spread over the shutter, so any change blurs correctly, including
+  camera moves and appearing `Node`s. One count of renders serves both,
+  as in Blender's Eevee.
 
 **Drivers**
 

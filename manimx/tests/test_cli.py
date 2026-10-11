@@ -13,7 +13,7 @@ from manimx.project import Project, ProjectError, ProjectSource
 from PIL import Image
 
 needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
-TINY = ["--width", "64", "--height", "36", "--fps", "5", "--motion-blur", "1"]
+TINY = ["--width", "64", "--height", "36", "--fps", "5", "--samples", "1"]
 
 
 @pytest.fixture
@@ -38,10 +38,11 @@ def test_help_and_version(capsys) -> None:
 
 def test_new_creates_a_project_with_example_scenes(capsys, project) -> None:
     data = config(project)
-    assert data["format"] == 2 and data["$schema"] == "./.manimx/project.schema.json"
+    assert data["format"] == 3 and data["$schema"] == "./.manimx/project.schema.json"
     assert data["output"]["width"] == 1280 and data["output"]["fps"] == 30 and "camera" not in data
     assert data["performance"] == {"workers": 1, "frames_in_flight": 3}
-    assert data["effects"]["motion_blur"] == {"enabled": False, "samples": 8, "shutter_angle": 180.0}
+    assert data["effects"]["motion_blur"] == {"enabled": False, "shutter_angle": 180.0}
+    assert data["output"]["samples"] == 1
     assert data["effects"]["bloom"]["enabled"] is False and data["lighting"]["default_lights"] is True
     assert list(data["scenes"]) == ["Intro", "Bounce"] and [c["scene"] for c in data["timeline"]["clips"]] == ["Intro", "Bounce"]
     schema = json.loads((project / ".manimx" / "project.schema.json").read_text())
