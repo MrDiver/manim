@@ -14,14 +14,14 @@
 //! References only grow within a layer, so values left by earlier clip
 //! scopes never match.
 
-use super::buffer::GrowableBuffer;
-use super::context::{Gpu, SHADOW_FORMAT};
-use super::mesh_pass::MeshPass;
-use super::profiler::GpuProfiler;
-use super::vector_pass::VectorPass;
-use crate::graph::NO_CLIP;
-use crate::records::{Frame, ShadowView};
-use crate::shadows::ShadowViews;
+use crate::packing::records::{Frame, ShadowView};
+use crate::packing::scene_graph::NO_CLIP;
+use crate::packing::shadows::ShadowViews;
+use crate::render::buffer::GrowableBuffer;
+use crate::render::context::{Gpu, SHADOW_FORMAT};
+use crate::render::passes::mesh::MeshPass;
+use crate::render::passes::vector::VectorPass;
+use crate::render::profiler::GpuProfiler;
 
 /// Frames of the shadow views share one uniform buffer; bind group offsets
 /// must be multiples of 256 bytes.

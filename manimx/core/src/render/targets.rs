@@ -12,7 +12,9 @@
 //! The resolved `lit` and `vector` textures are the renderer's output; the
 //! composer combines them into an image.
 
-use super::context::{COLOR_FORMAT, DEPTH_FORMAT, EDGE_FORMAT, GBUFFER_FORMATS, HDR_FORMAT};
+use crate::render::context::{
+    COLOR_FORMAT, DEPTH_FORMAT, EDGE_FORMAT, GBUFFER_FORMATS, HDR_FORMAT,
+};
 
 pub struct RenderTargets {
     pub width: u32,

@@ -13,13 +13,15 @@ use std::collections::{HashMap, HashSet};
 
 use pyo3::prelude::*;
 
-use super::buffer::{GrowableBuffer, Records};
-use super::context::{shadow_depth_stencil, Gpu, ShadowStencil, DEPTH_FORMAT, GBUFFER_FORMATS};
-use super::vector_pass::shadow_runs;
-use crate::callbacks::bytes_of;
-use crate::graph::ShadowList;
-use crate::meshes::DrawGroup;
-use crate::records::{DrawIndexed, Frame};
+use crate::packing::callbacks::bytes_of;
+use crate::packing::meshes::DrawGroup;
+use crate::packing::records::{DrawIndexed, Frame};
+use crate::packing::scene_graph::ShadowList;
+use crate::render::buffer::{GrowableBuffer, Records};
+use crate::render::context::{
+    shadow_depth_stencil, Gpu, ShadowStencil, DEPTH_FORMAT, GBUFFER_FORMATS,
+};
+use crate::render::passes::vector::shadow_runs;
 
 /// Color space of each texture slot, in `PbrMaterial.textures` order: base
 /// color and emissive hold sRGB colors, the others linear data.

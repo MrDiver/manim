@@ -1,35 +1,33 @@
-//! The native core of manimx. CORE.md (in the folder above) explains
-//! why it exists and what it will do; README.md here maps the modules.
+//! The native core of manimx, imported in Python as `manimx._core`.
+//!
+//! A frame goes through three stages, one folder each:
+//!
+//! 1. `evaluation`: every signal of a scene set to its value at a time
+//!    (the `Evaluator`, `FrameState`).
+//! 2. `packing`: the scene graph with those values turned into the
+//!    records the GPU reads (the `Packer`); `geometry` holds the shape
+//!    math it uses (fills as triangles, strokes as curve records).
+//! 3. `render`: the records drawn on the GPU into a frame
+//!    (the `FrameRenderer`).
+//!
+//! CORE.md (in the folder above) explains why the core exists;
+//! README.md here maps every module.
 
 use pyo3::prelude::*;
 
-mod arena;
-mod callbacks;
-mod contribution;
-mod evaluator;
-mod gpu;
-mod graph;
-mod lights;
-mod meshes;
-mod packer;
-mod paths;
-mod rates;
-mod records;
-mod shadows;
-mod strokes;
-mod tessellation;
-mod track;
-mod value;
-mod vectors;
+mod evaluation;
+mod geometry;
+mod packing;
+mod render;
 
 #[pymodule]
 fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("VERSION", env!("CARGO_PKG_VERSION"))?;
-    module.add_class::<evaluator::Evaluator>()?;
-    module.add_class::<evaluator::FrameState>()?;
-    module.add_class::<evaluator::Slots>()?;
-    module.add_class::<graph::SceneGraph>()?;
-    module.add_class::<gpu::frame_renderer::FrameRenderer>()?;
+    module.add_class::<evaluation::evaluator::Evaluator>()?;
+    module.add_class::<evaluation::evaluator::FrameState>()?;
+    module.add_class::<evaluation::evaluator::Slots>()?;
+    module.add_class::<packing::scene_graph::SceneGraph>()?;
+    module.add_class::<render::frame_renderer::FrameRenderer>()?;
     module.add_function(wrap_pyfunction!(stroke_records, module)?)?;
     Ok(())
 }
@@ -62,14 +60,14 @@ fn stroke_records<'py>(
         .into_iter()
         .map(|row| [row[0], row[1], row[2]])
         .collect();
-    let style = strokes::StrokeStyle {
+    let style = geometry::strokes::StrokeStyle {
         colors: &colors,
         opacities: &opacities,
         widths: &widths,
         joints: &joints,
         cap,
     };
-    let stroke = strokes::stroke_records(&flat, dimension, &style);
+    let stroke = geometry::strokes::stroke_records(&flat, dimension, &style);
     Ok((
         pyo3::types::PyBytes::new(py, &stroke.curves),
         pyo3::types::PyBytes::new(py, &stroke.points),

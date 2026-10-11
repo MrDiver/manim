@@ -12,8 +12,8 @@ use pyo3::prelude::*;
 
 use glam::{DMat4, DQuat, DVec3};
 
-use crate::evaluator::FrameState;
-use crate::value::Value;
+use crate::evaluation::evaluator::FrameState;
+use crate::evaluation::value::Value;
 
 /// Clip index of something not inside any `ClippingGroup` (`NO_CLIP`).
 pub const NO_CLIP: i32 = -1;

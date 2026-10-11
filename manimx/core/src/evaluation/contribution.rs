@@ -11,8 +11,8 @@ use glam::{DQuat, DVec3};
 
 use std::sync::Arc;
 
-use crate::paths;
-use crate::value::{Kind, Value};
+use crate::evaluation::paths;
+use crate::evaluation::value::{Kind, Value};
 
 pub enum Contribution {
     /// From the start value to `value` (`SignalChange` with ABSOLUTE).

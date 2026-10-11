@@ -18,11 +18,11 @@ use std::sync::Arc;
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
-use crate::contribution::{Contribution, Keyframes, Window};
-use crate::paths;
-use crate::rates::Rate;
-use crate::track::{Entry, Track};
-use crate::value::{Kind, Value};
+use crate::evaluation::contribution::{Contribution, Keyframes, Window};
+use crate::evaluation::paths;
+use crate::evaluation::rates::Rate;
+use crate::evaluation::track::{Entry, Track};
+use crate::evaluation::value::{Kind, Value};
 
 /// One signal's current value and version (its kind is in
 /// `Evaluator::kinds`, shared with every `FrameState`).

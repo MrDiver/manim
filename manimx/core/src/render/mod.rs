@@ -18,15 +18,13 @@
 //! | `inspect` | reads textures back to look at them (scripts/render_internals.py) |
 
 pub mod buffer;
-pub mod camera_views;
 pub mod composer;
 pub mod context;
+pub mod effects;
 pub mod frame_renderer;
+pub mod fullscreen;
 pub mod inspect;
-pub mod lighting_pass;
-pub mod mesh_pass;
+pub mod passes;
 pub mod profiler;
 pub mod renderer;
-pub mod shadow_pass;
 pub mod targets;
-pub mod vector_pass;

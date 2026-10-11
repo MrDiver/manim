@@ -18,17 +18,18 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 
-use super::composer::{
-    Blend, Bloom, Composer, CompositeTarget, DepthOfField, Effect, ShaderEffect,
-};
-use super::context::{Gpu, COLOR_FORMAT, HDR_FORMAT};
-use super::inspect::TextureKind;
-use super::renderer::{Renderer, TargetSettings};
-use crate::evaluator::FrameState;
-use crate::graph::SceneGraph;
-use crate::packer::{parse_settings, Packer, Packet};
-use crate::records::Frame;
-use crate::vectors::VectorDraws;
+use crate::evaluation::evaluator::FrameState;
+use crate::packing::packer::{parse_settings, Packer, Packet};
+use crate::packing::records::Frame;
+use crate::packing::scene_graph::SceneGraph;
+use crate::packing::vectors::VectorDraws;
+use crate::render::composer::{Composer, CompositeTarget};
+use crate::render::context::{Gpu, COLOR_FORMAT, HDR_FORMAT};
+use crate::render::effects::depth_of_field::DepthOfField;
+use crate::render::effects::{Bloom, Effect, ShaderEffect};
+use crate::render::fullscreen::Blend;
+use crate::render::inspect::TextureKind;
+use crate::render::renderer::{Renderer, TargetSettings};
 
 /// Bytes per row of texture-to-buffer copies must be multiples of this.
 const ROW_ALIGNMENT: u32 = 256;
@@ -324,7 +325,7 @@ impl FrameRenderer {
                 )
             }
         };
-        let texels = super::inspect::read(&self.gpu, &view, kind, size, layer)?;
+        let texels = crate::render::inspect::read(&self.gpu, &view, kind, size, layer)?;
         Ok((
             size.0,
             size.1,

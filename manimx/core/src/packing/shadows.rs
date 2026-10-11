@@ -24,11 +24,11 @@ use std::f64::consts::PI;
 use glam::{DMat4, DVec3, DVec4};
 use pyo3::prelude::*;
 
-use crate::callbacks::{bytes_of, Callbacks};
-use crate::graph::{DrawItem, FlatScene, LightType, NodeData, SceneGraph, Values};
-use crate::lights::LightSource;
-use crate::meshes::MeshPacker;
-use crate::records::{self, Frame, Light, ShadowView};
+use crate::packing::callbacks::{bytes_of, Callbacks};
+use crate::packing::lights::LightSource;
+use crate::packing::meshes::MeshPacker;
+use crate::packing::records::{self, Frame, Light, ShadowView};
+use crate::packing::scene_graph::{DrawItem, FlatScene, LightType, NodeData, SceneGraph, Values};
 
 const NEAR: f64 = 0.05;
 /// Cube faces of a point light: (looking along, up), in the order of

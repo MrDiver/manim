@@ -2,7 +2,7 @@
 //! texture, rendered before the frame and sampled by the vector pass.
 //! See manimx/animation/camera_view.py.
 
-use super::context::HDR_FORMAT;
+use crate::render::context::HDR_FORMAT;
 
 pub struct CameraViewTexture {
     texture: wgpu::Texture,

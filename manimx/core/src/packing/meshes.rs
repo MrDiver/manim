@@ -21,10 +21,12 @@ use std::collections::{HashMap, HashSet};
 use glam::{DMat3, DMat4, DQuat, DVec3};
 use pyo3::prelude::*;
 
-use crate::arena::Arena;
-use crate::callbacks::{bytes_of, Callbacks};
-use crate::graph::{FlatScene, MeshFields, NodeData, SceneGraph, ShadowList, Values};
-use crate::records::{self, DrawIndexed, Material, MeshObject};
+use crate::packing::arena::Arena;
+use crate::packing::callbacks::{bytes_of, Callbacks};
+use crate::packing::records::{self, DrawIndexed, Material, MeshObject};
+use crate::packing::scene_graph::{
+    FlatScene, MeshFields, NodeData, SceneGraph, ShadowList, Values,
+};
 
 /// A mesh as the renderer needs it, built once per mesh version.
 pub struct MeshGeometry {
@@ -331,7 +333,7 @@ impl MeshPacker {
 /// A texture's identity, 0 for none (draws are grouped by texture sets).
 fn texture_identity(values: &Values, slot: usize) -> usize {
     match values.get(slot) {
-        crate::value::Value::Object(object) if !object.is_none(values.py) => {
+        crate::evaluation::value::Value::Object(object) if !object.is_none(values.py) => {
             object.as_ptr() as usize
         }
         _ => 0,

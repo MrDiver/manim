@@ -12,7 +12,7 @@
 //! like `resample` does: linear interpolation of the list stretched over
 //! them.
 
-use crate::records::{StrokeCurve, NO_NEIGHBOR, STROKE_POINT_SIZE};
+use crate::packing::records::{StrokeCurve, NO_NEIGHBOR, STROKE_POINT_SIZE};
 
 /// `POINTS_PER_CURVE`: a cubic Bezier's four control points.
 const POINTS_PER_CURVE: usize = 4;

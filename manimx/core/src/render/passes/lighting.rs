@@ -6,9 +6,9 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
-use super::buffer::GrowableBuffer;
-use super::context::{Gpu, EDGE_FORMAT, HDR_FORMAT};
-use super::shadow_pass::ShadowPass;
+use crate::render::buffer::GrowableBuffer;
+use crate::render::context::{Gpu, EDGE_FORMAT, HDR_FORMAT};
+use crate::render::passes::shadow::ShadowPass;
 
 /// The stencil value of a pixel on an edge.
 const EDGE: u32 = 1;

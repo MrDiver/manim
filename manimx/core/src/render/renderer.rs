@@ -14,17 +14,17 @@
 
 use pyo3::prelude::*;
 
-use super::buffer::Records;
-use super::context::Gpu;
-use super::inspect::TextureKind;
-use super::lighting_pass::LightingPass;
-use super::mesh_pass::{MeshData, MeshPass};
-use super::profiler::GpuProfiler;
-use super::shadow_pass::ShadowPass;
-use super::targets::RenderTargets;
-use super::vector_pass::{VectorData, VectorPass};
-use crate::packer::{Packer, Packet};
-use crate::records::Frame;
+use crate::packing::packer::{Packer, Packet};
+use crate::packing::records::Frame;
+use crate::render::buffer::Records;
+use crate::render::context::Gpu;
+use crate::render::inspect::TextureKind;
+use crate::render::passes::lighting::LightingPass;
+use crate::render::passes::mesh::{MeshData, MeshPass};
+use crate::render::passes::shadow::ShadowPass;
+use crate::render::passes::vector::{VectorData, VectorPass};
+use crate::render::profiler::GpuProfiler;
+use crate::render::targets::RenderTargets;
 
 /// What the renderer needs from the `RenderConfig`.
 #[derive(Clone, Copy, PartialEq)]

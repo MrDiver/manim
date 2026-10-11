@@ -41,15 +41,15 @@ use std::collections::{HashMap, HashSet};
 
 use pyo3::prelude::*;
 
-use crate::arena::Arena;
-use crate::callbacks::{bytes_of, Callbacks};
-use crate::graph::{
+use crate::evaluation::value::Value;
+use crate::geometry::strokes::{stroke_records, StrokeStyle};
+use crate::geometry::tessellation::tessellate_fill;
+use crate::packing::arena::Arena;
+use crate::packing::callbacks::{bytes_of, Callbacks};
+use crate::packing::records::{self, DrawIndirect, Instance, Object, StrokeCurve};
+use crate::packing::scene_graph::{
     DrawItem, FlatScene, Node, NodeData, PathFields, SceneGraph, ShadowList, Values, NO_CLIP,
 };
-use crate::records::{self, DrawIndirect, Instance, Object, StrokeCurve};
-use crate::strokes::{stroke_records, StrokeStyle};
-use crate::tessellation::tessellate_fill;
-use crate::value::Value;
 use glam::{DMat4, DVec2, DVec3};
 
 /// Where one path's records live, and what they were built from (`_Slot`).

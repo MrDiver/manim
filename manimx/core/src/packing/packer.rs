@@ -12,14 +12,14 @@ use std::collections::HashMap;
 use glam::DMat4;
 use pyo3::prelude::*;
 
-use crate::callbacks::Callbacks;
-use crate::evaluator::FrameState;
-use crate::graph::{NodeData, SceneGraph, Values};
-use crate::lights::{self, LightColors};
-use crate::meshes::{MeshOutput, MeshPacker};
-use crate::records::Light;
-use crate::shadows::{self, Bounds, FrameSettings, ShadowLayers, ShadowViews};
-use crate::vectors::{CameraViews, VectorDraws, VectorPacker};
+use crate::evaluation::evaluator::FrameState;
+use crate::packing::callbacks::Callbacks;
+use crate::packing::lights::{self, LightColors};
+use crate::packing::meshes::{MeshOutput, MeshPacker};
+use crate::packing::records::Light;
+use crate::packing::scene_graph::{NodeData, SceneGraph, Values};
+use crate::packing::shadows::{self, Bounds, FrameSettings, ShadowLayers, ShadowViews};
+use crate::packing::vectors::{CameraViews, VectorDraws, VectorPacker};
 
 /// Packs after which per-node data unused since is dropped (`CACHE_MAX_AGE`).
 const CACHE_MAX_AGE: u64 = 1024;

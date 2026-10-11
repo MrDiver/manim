@@ -11,11 +11,13 @@
 
 use std::collections::HashMap;
 
-use super::buffer::{GrowableBuffer, Records};
-use super::camera_views::CameraViewTexture;
-use super::context::{shadow_depth_stencil, Gpu, ShadowStencil, COLOR_FORMAT, DEPTH_FORMAT};
-use crate::graph::ShadowList;
-use crate::records::Frame;
+use crate::packing::records::Frame;
+use crate::packing::scene_graph::ShadowList;
+use crate::render::buffer::{GrowableBuffer, Records};
+use crate::render::context::{
+    shadow_depth_stencil, Gpu, ShadowStencil, COLOR_FORMAT, DEPTH_FORMAT,
+};
+use crate::render::passes::camera_views::CameraViewTexture;
 
 /// Bytes of one indirect draw (`DrawIndirectArgs`).
 const DRAW_SIZE: u64 = 16;

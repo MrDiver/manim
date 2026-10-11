@@ -4,9 +4,9 @@
 
 use pyo3::prelude::*;
 
-use crate::contribution::Contribution;
-use crate::rates::Rate;
-use crate::value::{Kind, Value};
+use crate::evaluation::contribution::Contribution;
+use crate::evaluation::rates::Rate;
+use crate::evaluation::value::{Kind, Value};
 
 /// A placement's appearance on one track (`Entry` with its `Placement`).
 pub struct Entry {

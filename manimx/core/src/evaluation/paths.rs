@@ -3,7 +3,7 @@
 //!
 //! Points are rows of `dimension` floats, four per cubic curve.
 
-use crate::value::Array;
+use crate::evaluation::value::Array;
 
 const POINTS_PER_CURVE: usize = 4;
 

@@ -8,9 +8,9 @@ use std::f64::consts::FRAC_PI_2;
 use glam::{DMat4, DVec3};
 use pyo3::prelude::*;
 
-use crate::callbacks::Callbacks;
-use crate::graph::{FlatScene, LightType, NodeData, SceneGraph, Values, NO_CLIP};
-use crate::records::{self, Light};
+use crate::packing::callbacks::Callbacks;
+use crate::packing::records::{self, Light};
+use crate::packing::scene_graph::{FlatScene, LightType, NodeData, SceneGraph, Values, NO_CLIP};
 
 /// One light as the renderer needs it (`LightItem` with its `RLight`).
 pub struct LightSource {

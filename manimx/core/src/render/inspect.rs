@@ -11,7 +11,7 @@
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::PyResult;
 
-use super::context::Gpu;
+use crate::render::context::Gpu;
 
 /// How a texture is read in WGSL.
 #[derive(Clone, Copy)]
