@@ -19,6 +19,7 @@ use crate::render::error::Result;
 use crate::render::packing::flatten::ShadowList;
 use crate::render::packing::records::Frame;
 use crate::render::passes::camera_views::CameraViewTexture;
+use crate::render::passes::images::ImageTexture;
 
 /// Bytes of one indirect draw (`DrawIndirectArgs`).
 const DRAW_SIZE: u64 = 16;
@@ -33,6 +34,8 @@ pub struct VectorData<'a> {
     /// Per light scope (NO_CLIP first), the shadow casters' draws sorted
     /// by clip scope, and their runs.
     pub shadows: &'a [ShadowList<u8>],
+    /// The images fills show, by layer.
+    pub images: &'a [std::sync::Arc<crate::robjects::Texture>],
 }
 
 /// What a pipeline variant is used for (`Role`).
@@ -73,6 +76,10 @@ pub struct VectorPass {
     pub camera_views: CameraViewTexture,
     /// The camera view texture the bind group was made with.
     camera_views_generation: u64,
+    /// The images fills show.
+    images: ImageTexture,
+    /// The image texture the bind group was made with.
+    images_generation: u64,
 }
 
 impl VectorPass {
@@ -109,6 +116,8 @@ impl VectorPass {
             shadow_groups: HashMap::new(),
             camera_views: CameraViewTexture::new(&gpu.device),
             camera_views_generation: u64::MAX,
+            images: ImageTexture::new(&gpu.device),
+            images_generation: u64::MAX,
         }
     }
 
@@ -127,6 +136,7 @@ impl VectorPass {
         targets_generation: u64,
     ) -> Result<()> {
         let changed = self.use_variant(gpu, multisampled)?;
+        self.images.ensure(&gpu.device, &gpu.queue, data.images);
         let mut grown = false;
         for (buffer, records) in self.buffers.iter_mut().zip(&data.buffers) {
             grown |= buffer.write_records(&gpu.device, &gpu.queue, records);
@@ -160,9 +170,11 @@ impl VectorPass {
             || self.bind_group.is_none()
             || targets_generation != self.targets_generation
             || self.camera_views.generation != self.camera_views_generation
+            || self.images.generation != self.images_generation
         {
             self.targets_generation = targets_generation;
             self.camera_views_generation = self.camera_views.generation;
+            self.images_generation = self.images.generation;
             self.bind_group =
                 Some(self.create_bind_group(gpu, frame_uniform, 0, mask_layers, mesh_depth));
             self.shadow_groups.clear();
@@ -436,6 +448,32 @@ impl VectorPass {
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
             count: None,
         });
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: next + 4,
+            visibility: fragment,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2Array,
+                multisampled: false,
+            },
+            count: None,
+        });
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: next + 5,
+            visibility: fragment,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        });
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: next + 6,
+            visibility: fragment,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        });
         gpu.device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("vector"),
@@ -452,7 +490,8 @@ impl VectorPass {
         mesh_depth: &wgpu::TextureView,
     ) -> wgpu::BindGroup {
         // Binding order matches vector.wgsl: frame, storage buffers, masks,
-        // mesh depth, camera views and their sampler.
+        // mesh depth, camera views and their sampler, images, their sampler
+        // and regions.
         let mut entries = vec![wgpu::BindGroupEntry {
             binding: 0,
             resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
@@ -483,6 +522,18 @@ impl VectorPass {
         entries.push(wgpu::BindGroupEntry {
             binding: next + 3,
             resource: wgpu::BindingResource::Sampler(&self.camera_views.sampler),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: next + 4,
+            resource: wgpu::BindingResource::TextureView(&self.images.array_view),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: next + 5,
+            resource: wgpu::BindingResource::Sampler(&self.images.sampler),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: next + 6,
+            resource: self.images.regions.as_entire_binding(),
         });
         gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("vector"),

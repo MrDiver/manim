@@ -46,19 +46,30 @@ impl Points {
 }
 
 /// A fill: one color and opacity, or lists of them spread evenly over the
-/// points (a gradient along the path).
+/// points (a gradient along the path), and optionally an image the colors
+/// tint, stretched over the shape's local box around its origin.
 pub struct Fill {
     pub version: u64,
     pub colors: Vec<[f64; 3]>,
     pub opacities: Vec<f64>,
+    pub image: Option<Arc<Texture>>,
 }
 
 impl Fill {
     pub fn new(colors: Vec<[f64; 3]>, opacities: Vec<f64>) -> Fill {
+        Fill::with_image(colors, opacities, None)
+    }
+
+    pub fn with_image(
+        colors: Vec<[f64; 3]>,
+        opacities: Vec<f64>,
+        image: Option<Arc<Texture>>,
+    ) -> Fill {
         Fill {
             version: next_version(),
             colors,
             opacities,
+            image,
         }
     }
 }

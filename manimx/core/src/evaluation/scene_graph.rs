@@ -46,6 +46,8 @@ struct PathFields {
     points: usize,
     /// color, opacity.
     fill: Option<[usize; 2]>,
+    /// The fill's image (a `Texture` or None), if the node has one.
+    fill_image: Option<usize>,
     /// color, opacity, width, joint, cap.
     stroke: [usize; 5],
     cast_shadows: usize,
@@ -119,7 +121,7 @@ struct Node {
 struct Built {
     leaf: Option<(Vec<u64>, Arc<RNode>)>,
     points: Option<(u64, Arc<Points>)>,
-    fill: Option<([u64; 2], Arc<Fill>)>,
+    fill: Option<(Vec<u64>, Arc<Fill>)>,
     stroke: Option<([u64; 5], Arc<Stroke>)>,
     mesh: Option<(u64, Arc<Mesh>)>,
     material: Option<(Vec<u64>, Arc<Material>)>,
@@ -285,7 +287,7 @@ fn leaf_kind(data: &NodeData, values: &Values, built: &mut Built) -> PyResult<Ki
             match fields.fill {
                 Some(slots) => Kind::Shape2D {
                     path,
-                    fill: fill(slots, values, built)?,
+                    fill: fill(slots, fields.fill_image, values, built)?,
                 },
                 None => Kind::Curve3D { path },
             }
@@ -364,13 +366,34 @@ fn path(fields: &PathFields, values: &Values, built: &mut Built) -> PyResult<Pat
     })
 }
 
-fn fill(slots: [usize; 2], values: &Values, built: &mut Built) -> PyResult<Arc<Fill>> {
-    cached(&mut built.fill, slots.map(|s| values.version(s)), || {
-        Ok(Fill::new(
+fn fill(
+    slots: [usize; 2],
+    image: Option<usize>,
+    values: &Values,
+    built: &mut Built,
+) -> PyResult<Arc<Fill>> {
+    let mut key: Vec<u64> = slots.iter().map(|&s| values.version(s)).collect();
+    key.extend(image.map(|s| values.version(s)));
+    cached(&mut built.fill, key, || {
+        Ok(Fill::with_image(
             values.colors(slots[0])?,
             unit(values.floats(slots[1])?),
+            image
+                .map(|slot| texture(slot, values))
+                .transpose()?
+                .flatten(),
         ))
     })
+}
+
+/// A `Texture` signal's value (None for None).
+fn texture(slot: usize, values: &Values) -> PyResult<Option<Arc<Texture>>> {
+    let object = values.object(slot)?;
+    let object = object.bind(values.py);
+    if object.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(object.cast::<PyTexture>()?.get().texture.clone()))
 }
 
 fn unit(values: Vec<f64>) -> Vec<f64> {
@@ -409,14 +432,7 @@ fn surface(fields: &MeshFields, values: &Values, built: &mut Built) -> PyResult<
 /// `Shape3D` clamps them.
 fn material(slots: &[usize], values: &Values) -> PyResult<Material> {
     let unit = |slot: usize| -> PyResult<f64> { Ok(values.scalar(slot)?.clamp(0.0, 1.0)) };
-    let texture = |slot: usize| -> PyResult<Option<Arc<Texture>>> {
-        let object = values.object(slot)?;
-        let object = object.bind(values.py);
-        if object.is_none() {
-            return Ok(None);
-        }
-        Ok(Some(object.cast::<PyTexture>()?.get().texture.clone()))
-    };
+    let texture = |slot: usize| texture(slot, values);
     let surface_shader = {
         let object = values.object(slots[13])?;
         let object = object.bind(values.py);
@@ -605,6 +621,11 @@ fn parse_node(
         Ok(NodeData::Path(PathFields {
             points: field("points")?,
             fill,
+            fill_image: if fill.is_some() {
+                optional("fill_image")
+            } else {
+                None
+            },
             stroke: [
                 field("stroke_color")?,
                 field("stroke_opacity")?,

@@ -189,6 +189,7 @@ impl Renderer {
             transparent: &packet.draws.transparent,
             masks: &packet.draws.masks,
             shadows: &packet.draws.shadows,
+            images: &packet.draws.images,
         };
         let mesh_depth = &targets.depth_view;
         self.vector_pass.prepare(

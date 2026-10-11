@@ -155,7 +155,9 @@ pub fn transform_to_py<'py>(py: Python<'py>, t: &Transform) -> PyResult<Bound<'p
 // -- values ---------------------------------------------------------------------
 
 /// Fill style: one color and opacity, or lists of them (a gradient along
-/// the path, spread over its points by the renderer).
+/// the path, spread over its points by the renderer), and optionally an
+/// `image` (a `Texture`) the colors tint, stretched over the shape's local
+/// box around its origin.
 #[pyclass(module = "manimx.robjects", name = "Fill", frozen)]
 pub struct PyFill {
     pub fill: Arc<Fill>,
@@ -164,17 +166,36 @@ pub struct PyFill {
 #[pymethods]
 impl PyFill {
     #[new]
-    #[pyo3(signature = (color=None, opacity=None))]
+    #[pyo3(signature = (color=None, opacity=None, image=None))]
     fn new(
         py: Python<'_>,
         color: Option<&Bound<'_, PyAny>>,
         opacity: Option<&Bound<'_, PyAny>>,
+        image: Option<Bound<'_, PyTexture>>,
     ) -> PyResult<Self> {
         let colors = colors(py, color)?;
         let opacities = scalars(py, opacity, 0.0, "opacity", 0.0, 1.0)?;
+        let image = image.map(|image| image.get().texture.clone());
         Ok(PyFill {
-            fill: Arc::new(Fill::new(colors, opacities)),
+            fill: Arc::new(Fill::with_image(colors, opacities, image)),
         })
+    }
+
+    /// The image the colors tint, or None.
+    #[getter]
+    fn image(&self, py: Python<'_>) -> PyResult<Option<Py<PyTexture>>> {
+        self.fill
+            .image
+            .as_ref()
+            .map(|texture| {
+                Py::new(
+                    py,
+                    PyTexture {
+                        texture: texture.clone(),
+                    },
+                )
+            })
+            .transpose()
     }
 
     /// The colors, `(K, 3)` sRGB.
@@ -196,7 +217,10 @@ impl PyFill {
     fn __eq__(&self, other: &Bound<'_, PyAny>) -> bool {
         other.cast::<PyFill>().is_ok_and(|other| {
             let other = &other.get().fill;
-            self.fill.colors == other.colors && self.fill.opacities == other.opacities
+            let image = |fill: &Fill| fill.image.as_ref().map(|texture| texture.uid);
+            self.fill.colors == other.colors
+                && self.fill.opacities == other.opacities
+                && image(&self.fill) == image(other)
         })
     }
 

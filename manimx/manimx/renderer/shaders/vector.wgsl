@@ -32,6 +32,14 @@
 // Camera views: the fill of a CameraView shape is the picture of another
 // camera, rendered before the frame into one layer of `camera_views`
 // (linear, premultiplied, see composite.wgsl). The fill color tints it.
+//
+// Images: a fill may show an image (Shape2D.fill_image), one layer of
+// `images` (sRGB values premultiplied by alpha, with mip levels). Images of
+// different sizes share the layer size: each sits in the top left corner of
+// its layer, its edge pixels repeated into the rest (so lower mip levels do
+// not bleed), and `image_regions` says where. `Object.view` tells them
+// apart: camera view layers are 0 and up, NO_VIEW is -1, image layer i is
+// -2 - i.
 
 // ---------------------------------------------------------------------------
 // Bindings (layouts mirror the record structs in core/src/packing/records.rs)
@@ -113,6 +121,10 @@ struct StrokeCurve {
 @group(0) @binding(8) var mesh_depth: texture_depth_multisampled_2d;
 @group(0) @binding(9) var camera_views: texture_2d_array<f32>;
 @group(0) @binding(10) var camera_view_sampler: sampler;
+@group(0) @binding(11) var images: texture_2d_array<f32>;
+@group(0) @binding(12) var image_sampler: sampler;
+// Per image layer: the center of the image's region (uv) and its size.
+@group(0) @binding(13) var<storage, read> image_regions: array<vec4<f32>>;
 
 // ---------------------------------------------------------------------------
 // Shared vertex output
@@ -226,11 +238,12 @@ fn fs_main(in: VertexOutput, @builtin(sample_index) sample: u32) -> FragmentOutp
     // `fwidth(z)`; the layer bias needs the finer slope (see layer_slope).
     let slope = fwidth(in.clip_position.z);
     let fine_slope = layer_slope(in);
+    let gradients = picture_gradients(in);
     if hidden_by_meshes(in.clip_position, sample, slope) {
         discard;
     }
     var out: FragmentOutput;
-    out.color = premultiplied(shade(in));
+    out.color = premultiplied(shade(in, gradients));
     out.depth = layered_depth(in.clip_position.z, in.layer, fine_slope);
     return out;
 }
@@ -252,7 +265,13 @@ fn hidden_by_meshes(position: vec4<f32>, sample: u32, slope: f32) -> bool {
 /// Mask passes render without a depth buffer: color (alpha) only.
 @fragment
 fn fs_mask(in: VertexOutput) -> @location(0) vec4<f32> {
-    return premultiplied(shade(in));
+    return premultiplied(shade(in, picture_gradients(in)));
+}
+
+/// How `in.picture` changes per pixel across and down (for the mip level
+/// of images): taken while every fragment of the quad is still running.
+fn picture_gradients(in: VertexOutput) -> vec4<f32> {
+    return vec4<f32>(dpdx(in.picture), dpdy(in.picture));
 }
 
 /// A straight-alpha color times the object's alpha (fades).
@@ -264,7 +283,7 @@ fn premultiplied(color: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(color.rgb * color.a, color.a);
 }
 
-fn shade(in: VertexOutput) -> vec4<f32> {
+fn shade(in: VertexOutput, gradients: vec4<f32>) -> vec4<f32> {
     // Loop-Blinn curve test: u^2 - v is negative on the chord side of the
     // quadratic and positive on the control-point side (Loop and Blinn 2005,
     // "Resolution Independent Curve Rendering using Programmable Graphics
@@ -276,8 +295,10 @@ fn shade(in: VertexOutput) -> vec4<f32> {
         }
     }
     var color = in.color;
-    if in.view != NO_VIEW {
+    if in.view >= 0 {
         color = tinted_picture(color, in);
+    } else if in.view < NO_VIEW {
+        color = tinted_image(color, in, gradients);
     }
     if in.clip != NO_CLIP {
         let pixel = vec2<i32>(floor(in.clip_position.xy));
@@ -300,6 +321,21 @@ fn tinted_picture(tint: vec4<f32>, in: VertexOutput) -> vec4<f32> {
     }
     let srgb = linear_to_srgb(picture.rgb / picture.a);
     return vec4<f32>(srgb * tint.rgb, picture.a * tint.a);
+}
+
+/// An image at this fragment, tinted by the fill color. Both are sRGB
+/// values; the image is stored premultiplied, so filtering does not darken
+/// its transparent edges.
+fn tinted_image(tint: vec4<f32>, in: VertexOutput, gradients: vec4<f32>) -> vec4<f32> {
+    let layer = NO_VIEW - 1 - in.view;
+    let region = image_regions[layer];
+    let size = region.zw;
+    let uv = region.xy + (in.picture - vec2<f32>(0.5)) * size;
+    let image = textureSampleGrad(images, image_sampler, uv, layer, gradients.xy * size, gradients.zw * size);
+    if image.a <= 0.0 {
+        return vec4<f32>(0.0);
+    }
+    return vec4<f32>(image.rgb / image.a * tint.rgb, image.a * tint.a);
 }
 
 // ---------------------------------------------------------------------------

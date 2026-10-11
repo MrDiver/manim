@@ -22,14 +22,23 @@ pub struct Object {
     pub flags: u32,
     pub fill_colors: u32,
     pub alpha: f32,
-    /// Layer of the camera view texture the fill shows, or `NO_VIEW`.
+    /// Layer of the camera view texture the fill shows, or `NO_VIEW`, or
+    /// below it an image layer (`image_view`).
     pub view: i32,
-    /// `1 / (width, height)` of a camera view's plane.
+    /// `1 / (width, height)` of a camera view's plane (or of the box an
+    /// image covers).
     pub view_scale: [f32; 2],
 }
 
-/// `Object.view` of every shape that is not a camera view.
+/// `Object.view` of every shape that shows no camera view or image.
 pub const NO_VIEW: i32 = -1;
+
+/// `Object.view` of a fill showing layer `layer` of the image texture
+/// (passes/images.rs): the values below `NO_VIEW`, so camera view layers
+/// keep 0 and up.
+pub fn image_view(layer: usize) -> i32 {
+    NO_VIEW - 1 - layer as i32
+}
 
 /// `INSTANCE_DTYPE`: what one draw instance generates.
 #[repr(C)]

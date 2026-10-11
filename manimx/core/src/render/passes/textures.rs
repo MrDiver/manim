@@ -31,7 +31,7 @@ const PRECISION_BITS: u32 = 32 - 8 - 2;
 
 /// The RGBA image `pixels` of `from` pixels resized to `to` with a box
 /// filter.
-fn shrink(pixels: &[u8], from: (u32, u32), to: (u32, u32)) -> Vec<u8> {
+pub fn shrink(pixels: &[u8], from: (u32, u32), to: (u32, u32)) -> Vec<u8> {
     let (width, height) = (from.0 as usize, from.1 as usize);
     let mut image: Vec<u8> = pixels.chunks_exact(4).flat_map(premultiply).collect();
     if to.0 != from.0 {
@@ -108,7 +108,7 @@ fn box_weights(input: usize, output: usize) -> Vec<(usize, Vec<i64>)> {
 }
 
 /// RGBA to RGBa: colors times alpha, rounded (Pillow's `MULDIV255`).
-fn premultiply(pixel: &[u8]) -> [u8; 4] {
+pub fn premultiply(pixel: &[u8]) -> [u8; 4] {
     let alpha = pixel[3] as u32;
     let times = |value: u8| {
         let product = value as u32 * alpha + 128;

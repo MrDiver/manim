@@ -63,6 +63,7 @@ from .graphs import (
     ThreeDAxes,
     Value,
 )
+from .images import Image
 from .indications import ApplyWave, Circumscribe, Flash, ShowPassingFlash, Wiggle
 from .lines import (
     Angle,
@@ -192,6 +193,7 @@ __all__ = [
     "GrowFromEdge",
     "GrowFromPoint",
     "Homotopy",
+    "Image",
     "Indicate",
     "Integer",
     "IntegerMatrix",

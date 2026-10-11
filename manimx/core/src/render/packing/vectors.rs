@@ -38,6 +38,7 @@
 //! `PathCache`.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use glam::{DMat4, DVec2, DVec3};
 
@@ -46,7 +47,7 @@ use crate::render::geometry::tessellation::tessellate_fill;
 use crate::render::packing::arena::Arena;
 use crate::render::packing::flatten::{DrawItem, FlatScene, ShadowList, NO_CLIP};
 use crate::render::packing::records::{self, DrawIndirect, Instance, Object, StrokeCurve};
-use crate::robjects::{Fill, Kind, Path, Points};
+use crate::robjects::{Fill, Kind, Path, Points, Texture};
 
 /// Where one path's records live, and what they were built from (`_Slot`).
 struct Slot {
@@ -141,6 +142,8 @@ pub struct VectorDraws {
     /// Per light scope (NO_CLIP first), the casters sorted by clip scope
     /// and their runs (`FlatScene::shadow_lists`).
     pub shadows: Vec<ShadowList<u8>>,
+    /// The images fills show, by layer of the image texture.
+    pub images: Vec<Arc<Texture>>,
 }
 
 pub struct VectorPacker {
@@ -204,13 +207,22 @@ impl VectorPacker {
         }
         let mut draws = Vec::new();
         let mut seen = HashSet::new();
+        let mut images = Vec::new();
         let context = PathContext {
             view,
             camera_views,
             generation,
         };
         for item in &flat.items {
-            self.add(&context, item, NO_CLIP, false, &mut draws, &mut seen);
+            self.add(
+                &context,
+                item,
+                NO_CLIP,
+                false,
+                &mut draws,
+                &mut seen,
+                &mut images,
+            );
         }
         for (index, scope) in flat.clips.iter().enumerate() {
             for item in &scope.mask {
@@ -221,6 +233,7 @@ impl VectorPacker {
                     scope.one_sided,
                     &mut draws,
                     &mut seen,
+                    &mut images,
                 );
             }
         }
@@ -234,9 +247,13 @@ impl VectorPacker {
             let slot = self.slots.remove(&key).unwrap();
             self.free(&slot);
         }
-        batch(flat, draws)
+        VectorDraws {
+            images,
+            ..batch(flat, draws)
+        }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn add(
         &mut self,
         context: &PathContext,
@@ -245,6 +262,7 @@ impl VectorPacker {
         front_only: bool,
         draws: &mut Vec<Draw>,
         seen: &mut HashSet<(u64, i32)>,
+        images: &mut Vec<Arc<Texture>>,
     ) {
         let node = item.node;
         let (path, fill) = match &node.kind {
@@ -283,11 +301,12 @@ impl VectorPacker {
         } else {
             0
         });
-        let view = context
-            .camera_views
-            .get(&node.uid)
-            .copied()
-            .unwrap_or(NOT_A_VIEW);
+        let image = fill.and_then(|fill| fill.image.as_ref());
+        let view = match (context.camera_views.get(&node.uid), image) {
+            (Some(view), _) => *view,
+            (None, Some(image)) => image_view(images, image, &path.points),
+            (None, None) => NOT_A_VIEW,
+        };
         let placement = (layer, item.clip, flags, item.alpha, view);
         if slot.world != Some(item.world) || slot.placement != placement {
             let entry: &mut Object = self.objects.record_mut(slot.object);
@@ -349,10 +368,10 @@ impl VectorPacker {
         let cache = self.paths.get_mut(&uid).unwrap();
         let colors_key = vec![points_version, fill.version];
         let colors = fill_colors(cache, points, fill, &colors_key);
-        // A picture may be see-through anywhere (a transparent background).
+        // A picture or an image may be see-through anywhere.
         let (visible, opaque) = (
             colors.visible,
-            colors.opaque && !context.camera_views.contains_key(&uid),
+            colors.opaque && !context.camera_views.contains_key(&uid) && fill.image.is_none(),
         );
         if !visible {
             return None;
@@ -539,6 +558,7 @@ fn batch(scene: &FlatScene, draws: Vec<Draw>) -> VectorDraws {
         transparent: draw_bytes(transparent.iter().map(|d| d.args)),
         masks,
         shadows,
+        images: Vec::new(),
     }
 }
 
@@ -554,6 +574,24 @@ pub type CameraView = (i32, [f32; 2]);
 pub type CameraViews = HashMap<u64, CameraView>;
 
 const NOT_A_VIEW: CameraView = (records::NO_VIEW, [0.0, 0.0]);
+
+/// The view of a fill showing `image`: its layer (added to `images` on its
+/// first use in the frame) and `1 / size` of the local box around the
+/// origin that the image covers, as wide as the path reaches either way.
+fn image_view(images: &mut Vec<Arc<Texture>>, image: &Arc<Texture>, points: &Points) -> CameraView {
+    let layer = match images.iter().position(|seen| seen.uid == image.uid) {
+        Some(layer) => layer,
+        None => {
+            images.push(image.clone());
+            images.len() - 1
+        }
+    };
+    let reach = (0..points.count())
+        .map(|index| points.point(index).truncate().abs())
+        .fold(DVec2::ZERO, DVec2::max);
+    let scale = |half: f64| if half > 0.0 { (0.5 / half) as f32 } else { 0.0 };
+    (records::image_view(layer), [scale(reach.x), scale(reach.y)])
+}
 
 /// What building one path's records needs, besides the packer itself.
 struct PathContext<'a> {

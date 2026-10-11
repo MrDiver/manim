@@ -535,6 +535,18 @@ Each scope's mask is a texture layer; nested masks are clipped by their
 parent, so one lookup covers all enclosing groups. Clipped content goes
 into the transparent list and keeps correct depth.
 
+**Images are fills.** `Shape2D.fill_image` (and `Image`, a rectangle
+with one) shows a texture in a 2D fill, so images fade, clip and keep
+the painter's order like any shape, and their colors stay exact (2D is
+never tone mapped). The frame's images share one 2D array texture with
+mip levels (passes/images.rs), stored as premultiplied sRGB values; each
+sits in the top left of its layer with its edge repeated into the
+padding, and a small region buffer maps the shape's local box onto it.
+`Object.view` tells image layers (below `NO_VIEW`) from camera view
+layers. The array is made again only when the frame's list of images
+changes; its layers are as large as the largest image (at most 4096
+pixels), so one large image makes every layer large.
+
 **Lights scoped to clipping groups.** A light inside a `ClippingGroup` only
 lights, and only gets shadows from, objects in that group. The G-buffer
 stores each pixel's scope, and shadow casters and bounds are built per

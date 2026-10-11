@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from ...robjects import CapStyle, JointType
+from ...robjects import CapStyle, JointType, Texture
 from ...utils.color import WHITE
 from .. import authoring
 from ..signals.kinds import COLORS, DISCRETE, PATH, SCALARS
@@ -43,6 +43,7 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
     ``points``          PATH      ``points`` (the part ``drawn_points``)
     ``fill_color``      COLORS    ``fill.color`` (one color or a gradient)
     ``fill_opacity``    SCALARS   ``fill.opacity``
+    ``fill_image``      DISCRETE  ``fill.image`` (a Texture, or None)
     ``stroke_color``    COLORS    ``stroke.color``
     ``stroke_opacity``  SCALARS   ``stroke.opacity``
     ``stroke_width``    SCALARS   ``stroke.width``
@@ -53,7 +54,10 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
 
     Lists (gradients, tapering widths) are spread over the path's points
     by the renderer. ``color`` sets fill and stroke color together. The
-    fill is transparent unless ``fill_opacity`` is given.
+    fill is transparent unless ``fill_opacity`` is given. A ``fill_image``
+    is tinted by the fill color and opacity (white and 1 show it as it
+    is) and stretched over the shape's local box around its origin, as far
+    as the points reach either way (a centered shape's bounds).
 
     ``draw_start`` and ``draw_end`` (SCALAR, 0 and 1) say which part of the
     path is drawn, as fractions of its curves: Create and Write animate
@@ -72,6 +76,7 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         color: Colors = WHITE,
         fill_color: Colors | None = None,
         fill_opacity: Scalars = 0.0,
+        fill_image: Texture | None = None,
         stroke_color: Colors | None = None,
         stroke_width: Scalars = 4.0,
         stroke_opacity: Scalars = 1.0,
@@ -86,6 +91,7 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         self.draw_start, self.draw_end, self.drawn_points = drawn_part(self.points, prefix)
         self.fill_color = RootSignal(style.colors(color if fill_color is None else fill_color), COLORS, name=f"{prefix}.fill_color")
         self.fill_opacity = RootSignal(fill_opacity, SCALARS, name=f"{prefix}.fill_opacity")
+        self.fill_image = RootSignal(fill_image, DISCRETE, name=f"{prefix}.fill_image")
         self.stroke_color = RootSignal(style.colors(color if stroke_color is None else stroke_color), COLORS, name=f"{prefix}.stroke_color")
         self.stroke_width = RootSignal(stroke_width, SCALARS, name=f"{prefix}.stroke_width")
         self.stroke_opacity = RootSignal(stroke_opacity, SCALARS, name=f"{prefix}.stroke_opacity")
@@ -129,17 +135,21 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         yield from super().signals()
         yield from (
             self.points, self.draw_start, self.draw_end, self.drawn_points,
-            self.fill_color, self.fill_opacity, self.stroke_color, self.stroke_width,
+            self.fill_color, self.fill_opacity, self.fill_image, self.stroke_color, self.stroke_width,
             self.stroke_opacity, self.stroke_joint, self.stroke_cap, self.cast_shadows,
         )  # fmt: skip
 
     @animatable
-    def set_fill(self, color: Colors | None = None, opacity: Scalars | None = None) -> ChangeList:
+    def set_fill(self, color: Colors | None = None, opacity: Scalars | None = None, image: Texture | None = None) -> ChangeList:
+        """Change the fill; an ``image`` replaces the fill image (it is
+        switched, not blended: cross-fade two shapes to blend images)."""
         changes: ChangeList = []
         if color is not None:
             changes.append((self.fill_color, ABS, style.colors(color)))
         if opacity is not None:
             changes.append((self.fill_opacity, ABS, opacity))
+        if image is not None:
+            changes.append((self.fill_image, ABS, image))
         return changes
 
     @animatable
@@ -178,6 +188,7 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         # The render object draws the part of the points from draw_start to draw_end.
         yield from (
             ("points", self.drawn_points), ("fill_color", self.fill_color), ("fill_opacity", self.fill_opacity),
+            ("fill_image", self.fill_image),
             ("stroke_color", self.stroke_color),
             ("stroke_opacity", self.stroke_opacity), ("stroke_width", self.stroke_width),
             ("stroke_joint", self.stroke_joint), ("stroke_cap", self.stroke_cap), ("cast_shadows", self.cast_shadows),
@@ -185,7 +196,7 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
 
 
 _UNPACKED = (
-    "fill_color", "fill_opacity", "stroke_color", "stroke_width", "stroke_opacity", "stroke_joint", "stroke_cap",
+    "fill_color", "fill_opacity", "fill_image", "stroke_color", "stroke_width", "stroke_opacity", "stroke_joint", "stroke_cap",
     "cast_shadows", "draw_start", "draw_end", "rotation", "alpha",
 )  # fmt: skip
 """The signals besides points and the transform axes that unpack() copies."""
