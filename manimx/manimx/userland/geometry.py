@@ -442,25 +442,65 @@ def union_points(paths: Sequence[np.ndarray]) -> np.ndarray:
     """The outline of the union of the filled ``paths`` (2D, four points
     per cubic curve, closed subpaths), as one path of that layout: shapes
     built from overlapping pieces (a tall Typst delimiter) become one
-    outline to draw. Uses Skia's path operations (skia-pathops,
+    outline to draw."""
+    return boolean_points("union", [[points] for points in paths])
+
+
+BOOLEAN_OPERATIONS = ("union", "intersection", "difference", "exclusion")
+
+
+def boolean_points(operation: str, operands: Sequence[Sequence[np.ndarray]]) -> np.ndarray:
+    """The outline of ``operation`` (one of BOOLEAN_OPERATIONS) applied to
+    ``operands`` in order: the first operand with the second, the result
+    with the third and so on ("difference": the first minus all others).
+    Each operand is the filled area of its paths (2D, four points per cubic
+    curve; open subpaths are closed, overlaps count once). The result is
+    one path of the same layout. Uses Skia's path operations (skia-pathops,
     https://github.com/fonttools/skia-pathops)."""
     import pathops
 
-    shapes = []
+    kinds = {
+        "union": pathops.PathOp.UNION,
+        "intersection": pathops.PathOp.INTERSECTION,
+        "difference": pathops.PathOp.DIFFERENCE,
+        "exclusion": pathops.PathOp.XOR,
+    }
+    if operation not in kinds:
+        raise ValueError(f"unknown boolean operation {operation!r}: one of {', '.join(BOOLEAN_OPERATIONS)}")
+    shapes = [_skia_path(paths) for paths in operands]
+    if not shapes:
+        return np.zeros((0, 2))
+    result = shapes[0]
+    if len(shapes) == 1:
+        result = pathops.op(result, pathops.Path(), pathops.PathOp.UNION)  # resolves its own overlaps
+    for shape in shapes[1:]:
+        result = pathops.op(result, shape, kinds[operation])
+    return _points_of(result)
+
+
+def _skia_path(paths: Sequence[np.ndarray]) -> Any:
+    """One skia-pathops Path of every subpath of ``paths``, closed."""
+    import pathops
+
+    shape = pathops.Path()
     for points in paths:
-        shape = pathops.Path()
-        for piece in subpaths(np.asarray(points, dtype=np.float64)):
+        points = np.asarray(points, dtype=np.float64)
+        if len(points) == 0:
+            continue
+        for piece in subpaths(points[:, :2]):
             shape.moveTo(*piece[0])
             for curve in piece.reshape(-1, 4, 2):
                 shape.cubicTo(*curve[1], *curve[2], *curve[3])
             shape.close()
-        shapes.append(shape)
-    builder = pathops.OpBuilder()
-    for shape in shapes:
-        builder.add(shape, pathops.PathOp.UNION)
+    return shape
+
+
+def _points_of(shape: Any) -> np.ndarray:
+    """A skia-pathops Path as a path of cubic curves (lines and quadratics
+    raised to cubics)."""
     curves: list[np.ndarray] = []
     start = current = np.zeros(2)
-    for verb, points in builder.resolve().segments:
+    for verb, points in shape.segments:
         targets = [np.array(point, dtype=np.float64) for point in points]
         if verb == "moveTo":
             start = current = targets[0]

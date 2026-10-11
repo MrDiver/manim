@@ -182,31 +182,40 @@ class _Bounds:
         self.layout = layout
 
     def __call__(self, *values: Any) -> np.ndarray:
-        matrices: list[np.ndarray] = []
         low, high = np.full(3, np.inf), np.full(3, -np.inf)
-        cursor = 0
-        for parent, parts, is_path in self.layout:
-            position, rotation, scale = np.zeros(3), quaternion.one, np.ones(3)
-            for part in parts:
-                if part == "position":
-                    position, cursor = np.asarray(values[cursor : cursor + 3], dtype=np.float64), cursor + 3
-                elif part == "rotation":
-                    rotation, cursor = values[cursor], cursor + 1
-                else:
-                    scale, cursor = np.asarray(values[cursor : cursor + 3], dtype=np.float64), cursor + 3
-            local = np.eye(4)
-            local[:3, :3] = quaternion.as_rotation_matrix(rotation) * scale
-            local[:3, 3] = position
-            matrix = matrices[parent] @ local if parent >= 0 else local
-            matrices.append(matrix)
-            if is_path:
-                points, cursor = np.asarray(values[cursor], dtype=np.float64), cursor + 1
-                if len(points):
-                    full = np.zeros((len(points), 3))
-                    full[:, : points.shape[1]] = points
-                    moved = full @ matrix[:3, :3].T + matrix[:3, 3]
-                    low, high = np.minimum(low, moved.min(axis=0)), np.maximum(high, moved.max(axis=0))
+        for moved in family_paths(self.layout, values):
+            if len(moved):
+                low, high = np.minimum(low, moved.min(axis=0)), np.maximum(high, moved.max(axis=0))
         return np.array([low, high]) if np.isfinite(low).all() else np.zeros((2, 3))
+
+
+def family_paths(layout: tuple[tuple[int, tuple[str, ...], bool], ...], values: Sequence[Any]) -> list[np.ndarray]:
+    """The points of every path in a family, in the family root's parent
+    space (3D), from the values of :func:`_family_layout`'s inputs."""
+    matrices: list[np.ndarray] = []
+    paths: list[np.ndarray] = []
+    cursor = 0
+    for parent, parts, is_path in layout:
+        position, rotation, scale = np.zeros(3), quaternion.one, np.ones(3)
+        for part in parts:
+            if part == "position":
+                position, cursor = np.asarray(values[cursor : cursor + 3], dtype=np.float64), cursor + 3
+            elif part == "rotation":
+                rotation, cursor = values[cursor], cursor + 1
+            else:
+                scale, cursor = np.asarray(values[cursor : cursor + 3], dtype=np.float64), cursor + 3
+        local = np.eye(4)
+        local[:3, :3] = quaternion.as_rotation_matrix(rotation) * scale
+        local[:3, 3] = position
+        matrix = matrices[parent] @ local if parent >= 0 else local
+        matrices.append(matrix)
+        if is_path:
+            points, cursor = np.asarray(values[cursor], dtype=np.float64), cursor + 1
+            full = np.zeros((len(points), 3))
+            if len(points):
+                full[:, : points.shape[1]] = points
+            paths.append(full @ matrix[:3, :3].T + matrix[:3, 3])
+    return paths
 
 
 class _BoundsSide:

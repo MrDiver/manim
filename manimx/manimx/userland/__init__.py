@@ -33,6 +33,7 @@ from .animations import (
     Unwrite,
     Write,
 )
+from .booleans import Difference, Exclusion, Intersection, Union
 from .charts import BarChart
 from .code import Blink, Code, CycleCharacters, Flipboard, MorphCode, TypeCode, Untype
 from .constants import (
@@ -169,12 +170,14 @@ __all__ = [
     "DashedLine",
     "DecimalMatrix",
     "DecimalNumber",
+    "Difference",
     "Dot",
     "Dot3D",
     "DoubleArrow",
     "DrawBorderThenFill",
     "Elbow",
     "Ellipse",
+    "Exclusion",
     "FadeIn",
     "FadeOut",
     "FadeTransform",
@@ -189,6 +192,7 @@ __all__ = [
     "Indicate",
     "Integer",
     "IntegerMatrix",
+    "Intersection",
     "Line",
     "Line3D",
     "Matrix",
@@ -227,6 +231,7 @@ __all__ = [
     "TypstMath",
     "Uncreate",
     "Underline",
+    "Union",
     "Untype",
     "Unwrite",
     "Value",
