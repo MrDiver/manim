@@ -46,11 +46,13 @@ from ..animation import (
     ARRAY,
     DISCRETE,
     SCALAR,
+    Curve3D,
     DerivedSignal,
     Group,
     Node,
     RootSignal,
     Shape2D,
+    Shape3D,
     Signal,
 )
 from ..animation.authoring import current
@@ -335,6 +337,93 @@ class NumberPlane(Axes):
         self.minor_x_lines, self.minor_y_lines = minors
         self.children[:0] = [*minors, self.grid]  # under the axes
         self.add()  # tells the structure listeners about it
+
+
+class ThreeDAxes(Group):
+    """Three NumberLines crossing where all three ranges are 0 (or the
+    nearest end of a range without 0): ``x_axis`` and ``y_axis`` in the
+    XY plane, ``z_axis`` standing along z (its labels face the y axis).
+
+    :meth:`coords_to_point` places coordinates; :meth:`plot_surface` and
+    :meth:`plot_curve` draw a surface ``z = f(x, y)`` and a curve
+    ``(x, y, z) = f(t)`` through them. Unlike :class:`Axes`, these are
+    placed once, where the axes are when they are made. ``axis_style``
+    styles all three lines.
+    """
+
+    def __init__(
+        self,
+        x_range: Range = (-4.0, 4.0, 1.0),
+        y_range: Range = (-4.0, 4.0, 1.0),
+        z_range: Range = (-3.0, 3.0, 1.0),
+        x_length: float = 8.0,
+        y_length: float = 8.0,
+        z_length: float = 6.0,
+        include_numbers: bool = False,
+        decimals: int = 0,
+        preamble: str = "",
+        tick_size: float = 0.1,
+        include_tips: bool = True,
+        name: str | None = None,
+        **axis_style: Any,
+    ) -> None:
+        super().__init__(name=name)
+        common = {
+            "include_numbers": include_numbers, "decimals": decimals, "preamble": preamble, "tick_size": tick_size,
+            "include_tip": include_tips, "exclude": (0.0,),
+        }  # fmt: skip
+        ranges = [_range(values) for values in (x_range, y_range, z_range)]
+        self.lengths3 = (float(x_length), float(y_length), float(z_length))
+        self.x_axis = NumberLine(x_range, x_length, name=f"{self.name}.x_axis", **common, **axis_style)
+        self.y_axis = NumberLine(y_range, y_length, angle=math.pi / 2, label_direction=(-1.0, 0.0), name=f"{self.name}.y_axis", **common, **axis_style)
+        self.z_axis = NumberLine(z_range, z_length, name=f"{self.name}.z_axis", **common, **axis_style)
+        self.z_axis.rotate(-math.pi / 2, (0.0, 1.0, 0.0))  # its x along z
+        crossing = [_Crossing(length)(minimum, maximum, step) for (minimum, maximum, step), length in zip(ranges, self.lengths3, strict=True)]
+        self.x_axis.move_to((0.0, crossing[1], crossing[2]))
+        self.y_axis.move_to((crossing[0], 0.0, crossing[2]))
+        self.z_axis.move_to((crossing[0], crossing[1], 0.0))
+        self.add(self.x_axis, self.y_axis, self.z_axis)
+
+    def coords_to_point(self, x: float, y: float, z: float) -> np.ndarray:
+        """Where ``(x, y, z)`` is, in the axes' parent's space, as
+        authoring code sees the ranges and the axes right now (rotation is
+        not followed)."""
+        local = np.array([
+            _place(x, current(self.x_axis.minimum), current(self.x_axis.maximum), self.lengths3[0]),
+            _place(y, current(self.y_axis.minimum), current(self.y_axis.maximum), self.lengths3[1]),
+            _place(z, current(self.z_axis.minimum), current(self.z_axis.maximum), self.lengths3[2]),
+        ])  # fmt: skip
+        scale = np.array([current(axis) for axis in self.scale.axes])
+        return np.array([current(axis) for axis in self.position.axes]) + local * scale
+
+    c2p = coords_to_point
+
+    def plot_surface(
+        self,
+        function: Callable[[float, float], float],
+        x_range: Sequence[float] | None = None,
+        y_range: Sequence[float] | None = None,
+        resolution: tuple[int, int] = (32, 32),
+        name: str | None = None,
+        **style: Any,
+    ) -> Shape3D:
+        """The surface ``z = function(x, y)`` over ``x_range`` and
+        ``y_range`` (default: the axes' ranges), in the axes' parent's
+        space (a ParametricSurface; ``style`` as for a Shape3D)."""
+        from .shapes3d import ParametricSurface
+
+        xs = x_range or (current(self.x_axis.minimum), current(self.x_axis.maximum))
+        ys = y_range or (current(self.y_axis.minimum), current(self.y_axis.maximum))
+        return ParametricSurface(
+            lambda u, v: self.coords_to_point(u, v, function(u, v)), (float(xs[0]), float(xs[1])), (float(ys[0]), float(ys[1])), resolution, name, **style
+        )
+
+    def plot_curve(self, function: Callable[[float], Sequence[float]], t_range: tuple[float, float] = (0.0, 1.0), samples: int = 64, name: str | None = None, **style: Any) -> Curve3D:
+        """The curve through ``function(t)`` (coordinates ``(x, y, z)``),
+        in the axes' parent's space (a ParametricCurve3D)."""
+        from .curves3d import ParametricCurve3D
+
+        return ParametricCurve3D(lambda t: self.coords_to_point(*function(t)), t_range, samples, name, **style)
 
 
 class FunctionGraph(Shape2D):
@@ -733,4 +822,4 @@ def _unit(vector: Sequence[float]) -> np.ndarray:
     return array / (np.linalg.norm(array) or 1.0)
 
 
-__all__ = ["Axes", "FunctionGraph", "NumberLine", "NumberPlane", "ParametricFunction", "Value"]
+__all__ = ["Axes", "FunctionGraph", "NumberLine", "NumberPlane", "ParametricFunction", "ThreeDAxes", "Value"]

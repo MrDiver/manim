@@ -51,6 +51,7 @@ from .graphs import (
     NumberLine,
     NumberPlane,
     ParametricFunction,
+    ThreeDAxes,
     Value,
 )
 from .lines import (
@@ -95,7 +96,19 @@ from .shapes2d import (
     Star,
     Triangle,
 )
-from .shapes3d import Box, ParametricSurface, Sphere, Torus
+from .shapes3d import (
+    Arrow3D,
+    Box,
+    Cone,
+    Cube,
+    Cylinder,
+    Dot3D,
+    Line3D,
+    ParametricSurface,
+    Prism,
+    Sphere,
+    Torus,
+)
 from .svg import SVG, read_svg
 from .tables import DecimalMatrix, IntegerMatrix, Matrix, Table
 from .typst import BulletedList, Typst, TypstMath
@@ -122,6 +135,7 @@ __all__ = [
     "Arc",
     "ArcBetweenPoints",
     "Arrow",
+    "Arrow3D",
     "Axes",
     "BackgroundRectangle",
     "BarChart",
@@ -132,15 +146,19 @@ __all__ = [
     "BulletedList",
     "Circle",
     "Code",
+    "Cone",
     "Create",
     "Cross",
+    "Cube",
     "CubicBezier",
     "CurvedArrow",
     "CycleCharacters",
+    "Cylinder",
     "DashedLine",
     "DecimalMatrix",
     "DecimalNumber",
     "Dot",
+    "Dot3D",
     "DoubleArrow",
     "DrawBorderThenFill",
     "Elbow",
@@ -154,6 +172,7 @@ __all__ = [
     "Integer",
     "IntegerMatrix",
     "Line",
+    "Line3D",
     "Matrix",
     "Morph",
     "MorphCode",
@@ -166,6 +185,7 @@ __all__ = [
     "ParametricSurface",
     "Polygon",
     "Polyline",
+    "Prism",
     "Rectangle",
     "RegularPolygon",
     "RightAngle",
@@ -178,6 +198,7 @@ __all__ = [
     "Star",
     "SurroundingRectangle",
     "Table",
+    "ThreeDAxes",
     "Torus",
     "Triangle",
     "TypeCode",

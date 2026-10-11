@@ -279,6 +279,100 @@ def torus_mesh(major_radius: float = 1.0, minor_radius: float = 0.35, segments: 
     return MeshData(positions.reshape(-1, 3), _grid_indices(sides, segments, flip=True), normals.reshape(-1, 3), uvs.reshape(-1, 2))
 
 
+def cylinder_mesh(radius: float = 1.0, height: float = 2.0, segments: int = 48, caps: bool = True) -> MeshData:
+    """Cylinder around the z axis, centered at the origin: a smooth side
+    and, with ``caps``, flat disks at both ends."""
+    return _lathe(_circle(segments), [(radius, -height / 2), (radius, height / 2)], caps=(caps, caps))
+
+
+def cone_mesh(radius: float = 1.0, height: float = 2.0, segments: int = 48, cap: bool = True) -> MeshData:
+    """Cone around the z axis, its base at ``z = -height / 2`` (a flat
+    disk with ``cap``) and its apex at ``z = height / 2``."""
+    return _lathe(_circle(segments), [(radius, -height / 2), (0.0, height / 2)], caps=(cap, False))
+
+
+def prism_mesh(n: int = 6, radius: float = 1.0, height: float = 2.0) -> MeshData:
+    """Right prism around the z axis over a regular ``n``-gon of
+    circumradius ``radius`` (a corner on +x), centered at the origin, with
+    flat sides and caps."""
+    if n < 3:
+        raise ValueError(f"a prism needs at least 3 sides, got {n}")
+    corners = _circle(n)
+    positions, normals, uvs, indices = [], [], [], []
+    bottom, top = -height / 2, height / 2
+    for index in range(n):
+        a, b = corners[index], corners[(index + 1) % n]
+        normal = np.append((a + b) / np.linalg.norm(a + b), 0.0)
+        base = len(positions)
+        for corner, z, u, v in ((a, bottom, 0, 1), (b, bottom, 1, 1), (b, top, 1, 0), (a, top, 0, 0)):
+            positions.append(np.append(corner * radius, z))
+            normals.append(normal)
+            uvs.append((u, v))
+        indices += [base, base + 1, base + 2, base, base + 2, base + 3]
+    mesh = MeshData(np.array(positions), np.array(indices), np.array(normals), np.array(uvs))
+    return _joined([mesh, _disk(corners * radius, bottom, -1.0), _disk(corners * radius, top, 1.0)])
+
+
+def _circle(segments: int) -> np.ndarray:
+    """``segments`` points on the unit circle, the first on +x, counterclockwise."""
+    angles = np.linspace(0.0, math.tau, segments, endpoint=False)
+    return np.column_stack([np.cos(angles), np.sin(angles)])
+
+
+def _lathe(circle: np.ndarray, profile: list[tuple[float, float]], caps: tuple[bool, bool]) -> MeshData:
+    """A surface of revolution around z through the ``(radius, z)`` profile
+    (bottom to top), with smooth normals around and flat disks closing the
+    bottom and top ends where ``caps`` says so."""
+    (r0, z0), (r1, z1) = profile
+    slope = np.array([z1 - z0, r0 - r1])  # the side's outward normal in the (radius, z) plane
+    slope = slope / np.linalg.norm(slope)
+    segments = len(circle)
+    ring = np.vstack([circle, circle[:1]])
+    positions, normals, uvs = [], [], []
+    for (radius, z), v in ((profile[0], 1.0), (profile[1], 0.0)):
+        for index, point in enumerate(ring):
+            positions.append(np.append(point * radius, z))
+            normals.append(np.append(point * slope[0], slope[1]))
+            uvs.append((index / segments, v))
+    indices = []
+    for index in range(segments):
+        a, b, c, d = index, index + 1, segments + 1 + index, segments + 2 + index
+        if r0 > 0:
+            indices += [a, b, d]
+        if r1 > 0:
+            indices += [a, d, c]
+    parts = [MeshData(np.array(positions), np.array(indices), np.array(normals), np.array(uvs))]
+    if caps[0] and r0 > 0:
+        parts.append(_disk(circle * r0, z0, -1.0))
+    if caps[1] and r1 > 0:
+        parts.append(_disk(circle * r1, z1, 1.0))
+    return _joined(parts)
+
+
+def _disk(corners: np.ndarray, z: float, facing: float) -> MeshData:
+    """A flat fan over ``corners`` (counterclockwise around z) at height
+    ``z``, facing +z (``facing`` 1) or -z (-1)."""
+    count = len(corners)
+    positions = np.vstack([[0.0, 0.0, z], np.column_stack([corners, np.full(count, z)])])
+    normals = np.tile([0.0, 0.0, facing], (count + 1, 1))
+    extent = np.abs(corners).max() or 1.0
+    uvs = np.vstack([[0.5, 0.5], corners / (2 * extent) * [1.0, -1.0] + 0.5])
+    fan = [(0, 1 + index, 1 + (index + 1) % count) for index in range(count)]
+    indices = np.array([(a, b, c) if facing > 0 else (a, c, b) for a, b, c in fan]).reshape(-1)
+    return MeshData(positions, indices, normals, uvs)
+
+
+def _joined(meshes: list[MeshData]) -> MeshData:
+    """One mesh of several (their vertices and triangles side by side)."""
+    offsets = np.cumsum([0] + [len(mesh.positions) for mesh in meshes[:-1]])
+    return MeshData(
+        np.vstack([mesh.positions for mesh in meshes]),
+        np.concatenate([np.asarray(mesh.indices) + offset for mesh, offset in zip(meshes, offsets, strict=True)]),
+        np.vstack([mesh.normals for mesh in meshes]),
+        np.vstack([mesh.uvs for mesh in meshes]),
+    )
+
+
 def surface_mesh(
     function: Callable[[float, float], Any],
     u_range: tuple[float, float] = (0.0, 1.0),
@@ -321,10 +415,13 @@ __all__ = [
     "arc_points",
     "brace_points",
     "box_mesh",
+    "cone_mesh",
     "corner_points",
+    "cylinder_mesh",
     "dashes_points",
     "ellipse_points",
     "parametric_points",
+    "prism_mesh",
     "rectangle_points",
     "regular_polygon_points",
     "rounded_rectangle_points",

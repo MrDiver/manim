@@ -852,7 +852,8 @@ flowchart LR
   `tests/test_node_fields.py`): fills and strokes take one value or a
   list (gradients, tapering widths), joints and caps are `DISCRETE`,
   every `PbrMaterial` field of a `Shape3D` is a signal;
-- 3D: `Curve3D`, `Shape3D`, `Particles`, the three lights with shadows
+- 3D: `Curve3D`, `Shape3D`, `Particles`; `Cube`, `Prism`, `Cylinder`,
+  `Cone`, `Dot3D`, `Line3D`, `Arrow3D`, `ThreeDAxes` with surfaces; the three lights with shadows
   (PCF, PCSS), `ClippingGroup` portals with scoped lights, surface
   shaders, camera views, depth of field, `load_gltf()`;
 - the core (CORE.md): evaluation, render objects and rendering in Rust,
