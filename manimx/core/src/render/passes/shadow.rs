@@ -317,6 +317,7 @@ impl ShadowPass {
             self.translucent_depth_view,
             self.translucent_layers,
         ) = create_translucency(&gpu.device, resolution, layers);
+        self.tinted = vec![true; layers as usize];
         self.resolution = resolution;
         true
     }
