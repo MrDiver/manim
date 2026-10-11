@@ -27,6 +27,7 @@ from .signals.signal import RootSignal, Signal
 from .signals.signal_tracks import Change, RateFunction
 
 if TYPE_CHECKING:
+    from .audio import Sound
     from .nodes.node import Node
 
 
@@ -66,6 +67,12 @@ class Animation:
 
     def removes(self) -> Sequence[Node]:
         """Nodes removed from the scene when this animation ends."""
+        return ()
+
+    def audio(self) -> Sequence[tuple[Sound, float, float]]:
+        """Sounds this animation plays: ``(sound, volume, when)``, ``when``
+        a fraction of its run time (0: as it starts), so they stay on
+        their moments whatever run time ``play`` gives it."""
         return ()
 
 

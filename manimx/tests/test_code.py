@@ -176,3 +176,32 @@ def test_cycle_characters_swaps_whole_glyphs_without_folding() -> None:
     for time, character in ((0.1, "A"), (0.3, "B"), (0.6, "C"), (0.9, "D"), (1.0, "E")):
         prepared.evaluate(time)
         np.testing.assert_allclose(cycle.board.children[0].points.value, glyph_points(character, after.setup) + pen)
+
+
+def test_typing_and_cycling_play_a_random_sound_per_step() -> None:
+    from manimx.animation import Sound
+    from manimx.userland import CycleCharacters, Flipboard, TypeCode
+    from manimx.userland.code import _ticks
+
+    clicks = [Sound(np.zeros(10), 1000), Sound(np.ones(10) * 0.5, 1000)]
+    code = Code("ab\ncd")
+    typing = TypeCode(code, sounds=clicks, seed=3)
+    audio = typing.audio()
+    assert len(audio) == 5 and {sound for sound, _, _ in audio} <= set(clicks)
+    assert [when for _, _, when in audio] == pytest.approx([0.0, 0.2, 0.4, 0.6, 0.8])
+    assert TypeCode(code).audio() == []
+    # A whole board stepping at once clicks once per step; folding flaps
+    # click halfway into a step.
+    ways = {(0, 0): "ABCD", (0, 1): "AB"}
+    assert _ticks(ways, 3, {0: (0.0, 1.0), 1: (0.0, 1.0)}, 0.0) == pytest.approx([1 / 3, 2 / 3, 1.0])
+    assert _ticks(ways, 3, {0: (0.0, 1.0), 1: (0.0, 1.0)}, 0.5) == pytest.approx([1 / 6, 1 / 2, 5 / 6])
+    cycle = CycleCharacters(Code("A"), Code("C"), alphabet="ABC", sounds=clicks)
+    assert [when for _, _, when in cycle.audio()] == pytest.approx([0.5, 1.0])
+    assert len(Flipboard(Code("A"), Code("C"), alphabet="ABC", sounds=clicks).audio()) == 2
+
+    class Built(Scene):
+        def construct(self):
+            self.play(TypeCode(Code("ab"), sounds=clicks), run_time=1.0)
+
+    prepared = Built().prepare()
+    assert len(prepared.segments[0].sounds) == 2

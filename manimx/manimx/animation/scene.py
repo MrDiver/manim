@@ -313,6 +313,8 @@ class SceneCompiler:
         self.cursor = begin
         self.add([m for m in animation.nodes() if not self._is_inside_present(m)])
         self.place(animation, begin, duration, rate)
+        for sound, volume, when in animation.audio():
+            self.play_sound(sound, volume, at=begin + when * duration)
         self._remove_after(animation, begin + duration)
 
     def _remove_after(self, animation: Animation, at: float) -> None:

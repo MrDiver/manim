@@ -48,6 +48,7 @@ from ..animation import (
     RootSignal,
     Shape2D,
     Signal,
+    Sound,
     Target,
 )
 from ..animation.authoring import current as authoring_current
@@ -304,6 +305,11 @@ class CycleCharacters(_PlannedAnimation):
     lag_ratio: float = 0.0
     run_time: float = 1.5
     rate: RateFunction = linear
+    sounds: Sequence[str | Path | Sound] = ()
+    """Sounds to play as the cells change, one picked at random (by
+    ``seed``) for each step; steps of several cells at once sound once."""
+    volume: float = 1.0
+    seed: int = 0
 
     fold = False
 
@@ -318,6 +324,7 @@ class CycleCharacters(_PlannedAnimation):
         span = max((len(way) - 1 for way in ways.values()), default=0)
         columns = sorted({column for _, column in cells})
         windows = dict(zip(columns, _lagged(len(columns), self.lag_ratio), strict=True)) if columns else {}
+        self._ticks = _ticks(ways, span, windows, 0.5 if self.fold else 0.0)
         self.board = _Board(self.target, name=f"{self.target.name}.cells")
         grid = self.target.grid
         for cell in cells:
@@ -341,6 +348,9 @@ class CycleCharacters(_PlannedAnimation):
 
     def removes(self) -> Sequence[Node]:
         return (self.source, self.board)
+
+    def audio(self) -> Sequence[tuple[Sound, float, float]]:
+        return _random_sounds(self.sounds, self.volume, self.seed, self._ticks)
 
 
 @dataclass(eq=False)
@@ -434,7 +444,9 @@ class TypeCode(_PlannedAnimation):
     ``code.cursor(color=...)``) stands after the last character typed.
     ``speed`` is in key presses per second and sets the run time unless
     one is given; ``jitter`` (0 to 1) varies the time between presses, as
-    a hand does, the same way for the same ``seed``.
+    a hand does, the same way for the same ``seed``. ``sounds`` (files or
+    Sounds) are key clicks: each press plays one picked at random by
+    ``seed``, at ``volume``.
     """
 
     code: Code
@@ -444,6 +456,8 @@ class TypeCode(_PlannedAnimation):
     seed: int = 0
     run_time: float | None = None  # type: ignore[assignment]
     rate: RateFunction = linear
+    sounds: Sequence[str | Path | Sound] = ()
+    volume: float = 1.0
 
     backwards = False
 
@@ -485,6 +499,9 @@ class TypeCode(_PlannedAnimation):
     def nodes(self) -> Sequence[Node]:
         return (self.code,) if self.cursor is None else (self.code, self.cursor)
 
+    def audio(self) -> Sequence[tuple[Sound, float, float]]:
+        return _random_sounds(self.sounds, self.volume, self.seed, list(self._presses))
+
 
 @dataclass(eq=False)
 class Untype(TypeCode):
@@ -515,6 +532,38 @@ class Blink(Animation):
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
+
+
+def _ticks(ways: Mapping[tuple[int, int], str], span: int, windows: Mapping[int, tuple[float, float]], offset: float) -> list[float]:
+    """When cells change character, as fractions of the run time (with a
+    linear rate): step ``k`` of a cell at ``k - offset`` of ``span`` steps
+    into its column's window. Steps closer than 1% of the run time count
+    once, so a board changing all at once clicks once per step."""
+    times = sorted(
+        lower + (step - offset) / span * (upper - lower)
+        for (_, column), way in ways.items()
+        for lower, upper in [windows[column]]
+        for step in range(1, len(way))
+    ) if span else []  # fmt: skip
+    ticks: list[float] = []
+    for time in times:
+        if not ticks or time - ticks[-1] >= 0.01:
+            ticks.append(time)
+    return ticks
+
+
+@lru_cache(maxsize=64)
+def _load_sound(path: str) -> Sound:
+    return Sound.load(path)
+
+
+def _random_sounds(sounds: Sequence[str | Path | Sound], volume: float, seed: int, times: Sequence[float]) -> list[tuple[Sound, float, float]]:
+    """One of ``sounds`` at each of ``times``, picked at random by ``seed``."""
+    if not sounds:
+        return []
+    loaded = [sound if isinstance(sound, Sound) else _load_sound(str(sound)) for sound in sounds]
+    picks = np.random.default_rng(seed).integers(0, len(loaded), len(times))
+    return [(loaded[int(pick)], float(volume), float(time)) for pick, time in zip(picks, times, strict=True)]
 
 
 # --------------------------------------------------------------------------
