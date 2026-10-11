@@ -97,7 +97,9 @@ main {
 
 #timeline {
   --label: 220px;
+  --lanes: calc(100% - var(--label) - 12px); /* set in pixels by app.js, times the zoom */
   position: relative;
+  overflow-x: auto;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -113,11 +115,17 @@ main {
 
 .row {
   display: grid;
-  grid-template-columns: var(--label) 1fr;
+  grid-template-columns: var(--label) var(--lanes);
   align-items: stretch;
+  width: calc(var(--label) + var(--lanes) + 12px);
 }
 
+/* Labels stay in view while the zoomed lanes scroll under them. */
 .label {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--surface);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -129,7 +137,6 @@ main {
 
 .lane {
   position: relative;
-  margin-right: 12px;
   cursor: ew-resize;
 }
 
@@ -282,8 +289,18 @@ button.toggle:focus-visible {
   top: 0;
   bottom: 0;
   left: var(--label);
-  right: 12px;
+  width: var(--lanes);
+  z-index: 2;
   pointer-events: none;
+}
+
+.zoom {
+  display: flex;
+  gap: 4px;
+}
+
+.zoom button {
+  min-width: 28px;
 }
 
 #playhead {

@@ -11,6 +11,11 @@
   <header>
     <h1 id="title">manimx</h1>
     <div class="tools">
+      <div class="zoom" role="group" aria-label="Timeline zoom">
+        <button id="zoom-out" type="button" title="Zoom the timeline out (-)">−</button>
+        <button id="zoom-fit" type="button" title="Show the whole timeline (0)">Fit</button>
+        <button id="zoom-in" type="button" title="Zoom the timeline in (+)">+</button>
+      </div>
       <button id="indices" type="button" aria-pressed="false" title="Show the index of every path in its group (for MorphMatching pairs)">Indices</button>
       <output id="time" aria-live="off">0.00 s</output>
     </div>
@@ -30,7 +35,7 @@
       <div id="rows" role="tree" aria-label="Clips, nodes, signals and animations"></div>
       <div id="overlay"><div id="playhead"></div></div>
     </section>
-    <p class="hint">Drag on the tracks to scrub. ← → one frame, Shift+← → one second, Home and End. Click a name to open its tracks.</p>
+    <p class="hint">Drag on the tracks to scrub. ← → one frame, Shift+← → one second, Home and End. Ctrl+wheel or + and − zoom, 0 fits. Click a name to open its tracks.</p>
   </main>
 </body>
 </html>

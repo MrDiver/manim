@@ -18,6 +18,11 @@
 // Reload on save: /api/changes answers when the server rebuilt the
 // timeline (or failed to); the page then fetches the timeline again and
 // shows the same time, or the build error above the frame.
+//
+// Zoom: the lanes are `zoom` times as wide as the space beside the labels
+// (the CSS variable --lanes, in pixels) and the timeline scrolls sideways
+// under its sticky labels. Ctrl+wheel zooms around the pointer, the keys
+// and buttons around the playhead; a moved playhead is scrolled into view.
 
 const elements = {
   problem: document.getElementById("problem"),
@@ -32,7 +37,13 @@ const elements = {
   collapse: document.getElementById("collapse"),
   indices: document.getElementById("indices"),
   labels: document.getElementById("labels"),
+  zoomIn: document.getElementById("zoom-in"),
+  zoomOut: document.getElementById("zoom-out"),
+  zoomFit: document.getElementById("zoom-fit"),
 };
+
+/** Smallest width of one frame when zoomed in all the way, in pixels. */
+const MAX_FRAME_WIDTH = 32;
 
 const state = {
   timeline: null, // /api/timeline
@@ -43,6 +54,7 @@ const state = {
   shownUrl: null,
   open: loadOpen(), // keys of the rows whose tracks are shown
   indices: loadIndices(), // index labels over the frame
+  zoom: 1, // lanes width / the width beside the labels
 };
 
 /** Horizontal position of a time, as a percentage of the timeline. */
@@ -63,18 +75,66 @@ function snap(time) {
   return Math.min(duration, Math.max(0, Math.round(time * fps) / fps));
 }
 
-function drawTimeline() {
-  const { duration, clips, segments } = state.timeline;
+/** Pixels beside the labels: the lanes' width at zoom 1. */
+function fitWidth() {
+  const label = parseFloat(getComputedStyle(elements.timeline).getPropertyValue("--label")) || 220;
+  return Math.max(100, elements.timeline.clientWidth - label - 12);
+}
+
+function maxZoom() {
+  const { duration, fps } = state.timeline;
+  return Math.max(1, (duration * fps * MAX_FRAME_WIDTH) / fitWidth());
+}
+
+/** Zoom to `zoom`, keeping the time under the horizontal position `clientX` there. */
+function zoomTo(zoom, clientX) {
+  const box = elements.ruler.getBoundingClientRect();
+  const fraction = Math.min(1, Math.max(0, (clientX - box.left) / box.width));
+  state.zoom = Math.min(maxZoom(), Math.max(1, zoom));
+  layoutLanes();
+  drawRuler();
+  const label = elements.ruler.offsetLeft;
+  const lanes = elements.ruler.offsetWidth;
+  const offset = clientX - elements.timeline.getBoundingClientRect().left;
+  elements.timeline.scrollLeft = label + fraction * lanes - offset;
+}
+
+/** Zoom by `factor` around the playhead. */
+function zoomBy(factor) {
+  zoomTo(state.zoom * factor, elements.playhead.getBoundingClientRect().left);
+}
+
+function layoutLanes() {
+  elements.timeline.style.setProperty("--lanes", `${fitWidth() * state.zoom}px`);
+}
+
+/** Scroll the playhead into view if it left the lanes' visible part. */
+function revealPlayhead() {
+  const timeline = elements.timeline;
+  const label = elements.ruler.offsetLeft;
+  const x = label + (percent(state.time) / 100) * elements.ruler.offsetWidth;
+  const left = timeline.scrollLeft + label;
+  const right = timeline.scrollLeft + timeline.clientWidth - 12;
+  if (x < left || x > right) timeline.scrollLeft = x - label - (timeline.clientWidth - label) / 2;
+}
+
+function drawRuler() {
+  const { duration } = state.timeline;
   elements.ruler.replaceChildren();
-  const step = niceStep(duration);
+  const step = niceStep(duration / state.zoom);
   for (let t = 0; t <= duration + 1e-9; t += step) {
     const tick = document.createElement("span");
     tick.className = "tick";
     tick.style.left = `${percent(t)}%`;
-    tick.textContent = `${Number(t.toFixed(2))} s`;
+    tick.textContent = `${Number(t.toFixed(3))} s`;
     elements.ruler.append(tick);
   }
+}
 
+function drawTimeline() {
+  const { duration, clips, segments } = state.timeline;
+  layoutLanes();
+  drawRuler();
   elements.rows.replaceChildren();
   const order = clips.map((clip, index) => index).sort((a, b) => clips[a].layer - clips[b].layer || a - b);
   for (const index of order) {
@@ -206,11 +266,12 @@ function niceStep(duration) {
   return [1, 2, 5, 10].map((m) => m * power).find((step) => step >= raw);
 }
 
-function show(time, intended = time) {
+function show(time, intended = time, reveal = false) {
   state.time = time;
   state.intended = intended;
   history.replaceState(null, "", `#t=${intended.toFixed(3)}`); // a link keeps the place
   elements.playhead.style.left = `${percent(time)}%`;
+  if (reveal) revealPlayhead();
   elements.time.textContent = `${time.toFixed(2)} s · frame ${Math.round(time * state.timeline.fps)}`;
   if (state.loading) {
     state.wanted = time;
@@ -305,6 +366,22 @@ function listen() {
   timeline.addEventListener("pointermove", (event) => {
     if (timeline.hasPointerCapture(event.pointerId)) show(timeAt(event.clientX));
   });
+  timeline.addEventListener(
+    "wheel",
+    (event) => {
+      if (!event.ctrlKey && !event.metaKey) return; // plain wheels scroll
+      event.preventDefault();
+      zoomTo(state.zoom * Math.exp(-event.deltaY * 0.002), event.clientX);
+    },
+    { passive: false },
+  );
+  elements.zoomIn.addEventListener("click", () => zoomBy(1.5));
+  elements.zoomOut.addEventListener("click", () => zoomBy(1 / 1.5));
+  elements.zoomFit.addEventListener("click", () => zoomTo(1, 0));
+  new ResizeObserver(() => {
+    layoutLanes();
+    drawRuler();
+  }).observe(timeline);
   elements.collapse.addEventListener("click", () => {
     state.open.clear();
     saveOpen();
@@ -316,13 +393,24 @@ function listen() {
       ArrowLeft: -(event.shiftKey ? 1 : 1 / fps),
       ArrowRight: event.shiftKey ? 1 : 1 / fps,
     };
+    if (event.target.closest("input, select, textarea")) return; // typing, not moving
+    const zooms = { "+": 1.5, "=": 1.5, "-": 1 / 1.5 };
+    if (event.key in zooms) {
+      event.preventDefault();
+      zoomBy(zooms[event.key]);
+      return;
+    }
+    if (event.key === "0") {
+      zoomTo(1, 0);
+      return;
+    }
     let time = null;
     if (event.key in steps) time = snap(state.time + steps[event.key]);
     else if (event.key === "Home") time = 0;
     else if (event.key === "End") time = duration;
     if (time !== null) {
       event.preventDefault();
-      show(time);
+      show(time, time, true);
     }
   });
 }
