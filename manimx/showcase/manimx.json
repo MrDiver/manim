@@ -128,6 +128,10 @@
     "Shapes3D": {
       "module": "scenes.shapes3d",
       "class": "Shapes3D"
+    },
+    "Indications": {
+      "module": "scenes.indications",
+      "class": "Indications"
     }
   },
   "timeline": {
@@ -188,6 +192,9 @@
       },
       {
         "scene": "Shapes3D"
+      },
+      {
+        "scene": "Indications"
       },
       {
         "scene": "LowerThird",
