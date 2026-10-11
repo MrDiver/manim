@@ -14,9 +14,12 @@ See docs/animation_engine_design.md.
 from .animations import (
     Animation,
     AnimationBuilder,
+    AnimationGroup,
     ChangeSignals,
+    LaggedStart,
     SetValue,
     SignalChange,
+    Succession,
     Target,
 )
 from .audio import Sound, SoundEvent, mix, write_wav
@@ -79,6 +82,7 @@ __all__ = [
     "SEGMENT_GAP",
     "Animation",
     "AnimationBuilder",
+    "AnimationGroup",
     "Camera",
     "CameraView",
     "Change",
@@ -93,6 +97,7 @@ __all__ = [
     "Entry",
     "Group",
     "InvalidCue",
+    "LaggedStart",
     "Light",
     "MonotoneMap",
     "Node",
@@ -119,6 +124,7 @@ __all__ = [
     "Sound",
     "SoundEvent",
     "SpotLight",
+    "Succession",
     "Target",
     "TimeSignals",
     "Timeline",

@@ -7,7 +7,8 @@ public signals of a node, exactly as a project's own animation would.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import math
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
@@ -202,6 +203,34 @@ class GrowFromCenter(Animation):
 
 
 @dataclass(eq=False)
+class SpinInFromNothing(GrowFromCenter):
+    """Grow a node from nothing while it turns ``angle`` about ``axis``
+    into place."""
+
+    angle: float = math.pi / 2
+    axis: Sequence[float] = (0.0, 0.0, 1.0)
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        require(self.node, RotationMixin, "SpinInFromNothing")
+        self._end_rotation = authoring_current(self.node.rotation)
+        self._start_rotation = self._end_rotation * quaternion_from_axis_angle(self.axis, -self.angle)
+
+    def targets(self) -> Sequence[Target]:
+        return [*super().targets(), Target(self.node.rotation, Change.ABSOLUTE)]
+
+    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
+        if signal is self.node.rotation:
+            return evaluate(self.planned_contribution(signal), signal.kind, alpha)
+        return super().contribution(signal, alpha, start_value)
+
+    def planned_contribution(self, signal: RootSignal) -> Contribution:
+        if signal is self.node.rotation:
+            return Between(self._start_rotation, self._end_rotation)
+        return super().planned_contribution(signal)
+
+
+@dataclass(eq=False)
 class ShrinkToCenter(Animation):
     """Shrink a node to nothing and remove it."""
 
@@ -260,6 +289,204 @@ class _PlannedAnimation(Animation):
 
     def planned_contribution(self, signal: RootSignal) -> Contribution:
         return self._planned[signal.id][1]
+
+
+@dataclass(eq=False)
+class GrowFromPoint(_PlannedAnimation):
+    """Grow a node from nothing at ``point`` (in its parent's space) to
+    its authored size and place: a scaling about ``point``."""
+
+    node: Node
+    point: Sequence[float] = (0.0, 0.0, 0.0)
+    run_time: float = 1.0
+    rate: RateFunction = smooth
+
+    def __post_init__(self) -> None:
+        require(self.node, PositionMixin, type(self).__name__)
+        require(self.node, ScalableMixin, type(self).__name__)
+        self._plan()
+        point = _point3(self._start_point())
+        # The position moving linearly while the scale grows linearly
+        # keeps every point of the node on its ray from ``point``.
+        for axis, start in zip(self.node.position.axes, point, strict=True):
+            self._between(axis, start, authoring_current(axis))
+        for axis in self.node.scale.axes:
+            self._between(axis, 0.0, authoring_current(axis))
+
+    def _start_point(self) -> Sequence[float]:
+        return self.point
+
+    def nodes(self) -> Sequence[Node]:
+        return (self.node,)
+
+
+@dataclass(eq=False)
+class GrowFromEdge(GrowFromPoint):
+    """Grow a node from the middle of its bounding box's side facing
+    ``edge`` (UP, DOWN, LEFT, RIGHT, or a corner like UL)."""
+
+    edge: Sequence[float] = (0.0, -1.0, 0.0)
+
+    def _start_point(self) -> Sequence[float]:
+        from .markers import current_bounds
+
+        low, high = current_bounds(self.node)
+        return (low + high) / 2 + (high - low) / 2 * _point3(self.edge)
+
+
+@dataclass(eq=False)
+class GrowArrow(_PlannedAnimation):
+    """Grow an arrow (or Line) from its start: its end moves out from the
+    start to where it is."""
+
+    arrow: Node
+    run_time: float = 1.0
+    rate: RateFunction = smooth
+
+    def __post_init__(self) -> None:
+        if not hasattr(self.arrow, "start") or not hasattr(self.arrow, "end"):
+            raise TypeError(f"GrowArrow needs a node with a start and an end, not {type(self.arrow).__name__}")
+        self._plan()
+        for start, end in zip(self.arrow.start.axes, self.arrow.end.axes, strict=True):
+            if not isinstance(end, RootSignal):
+                raise TypeError(f"{self.arrow.name}'s end follows other signals; it cannot grow")
+            self._between(end, authoring_current(start), authoring_current(end))
+
+    def nodes(self) -> Sequence[Node]:
+        return (self.arrow,)
+
+
+@dataclass(eq=False)
+class FadeTransform(_PlannedAnimation):
+    """Cross-fade ``source`` into ``target``: the source fades out while it
+    moves and stretches onto the target's bounding box, the target fades
+    in from the source's box. With ``stretch`` false both scale evenly.
+    The target takes the source's place."""
+
+    source: Node
+    target: Node
+    stretch: bool = True
+    run_time: float = 1.0
+    rate: RateFunction = smooth
+
+    def __post_init__(self) -> None:
+        from .markers import current_bounds
+
+        for node in (self.source, self.target):
+            require(node, PositionMixin, "FadeTransform")
+            require(node, ScalableMixin, "FadeTransform")
+        self._plan()
+        boxes = [current_bounds(node) for node in (self.source, self.target)]
+        sizes = [high - low for low, high in boxes]
+        centers = [(low + high) / 2 for low, high in boxes]
+        ratio = np.where((sizes[0] > 1e-9) & (sizes[1] > 1e-9), sizes[1] / np.where(sizes[0] > 1e-9, sizes[0], 1.0), 1.0)
+        if not self.stretch:
+            shown = ratio[np.array([s > 1e-9 for s in sizes[0]]) & np.array([s > 1e-9 for s in sizes[1]])]
+            ratio = np.full(3, float(shown.min()) if len(shown) else 1.0)
+        self._cover(self.source, centers[0], centers[1], ratio, fade_in=False)
+        self._cover(self.target, centers[1], centers[0], 1.0 / ratio, fade_in=True)
+
+    def _cover(self, node: Node, center: np.ndarray, other: np.ndarray, factor: np.ndarray, fade_in: bool) -> None:
+        """Move and scale ``node`` so its box (around ``center``) lies on the
+        other node's box (around ``other``): towards it while fading out,
+        or from it while fading in."""
+        position = np.array([authoring_current(axis) for axis in node.position.axes])
+        scale = np.array([authoring_current(axis) for axis in node.scale.axes])
+        placed = other - factor * (center - position)
+        for axis, here, there in zip(node.position.axes, position, placed, strict=True):
+            self._between(axis, *((there, here) if fade_in else (here, there)))
+        for axis, here, there in zip(node.scale.axes, scale, scale * factor, strict=True):
+            self._between(axis, *((there, here) if fade_in else (here, there)))
+        shown = authoring_current(node.alpha)
+        self._between(node.alpha, *((0.0, shown) if fade_in else (shown, 0.0)))
+
+    def nodes(self) -> Sequence[Node]:
+        return (self.source, self.target)
+
+    def removes(self) -> Sequence[Node]:
+        return (self.source,)
+
+
+@dataclass(eq=False)
+class AddTextLetterByLetter(_PlannedAnimation):
+    """Show a node's paths (the glyphs of text) one after another,
+    ``time_per_char`` seconds apart, which sets the run time."""
+
+    node: Node
+    time_per_char: float = 0.1
+    run_time: float | None = None  # type: ignore[assignment]
+    rate: RateFunction = linear
+
+    backwards = False
+
+    def __post_init__(self) -> None:
+        self._plan()
+        paths = _drawn_paths(self.node)
+        if self.run_time is None:
+            self.run_time = max(len(paths), 1) * self.time_per_char
+        count = max(len(paths), 1)
+        for index, path in enumerate(paths):
+            shown = authoring_current(path.alpha)
+            if self.backwards:
+                at = (count - 1 - index) / count
+                self._between(path.alpha, shown, 0.0, at, at)
+            else:
+                at = index / count
+                self._between(path.alpha, 0.0, shown, at, at)
+
+    def nodes(self) -> Sequence[Node]:
+        return (self.node,)
+
+
+@dataclass(eq=False)
+class RemoveTextLetterByLetter(AddTextLetterByLetter):
+    """Hide a node's paths one after another from the last, then remove it."""
+
+    backwards = True
+
+    def removes(self) -> Sequence[Node]:
+        return (self.node,)
+
+
+@dataclass(eq=False)
+class Homotopy(Animation):
+    """Move every point of a node's paths through ``homotopy(x, y, z, t)``
+    (a point) as ``t`` runs from 0 to 1, in each path's own space; the
+    paths end where ``homotopy`` puts them at ``t = 1``. Paths whose
+    points follow other signals (a Circle's follow its radius) cannot be
+    moved this way."""
+
+    homotopy: Callable[[float, float, float, float], Sequence[float]]
+    node: Node
+    run_time: float = 3.0
+    rate: RateFunction = linear
+
+    def __post_init__(self) -> None:
+        self._paths = _drawn_paths(self.node)
+        for path in self._paths:
+            if not isinstance(path.points, RootSignal):
+                raise TypeError(f"{path.name}'s points follow other signals; Homotopy cannot move them")
+        self._start = {path.points.id: _points(path) for path in self._paths}
+        self._function = np.vectorize(lambda x, y, z, t: tuple(self.homotopy(x, y, z, t)), otypes=[float, float, float])
+
+    def targets(self) -> Sequence[Target]:
+        return [Target(path.points, Change.ABSOLUTE) for path in self._paths]
+
+    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> np.ndarray:
+        points = self._start[signal.id]
+        full = _resized(points, 3)
+        moved = np.column_stack(self._function(full[:, 0], full[:, 1], full[:, 2], alpha))
+        return moved[:, : points.shape[1]]
+
+    def nodes(self) -> Sequence[Node]:
+        return (self.node,)
+
+
+def _point3(point: Sequence[float]) -> np.ndarray:
+    array = np.zeros(3)
+    given = np.asarray(point, dtype=np.float64).reshape(-1)
+    array[: len(given)] = given
+    return array
 
 
 MorphTarget = TypeVar("MorphTarget", bound=Node)
@@ -733,8 +960,16 @@ def _in_space_of(points: np.ndarray, from_world: np.ndarray, to_world: np.ndarra
     return moved[:, :dimension]
 
 __all__ = [
+    "AddTextLetterByLetter",
     "Create",
+    "FadeTransform",
+    "GrowArrow",
+    "GrowFromEdge",
+    "GrowFromPoint",
+    "Homotopy",
     "MoveAlongPath",
+    "RemoveTextLetterByLetter",
+    "SpinInFromNothing",
     "DrawBorderThenFill",
     "FadeIn",
     "FadeOut",

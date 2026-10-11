@@ -69,6 +69,64 @@ class Animation:
         return ()
 
 
+class AnimationGroup:
+    """Animations played as one: each starts ``lag_ratio`` of the one
+    before it's run time after that one starts (0: all together, 1: one
+    after another). ``run_time`` stretches or squeezes the whole group to
+    that length (default: as long as its animations take). Groups nest.
+
+    A group is not placed on the timeline itself: ``play`` places each
+    animation in it at its own start, with its own rate. So a group has no
+    rate of its own, and a Simulation cannot be in one.
+    """
+
+    def __init__(self, *animations: Animation | AnimationBuilder | AnimationGroup, lag_ratio: float = 0.0, run_time: float | None = None) -> None:
+        if not animations:
+            raise ValueError(f"{type(self).__name__} needs at least one animation")
+        self.animations = [item if isinstance(item, AnimationGroup) else as_animation(item) for item in animations]
+        self.lag_ratio = float(lag_ratio)
+        self._run_time = run_time
+
+    @property
+    def run_time(self) -> float:
+        if self._run_time is not None:
+            return float(self._run_time)
+        return max(start + length for _, start, length in self._natural())
+
+    def schedule(self, run_time: float | None = None) -> list[tuple[Animation, float, float]]:
+        """``(animation, start, run time)`` of every animation in the group
+        (nested groups opened), starts counted from the group's start,
+        fitted to ``run_time`` (default: the group's)."""
+        natural = self._natural()
+        span = max(start + length for _, start, length in natural)
+        factor = (run_time if run_time is not None else self.run_time) / span if span > 0 else 1.0
+        return [(animation, start * factor, length * factor) for animation, start, length in natural]
+
+    def _natural(self) -> list[tuple[Animation, float, float]]:
+        entries: list[tuple[Animation, float, float]] = []
+        start = 0.0
+        for item in self.animations:
+            inner = item.schedule() if isinstance(item, AnimationGroup) else [(item, 0.0, float(item.run_time))]
+            entries += [(animation, start + offset, length) for animation, offset, length in inner]
+            start += self.lag_ratio * max(offset + length for _, offset, length in inner)
+        return entries
+
+
+class Succession(AnimationGroup):
+    """Animations one after another."""
+
+    def __init__(self, *animations: Animation | AnimationBuilder | AnimationGroup, run_time: float | None = None) -> None:
+        super().__init__(*animations, lag_ratio=1.0, run_time=run_time)
+
+
+class LaggedStart(AnimationGroup):
+    """Animations started one after another, each ``lag_ratio`` of the
+    previous one's run time after it, so they overlap."""
+
+    def __init__(self, *animations: Animation | AnimationBuilder | AnimationGroup, lag_ratio: float = 0.05, run_time: float | None = None) -> None:
+        super().__init__(*animations, lag_ratio=lag_ratio, run_time=run_time)
+
+
 # --------------------------------------------------------------------------
 # Plain signal changes and the .animate builder
 # --------------------------------------------------------------------------

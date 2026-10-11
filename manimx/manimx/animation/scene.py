@@ -50,6 +50,7 @@ from ..robjects import RGroup, new_uid
 from .animations import (
     Animation,
     AnimationBuilder,
+    AnimationGroup,
     SetValue,
     SignalChange,
     as_animation,
@@ -156,18 +157,19 @@ class Scene:
 
     def play(
         self,
-        *animations: Animation | AnimationBuilder,
+        *animations: Animation | AnimationBuilder | AnimationGroup,
         run_time: float | None = None,
         rate: RateFunction | None = None,
         lag_ratio: float = 0.0,
     ) -> None:
         """Place animations at the current time and wait until they end.
 
-        ``run_time`` and ``rate`` override the animations' own. With
-        ``lag_ratio`` > 0 each animation starts that fraction of its run
-        time after the previous one (Manim's LaggedStart).
+        ``run_time`` and ``rate`` override the animations' own (a group's
+        run time is fitted to ``run_time``; ``rate`` reaches the animations
+        in it). With ``lag_ratio`` > 0 each animation starts that fraction
+        of its run time after the previous one (Manim's LaggedStart).
         """
-        self._authoring().play([as_animation(a) for a in animations], run_time, rate, lag_ratio)
+        self._authoring().play([a if isinstance(a, AnimationGroup) else as_animation(a) for a in animations], run_time, rate, lag_ratio)
 
     def wait(self, duration: float = 1.0) -> None:
         """Let ``duration`` seconds pass."""
@@ -272,7 +274,7 @@ class SceneCompiler:
                 self.present.discard(node.uid)
                 self.record_instant(node.present, Change.ABSOLUTE, False)
 
-    def play(self, animations: Sequence[Animation], run_time: float | None, rate: RateFunction | None, lag_ratio: float) -> None:
+    def play(self, animations: Sequence[Animation | AnimationGroup], run_time: float | None, rate: RateFunction | None, lag_ratio: float) -> None:
         if not animations:
             raise ValueError("play() needs at least one animation")
         start = self.cursor
@@ -285,24 +287,38 @@ class SceneCompiler:
             simulated = isinstance(animation, Simulation)
             duration = animation.run_time if run_time is None or simulated else run_time
             begin = start + index * lag_ratio * duration
-            # Nodes appear when their own animation begins: a lagged
-            # FadeIn must not show its node before its fade starts.
-            self.cursor = begin
-            self.add([m for m in animation.nodes() if not self._is_inside_present(m)])
-            if simulated:
+            if isinstance(animation, AnimationGroup):
+                for member, offset, length in animation.schedule(duration):
+                    if isinstance(member, Simulation):
+                        raise TypeError("a Simulation cannot be in an AnimationGroup; play it on its own")
+                    self._place_one(member, begin + offset, length, rate or member.rate)
+            elif simulated:
+                self.cursor = begin
+                self.add([m for m in animation.nodes() if not self._is_inside_present(m)])
                 duration = animation.bake(self, begin)
                 for event, at in animation.events:
                     self.segment_emits.append(Emit(event, begin + at - self.segment_start))
                 for sound, volume, at in animation.sounds:
                     self.play_sound(sound, volume, at=begin + at)
                 self.place(animation, begin, duration, linear)
+                self._remove_after(animation, begin + duration)
             else:
-                self.place(animation, begin, duration, rate or animation.rate)
+                self._place_one(animation, begin, duration, rate or animation.rate)
             end = max(end, begin + duration)
-            if animation.removes():
-                self.cursor = begin + duration
-                self.remove(animation.removes())
         self.cursor = end
+
+    def _place_one(self, animation: Animation, begin: float, duration: float, rate: RateFunction) -> None:
+        # Nodes appear when their own animation begins: a lagged FadeIn
+        # must not show its node before its fade starts.
+        self.cursor = begin
+        self.add([m for m in animation.nodes() if not self._is_inside_present(m)])
+        self.place(animation, begin, duration, rate)
+        self._remove_after(animation, begin + duration)
+
+    def _remove_after(self, animation: Animation, at: float) -> None:
+        if animation.removes():
+            self.cursor = at
+            self.remove(animation.removes())
 
     def wait(self, duration: float) -> None:
         if duration < 0:

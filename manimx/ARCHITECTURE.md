@@ -864,6 +864,9 @@ flowchart LR
   focus, regions, scrolling windows, `MorphCode`, `Flipboard`,
   `TypeCode`, `Untype` and `Blink`;
 - `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`, `Unwrite`;
+  `AnimationGroup`, `Succession`, `LaggedStart`; the Grow family,
+  `FadeTransform`, `Homotopy`, letter by letter; `Flash`,
+  `ShowPassingFlash`, `Circumscribe`, `Wiggle`, `ApplyWave`;
 - `manimx ui` with reload on save;
 - performance (PERFORMANCE.md): the benchmark project from 48.6 fps to
   123.5 with the core; light-show 70 to 23 ms per frame.
