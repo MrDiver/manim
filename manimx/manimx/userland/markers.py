@@ -12,7 +12,7 @@ added to a group later count too. No mark picks a color.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
@@ -31,6 +31,7 @@ from ..animation import (
     Shape2D,
     Signal,
 )
+from ..animation.authoring import current
 from .geometry import corner_points, rectangle_points, rounded_rectangle_points
 from .shapes2d import Brace, _Side
 
@@ -57,26 +58,44 @@ class _FamilyBounds:
         self.listening: set[int] = set()
 
     def rebind(self, _group: Group | None = None) -> None:
-        layout: list[tuple[int, tuple[str, ...], bool]] = []
-        inputs: list[Signal] = []
+        layout, inputs = _family_layout(self.node, self._listen)
+        self.signal.rebind(_Bounds(layout), inputs)
 
-        def visit(member: Node, parent: int) -> None:
-            parts = tuple(part for part, mixin in (("position", PositionMixin), ("rotation", RotationMixin), ("scale", ScalableMixin)) if isinstance(member, mixin))
-            for part in parts:
-                inputs.extend(getattr(member, part).axes if part != "rotation" else (member.rotation,))  # type: ignore[attr-defined]
-            is_path = isinstance(member, (Shape2D, Curve3D))
-            if is_path:
-                inputs.append(member.points)  # type: ignore[attr-defined]
-            if isinstance(member, Group) and id(member) not in self.listening:
-                self.listening.add(id(member))
-                member.on_structure_change(self.rebind)
-            here = len(layout)
-            layout.append((parent, parts, is_path))
-            for child in _children(member):
-                visit(child, here)
+    def _listen(self, group: Group) -> None:
+        if id(group) not in self.listening:
+            self.listening.add(id(group))
+            group.on_structure_change(self.rebind)
 
-        visit(self.node, -1)
-        self.signal.rebind(_Bounds(tuple(layout)), tuple(inputs))
+
+def current_bounds(node: Node) -> np.ndarray:
+    """:func:`bounds` of ``node`` as authoring code sees it right now, as
+    a value (for laying nodes out while a scene is composed)."""
+    layout, inputs = _family_layout(node)
+    return _Bounds(layout)(*(current(signal) for signal in inputs))
+
+
+def _family_layout(node: Node, on_group: Callable[[Group], None] | None = None) -> tuple[tuple[tuple[int, tuple[str, ...], bool], ...], tuple[Signal, ...]]:
+    """The layout and inputs of :class:`_Bounds` for ``node``'s family;
+    ``on_group`` is called with every group in it."""
+    layout: list[tuple[int, tuple[str, ...], bool]] = []
+    inputs: list[Signal] = []
+
+    def visit(member: Node, parent: int) -> None:
+        parts = tuple(part for part, mixin in (("position", PositionMixin), ("rotation", RotationMixin), ("scale", ScalableMixin)) if isinstance(member, mixin))
+        for part in parts:
+            inputs.extend(getattr(member, part).axes if part != "rotation" else (member.rotation,))  # type: ignore[attr-defined]
+        is_path = isinstance(member, (Shape2D, Curve3D))
+        if is_path:
+            inputs.append(member.points)  # type: ignore[attr-defined]
+        if isinstance(member, Group) and on_group is not None:
+            on_group(member)
+        here = len(layout)
+        layout.append((parent, parts, is_path))
+        for child in _children(member):
+            visit(child, here)
+
+    visit(node, -1)
+    return tuple(layout), tuple(inputs)
 
 
 def edge(node: Node, direction: Sequence[float]) -> DerivedSignal:
@@ -245,4 +264,4 @@ def _children(node: Node) -> list[Node]:
     return []
 
 
-__all__ = ["BackgroundRectangle", "BraceLabel", "Cross", "SurroundingRectangle", "Underline", "bounds", "edge"]
+__all__ = ["BackgroundRectangle", "BraceLabel", "Cross", "SurroundingRectangle", "Underline", "bounds", "current_bounds", "edge"]

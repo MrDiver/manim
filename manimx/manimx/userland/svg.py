@@ -100,6 +100,9 @@ class SVG(Group):
         text = str(source) if isinstance(source, str) and source.lstrip().startswith("<") else Path(source).read_text()
         paths = read_svg(text, width=width, height=height)
         super().__init__(*(Shape2D(path.points, self._path_name(path), **(path.style() | style)) for path in paths), name=name)
+        self.baseline = next((path.origin[1] for path in paths if path.origin is not None), None)
+        """The y of the first glyph's baseline in the group's space (None
+        without glyphs), to line text up with other text."""
 
     def _path_name(self, path: SVGPath) -> str | None:
         """The name of the Shape2D of ``path`` (None: a generated one)."""

@@ -22,7 +22,7 @@ import numpy as np
 
 from ..animation import SCALAR, Group, RootSignal, Shape2D, Signal
 from ..animation.nodes.node import ABS, ChangeList, animatable
-from .constants import ORIGIN
+from .constants import LEFT, ORIGIN
 from .svg import UNITS_PER_INCH, _inches, read_svg
 from .typst import PAGE, compile_typst
 
@@ -104,6 +104,63 @@ class DecimalNumber(Group):
         return [(self.value, ABS, float(value))]
 
 
+class Integer(DecimalNumber):
+    """A :class:`DecimalNumber` without decimal places."""
+
+    def __init__(
+        self,
+        value: float | Signal = 0,
+        preamble: str = "",
+        anchor: Sequence[float] = ORIGIN,
+        characters: int | None = None,
+        name: str | None = None,
+        **style: Any,
+    ) -> None:
+        super().__init__(value, 0, preamble, anchor, characters, name, **style)
+
+
+class Variable(Group):
+    """``label = value``: Typst markup ``label`` (``"$x$"``), an equals
+    sign and a :class:`DecimalNumber` of ``value`` (a number or a SCALAR
+    signal, as for DecimalNumber) on one baseline, centered on the origin
+    as first shown; the number grows to the right. ``label``, ``number``
+    and ``value`` are its parts; ``set_value`` changes the value.
+    ``style`` reaches the label and the number.
+    """
+
+    def __init__(
+        self,
+        value: float | Signal,
+        label: str,
+        decimals: int = 2,
+        preamble: str = "",
+        characters: int | None = None,
+        name: str | None = None,
+        **style: Any,
+    ) -> None:
+        from .typst import Typst
+
+        super().__init__(name=name)
+        self.label = Typst(f"{label} =", preamble, name=f"{self.name}.label", **style)
+        self.number = DecimalNumber(value, decimals, preamble, LEFT, characters, name=f"{self.name}.number", **style)
+        self.value = self.number.value
+        label_points = np.vstack([shape.points.value for shape in self.label.shapes])
+        gap = glyph("0", preamble).advance * 0.4
+        number_baseline = -self.number.layout._center
+        self.label.shift((0.0, number_baseline - (self.label.baseline or 0.0), 0.0))
+        self.number.move_to((label_points[:, 0].max() + gap, 0.0, 0.0))
+        first = self.number.layout.placed(float(self.number.value.value))
+        width = label_points[:, 0].max() - label_points[:, 0].min() + gap + (max(points[:, 0].max() for points in first if len(points)) if first else 0.0)
+        left = label_points[:, 0].min()
+        for part in (self.label, self.number):
+            part.shift((-left - width / 2, 0.0, 0.0))
+        self.add(self.label, self.number)
+
+    @animatable
+    def set_value(self, value: float) -> ChangeList:
+        return DecimalNumber.set_value._signal_changes(self.number, value)  # type: ignore[attr-defined]
+
+
 class NumberLayout:
     """Where each character of a formatted number goes."""
 
@@ -145,4 +202,4 @@ class _Slot:
         return placed[self.index] if self.index < len(placed) else np.zeros((0, 2))
 
 
-__all__ = ["CHARACTERS", "DecimalNumber", "Glyph", "NumberLayout", "glyph"]
+__all__ = ["CHARACTERS", "DecimalNumber", "Glyph", "Integer", "NumberLayout", "Variable", "glyph"]

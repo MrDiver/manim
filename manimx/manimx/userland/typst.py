@@ -14,6 +14,9 @@ import zlib
 from functools import lru_cache
 from typing import Any
 
+import numpy as np
+
+from ..animation import Group
 from .svg import SVG, SVGPath
 
 PAGE = "#set page(width: auto, height: auto, margin: 0pt, fill: none)\n"
@@ -62,6 +65,29 @@ class TypstMath(Typst):
 
     def __init__(self, formula: str, preamble: str = "", width: float | None = None, height: float | None = None, name: str | None = None, **style: Any) -> None:
         super().__init__(f"$ {formula} $", preamble, width, height, name, **style)
+
+
+class BulletedList(Group):
+    """``items`` (Typst markup each) as a bulleted list: one Typst per
+    item, so items can be shown one after another, their bullets lined up
+    on the left and their baselines ``spacing`` apart, the list centered
+    on the origin. ``style`` reaches every item."""
+
+    def __init__(self, *items: str, preamble: str = "", spacing: float = 0.6, name: str | None = None, **style: Any) -> None:
+        super().__init__(name=name)
+        self.items = [Typst(f"- {item}", preamble, name=f"{self.name}.item{index}", **style) for index, item in enumerate(items)]
+        lefts = []
+        for index, item in enumerate(self.items):
+            points = [shape.points.value for shape in item.shapes]
+            left = min((float(p[:, 0].min()) for p in points if len(p)), default=0.0)
+            lefts.append(left)
+            item.shift((-left, -index * spacing - (item.baseline or 0.0), 0.0))
+        if self.items:
+            boxes = [np.vstack([shape.points.value for shape in item.shapes]) + [-left, 0.0] for item, left in zip(self.items, lefts, strict=True)]
+            width = max(float(box[:, 0].max()) for box in boxes)
+            for item in self.items:
+                item.shift((-width / 2, (len(self.items) - 1) * spacing / 2, 0.0))
+        self.add(*self.items)
 
 
 @lru_cache(maxsize=256)
@@ -187,4 +213,4 @@ def _literal(text: bytes) -> bytes:
     return bytes(out)
 
 
-__all__ = ["PAGE", "Typst", "TypstMath", "compile_typst", "glyph_characters"]
+__all__ = ["PAGE", "BulletedList", "Typst", "TypstMath", "compile_typst", "glyph_characters"]

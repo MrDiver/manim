@@ -857,7 +857,9 @@ flowchart LR
   shaders, camera views, depth of field, `load_gltf()`;
 - the core (CORE.md): evaluation, render objects and rendering in Rust,
   with the render object tree as the interface; the only renderer;
-- graphs with adaptive ticks, number lines, Typst, SVG; `Code` with
+- graphs with adaptive ticks, number lines, `BarChart`; `Table`,
+  `Matrix` (`DecimalMatrix` of signals), `Integer`, `Variable`,
+  `BulletedList`; Typst, SVG; `Code` with
   focus, regions, scrolling windows, `MorphCode`, `Flipboard`,
   `TypeCode`, `Untype` and `Blink`;
 - `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`, `Unwrite`;

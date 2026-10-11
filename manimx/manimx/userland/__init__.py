@@ -25,6 +25,7 @@ from .animations import (
     Unwrite,
     Write,
 )
+from .charts import BarChart
 from .code import Blink, Code, CycleCharacters, Flipboard, MorphCode, TypeCode, Untype
 from .constants import (
     DEGREES,
@@ -71,9 +72,10 @@ from .markers import (
     SurroundingRectangle,
     Underline,
     bounds,
+    current_bounds,
     edge,
 )
-from .numbers import DecimalNumber
+from .numbers import DecimalNumber, Integer, Variable
 from .shapes2d import (
     AnnularSector,
     Annulus,
@@ -95,7 +97,8 @@ from .shapes2d import (
 )
 from .shapes3d import Box, ParametricSurface, Sphere, Torus
 from .svg import SVG, read_svg
-from .typst import Typst, TypstMath
+from .tables import DecimalMatrix, IntegerMatrix, Matrix, Table
+from .typst import BulletedList, Typst, TypstMath
 
 __all__ = [
     "DEGREES",
@@ -121,10 +124,12 @@ __all__ = [
     "Arrow",
     "Axes",
     "BackgroundRectangle",
+    "BarChart",
     "Blink",
     "Box",
     "Brace",
     "BraceLabel",
+    "BulletedList",
     "Circle",
     "Code",
     "Create",
@@ -133,6 +138,7 @@ __all__ = [
     "CurvedArrow",
     "CycleCharacters",
     "DashedLine",
+    "DecimalMatrix",
     "DecimalNumber",
     "Dot",
     "DoubleArrow",
@@ -145,7 +151,10 @@ __all__ = [
     "FunctionGraph",
     "GrowFromCenter",
     "Indicate",
+    "Integer",
+    "IntegerMatrix",
     "Line",
+    "Matrix",
     "Morph",
     "MorphCode",
     "MorphMatching",
@@ -168,6 +177,7 @@ __all__ = [
     "Square",
     "Star",
     "SurroundingRectangle",
+    "Table",
     "Torus",
     "Triangle",
     "TypeCode",
@@ -178,9 +188,11 @@ __all__ = [
     "Untype",
     "Unwrite",
     "Value",
+    "Variable",
     "Vector",
     "Write",
     "bounds",
+    "current_bounds",
     "edge",
     "geometry",
     "load_gltf",
