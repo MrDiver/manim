@@ -1,7 +1,10 @@
 # manimx core: the timeline as data, evaluated in Rust
 
-Plan and status of moving everything below the authoring API out of
-Python. Read ARCHITECTURE.md first; this file only describes what changes.
+The plan that moved everything below the authoring API out of Python,
+and how far it got. The phases below describe the steps as they were
+planned (some mention the Python renderer, which the core replaced and
+which is removed now); ARCHITECTURE.md section 9 and core/README.md
+describe the core as it is.
 
 ## Why
 

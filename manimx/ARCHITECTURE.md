@@ -16,12 +16,6 @@ engine's design rationale in `docs/animation_engine_design.md` (repository
 root), performance work in [PERFORMANCE.md](PERFORMANCE.md), usage in
 [GETTING_STARTED.md](GETTING_STARTED.md).
 
-> **Being rewritten.** Sections 1–3, 8, 9 and 10 describe the code as it
-> is. Sections 6 (worlds and views, removed when every scene got its own
-> camera), 7 and 12–14 still describe older states and are rewritten in
-> the documentation pass that follows the removal of the Python renderer
-> (FUTURE_IDEAS.md lists what was removed and why).
-
 Contents:
 
 1. [The big picture](#1-the-big-picture)
@@ -29,8 +23,8 @@ Contents:
 3. [From `Scene.construct()` to a video](#3-from-sceneconstruct-to-a-video)
 4. [The animation package](#4-the-animation-package)
 5. [Timing: `Timeline`, `Clip`, `Segment`, `MonotoneMap`](#5-timing-timeline-clip-segment-monotonemap)
-6. [`World2D`, `World3D`, `animation.Camera`, `View`](#6-world2d-world3d-animationcamera-view)
-7. [`RNode`: the contract between both sides](#7-rnode-the-contract-between-both-sides)
+6. [Cameras and camera views](#6-cameras-and-camera-views)
+7. [Render state: `RNode` trees](#7-render-state-rnode-trees)
 8. [The renderer](#8-the-renderer)
 9. [The core: `manimx._core`](#9-the-core-manimx_core)
 10. [Drivers: `CoreFramePipeline`, processes, `FrameSink`, audio](#10-drivers-coreframepipeline-processes-framesink-audio)
@@ -90,8 +84,8 @@ flowchart LR
 | Package | Contents | Depends on |
 |---|---|---|
 | `manimx._core` | the native core (Rust, PyO3; `core/`): `Evaluator`, `FrameState`, `SceneGraph`, `Packer`, `FrameRenderer` (section 9) | numpy; calls back into animation and renderer for user functions and records built once per version |
-| `manimx.robjects` | `RNode` and its subclasses `RGroup`, `RClippingGroup`, `RBezierPath` (→ `RShape2D`, `RCurve3D`), `RShape3D` (→ `RParticles`), `RLight` (→ `RDirectionalLight`, `RPointLight`, `RSpotLight`); `Transform`, `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`, `SurfaceShader`; `new_uid()`, `versioned()`; `PlannedFrame` (a frame of the core) | numpy |
-| `manimx.animation` (core) | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses (`Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D` (→ `Particles`), `Light` → `DirectionalLight`, `PointLight`, `SpotLight`; `animation.Camera`), `PositionMixin`, `RotationMixin`, `ScalableMixin`; the `Animation` contract (`Animation`, `SetValue`, `ChangeSignals`/`AnimationBuilder`) and the default rates `linear`, `smooth`; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `World2D`, `World3D`, `animation.Camera`, `View`; `Simulation`; `Sound`; contributions as data (`contributions.py`: `To`, `By`, `Ramp`, `Power`, `Turn`, `Keyframes`, `Between`, `Partial`), `paths.partial_path()`, `ScenePlan`, `PlannedTimeline`, `PlannedScene`, `planned_frames()` | robjects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
+| `manimx.robjects` | `RNode` and its subclasses `RGroup`, `RClippingGroup`, `RBezierPath` (→ `RShape2D`, `RCurve3D`), `RShape3D` (→ `RParticles`), `RLight` (→ `RDirectionalLight`, `RPointLight`, `RSpotLight`); `Transform`, `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`, `SurfaceShader`; `new_uid()`; `PlannedFrame` (a frame of the core) | numpy |
+| `manimx.animation` (core; `signals/` and `nodes/` hold the signal and node classes) | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses (`Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D` (→ `Particles`), `Light` → `DirectionalLight`, `PointLight`, `SpotLight`; `animation.Camera`), `PositionMixin`, `RotationMixin`, `ScalableMixin`; the `Animation` contract (`Animation`, `SetValue`, `ChangeSignals`/`AnimationBuilder`) and the default rates `linear`, `smooth`; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `Simulation`; `Sound`; contributions as data (`signals/contributions.py`: `To`, `By`, `Ramp`, `Power`, `Turn`, `Keyframes`, `Between`, `Partial`), `paths.partial_path()`, `ScenePlan`, `PlannedTimeline`, `PlannedScene`, `planned_frames()` | robjects; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
 | `manimx.userland` | everything a project could write on top of the core: shapes (`Circle`, `Dot`, `Square`, `Rectangle`, `RegularPolygon`, `Triangle`, `Polyline`, `ParametricCurve3D`, `Box`, `Sphere`, `Torus`, `ParametricSurface`), animations (`FadeIn`, `FadeOut`, `Rotate`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter`, `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`), `rate_functions`, `constants` (`UP`, `PI`, ...), `geometry` (every point and mesh generator, `align_paths()`), `load_gltf()` | animation, robjects |
 | `manimx.renderer` | `RenderConfig`, `renderer.Camera`, `ViewState`, `CameraViewState`; the camera's Frame record (`frame.py`); `MotionBlur`, `Bloom`, `ToneMap`, `ShaderEffect`; `core_callbacks` (records the core asks Python for); the WGSL shaders | robjects |
 | `manimx.drivers` | `render()`, `CoreFramePipeline`, `StillRenderer`, `render_image()`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation, `_core` |
@@ -100,9 +94,9 @@ flowchart LR
 | `manimx.cli` | the Typer `app` (`manimx` command), `scaffold`, `ui` | project, drivers, web |
 | `manimx.web` | `PreviewServer` (standard library HTTP), `ProjectReloader` (reload on save) and the page (`static/`: HTML, CSS, plain JS modules) | animation, drivers, renderer, project |
 
-`manimx.animation` never touches the GPU, and `manimx.renderer` never sees a
-`RootSignal` or a time: `RNode` trees and `PlannedFrame`s (both in
-`manimx.robjects`) are the only interface between them.
+`manimx.animation` never touches the GPU, and the renderer never sees a
+`RootSignal`: a `PlannedFrame` (`manimx.robjects`: the scene graph, the
+slot values at one time and their key) is all it gets.
 
 ## 3. From `Scene.construct()` to a video
 
@@ -162,8 +156,13 @@ Every animatable property of a `Node` is a signal:
 
 Setting a `RootSignal` invalidates its dependents; a `DerivedSignal`
 recomputes when it is read. Every signal has a process-unique `id` and a
-`version` that increases exactly when its value changes. Versions drive all
-caching downstream.
+`version` that increases exactly when its value changes. The core keeps
+the same versions per slot (section 9), and its caches key on them.
+
+The classes live in `manimx/animation/signals/`: `signal.py` (the
+signals), `kinds.py`, `signal_tracks.py` (section 4.2),
+`contributions.py` (section 9), `rates.py` and `paths.py`. The node
+classes live in `manimx/animation/nodes/`.
 
 ### 4.2 `Node`, `Animation`, `SignalTrack`
 
@@ -356,8 +355,10 @@ flowchart TD
 - **Purity:** the result of `state_at(t)` depends only on `t`.
 - **`Node.snapshot()`** builds new `RNode`s on every call
   (one R class per class, see section 4.2; `animation.Camera` →
-  nothing). Each keeps the `Node.uid` and carries version tokens from
-  `version_token()` (section 7).
+  nothing). Each keeps the `Node.uid` (section 7).
+- **Frames are not rendered from `state_at()`:** the core evaluates the
+  same tracks itself (section 9). `state_at()` is how tests and tools
+  read a scene's state.
 
 ### 4.4 `Simulation`
 
@@ -394,20 +395,18 @@ classDiagram
     direction LR
     class Timeline {
         clips
-        worlds
         events: dict name to time
         live
         add()
         fire()
-        state_at(t, world)
-        view_at(view, t)
+        frame_at(t)
+        state_at(t)
         audio(start, end)
         resolve()
     }
     class Clip {
         scene: PreparedScene
-        start
-        world, transform, layer
+        start, name, layer
         scales, ramps, cue_events
         cut_in, cut_out
         timings: SegmentTiming[]
@@ -429,9 +428,7 @@ classDiagram
         play_offset
     }
     Timeline "1" *-- "*" Clip
-    Timeline "1" *-- "*" World
     Clip --> PreparedScene : backs exactly one
-    Clip --> World
     Clip "1" *-- "*" SegmentTiming : resolved
     PreparedScene "1" *-- "*" Segment
 ```
@@ -452,24 +449,23 @@ classDiagram
   - every `Cue` whose event is known, so the cue lands exactly on it;
   - the edges of every `Ramp` (`Clip.slow_motion()`);
   - the end.
+- **Layers:** clips that overlap in time are drawn over each other,
+  lowest `Clip.layer` first, each through its own scene's camera, with
+  its own depth, lights and shadows (`Timeline.frame_at()` returns one
+  `ViewState` per active clip).
 - **Lazy resolution:** `Clip.cut()`, `Clip.slow_motion()`,
   `Clip.bind_cue()` and `Clip.set_scale()` mark the `Timeline` dirty, and the
   next query resolves it once.
 
-## 6. `World2D`, `World3D`, `animation.Camera`, `View`
+## 6. Cameras and camera views
 
-- **`World2D` and `World3D`:** every `Clip` has one `Clip.world`.
-  `World2D.check_transform()` keeps its clips in the z = 0 plane.
-  `Timeline.state_at(t, world)` returns one world's `RGroup`.
-- **`animation.Camera`:** a `Node` whose `RootSignal`s are `position`,
-  `rotation`, `frame_height`, `field_of_view` and `perspective`; it is
+- **`animation.Camera`:** every `Scene` has one (`Scene.camera`), a
+  `Node` whose `RootSignal`s are `position`, `rotation`, `frame_height`,
+  `field_of_view`, `perspective`, `focus_distance` and `aperture`; it is
   animated like any other `Node`. `snapshot()` returns `None`.
-  `Timeline.camera_at()` evaluates its `Clip` at `Clip.held_time()`, so it
-  keeps its first and last placement outside the clip.
-  `animation.Camera.render_camera()` returns a `renderer.Camera`.
-- **`View(world, camera)`:** `Timeline.view(view)` is a function of time
-  returning `ViewState(root, camera)`. `FrameComposer` uses
-  `ViewState.camera` for every motion-blur sample.
+  `animation.Camera.render_camera()` returns a `renderer.Camera`, which
+  `ViewState.camera` carries. A clip renders through its scene's camera,
+  so retiming a clip retimes its camera moves too.
 - **`CameraView(camera, width, height)`** (`animation/nodes/camera_view.py`): a
   `Shape2D` rectangle whose fill is the picture of another
   `animation.Camera`, tinted by the fill color. It moves, fades and is
@@ -477,56 +473,39 @@ classDiagram
   its scene's present camera views in `ViewState.camera_views`
   (`CameraViewState`: uid, `renderer.Camera`, width, height); the core
   reads the views' cameras from its `FrameState` like the scene camera.
-- **Rendering camera views:** before a view, `FrameComposer` (and the
-  core's `FrameRenderer`) renders each of its camera views at the frame's
-  pixel size, with `RenderConfig.view_aspect` set to the plane's aspect
-  and `RenderConfig.hide_camera_views` set, so a picture never shows a
-  camera view (no recursion; an explicit recursion depth is parked).
-  Each picture is composited into one layer of the renderer's camera view
-  texture and submitted on its own. The packers write the layer and
-  `1 / (width, height)` into the shape's `Object` record (`view`,
-  `view_scale`); `vector.wgsl` samples the layer at the fill's local
-  position.
+- **Rendering camera views:** before a view, the core's `FrameRenderer`
+  renders each of its camera views at the frame's pixel size, with
+  `RenderConfig.view_aspect` set to the plane's aspect and
+  `RenderConfig.hide_camera_views` set, so a picture never shows a
+  camera view (no recursion; an explicit recursion depth is in
+  FUTURE_IDEAS.md). Each picture is composited into one layer of the
+  camera view texture (core/src/render/passes/camera_views.rs). The
+  packer writes the layer and `1 / (width, height)` into the shape's
+  `Object` record (`view`, `view_scale`); `vector.wgsl` samples the layer
+  at the fill's local position.
 
-## 7. `RNode`: the contract between both sides
+## 7. Render state: `RNode` trees
 
-`RNode` (`manimx.robjects`) is the only thing that crosses from
-`manimx.animation` to `manimx.renderer`. These rules make every renderer
-cache correct:
+`PreparedScene.state_at(t)` and `Timeline.state_at(t)` return a tree of
+`RNode`s (`manimx.robjects`): what the scene shows at `t`, one R class
+per node class (`RShape2D` is the snapshot of a `Shape2D`). Frames are
+not rendered from these trees; the core reads the signals itself
+(section 9). The trees are for tests and tools, for example the web UI's
+labels (`web/labels.py`).
 
-1. **`RNode.uid`:** every snapshot of one `Node` has the
-   `Node.uid`. `new_uid()` never repeats within a process.
-2. **Versions:** fields declared with `versioned()` (`RBezierPath.points`,
-   `RBezierPath.stroke`, `RShape2D.fill`, `RShape3D.mesh`) have a token,
-   `RNode.version(name)`. Every `snapshot()` passes tokens from
-   `version_token()` of the `RootSignal`s a field is computed from, so
-   equal tokens mean equal values:
-   - `Shape2D`: `points` from `points`; `fill` from `fill_color` and
-     `fill_opacity`, `stroke` from the five stroke signals. While a token
-     holds, the snapshot reuses its `Fill` and `Stroke` values
-     (PERFORMANCE.md, step F);
-   - `Curve3D`: `points` and `stroke` the same way;
-   - `Shape3D`: `mesh` from the `mesh` signal (a `DISCRETE` signal holding
-     a `MeshData`, whose version changes only when another `MeshData` is
-     set); `material` from the six factor signals.
-     Moving, turning or scaling a `Shape3D` therefore keeps both tokens,
-     and `MeshBatch` keeps its interleaved vertices;
-   - lights have no versioned fields.
-
-   `RNode.transform` is not versioned; it is compared directly.
-   Neither is `RNode.alpha`: every snapshot carries its `Node.alpha` there,
-   `SceneFlattener` multiplies the alphas down the tree (`DrawItem.alpha`,
-   `LightItem.alpha`), and the renderer applies the product per object
-   (the vector shader multiplies every color's alpha, `MeshBatch` the
-   material's, `light_array()` the intensity). An `alpha` therefore never
-   enters a style or its version token: a fade changes one number per
-   object, and a group's fade reuses the snapshots of everything in it.
+1. **`RNode.uid`:** every snapshot of one `Node` has the `Node.uid`.
+   `new_uid()` counts up and never repeats within a process, so a new
+   object is never mistaken for an old one (manimx never uses Python
+   object addresses as identity).
+2. **`RNode.alpha`:** every snapshot carries its `Node.alpha`; a reader
+   multiplies the alphas down the tree, as the core does.
 3. **Immutability:** an `RNode` is never changed after `state_at`
-   returns it, and versioned arrays are read-only.
-4. **Purity:** `state_at` has no side effects on its result.
-5. **Lifecycle:** `renderer.submit(RemoveObjects(...))` drops the data of
-   objects gone for good. Otherwise `RNodeDataCache.sweep()` ages entries
-   out (section 8).
+   returns it, and its arrays (points, mesh data) are read-only.
+4. **Purity:** `state_at(t)` depends only on `t`.
+
+The value types in `manimx.robjects` (`Transform`, `Fill`, `Stroke`,
+`MeshData`, `PbrMaterial`, `Texture`, `SurfaceShader`) are also what
+nodes take as arguments.
 
 ## 8. The renderer
 
@@ -653,7 +632,7 @@ flowchart LR
     CLI["cli.app: new, generate scene, remove scene,<br/>list, render, still, ui"] --> P
     CLI --> Scaffold["scaffold.create_project(),<br/>scaffold.generate_scene(), templates"]
     CLI -->|"manimx ui"| UI["web.PreviewServer<br/>/api/timeline, /api/frame"]
-    UI -->|"Timeline.frame_at(t)"| P
+    UI -->|"planned_frames(timeline).frame_at(t)"| P
     J -.->|"$schema"| Schema[".manimx/project.schema.json<br/>from project_schema()"]
 ```
 
@@ -698,7 +677,7 @@ flowchart LR
   HTTP/1.1 keeps the connection open between frames. The time is part of
   the page's URL (`#t=`). A frame of the benchmark project takes 9.7 ms
   (2D) to 19.7 ms (3D) at 960 pixels, request included (measured with
-  the Python renderer).
+  the Python renderer, before the core rendered).
 - **`cli.ui`** prompts (questionary) only for missing arguments in a
   terminal. A `ProjectError` is printed as a panel with its `hint`. A
   `SceneError` comes with a rich traceback of the user's frames.
@@ -713,17 +692,13 @@ flowchart LR
 | `PreparedScene` | `Scene.prepare()` (kept in `Scene._prepared`) | one `Clip` | the `Timeline` | only through evaluation |
 | `SignalTrack`, `Placement`, `Entry` | `Scene.play()`, `authoring.change()` | the `PreparedScene` | the `PreparedScene` | `SignalTrack.refresh()` after edits |
 | `Segment`, `Emit`, `Cue`, `SoundEvent` | `wait_for`, `emit`, `cue`, `play_sound`/`play_wave` | the `PreparedScene` | the `PreparedScene` | no (frozen) |
-| `Timeline`, `Clip`, `World2D`/`World3D` | user code or `Project.build_timeline()` | the caller | the caller | yes; edits mark the `Timeline` dirty |
+| `Timeline`, `Clip` | user code or `Project.build_timeline()` | the caller | the caller | yes; edits mark the `Timeline` dirty |
 | `SegmentTiming`, `MonotoneMap` | `Timeline._resolve()` | the `Clip` | the next resolution | no |
-| `RNode` tree | `state_at()` | the caller of `state_at()` | that render | no |
+| `RNode` tree | `state_at()` | the caller of `state_at()` | the caller | no |
 | `Project` | `Project.load()` / `Project.find()` | the CLI command | the command | yes; `Project.save()` |
-| `RenderService` (`SceneFlattener`, `FramePacker`, `WGPURenderer`) | `RenderService.shared()` | the process | the process | its caches |
-| `FramePacket` | `FramePacker.pack()` | the `RenderService` | one render | no |
-| `FrameComposer` | `RenderService.composer(effects)` | the `RenderService` | the `RenderService` | its `_TexturePool` |
-| `FramePipeline` | `drivers.render()` | the render call | the call | yes |
-| `ScenePlan` (its `Evaluator` and `SceneGraph`) | `PlannedTimeline.plan()`, `planned_frames()` | the `PlannedTimeline` or `PlannedScene` | its `PreparedScene` | slot values on every evaluation |
-| `FrameState`, `PlannedFrame` | `ScenePlan.frame_at()` | the caller | that render | no |
-| `CoreFramePipeline` (its `FrameRenderer` with `Packer`) | `drivers.render()` | the render call | the call | its arenas, caches, GPU resources |
+| `ScenePlan` (its `Evaluator` and `SceneGraph`) | `PlannedTimeline.plan()`, `planned_frames()` | the `PlannedTimeline` or `PlannedScene`, by `PreparedScene.uid` | its planned timeline | slot values on every evaluation |
+| `FrameState`, `PlannedFrame` | `ScenePlan.frame_at()` | the caller | that frame | no |
+| `CoreFramePipeline` (its `FrameRenderer` with `Packer`, `Renderer`, `Composer`) | `drivers.render()`, `StillRenderer` | the render call, or the `StillRenderer` (one per configuration) | the call, or while among the last few configurations | its arenas, caches, GPU resources |
 | the core's wgpu device (`Gpu::shared`) | the first `FrameRenderer` | the process | the process | |
 | `_Writer` thread, `_worker_main` processes, ffmpeg | `drivers.render()` | the render call | the call | |
 
@@ -765,37 +740,33 @@ flowchart LR
   engine dependency. Animated `RootSignal`s are inputs; `DerivedSignal`,
   `Emit` and `SoundEvent` carry reactions.
 
-**`RNode` contract**
+**Identity**
 
-- **`uid` plus version tokens are the only change detection.** The renderer
-  never compares data deeply. `RNodeDataCache` and `RetainedVectors` use
-  the same keys.
+- **Counted ids, never addresses.** Nodes, scene graphs, prepared
+  scenes, clips and textures get an id from a counter when they are made;
+  caches and keys use those. Python reuses the addresses of freed
+  objects, so a key built from an address can match an object it was
+  never made from.
 
-**Render chain**
+**Renderer** (manimx/renderer/README.md has the details)
 
-- **Four stages with one input and one output each.** `SceneFlattener`,
-  `FramePacker`, `WGPURenderer` and `FrameComposer` can be used, tested and
-  measured alone. All scene logic and every per-object cache sit before the
-  `FramePacket`; the `WGPURenderer` only renders, so it could be replaced
-  (or ported) without touching what decides what to draw.
-- **A chain, not a wrapper.** `RenderService` holds the stages side by side
-  and runs them in order; none of them wraps another.
-- **`RenderService.shared()` is one service per process.** `GPUContext`,
-  pipelines, `GrowableBuffer`s, `RenderTargets`, `ResourceCache` and
-  per-object data survive across calls, which keeps a long-lived web UI
-  cheap.
-- **`RetainedVectors`** keeps records per `_Slot` in `Arena`s that mirror
-  the GPU buffers, patches them, and uploads only changed ranges.
-  `RetainedMeshes` does the same for mesh vertices and indices. The cost
-  follows what changed, not the size of the `FlatScene`.
-- **No `RShape3D` in a frame, no 3D passes.** Most Manim content is
-  `RShape2D`.
+- **One renderer, in the core.** The Python renderer was the reference
+  while the core was ported, and every change to rendering had to be
+  written twice; the core's renderer is the only one now, checked
+  against reference images (FUTURE_IDEAS.md, removed ideas).
+- **Packing never touches the GPU, the renderer decides nothing about
+  the scene.** The `Packer` turns a graph and a state into records and
+  keeps every per-node cache; the `Renderer` only uploads and draws.
+- **Retained records:** vector records stay in arenas that mirror the
+  GPU buffers, patched per frame; only changed ranges are uploaded. The
+  cost follows what changed, not the size of the scene.
+- **No meshes in a frame, no 3D passes.** Most Manim content is 2D.
 - **`MotionBlur` renders real sub-frames.** Any change blurs correctly,
-  including `animation.Camera` moves and appearing `Node`s.
+  including camera moves and appearing `Node`s.
 
 **Drivers**
 
-- **`FramePipeline`, the `_Writer` thread and worker processes run
+- **`CoreFramePipeline`, the `_Writer` thread and worker processes run
   together:** GPU, CPU, ffmpeg and disk all work at the same time.
 - **Workers rebuild the source with `load_source()`.** Purity guarantees
   identical frames. Spawn instead of fork, because GPU devices do not
@@ -814,13 +785,13 @@ flowchart LR
   Per-object Python per sub-frame was the cost (light-show: 70 ms of CPU
   against 19 ms of GPU per frame). Python stays per frame only where the
   user wrote per-frame Python.
-- **The Python path stays the reference.** The core ports it operation
-  by operation; tests compare values and pixels, and `performance.core`
-  turns the core off. Bugs found by the comparison are fixed in the
-  reference too (particle material indices).
+- **Python stays the reference for signal values.** The evaluator ports
+  `PreparedScene.evaluate()` operation by operation; tests/test_plan.py
+  compares every signal.
 - **Records that change rarely come from Python.** Built once per
-  version by the reference functions, they are identical, and porting
-  them (earcut, strokes, meshes) brings little until they change often.
+  version by core_callbacks.py; porting them brings little until they
+  change often. Fills and plain strokes, which change every frame in
+  morphs and plots, are built in Rust.
 - **Morph replaces its source** (`ReplacementTransform`) instead of
   changing children: the scene structure stays fixed after `construct()`,
   which the core relies on.
@@ -835,77 +806,39 @@ flowchart LR
 ## 14. State of the work and next steps
 
 **Done:**
-- signals, `Node`, `Animation`, `Scene`;
-- `Segment`, events, `Cue`, `MonotoneMap`;
-- `World2D`/`World3D`, `Clip` placement, `animation.Camera`, `View`;
-- `Simulation`;
-- `Sound` (mono and stereo, files and arrays);
-- `drivers.render()` with worker processes;
-- `Project` and the CLI, `example-project/`, GETTING_STARTED.md;
+- signals, `Node`, `Animation`, `Scene`; `Segment`, events, `Cue`,
+  `MonotoneMap`; `Clip` layers; `Simulation`; `Sound`;
+- `drivers.render()` with worker processes; `Project` and the CLI,
+  `example-project/`, GETTING_STARTED.md;
 - every render field has its signal on the scene class (checked by
   `tests/test_node_fields.py`): fills and strokes take one value or a
-  list (`COLORS`, `SCALARS`: gradients, tapering widths, which
-  interpolate across lengths), joints and caps are `DISCRETE`, every
-  `PbrMaterial` field of a `Shape3D` is a signal, and
-  `ClippingGroup.one_sided` is one. `RNode.visible` is the exception: a
-  scene node is not drawn by leaving the scene (`present`) or fading out
-  (`alpha`), never through that field;
-- 3D scene nodes: `Curve3D` (`ParametricCurve3D`), `Shape3D` (`Box`,
-  `Sphere`, `Torus`, `ParametricSurface`), `DirectionalLight`,
-  `PointLight`, `SpotLight`; `cast_shadows` as a `DISCRETE` signal on every
-  leaf. Known gap: the deferred mesh pass ignores `PbrMaterial.opacity`,
-  so fading a `Shape3D` (its `alpha` or `opacity`) does not show yet;
-- surface shaders: `SurfaceShader(code)` (`robjects/material.py`) is WGSL
-  defining `fn shade(surface: Surface, in: SurfaceInput) -> Surface`,
-  set per `Shape3D` (`surface_shader`, a `DISCRETE` signal and the last
-  material signal). The mesh pass splices it into mesh.wgsl in place of
-  surface_shader.wgsl's default and makes one pipeline per shader; draws
-  are grouped by texture set and shader. It runs before the G-buffer, so
-  the result is lit, shadowed and tone mapped. A shader may read
-  `frame.time`, so a frame with one is never held (`PlannedFrame.uses_time`,
-  `_TreeKeys`); WGSL errors become Python errors;
-- camera views (`CameraView`, see section 6);
-- depth of field: `animation.Camera` has `focus_distance` and `aperture`
-  (signals; `set_focus()`, `focus_on()`, `set_aperture()`), copied into
-  `renderer.Camera`. With an open aperture, a view is composited into a
-  scratch texture and depth_of_field.wgsl blurs it into the target: a
-  gather blur whose radius follows a thin lens, from the nearest depth of
-  all MSAA samples of the meshes' and the shapes' depth buffers. Python
-  composer and core do the same; the lens is part of the core's frame key;
-- `load_gltf()` builds a node tree: one `Group` per glTF node, one
-  `Shape3D` per primitive, glTF names as node names, material names as
-  `material:<name>` tags;
-- performance (PERFORMANCE.md): on the benchmark project 48.6 fps at
-  the start of the render-chain work, 74 with the reference path
-  optimized, 123.5 with the core (604 without motion blur), within 1.2
-  times its GPU time; light-show 70 to 23 ms per frame (GPU 19);
-- the core (CORE.md phases 0 to 6): signals, scene graph, packing and
-  rendering in Rust, the default for renders;
+  list (gradients, tapering widths), joints and caps are `DISCRETE`,
+  every `PbrMaterial` field of a `Shape3D` is a signal;
+- 3D: `Curve3D`, `Shape3D`, `Particles`, the three lights with shadows
+  (PCF, PCSS), `ClippingGroup` portals with scoped lights, surface
+  shaders, camera views, depth of field, `load_gltf()`;
+- the core (CORE.md): evaluation, packing and rendering in Rust, the
+  only renderer;
+- graphs with adaptive ticks, number lines, Typst, SVG;
 - `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`;
-- `manimx ui` with reload on save.
+- `manimx ui` with reload on save;
+- performance (PERFORMANCE.md): the benchmark project from 48.6 fps to
+  123.5 with the core; light-show 70 to 23 ms per frame.
 
-**Next, in the agreed order:**
-1. **Web UI:** scrubbing preview (first slice done: `manimx ui`), then
-   editing the `Project`, live presentation with clicks calling
-   `Timeline.fire()`. The page is plain JS for now; a framework is
-   reconsidered when editing starts.
-2. **Compositions:** a `View` shown as an image inside a `World2D`, nesting.
-3. **HDR colors for `RShape2D`:** a float vector target and `Bloom` on
-   `RenderLayers.vector`, while colors ≤ 1 stay exactly Manim's.
-4. **Whisper transcripts** calling `Clip.bind_cue()`; Typst and LaTeX
-   producing `Group`s of `Shape2D` (they get `Write` and `Morph`).
-5. **Performance:** frames are now near GPU-bound; the lighting pass
-   dominates (deferred vs forward renderer is a parked question).
-   CORE.md phase 7 lists the rest (sub-frames in one submission,
-   parallel frames, hardware encoding, WASM for `manimx ui`).
-6. **miette-style diagnostics** for `ProjectError` and `SceneError`, once
-   the common errors are known.
+Known gap: the deferred mesh pass ignores `PbrMaterial.opacity`, so
+fading a `Shape3D` does not show yet (FUTURE_IDEAS.md: translucent
+meshes).
+
+**Next, in the agreed order:** porting Manim's remaining classes
+(batches d, e, f), the rendering ideas, the web UI, then editing scenes
+in the UI (keyframes, clips made in the UI, gizmos). FUTURE_IDEAS.md
+keeps the ideas.
 
 **Working conventions:**
 - The scene tree (`Node` and its subclasses) and the render tree (`RNode`
   and its subclasses) are parallel: one R class per scene class, the R
   prefix on every render tree class, and every tree class in a module
-  named after it (`rshape2d.py`, `shape2d.py`). Value types (`Transform`,
+  named after it (`rshape2d.py`, `nodes/shape2d.py`). Value types (`Transform`,
   `Fill`, `MeshData`, ...) carry no prefix.
 - Core and userland: everything a project could have written itself on
   top of the public API is userland (`manimx.userland`: shapes, the
@@ -923,19 +856,20 @@ flowchart LR
   methods (`move_to`, `rotate`, `set_scale`), never render objects.
 - Render objects carry no names: names belong to nodes. Identity across
   snapshots is the `uid`, which tests allocate with `new_uid()` too.
-- Commits are kernel style, with the design decisions in the message and
-  no self-attribution. Commit only `manimx/`; `docs/`, the root
+- Commits are kernel style, with the design decisions in the message. Commit only `manimx/`; `docs/`, the root
   `pyproject.toml` and the root `uv.lock` belong to the user.
 - Tests: `uv run --active pytest` in `manimx/`, with coverage at least 90%.
 - The core: `maturin develop --release` in `manimx/` (with the
   environment manimx is installed in active) after every change to
-  `core/`; `cargo clippy --release` in `core/` stays clean. Rust code is
-  written to be read by someone who has never seen it: one concept per
-  module, a module doc naming the Python it ports, names from the Python
-  code.
+  `core/` (`uv run` rebuilds it when the sources change); `cargo clippy`
+  in `core/` stays clean. Rust code is written to be read by someone who
+  has never seen it: one folder per stage of a frame, one concept per
+  module, a module doc saying what it does, names from the Python code.
+- Every algorithm from elsewhere is cited next to its code with a link,
+  and listed in REFERENCES.md.
+- Identity is a counted id, never a Python object address.
 - Benchmark: check the power mode, run `scripts/benchmark_project.py
-  tests/projects/benchmark --check-reference <ref.npz>` (add `--core` for
-  the core), report.
+  tests/projects/benchmark --check-reference <ref.npz>`, report.
 - Don't run `ruff check` without `--no-fix`: the project config fixes files
   in place.
 - Describe everything with its name from the Python code.
