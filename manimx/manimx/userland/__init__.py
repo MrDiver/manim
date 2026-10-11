@@ -3,7 +3,7 @@ core (manimx.animation, manimx.robjects).
 
 Shapes built on the core node classes, the built-in animations, rate
 functions, direction constants, geometry generators, the glTF loader,
-the SVG reader and Typst text.
+the SVG reader, Typst text and code.
 Nothing in the core imports this package, so it can be changed, replaced
 or extended without touching how animation and rendering work.
 """
@@ -24,6 +24,7 @@ from .animations import (
     Uncreate,
     Write,
 )
+from .code import Code, MorphCode
 from .constants import (
     DEGREES,
     DL,
@@ -123,6 +124,7 @@ __all__ = [
     "Brace",
     "BraceLabel",
     "Circle",
+    "Code",
     "Create",
     "Cross",
     "CubicBezier",
@@ -141,6 +143,7 @@ __all__ = [
     "Indicate",
     "Line",
     "Morph",
+    "MorphCode",
     "MorphMatching",
     "MoveAlongPath",
     "NumberLine",

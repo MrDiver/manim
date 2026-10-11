@@ -857,7 +857,8 @@ flowchart LR
   shaders, camera views, depth of field, `load_gltf()`;
 - the core (CORE.md): evaluation, render objects and rendering in Rust,
   with the render object tree as the interface; the only renderer;
-- graphs with adaptive ticks, number lines, Typst, SVG;
+- graphs with adaptive ticks, number lines, Typst, SVG; `Code` with
+  focus, regions, scrolling windows and `MorphCode`;
 - `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`;
 - `manimx ui` with reload on save;
 - performance (PERFORMANCE.md): the benchmark project from 48.6 fps to

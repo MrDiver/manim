@@ -43,6 +43,8 @@ next to the algorithm; this page lists them all in one place.
 | Rotations interpolated along the shortest arc (slerp) | manimx/animation/signals/kinds.py (`ROTATION`) | Ken Shoemake, [Animating Rotation with Quaternion Curves](https://doi.org/10.1145/325165.325242) (SIGGRAPH 1985) |
 | Monotone time maps (retiming without running backwards) | manimx/animation/time_map.py | Fritsch and Carlson, [Monotone Piecewise Cubic Interpolation](https://doi.org/10.1137/0717021) (1980) |
 | Tick steps of 1 and 5 times powers of ten | manimx/userland/graphs.py | Paul Heckbert, [Nice Numbers for Graph Labels](https://www.ri.cmu.edu/publications/nice-numbers-for-graph-labels/) (Graphics Gems 1990) |
+| Matching two versions of a program (longest matching blocks of tokens) | manimx/userland/code.py (`_matching_cells`) | Ratcliff and Obershelp's pattern matching, as [difflib.SequenceMatcher](https://docs.python.org/3/library/difflib.html#difflib.SequenceMatcher) implements it |
+| Code colors as a TextMate theme | manimx/userland/code.py (`_tm_theme`) | [TextMate themes](https://macromates.com/manual/en/themes) |
 | Rate functions | manimx/userland/rate_functions.py | [easings.net](https://easings.net/) and Manim's rate functions |
 
 ## Ideas of manimx's own

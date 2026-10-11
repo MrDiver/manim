@@ -44,7 +44,7 @@ manimx/            the Python package
     timing.py        Timeline and Clip: scenes placed on a global timeline
     plan.py          a prepared scene handed to the core as data
   userland/        what a user could have written: Circle, FadeIn, graphs,
-                   SVG and Typst, glTF, rate functions, geometry
+                   SVG, Typst and Code, glTF, rate functions, geometry
   robjects/        render state (what a scene shows at one time) and the
                    value types nodes take: materials, meshes, styles
   renderer/        the settings Python gives the renderer, and its shaders

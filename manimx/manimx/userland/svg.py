@@ -57,6 +57,9 @@ class SVGPath:
     glyph: int | None = None
     """For a path drawn by a ``use`` of a ``symbol`` (how Typst and other
     tools place glyphs): which such use it is, in document order."""
+    origin: tuple[float, float] | None = None
+    """For such a path: where the use places the symbol's origin (a
+    glyph's pen position on the baseline), in scene units."""
 
     def style(self) -> dict[str, Any]:
         """The Shape2D style arguments of this path."""
@@ -128,7 +131,7 @@ def read_svg(text: str, width: float | None = None, height: float | None = None,
     elif width is not None and size[0] > 0:
         scale = width / size[0]
     flip = np.array([scale, -scale])
-    return [paint.path((points - center) * flip, scale) for points, paint in raw]
+    return [paint.path((points - center) * flip, scale, center) for points, paint in raw]
 
 
 # --------------------------------------------------------------------------
@@ -151,6 +154,8 @@ class _Paint:
     """Inches per user unit at the element (for its stroke width)."""
     glyph: int | None = None
     """The symbol use the element is drawn by (SVGPath.glyph)."""
+    origin: tuple[float, float] | None = None
+    """Where that use places the symbol's origin, in inches with y down."""
     gradients: tuple[tuple[str, str], ...] = ()
 
     def inherit(self, element: ElementTree.Element, matrix: Matrix) -> _Paint:
@@ -169,8 +174,9 @@ class _Paint:
         # Stroke widths scale with the transform's mean linear factor.
         return replace(self, **values, stroke_scale=math.sqrt(abs(np.linalg.det(matrix[:2, :2]))))
 
-    def path(self, points: np.ndarray, scale: float) -> SVGPath:
-        """The SVGPath of ``points``, drawn ``scale`` scene units per inch."""
+    def path(self, points: np.ndarray, scale: float, center: np.ndarray) -> SVGPath:
+        """The SVGPath of ``points`` (already moved and scaled), drawn
+        ``scale`` scene units per inch around ``center`` (inches)."""
         fill, stroke = _paint_color(self.fill, self.gradients), _paint_color(self.stroke, self.gradients)
         width = self.stroke_width * self.stroke_scale * scale / STROKE_WIDTH_SCALE
         return SVGPath(
@@ -181,6 +187,7 @@ class _Paint:
             stroke_opacity=self.stroke_opacity * self.opacity,
             stroke_width=width,
             glyph=self.glyph,
+            origin=None if self.origin is None else (float((self.origin[0] - center[0]) * scale), float((center[1] - self.origin[1]) * scale)),
         )
 
 
@@ -202,7 +209,9 @@ def _walk(element: ElementTree.Element, matrix: Matrix, paint: _Paint, by_id: di
             return
         offset = _translation(_length(element.get("x", "0")), _length(element.get("y", "0")))
         if _tag(target) == "symbol":
-            yield from _walk_children(target, matrix @ offset, replace(paint, glyph=next(uses)), by_id, uses)
+            origin = _apply(matrix @ offset, np.zeros((1, 2)))[0]
+            used = replace(paint, glyph=next(uses), origin=(float(origin[0]), float(origin[1])))
+            yield from _walk_children(target, matrix @ offset, used, by_id, uses)
         else:
             yield from _walk(target, matrix @ offset, paint, by_id, uses)
         return
