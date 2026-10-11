@@ -27,6 +27,7 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("VERSION", env!("CARGO_PKG_VERSION"))?;
     module.add_class::<evaluator::Evaluator>()?;
     module.add_class::<evaluator::FrameState>()?;
+    module.add_class::<evaluator::Slots>()?;
     module.add_class::<graph::SceneGraph>()?;
     module.add_class::<packer::Packer>()?;
     module.add_class::<gpu::frame_renderer::FrameRenderer>()?;

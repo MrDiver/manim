@@ -355,17 +355,37 @@ pub struct FrameState {
     pub versions: Arc<Vec<u64>>,
 }
 
+/// Slots given once and kept in Rust, so asking every frame for their
+/// key (`FrameState.key`) does not convert the list again.
+#[pyclass(module = "manimx._core", frozen)]
+pub struct Slots {
+    slots: Vec<usize>,
+}
+
+#[pymethods]
+impl Slots {
+    #[new]
+    fn new(slots: Vec<usize>) -> Slots {
+        Slots { slots }
+    }
+
+    fn __len__(&self) -> usize {
+        self.slots.len()
+    }
+}
+
 #[pymethods]
 impl FrameState {
-    /// Versions of the given slots as bytes: equal bytes promise equal
-    /// values (a key for holding frames).
     /// The value of `slot`, as the Python signal holds it.
     fn value(&self, py: Python<'_>, slot: usize) -> PyResult<Py<PyAny>> {
         self.kinds[slot].value_to_py(py, &self.values[slot])
     }
 
-    fn key(&self, slots: Vec<usize>) -> Vec<u8> {
+    /// Versions of the given slots as bytes: equal bytes promise equal
+    /// values (a key for holding frames).
+    fn key(&self, slots: &Slots) -> Vec<u8> {
         slots
+            .slots
             .iter()
             .flat_map(|&slot| self.versions[slot].to_le_bytes())
             .collect()

@@ -109,7 +109,7 @@ class ScenePlan:
         self.graph = self._scene_graph()
         """The core's scene graph, or None when a node is of a class the
         core cannot draw (its scene is then drawn from snapshots)."""
-        self._render_slots = sorted({self._slots[s.id] for root in scene.roots for node in root.family() for s in node.signals()})
+        self._render_slots = _core.Slots(sorted({self._slots[s.id] for root in scene.roots for node in root.family() for s in node.signals()}))
         self._shader_slots = sorted({self.slot(node.surface_shader) for root in scene.roots for node in root.family() if isinstance(node, Shape3D)})
         """Slots of every surface shader: one in use makes a frame depend on time."""
 
