@@ -452,9 +452,14 @@ class RemoveTextLetterByLetter(AddTextLetterByLetter):
 class Homotopy(Animation):
     """Move every point of a node's paths through ``homotopy(x, y, z, t)``
     (a point) as ``t`` runs from 0 to 1, in each path's own space; the
-    paths end where ``homotopy`` puts them at ``t = 1``. Paths whose
-    points follow other signals (a Circle's follow its radius) cannot be
-    moved this way."""
+    paths end where ``homotopy`` puts them at ``t = 1``.
+
+    A Shape2D whose points follow parameters (a Circle's follow its
+    radius) is unpacked first (:meth:`Shape2D.unpack`): a plain Shape2D
+    where it is, in the scene's space, takes its place and is bent, and
+    the original is hidden from the start. ``unpacked`` maps each such
+    original's uid to its plain shape, which stays in the scene.
+    """
 
     homotopy: Callable[[float, float, float, float], Sequence[float]]
     node: Node
@@ -462,24 +467,41 @@ class Homotopy(Animation):
     rate: RateFunction = linear
 
     def __post_init__(self) -> None:
-        self._paths = _drawn_paths(self.node)
-        for path in self._paths:
-            if not isinstance(path.points, RootSignal):
+        self.unpacked: dict[int, Shape2D] = {}
+        self._hidden: list[Node] = []
+        worlds = _world_matrices(self.node)
+        self._paths: list[Node] = []
+        for path in _drawn_paths(self.node):
+            if isinstance(path.points, RootSignal):
+                self._paths.append(path)
+                continue
+            if not isinstance(path, Shape2D):
                 raise TypeError(f"{path.name}'s points follow other signals; Homotopy cannot move them")
+            plain = path.unpack()
+            position, rotation, scale = _decomposed(worlds[path.uid])
+            for axis, value in zip((*plain.position.axes, *plain.scale.axes), (*position, *scale), strict=True):
+                axis.set(value)
+            plain.rotation.set(rotation)
+            plain.alpha.set(_world_alpha(path))
+            self.unpacked[path.uid] = plain
+            self._hidden.append(path)
+            self._paths.append(plain)
         self._start = {path.points.id: _points(path) for path in self._paths}
         self._function = np.vectorize(lambda x, y, z, t: tuple(self.homotopy(x, y, z, t)), otypes=[float, float, float])
 
     def targets(self) -> Sequence[Target]:
-        return [Target(path.points, Change.ABSOLUTE) for path in self._paths]
+        return [*(Target(path.points, Change.ABSOLUTE) for path in self._paths), *(Target(path.alpha, Change.ABSOLUTE) for path in self._hidden)]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> np.ndarray:
+    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
+        if signal.id not in self._start:
+            return 0.0  # an unpacked original, hidden
         points = self._start[signal.id]
         full = _resized(points, 3)
         moved = np.column_stack(self._function(full[:, 0], full[:, 1], full[:, 2], alpha))
         return moved[:, : points.shape[1]]
 
     def nodes(self) -> Sequence[Node]:
-        return (self.node,)
+        return (self.node, *self.unpacked.values())
 
 
 def _point3(point: Sequence[float]) -> np.ndarray:

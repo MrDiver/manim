@@ -73,7 +73,12 @@ thought about from scratch again.
 - **Who owns cameras:** the scene (today, `Scene.camera`) or the
   timeline, possibly several per project.
 - **Boolean operations on paths** (`Union`, `Intersection`,
-  `Difference`): need a path clipping library.
+  `Difference`): skia-pathops is a dependency now (`union_points`
+  merges Typst bracket pieces with it), so these are small nodes on it.
+- **ThreeDAxes that follow their ranges.** `plot_surface` and
+  `plot_curve` are placed once, where the axes are when they are made;
+  like `Axes.plot`, they could derive their points from the ranges and
+  the axes' transform, so zooming a 3D range rescales them.
 - **Whisper transcripts** calling `Clip.bind_cue()`, so animations wait
   for spoken words.
 - **LaTeX** next to Typst, producing groups of `Shape2D` (so `Write` and

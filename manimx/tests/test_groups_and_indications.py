@@ -7,7 +7,14 @@ import math
 
 import numpy as np
 import pytest
-from manimx.animation import AnimationGroup, LaggedStart, Scene, Succession
+from manimx.animation import (
+    AnimationGroup,
+    LaggedStart,
+    RootSignal,
+    Scene,
+    Shape2D,
+    Succession,
+)
 from manimx.userland import (
     DOWN,
     RIGHT,
@@ -123,8 +130,24 @@ def test_homotopy_moves_points_through_a_function() -> None:
     prepared = prepare(lambda s: s.play(Homotopy(lambda x, y, z, t: (x + t, y, z), text, run_time=1.0)))
     prepared.evaluate(1.0)
     np.testing.assert_allclose(text.shapes[0].points.value, start + [1.0, 0.0])
-    with pytest.raises(TypeError, match="follow other signals"):
-        Homotopy(lambda x, y, z, t: (x, y, z), Circle())
+    circle = Circle(1.0).move_to((2.0, 0.0, 0.0))
+    bend = Homotopy(lambda x, y, z, t: (x, y + t, z), circle, run_time=1.0)
+    plain = bend.unpacked[circle.uid]
+    assert isinstance(plain.points, RootSignal) and plain.position.x.value == pytest.approx(2.0)
+    np.testing.assert_allclose(plain.points.value, circle.points.value)
+    prepared = prepare(lambda s: (s.add(circle), s.play(bend)))
+    prepared.evaluate(1.0)
+    assert circle.alpha.value == 0.0 and plain.present.value
+    np.testing.assert_allclose(plain.points.value[:, 1], circle.points.value[:, 1] + 1.0)
+
+
+def test_unpack_makes_a_plain_shape_of_a_parametric_one() -> None:
+    circle = Circle(0.5, color="#ff0000", fill_opacity=0.5).move_to((1.0, 2.0, 0.0)).scale_by(2.0)
+    plain = circle.unpack()
+    assert type(plain) is Shape2D and isinstance(plain.points, RootSignal)
+    np.testing.assert_allclose(plain.points.value, circle.points.value)
+    assert plain.fill_opacity.value == 0.5 and plain.position.y.value == 2.0 and plain.scale.x.value == 2.0
+    np.testing.assert_allclose(plain.fill_color.value, circle.fill_color.value)
 
 
 def test_passing_flashes_draw_a_moving_stretch() -> None:

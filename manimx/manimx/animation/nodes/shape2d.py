@@ -15,6 +15,7 @@ import numpy as np
 
 from ...robjects import CapStyle, JointType
 from ...utils.color import WHITE
+from .. import authoring
 from ..signals.kinds import COLORS, DISCRETE, PATH, SCALARS
 from ..signals.paths import PointSignal, drawn_part, point_signal
 from ..signals.signal import DerivedSignal, RootSignal, Signal
@@ -93,6 +94,19 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         self.cast_shadows = RootSignal(cast_shadows, DISCRETE, name=f"{prefix}.cast_shadows")
         """The last snapshot's (token, Fill) and (token, Stroke)."""
 
+    def unpack(self) -> Shape2D:
+        """A plain Shape2D like this one is now: its points (free, no longer
+        derived from parameters such as a Circle's radius), style, transform
+        and alpha, as authoring code sees them. It is a new node, not in the
+        scene: put it where this one was (``self.remove(circle)``,
+        ``self.add(plain)``) to bend or morph its points freely."""
+        plain = Shape2D(np.array(authoring.current(self.points)), self.name, tags=self.tags)
+        for name in _UNPACKED:
+            getattr(plain, name).set(authoring.current(getattr(self, name)))
+        for mine, its in zip((*plain.position.axes, *plain.scale.axes), (*self.position.axes, *self.scale.axes), strict=True):
+            mine.set(authoring.current(its))
+        return plain
+
     def _derive_points(self, function: Callable[..., Any], *parameters: Signal) -> None:
         """Make ``points`` a signal derived from ``parameters`` by
         ``function`` (a pure function of their values): what a shape with
@@ -168,6 +182,13 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
             ("stroke_opacity", self.stroke_opacity), ("stroke_width", self.stroke_width),
             ("stroke_joint", self.stroke_joint), ("stroke_cap", self.stroke_cap), ("cast_shadows", self.cast_shadows),
         )  # fmt: skip
+
+
+_UNPACKED = (
+    "fill_color", "fill_opacity", "stroke_color", "stroke_width", "stroke_opacity", "stroke_joint", "stroke_cap",
+    "cast_shadows", "draw_start", "draw_end", "rotation", "alpha",
+)  # fmt: skip
+"""The signals besides points and the transform axes that unpack() copies."""
 
 
 __all__ = ["Shape2D"]
