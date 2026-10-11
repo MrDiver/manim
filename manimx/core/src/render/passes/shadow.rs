@@ -50,6 +50,9 @@ pub struct ShadowPass {
     pub transmittance_view: wgpu::TextureView,
     pub translucent_depth_view: wgpu::TextureView,
     translucent_layers: Vec<(wgpu::TextureView, wgpu::TextureView)>,
+    /// Per layer: whether its transmittance may hold anything but 1 (it was
+    /// tinted, or its textures are new and hold zeros), so it needs clearing.
+    tinted: Vec<bool>,
     resolution: u32,
     scopes: Vec<i32>,
     draw_layers: Vec<usize>,
@@ -78,6 +81,7 @@ impl ShadowPass {
             transmittance_view,
             translucent_depth_view,
             translucent_layers,
+            tinted: vec![true],
             resolution: 1,
             scopes: Vec::new(),
             draw_layers: Vec::new(),
@@ -126,7 +130,7 @@ impl ShadowPass {
 
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
-        &self,
+        &mut self,
         gpu: &Gpu,
         encoder: &mut wgpu::CommandEncoder,
         meshes: &mut MeshPass,
@@ -204,12 +208,23 @@ impl ShadowPass {
                 );
             }
             drop(pass);
-            // Run even without translucent casters: it clears the layer's
-            // transmittance from an earlier render.
-            let mut pass = self.begin_translucent(encoder, layer, profiler);
-            if meshes.has_translucent_shadows(scope) {
-                meshes.draw_translucent_shadow(gpu, &mut pass, frames, offset, scope, mask_layers);
+            // Also without translucent casters while the layer may still
+            // hold an earlier render's tint: the pass clears it.
+            let tinted = meshes.has_translucent_shadows(scope);
+            if tinted || self.tinted[layer] {
+                let mut pass = self.begin_translucent(encoder, layer, profiler);
+                if tinted {
+                    meshes.draw_translucent_shadow(
+                        gpu,
+                        &mut pass,
+                        frames,
+                        offset,
+                        scope,
+                        mask_layers,
+                    );
+                }
             }
+            self.tinted[layer] = tinted;
         }
     }
 
