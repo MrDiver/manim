@@ -203,8 +203,9 @@ impl RenderTargets {
         attachment
     }
 
-    /// The meshes' depth buffer as the geometry pass left it, to test
-    /// against (the translucent pass writes no depth).
+    /// The meshes' depth buffer as the geometry pass left it, for the
+    /// translucent pass to test against and add its own depth to (after
+    /// the vector pass, which tests against the opaque meshes only).
     pub fn depth_test_attachment(&self) -> wgpu::RenderPassDepthStencilAttachment<'_> {
         wgpu::RenderPassDepthStencilAttachment {
             view: &self.depth_view,

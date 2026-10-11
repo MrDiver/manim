@@ -300,9 +300,9 @@ flowchart TD
         P1["mask passes<br/>one per clip scope -> mask layer"] --> P2
         P2["shadow passes (only with meshes)<br/>casters' depth per changed shadow view;<br/>clip masks first into the stencil"] --> P3
         P3["geometry pass<br/>meshes -> MSAA G-buffer + depth"] --> P4
-        P4["lighting pass<br/>marks edge pixels in a stencil, lights other<br/>pixels once, edge pixels per sample -> lit layer (HDR)"] --> P4b
-        P4b["translucent pass (only with translucent meshes)<br/>lit forward, back to front, blended over the lit layer"] --> P5
-        P5["vector pass<br/>2D shapes and curves -> vector layer,<br/>own depth + test against mesh depth"]
+        P4["lighting pass<br/>marks edge pixels in a stencil, lights other<br/>pixels once, edge pixels per sample -> lit layer (HDR)"] --> P5
+        P5["vector pass<br/>2D shapes and curves -> vector layer,<br/>own depth + test against mesh depth"] --> P6
+        P6["translucent pass (only with translucent meshes)<br/>lit forward, back to front, blended over the lit layer,<br/>writing depth"]
     end
 
     P5 --> L["lit (rgba16float), vector (rgba8)"]
@@ -486,13 +486,21 @@ passes does not touch materials.
 
 **Translucent meshes are shaded forward.** A G-buffer holds one surface
 per sample, so meshes whose opacity or alpha is below 1 are left out of
-it. After the lighting pass they are drawn sorted back to front by the
+it. After the vector pass they are drawn sorted back to front by the
 view depth of their centers, lit in the fragment shader with the same
 material, surface shader and lighting code, and blended over the lit
-layer (premultiplied), depth-tested against the opaque meshes without
-writing depth. Each is drawn twice, back faces then front faces, so the
-far side of a closed mesh is behind its near side. A clip mask fades
-them softly instead of cutting at half coverage.
+layer (premultiplied), depth-tested against the opaque meshes. Each is
+drawn twice, back faces then front faces, so the far side of a closed
+mesh is behind its near side. A clip mask fades them softly instead of
+cutting at half coverage.
+
+They write depth. Sorting by centers goes wrong for meshes of very
+different sizes: a large floor's center can be nearer than a block
+standing on it, so the floor is drawn last. Without depth it would be
+blended over the block; with depth it is hidden where the block is, and
+the block shows the floor's lit layer behind it instead of the floor
+(at the start of a fade, exactly the opaque picture). The vector pass
+runs before, so 2D shapes still test against the opaque meshes only.
 
 **Translucent shadows tint the light.** Translucent casters write no
 shadow depth. A second pass per shadow layer draws them, depth-tested
@@ -589,8 +597,10 @@ track the scene.
 - **Painter's order between non-coplanar 2D planes:** where two 2D planes
   intersect, their layer bias can flip single pixels along the
   intersection.
-- **Translucent meshes** sort per mesh, not per triangle: two crossing
-  translucent meshes blend in one order everywhere. The vector layer is
+- **Translucent meshes** sort per mesh, not per triangle, and write
+  depth: where the sort is wrong, the mesh drawn later is hidden behind
+  the earlier one instead of seen through it (two crossing translucent
+  meshes show one order everywhere). The vector layer is
   composited over the lit layer, so 2D shapes behind a translucent mesh
   show in front of it. Texture alpha does not make a mesh translucent
   (no glTF alpha modes); opaque meshes clip at 50% mask coverage, and

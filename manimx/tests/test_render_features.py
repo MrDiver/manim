@@ -389,6 +389,20 @@ def test_a_mesh_alone_in_its_material_group_still_fades() -> None:
     assert 20 < seen[0] < opaque[0] - 20  # not drawn opaque into the G-buffer as well
 
 
+def test_a_translucent_mesh_hides_a_translucent_one_behind_it_drawn_later() -> None:
+    # The tilted floor's center is nearer than the block's, so the block is
+    # drawn first; at the block, the floor lies behind it.
+    floor = Shape3D(box_mesh(8.0, 4.0, 0.1), color="#0000ff")
+    floor.rotate(math.pi / 4, (0.0, 1.0, 0.0))
+    block = Shape3D(box_mesh(0.6, 0.6, 0.6), color="#ff0000").move_to((2.0, 0.0, -1.4))
+    for node in (floor, block):
+        node.alpha.set(0.9)
+    lit = DirectionalLight(direction=(0.0, 0.0, -1.0), intensity=1.0, cast_shadows=False)
+    aside = Shape3D(box_mesh(0.5, 0.5, 0.5), color="#00ff00").move_to((-3.0, 1.5, 0.0))  # keeps the group's draws
+    seen = pixel(render(floor, block, aside, lit), 2.0, 0.0)
+    assert seen[0] > 3 * seen[2]  # the block, not the floor over it
+
+
 def test_translucent_casters_tint_light_instead_of_blocking_it() -> None:
     floor = Shape3D(box_mesh(8.0, 8.0, 0.1), color="#ffffff").move_to((0.0, 0.0, -0.05))
     sun = DirectionalLight(direction=(1.0, 0.0, -1.0), intensity=2.0)  # the shadow falls 1 to the right

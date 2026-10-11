@@ -258,6 +258,9 @@ impl MeshPass {
     /// Draw the translucent meshes, back to front, each its back faces
     /// then its front faces, lit with `lighting` (mesh.wgsl's group 2) and
     /// blended over the lit layer of `pass`, whose depth is the G-buffer's.
+    /// They write depth too: where a mesh drawn later lies behind one drawn
+    /// earlier (the sort by centers got them wrong, as for a large floor
+    /// under small solids), it is hidden instead of drawn over it.
     pub fn draw_translucent(
         &mut self,
         gpu: &Gpu,
@@ -509,9 +512,12 @@ impl MeshPass {
                     }),
                     ..Default::default()
                 },
+                // Depth is written: a translucent mesh hides what is drawn
+                // behind it later, so the order only decides what blends
+                // and a fade starts exactly where the opaque picture was.
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(false),
+                    depth_write_enabled: Some(true),
                     depth_compare: Some(wgpu::CompareFunction::Less),
                     stencil: Default::default(),
                     bias: Default::default(),
