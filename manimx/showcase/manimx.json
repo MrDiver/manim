@@ -124,6 +124,10 @@
     "Tables": {
       "module": "scenes.tables",
       "class": "Tables"
+    },
+    "Shapes3D": {
+      "module": "scenes.shapes3d",
+      "class": "Shapes3D"
     }
   },
   "timeline": {
@@ -181,6 +185,9 @@
       },
       {
         "scene": "Tables"
+      },
+      {
+        "scene": "Shapes3D"
       },
       {
         "scene": "LowerThird",
