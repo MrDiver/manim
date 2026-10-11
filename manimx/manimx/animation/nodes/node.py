@@ -33,7 +33,7 @@ from __future__ import annotations
 import difflib
 import functools
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import quaternion
@@ -47,6 +47,9 @@ from ..signals.kinds import DISCRETE, FACTOR, ROTATION, SCALAR
 from ..signals.paths import PointSignal
 from ..signals.signal import RootSignal, Signal, Vector3Signal, derive
 from ..signals.signal_tracks import Change
+
+if TYPE_CHECKING:
+    from ..scene import PreparedScene
 
 ChangeList = list[tuple[RootSignal, Change, Any]]
 
@@ -124,6 +127,14 @@ class Node:
         """Every signal of this node (not of its children)."""
         yield self.alpha
         yield self.present
+
+    def after_prepare(self, scene: PreparedScene) -> bool:
+        """Called once with the prepared scene this node is in, before it is
+        shown. A node whose signals depend on the whole timeline (a
+        TracedPath samples where a point was) sets them here and returns
+        True; the scene's evaluator is then made again with the new values.
+        """
+        return False
 
     @property
     def animate(self) -> AnimationBuilder:

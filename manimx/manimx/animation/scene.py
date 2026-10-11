@@ -142,7 +142,11 @@ class Scene:
             finally:
                 _active.reset(token)
                 self._compiler = None
-            self._prepared = compiler.finish(self.time, self._camera)
+            prepared = compiler.finish(self.time, self._camera)
+            nodes = {node.uid: node for root in prepared.roots for node in root.family()}
+            if any([node.after_prepare(prepared) for node in nodes.values()]):
+                prepared.refresh()
+            self._prepared = prepared
         return self._prepared
 
     # -- authoring API (only inside construct) --------------------------------

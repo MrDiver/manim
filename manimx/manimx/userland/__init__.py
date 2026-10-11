@@ -52,7 +52,7 @@ from .constants import (
     UP,
     UR,
 )
-from .curves3d import ParametricCurve3D
+from .curves3d import ParametricCurve3D, TracedPath
 from .gltf import load_gltf
 from .graphs import (
     Axes,
@@ -225,6 +225,7 @@ __all__ = [
     "Table",
     "ThreeDAxes",
     "Torus",
+    "TracedPath",
     "Triangle",
     "TypeCode",
     "Typst",
