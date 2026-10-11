@@ -1,18 +1,25 @@
 //! Deferred lighting: G-buffer and lights in, the linear HDR "lit" layer
-//! out, one fullscreen triangle over every MSAA sample. Ports
+//! out: fullscreen triangles shade once per pixel where all MSAA samples
+//! hold one surface, once per sample on edges, which a first triangle
+//! marks in a stencil (shaders/deferred_lighting.wgsl). Ports
 //! `LightingPass` (manimx/renderer/webgpu/lighting_pass.py).
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use super::buffer::GrowableBuffer;
-use super::context::{Gpu, HDR_FORMAT};
+use super::context::{Gpu, EDGE_FORMAT, HDR_FORMAT};
 use super::shadow_pass::ShadowPass;
+
+/// The stencil value of a pixel on an edge.
+const EDGE: u32 = 1;
 
 pub struct LightingPass {
     lights: GrowableBuffer,
     scope_parents: GrowableBuffer,
-    variants: HashMap<u32, (wgpu::BindGroupLayout, wgpu::RenderPipeline)>,
+    /// Per sample count: the layout and the pipelines (with MSAA: marking
+    /// edges, per pixel, per sample on edges).
+    variants: HashMap<u32, (wgpu::BindGroupLayout, Vec<wgpu::RenderPipeline>)>,
     bind_group: Option<wgpu::BindGroup>,
     sample_count: u32,
     targets_generation: u64,
@@ -121,33 +128,40 @@ impl LightingPass {
         Ok(())
     }
 
+    /// Light into `pass`, whose stencil (with MSAA) is the edge stencil
+    /// (`RenderTargets::edge_attachment`), cleared.
     pub fn draw(&mut self, gpu: &Gpu, pass: &mut wgpu::RenderPass) -> pyo3::PyResult<()> {
         let sample_count = self.sample_count;
-        pass.set_pipeline(&self.variant(gpu, sample_count)?.1);
         pass.set_bind_group(0, self.bind_group.as_ref(), &[]);
-        pass.draw(0..3, 0..1); // one fullscreen triangle
+        pass.set_stencil_reference(EDGE);
+        for pipeline in &self.variant(gpu, sample_count)?.1 {
+            pass.set_pipeline(pipeline);
+            pass.draw(0..3, 0..1); // one fullscreen triangle
+        }
         Ok(())
     }
 
-    /// Layout and pipeline for multisampled or single-sampled G-buffers: a
+    /// Layout and pipelines for multisampled or single-sampled G-buffers: a
     /// multisampled binding cannot have one sample, so without MSAA the
-    /// shader reads plain textures.
+    /// shader reads plain textures and shades every pixel once.
     fn variant(
         &mut self,
         gpu: &Gpu,
         sample_count: u32,
-    ) -> pyo3::PyResult<&(wgpu::BindGroupLayout, wgpu::RenderPipeline)> {
+    ) -> pyo3::PyResult<&(wgpu::BindGroupLayout, Vec<wgpu::RenderPipeline>)> {
         if let Entry::Vacant(slot) = self.variants.entry(sample_count) {
             let multisampled = sample_count > 1;
-            let replacements: &[(&str, &str)] = if multisampled {
-                &[]
-            } else {
-                &[
-                    ("texture_depth_multisampled_2d", "texture_depth_2d"),
-                    ("texture_multisampled_2d<f32>", "texture_2d<f32>"),
-                ]
-            };
-            let shader = gpu.shader("deferred_lighting.wgsl", replacements)?;
+            let samples = format!("const GBUFFER_SAMPLES: i32 = {sample_count};");
+            let mut replacements = vec![("const GBUFFER_SAMPLES: i32 = 4;", samples.as_str())];
+            if !multisampled {
+                replacements.push(("texture_depth_multisampled_2d", "texture_depth_2d"));
+                replacements.push(("texture_multisampled_2d<f32>", "texture_2d<f32>"));
+                replacements.push((
+                    "const FIRST_SAMPLE: vec2<f32> = vec2<f32>(0.375, 0.125);",
+                    "const FIRST_SAMPLE: vec2<f32> = vec2<f32>(0.5);",
+                ));
+            }
+            let shader = gpu.shader("deferred_lighting.wgsl", &replacements)?;
             let layout = create_layout(&gpu.device, multisampled);
             let pipeline_layout =
                 gpu.device
@@ -156,33 +170,79 @@ impl LightingPass {
                         bind_group_layouts: &[Some(&layout)],
                         immediate_size: 0,
                     });
-            let pipeline = gpu
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("deferred lighting"),
-                    layout: Some(&pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &shader,
-                        entry_point: Some("vs_fullscreen"),
-                        compilation_options: Default::default(),
-                        buffers: &[],
-                    },
-                    primitive: Default::default(),
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState {
-                        count: sample_count,
-                        ..Default::default()
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &shader,
-                        entry_point: Some("fs_light"),
-                        compilation_options: Default::default(),
-                        targets: &[Some(HDR_FORMAT.into())],
-                    }),
-                    multiview_mask: None,
-                    cache: None,
+            // `edges`: the stencil test (None: no stencil); `mark`: write
+            // the edge value instead of color.
+            let pipeline = |entry_point: &str, edges: Option<wgpu::CompareFunction>, mark: bool| {
+                let write_mask = if mark {
+                    wgpu::ColorWrites::empty()
+                } else {
+                    wgpu::ColorWrites::ALL
+                };
+                let depth_stencil = edges.map(|compare| {
+                    let face = wgpu::StencilFaceState {
+                        compare,
+                        fail_op: wgpu::StencilOperation::Keep,
+                        depth_fail_op: wgpu::StencilOperation::Keep,
+                        pass_op: if mark {
+                            wgpu::StencilOperation::Replace
+                        } else {
+                            wgpu::StencilOperation::Keep
+                        },
+                    };
+                    wgpu::DepthStencilState {
+                        format: EDGE_FORMAT,
+                        depth_write_enabled: Some(false),
+                        depth_compare: Some(wgpu::CompareFunction::Always),
+                        stencil: wgpu::StencilState {
+                            front: face,
+                            back: face,
+                            read_mask: 0xff,
+                            write_mask: 0xff,
+                        },
+                        bias: Default::default(),
+                    }
                 });
-            slot.insert((layout, pipeline));
+                gpu.device
+                    .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                        label: Some(entry_point),
+                        layout: Some(&pipeline_layout),
+                        vertex: wgpu::VertexState {
+                            module: &shader,
+                            entry_point: Some("vs_fullscreen"),
+                            compilation_options: Default::default(),
+                            buffers: &[],
+                        },
+                        primitive: Default::default(),
+                        depth_stencil,
+                        multisample: wgpu::MultisampleState {
+                            count: sample_count,
+                            ..Default::default()
+                        },
+                        fragment: Some(wgpu::FragmentState {
+                            module: &shader,
+                            entry_point: Some(entry_point),
+                            compilation_options: Default::default(),
+                            targets: &[Some(wgpu::ColorTargetState {
+                                format: HDR_FORMAT,
+                                blend: None,
+                                write_mask,
+                            })],
+                        }),
+                        multiview_mask: None,
+                        cache: None,
+                    })
+            };
+            let pipelines = if multisampled {
+                use wgpu::CompareFunction::{Always, Equal, NotEqual};
+                vec![
+                    pipeline("fs_mark_edges", Some(Always), true),
+                    pipeline("fs_light_pixel", Some(NotEqual), false),
+                    pipeline("fs_light_sample", Some(Equal), false),
+                ]
+            } else {
+                vec![pipeline("fs_light_pixel", None, false)]
+            };
+            slot.insert((layout, pipelines));
         }
         Ok(&self.variants[&sample_count])
     }

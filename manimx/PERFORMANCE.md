@@ -627,6 +627,30 @@ blur 8), power profile `balanced`:
 
 Frames are bit-identical, in the Python renderer and in the core.
 
+### U. Lighting once per pixel, per sample only on edges
+
+The lighting pass shaded every MSAA sample (4 per pixel), although the
+geometry pass writes the same G-buffer values to all samples of a pixel
+inside a surface. Now three fullscreen triangles light the frame: one
+marks the pixels whose samples hold different surfaces in a stencil
+(depth, normal, colors and clip scope compared with small tolerances, so
+a smooth mesh's triangle seams count as one surface), one shades the
+other pixels once, at their first sample, and one shades the marked
+pixels per sample. Showcase, motion blur 8 and bloom forced on, power
+profile `balanced`, GPU lighting ms/frame and fps:
+
+| scene | lighting before | after | fps before | after |
+|---|---|---|---|---|
+| Solids | 23.8 | 9.9 | 27.3 | 50.4 |
+| Cornell | 7.7 | 5.7 | 65.3 | 84.0 |
+| Cameras | 13.2 | 10.2 | 19.5 | 22.2 |
+
+Frames are not bit-identical: an interior pixel now gets one turn of
+the soft shadow taps instead of four. Against the previous renderer,
+Cornell differs by 0.07 levels on average (0.06% of pixels by more
+than 8), Solids by 0.06; the `shadows` reference image was updated.
+Python renderer and core still match.
+
 ## Where the time goes now
 
 Benchmark project with `PortalOrbit`, after steps L to O: 48.6 to about

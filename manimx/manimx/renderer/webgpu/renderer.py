@@ -148,7 +148,9 @@ class WGPURenderer:
             geometry_pass.end()
 
             lighting_pass = encoder.begin_render_pass(
-                color_attachments=[targets.lit_attachment()], timestamp_writes=self.profiler.pass_timing("lighting")
+                color_attachments=[targets.lit_attachment()],
+                depth_stencil_attachment=targets.edge_attachment(),
+                timestamp_writes=self.profiler.pass_timing("lighting"),
             )
             if meshes is not None:
                 self._lighting_pass.draw(lighting_pass)

@@ -1,7 +1,8 @@
 """Deferred lighting pass: G-buffer + lights -> linear HDR "lit" layer.
 
-A single fullscreen triangle shades every MSAA sample of the G-buffer (see
-shaders/deferred_lighting.wgsl). Lights live in one storage buffer, so the
+Fullscreen triangles shade the G-buffer: once per pixel where all MSAA
+samples hold one surface, once per sample on edges, which a first
+triangle marks in a stencil (see shaders/deferred_lighting.wgsl). Lights live in one storage buffer, so the
 cost grows with lights x covered samples, independent of how many meshes
 or how much overdraw produced the G-buffer.
 """
@@ -11,8 +12,13 @@ from __future__ import annotations
 import numpy as np
 import wgpu
 
-from .gpu import HDR_FORMAT, GPUContext, GrowableBuffer
+from .gpu import EDGE_FORMAT, HDR_FORMAT, GPUContext, GrowableBuffer
 from .shadow_pass import ShadowPass
+
+
+_EDGE = 1
+"""The stencil value of a pixel on an edge."""
+_FIRST_SAMPLE = "const FIRST_SAMPLE: vec2<f32> = vec2<f32>(0.375, 0.125);"
 
 
 class LightingPass:
@@ -21,7 +27,7 @@ class LightingPass:
         self._frame_uniform = frame_uniform
         self._lights = GrowableBuffer(context, "lights", wgpu.BufferUsage.STORAGE)
         self._scope_parents = GrowableBuffer(context, "scope parents", wgpu.BufferUsage.STORAGE)
-        self._variants: dict[int, tuple[wgpu.GPUBindGroupLayout, wgpu.GPURenderPipeline]] = {}
+        self._variants: dict[int, tuple[wgpu.GPUBindGroupLayout, list[wgpu.GPURenderPipeline]]] = {}
         self._bind_group: wgpu.GPUBindGroup | None = None
         self._inputs: tuple[wgpu.GPUTextureView, ...] = ()
         self._sample_count = 0
@@ -60,35 +66,66 @@ class LightingPass:
             )
 
     def draw(self, render_pass: wgpu.GPURenderPassEncoder) -> None:
-        render_pass.set_pipeline(self._variant(self._sample_count)[1])
+        """Light into ``render_pass``, whose stencil (with MSAA) is the
+        edge stencil (``RenderTargets.lit_attachments``), cleared."""
         render_pass.set_bind_group(0, self._bind_group)
-        render_pass.draw(3)  # one fullscreen triangle
+        render_pass.set_stencil_reference(_EDGE)
+        for pipeline in self._variant(self._sample_count)[1]:
+            render_pass.set_pipeline(pipeline)
+            render_pass.draw(3)  # one fullscreen triangle
 
-    def _variant(self, sample_count: int) -> tuple[wgpu.GPUBindGroupLayout, wgpu.GPURenderPipeline]:
-        """Layout and pipeline for multisampled or single-sampled G-buffers.
+    def _variant(self, sample_count: int) -> tuple[wgpu.GPUBindGroupLayout, list[wgpu.GPURenderPipeline]]:
+        """Layout and pipelines for multisampled G-buffers (marking edges,
+        per pixel, per sample on edges) or single-sampled ones.
 
         A multisampled texture binding cannot have one sample, so without
         MSAA the shader reads plain textures; textureLoad's third argument
-        then is the mip level 0 instead of the sample index 0.
+        then is the mip level 0 instead of the sample index 0, and every
+        pixel is shaded once.
         """
         if sample_count not in self._variants:
             device = self._context.device
             multisampled = sample_count > 1
-            replacements = {} if multisampled else {
-                "texture_depth_multisampled_2d": "texture_depth_2d",
-                "texture_multisampled_2d<f32>": "texture_2d<f32>",
-            }
+            replacements = {"const GBUFFER_SAMPLES: i32 = 4;": f"const GBUFFER_SAMPLES: i32 = {sample_count};"}
+            if not multisampled:
+                replacements |= {
+                    "texture_depth_multisampled_2d": "texture_depth_2d",
+                    "texture_multisampled_2d<f32>": "texture_2d<f32>",
+                    _FIRST_SAMPLE: "const FIRST_SAMPLE: vec2<f32> = vec2<f32>(0.5);",
+                }
             shader = self._context.shader("deferred_lighting.wgsl", replacements)
             layout = self._create_layout(multisampled)
-            pipeline = device.create_render_pipeline(
-                label=f"deferred lighting x{sample_count}",
-                layout=device.create_pipeline_layout(bind_group_layouts=[layout]),
-                vertex={"module": shader, "entry_point": "vs_fullscreen", "buffers": []},
-                primitive={"topology": wgpu.PrimitiveTopology.triangle_list},
-                multisample={"count": sample_count},
-                fragment={"module": shader, "entry_point": "fs_light", "targets": [{"format": HDR_FORMAT}]},
-            )
-            self._variants[sample_count] = (layout, pipeline)
+            pipeline_layout = device.create_pipeline_layout(bind_group_layouts=[layout])
+
+            def pipeline(entry_point: str, edges: str | None, mark: bool = False) -> wgpu.GPURenderPipeline:
+                """``edges``: the stencil test (None: no stencil); ``mark``:
+                write the edge value instead of color."""
+                stencil = None
+                write = 0 if mark else wgpu.ColorWrite.ALL
+                if edges is not None:
+                    operation = wgpu.StencilOperation.replace if mark else wgpu.StencilOperation.keep
+                    face = {"compare": edges, "pass_op": operation}
+                    stencil = {"format": EDGE_FORMAT, "stencil_front": face, "stencil_back": face}
+                return device.create_render_pipeline(
+                    label=f"deferred lighting x{sample_count} ({entry_point})",
+                    layout=pipeline_layout,
+                    vertex={"module": shader, "entry_point": "vs_fullscreen", "buffers": []},
+                    primitive={"topology": wgpu.PrimitiveTopology.triangle_list},
+                    depth_stencil=stencil,
+                    multisample={"count": sample_count},
+                    fragment={"module": shader, "entry_point": entry_point, "targets": [{"format": HDR_FORMAT, "write_mask": write}]},
+                )
+
+            if multisampled:
+                compare = wgpu.CompareFunction
+                pipelines = [
+                    pipeline("fs_mark_edges", compare.always, mark=True),
+                    pipeline("fs_light_pixel", compare.not_equal),
+                    pipeline("fs_light_sample", compare.equal),
+                ]
+            else:
+                pipelines = [pipeline("fs_light_pixel", None)]
+            self._variants[sample_count] = (layout, pipelines)
         return self._variants[sample_count]
 
     def _create_layout(self, multisampled: bool) -> wgpu.GPUBindGroupLayout:

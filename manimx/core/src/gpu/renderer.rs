@@ -248,7 +248,7 @@ impl Renderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("lighting"),
                 color_attachments: &[Some(targets.lit_attachment())],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: targets.edge_attachment(),
                 timestamp_writes: self.profiler.pass_timing("lighting"),
                 occlusion_query_set: None,
                 multiview_mask: None,

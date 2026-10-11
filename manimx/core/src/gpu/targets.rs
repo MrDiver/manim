@@ -3,14 +3,15 @@
 //!
 //!     masks       one RGBA layer per clip scope (+ a scratch target to draw into)
 //!     G-buffer    4 color targets + depth, multisampled (see gbuffer.wgsl)
-//!     lit         multisampled HDR target of the lighting pass, resolved
+//!     lit         multisampled HDR target of the lighting pass, resolved,
+//!                 with a stencil marking the pixels on edges
 //!     vector      multisampled premultiplied RGBA of 2D shapes and curves,
 //!                 depth-tested against the G-buffer depth, resolved
 //!
 //! The resolved `lit` and `vector` textures are the renderer's output; the
 //! composer combines them into an image.
 
-use super::context::{COLOR_FORMAT, DEPTH_FORMAT, GBUFFER_FORMATS, HDR_FORMAT};
+use super::context::{COLOR_FORMAT, DEPTH_FORMAT, EDGE_FORMAT, GBUFFER_FORMATS, HDR_FORMAT};
 
 pub struct RenderTargets {
     pub width: u32,
@@ -25,6 +26,7 @@ pub struct RenderTargets {
     lit_view: wgpu::TextureView,
     vector_view: wgpu::TextureView,
     lit_msaa: Option<wgpu::TextureView>,
+    edges: Option<wgpu::TextureView>,
     vector_msaa: Option<wgpu::TextureView>,
     mask_layers: wgpu::Texture,
     pub mask_layers_view: wgpu::TextureView,
@@ -137,6 +139,7 @@ impl RenderTargets {
             lit,
             vector,
             lit_msaa: msaa("lit msaa", HDR_FORMAT),
+            edges: msaa("edges", EDGE_FORMAT),
             vector_msaa: msaa("vector msaa", COLOR_FORMAT),
             mask_scratch_view: view(&mask_scratch),
             mask_layers,
@@ -181,6 +184,20 @@ impl RenderTargets {
 
     pub fn lit_attachment(&self) -> wgpu::RenderPassColorAttachment<'_> {
         color(&self.lit_view, self.lit_msaa.as_ref())
+    }
+
+    /// The lighting pass's stencil (None without MSAA).
+    pub fn edge_attachment(&self) -> Option<wgpu::RenderPassDepthStencilAttachment<'_>> {
+        self.edges
+            .as_ref()
+            .map(|view| wgpu::RenderPassDepthStencilAttachment {
+                view,
+                depth_ops: None,
+                stencil_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(0),
+                    store: wgpu::StoreOp::Discard,
+                }),
+            })
     }
 
     pub fn vector_attachment(&self) -> wgpu::RenderPassColorAttachment<'_> {

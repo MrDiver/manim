@@ -15,6 +15,8 @@ pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Shadow maps: depth, and a stencil for the masks of clipped casters.
 pub const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32FloatStencil8;
+/// The lighting pass's stencil, which marks the pixels on an edge.
+pub const EDGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Stencil8;
 /// Linear radiance of lit meshes, before tone mapping.
 pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// Color targets of the G-buffer (see shaders/gbuffer.wgsl).

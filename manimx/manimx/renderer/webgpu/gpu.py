@@ -18,6 +18,8 @@ COLOR_FORMAT = wgpu.TextureFormat.rgba8unorm
 """Colors are stored and blended in sRGB values, like Manim's Cairo renderer."""
 DEPTH_FORMAT = wgpu.TextureFormat.depth32float
 SHADOW_FORMAT = wgpu.TextureFormat.depth32float_stencil8
+EDGE_FORMAT = wgpu.TextureFormat.stencil8
+"""The lighting pass's stencil, which marks the pixels on an edge."""
 """Shadow maps: depth, and a stencil for the masks of clipped casters."""
 HDR_FORMAT = wgpu.TextureFormat.rgba16float
 """Linear radiance of lit meshes, before tone mapping."""

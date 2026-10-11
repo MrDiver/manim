@@ -2,7 +2,8 @@
 
     masks       one RGBA layer per clip scope (+ a scratch target to draw into)
     G-buffer    3 color targets + depth, multisampled (see gbuffer.wgsl)
-    lit         multisampled HDR target of the lighting pass -> resolved
+    lit         multisampled HDR target of the lighting pass -> resolved,
+                with a stencil marking the pixels on edges
     vector      multisampled premultiplied RGBA of 2D shapes and curves,
                 depth-tested against the G-buffer depth -> resolved
 
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 
 import wgpu
 
-from .gpu import COLOR_FORMAT, DEPTH_FORMAT, GBUFFER_FORMATS, HDR_FORMAT
+from .gpu import COLOR_FORMAT, DEPTH_FORMAT, EDGE_FORMAT, GBUFFER_FORMATS, HDR_FORMAT
 
 _ATTACHMENT = wgpu.TextureUsage.RENDER_ATTACHMENT
 _SAMPLED = wgpu.TextureUsage.TEXTURE_BINDING
@@ -64,6 +65,7 @@ class RenderTargets:
         self.lit = texture("lit", HDR_FORMAT, sample_count=1, usage=_ATTACHMENT | _SAMPLED | wgpu.TextureUsage.COPY_SRC)
         self.vector = texture("vector", COLOR_FORMAT, sample_count=1, usage=_ATTACHMENT | _SAMPLED | wgpu.TextureUsage.COPY_SRC)
         self._lit_msaa = texture("lit msaa", HDR_FORMAT) if samples > 1 else None
+        self._edges = texture("edges", EDGE_FORMAT) if samples > 1 else None
         self._vector_msaa = texture("vector msaa", COLOR_FORMAT) if samples > 1 else None
 
         # One layer per clip scope, sampled by clipped content. Mask passes
@@ -81,6 +83,14 @@ class RenderTargets:
         # views (creating views per frame was measurable Python overhead).
         self._mask_attachment = _color(self._mask_scratch, self._mask_msaa)
         self._lit_attachment = _color(self.lit, self._lit_msaa)
+        self._edge_attachment = None
+        if self._edges is not None:
+            self._edge_attachment = {
+                "view": self._edges.create_view(),
+                "stencil_clear_value": 0,
+                "stencil_load_op": wgpu.LoadOp.clear,
+                "stencil_store_op": wgpu.StoreOp.discard,
+            }
         self._vector_attachment = _color(self.vector, self._vector_msaa)
         self._gbuffer_attachments = [
             {"view": view, "clear_value": (0, 0, 0, 0), "load_op": wgpu.LoadOp.clear, "store_op": wgpu.StoreOp.store}
@@ -114,6 +124,10 @@ class RenderTargets:
 
     def lit_attachment(self) -> dict:
         return self._lit_attachment
+
+    def edge_attachment(self) -> dict | None:
+        """The lighting pass's stencil (None without MSAA)."""
+        return self._edge_attachment
 
     def vector_attachment(self) -> dict:
         return self._vector_attachment
