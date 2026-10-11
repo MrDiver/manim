@@ -3,8 +3,9 @@
 //! ```text
 //! masks       one RGBA layer per clip scope (+ a scratch target to draw into)
 //! G-buffer    4 color targets + depth, multisampled (see gbuffer.wgsl)
-//! lit         multisampled HDR target of the lighting pass, resolved,
-//!             with a stencil marking the pixels on edges
+//! lit         multisampled HDR target of the lighting pass (and of the
+//!             translucent meshes over it), resolved, with a stencil
+//!             marking the pixels on edges
 //! vector      multisampled premultiplied RGBA of 2D shapes and curves,
 //!             depth-tested against the G-buffer depth, resolved
 //! ```
@@ -185,8 +186,34 @@ impl RenderTargets {
             .collect()
     }
 
-    pub fn lit_attachment(&self) -> wgpu::RenderPassColorAttachment<'_> {
-        color(&self.lit_view, self.lit_msaa.as_ref())
+    /// The lighting pass's target; with `keep`, its multisampled samples
+    /// are kept for the translucent pass to draw over.
+    pub fn lit_attachment(&self, keep: bool) -> wgpu::RenderPassColorAttachment<'_> {
+        let mut attachment = color(&self.lit_view, self.lit_msaa.as_ref());
+        if keep {
+            attachment.ops.store = wgpu::StoreOp::Store;
+        }
+        attachment
+    }
+
+    /// The lit layer again, as the lighting pass left it, resolved anew.
+    pub fn lit_over_attachment(&self) -> wgpu::RenderPassColorAttachment<'_> {
+        let mut attachment = color(&self.lit_view, self.lit_msaa.as_ref());
+        attachment.ops.load = wgpu::LoadOp::Load;
+        attachment
+    }
+
+    /// The meshes' depth buffer as the geometry pass left it, to test
+    /// against (the translucent pass writes no depth).
+    pub fn depth_test_attachment(&self) -> wgpu::RenderPassDepthStencilAttachment<'_> {
+        wgpu::RenderPassDepthStencilAttachment {
+            view: &self.depth_view,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        }
     }
 
     /// The lighting pass's stencil (None without MSAA).

@@ -390,6 +390,9 @@ fn caster_key(scene: &FlatScene, scope: i32) -> Vec<u64> {
     let add = |key: &mut Vec<u64>, item: &DrawItem| {
         item.node.fingerprint(key);
         key.extend(item.world.to_cols_array().iter().map(|v| v.to_bits()));
+        // Translucent meshes cast shadows as dark as their alpha, which the
+        // groups above them multiply in.
+        key.push(item.alpha.to_bits());
     };
     for item in &scene.items {
         let cast_shadows = match &item.node.kind {

@@ -18,9 +18,9 @@ thought about from scratch again.
   shadow maps like rays towards points on the light.
 - **Hardware ray tracing** (ray queries) for shadows and reflections,
   once wgpu exposes it on all platforms.
-- **Translucent meshes.** The deferred lighting pass has one surface per
-  sample, so meshes cannot fade (`opacity`, `alpha`). A forward pass for
-  transparent meshes after the lighting pass would draw them.
+- **Soft translucent shadows** with PCSS penumbrae, and order-independent
+  transparency (weighted blended or per-pixel lists) for crossing
+  translucent meshes; 2D shapes depth-sorted with translucent meshes.
 - **Volumetric light and god rays.** Ray-march each view ray through a
   medium, looking up the shadow maps; god rays follow from it. Open
   question: the medium as a scene node `Fog(density, color, anisotropy)`

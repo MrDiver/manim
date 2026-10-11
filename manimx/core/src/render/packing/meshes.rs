@@ -16,6 +16,13 @@
 //! `multi_draw_indexed_indirect` per group. A mesh's interleaved vertices
 //! and a material's entry are built once per version of the mesh and the
 //! material.
+//!
+//! A mesh whose material alpha (opacity times the node's alpha) is below 1
+//! is translucent: it is left out of its group's G-buffer draws and listed
+//! in `translucent` instead, sorted back to front by the view depth of its
+//! box's center, for the forward pass (mesh.wgsl). Its shadow tints the
+//! light instead of blocking it (shadow.rs). A mesh with alpha 0 is not
+//! drawn at all, and casts no shadow.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -126,6 +133,7 @@ fn material_entry(material: &robjects::Material) -> Material {
 pub struct DrawGroup {
     pub textures: [Option<Arc<Texture>>; 5],
     pub surface_shader: Option<Arc<SurfaceShader>>,
+    /// The opaque meshes' draws (the G-buffer's).
     pub draws: Vec<DrawIndexed>,
 }
 
@@ -138,9 +146,14 @@ pub struct MeshOutput {
     pub objects: Vec<MeshObject>,
     pub materials: Vec<Material>,
     pub groups: Vec<DrawGroup>,
-    /// Per light scope (NO_CLIP first), the shadow-casting meshes' draws
-    /// sorted by clip scope, and their runs (`FlatScene::shadow_lists`).
+    /// The translucent meshes' draws, back to front, with the index of the
+    /// group whose textures and surface shader they use.
+    pub translucent: Vec<(usize, DrawIndexed)>,
+    /// Per light scope (NO_CLIP first), the opaque shadow-casting meshes'
+    /// draws sorted by clip scope, and their runs (`FlatScene::shadow_lists`).
     pub shadow_draws: Vec<ShadowList<DrawIndexed>>,
+    /// The same for translucent casters, which tint the light (shadow.rs).
+    pub translucent_shadow_draws: Vec<ShadowList<DrawIndexed>>,
 }
 
 pub struct MeshPacker {
@@ -239,12 +252,15 @@ impl MeshPacker {
         self.seen.clear();
     }
 
-    /// The frame's mesh records, without the lights.
-    pub fn pack(&mut self, scene: &FlatScene) -> MeshOutput {
+    /// The frame's mesh records, without the lights; `view` is the
+    /// camera's view matrix (world to camera), to sort translucent meshes.
+    pub fn pack(&mut self, scene: &FlatScene, view: &DMat4) -> MeshOutput {
         let mut objects = Vec::new();
         let mut materials = Vec::new();
         let mut groups: Vec<(GroupKey, DrawGroup)> = Vec::new();
+        let mut translucent: Vec<(f64, usize, DrawIndexed)> = Vec::new();
         let mut shadow_draws: Vec<(DrawIndexed, i32)> = Vec::new();
+        let mut translucent_shadow_draws: Vec<(DrawIndexed, i32)> = Vec::new();
         // A node drawn more than once (it sits in several groups) shares
         // its material entry while its alpha is the same.
         let mut material_slots: HashMap<(u64, u64), u32> = HashMap::new();
@@ -262,6 +278,9 @@ impl MeshPacker {
             if item.alpha != 1.0 {
                 // The item's alpha (RNode.alpha, times every one above) fades the material.
                 entry.base_color[3] *= item.alpha as f32;
+            }
+            if entry.base_color[3] <= 0.0 {
+                continue;
             }
             let first_object = objects.len() as u32;
             let count = match instances {
@@ -324,17 +343,37 @@ impl MeshPacker {
                 base_vertex: base_vertex as i32,
                 first_instance: first_object,
             };
-            groups[group].1.draws.push(draw);
+            let is_translucent = entry.base_color[3] < 1.0;
+            if is_translucent {
+                let corners = &self.geometry[&node.uid].corners;
+                let center = corners.iter().copied().sum::<DVec3>() / corners.len() as f64;
+                let depth = -view.transform_point3(item.world.transform_point3(center)).z;
+                translucent.push((depth, group, draw));
+            } else {
+                groups[group].1.draws.push(draw);
+            }
             if surface.cast_shadows {
-                shadow_draws.push((draw, item.clip));
+                let casters = if is_translucent {
+                    &mut translucent_shadow_draws
+                } else {
+                    &mut shadow_draws
+                };
+                casters.push((draw, item.clip));
             }
         }
         self.finish();
+        // Farthest first; meshes at the same depth keep the tree's order.
+        translucent.sort_by(|a, b| b.0.total_cmp(&a.0));
         MeshOutput {
             objects,
             materials,
             groups: groups.into_iter().map(|(_, group)| group).collect(),
+            translucent: translucent
+                .into_iter()
+                .map(|(_, group, draw)| (group, draw))
+                .collect(),
             shadow_draws: scene.shadow_lists(&shadow_draws),
+            translucent_shadow_draws: scene.shadow_lists(&translucent_shadow_draws),
         }
     }
 }

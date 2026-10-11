@@ -26,8 +26,14 @@
 // pattern once the samples and renders of a frame are averaged. The lighting pass
 // sets `shadow_pixel` before shading.
 //
-// Needs `shadow_maps`, `shadow_sampler` and `shadow_views` declared by the
-// including shader (deferred_lighting.wgsl).
+// Translucent casters do not block light: the shadow pass keeps, per
+// texel, the light they let through (multiplied) and the distance of the
+// nearest one, and a point behind that distance gets the light times the
+// transmittance, filtered over the 2x2 texels around it.
+//
+// Needs `shadow_maps`, `shadow_sampler`, `shadow_views`,
+// `shadow_transmittance` and `shadow_translucent_depth` declared by the
+// including shader (deferred_lighting.wgsl, mesh.wgsl).
 
 // Mirrors `ShadowView` in core/src/packing/records.rs.
 struct ShadowView {
@@ -68,17 +74,57 @@ fn shadow_tap(light: Light, world: vec3<f32>) -> ShadowTap {
     return ShadowTap(layer, view, at, inside);
 }
 
-/// 1 where `surface` sees `light` fully, 0 in full shadow.
+/// 1 where `surface` sees `light` fully, 0 in full shadow: blocked by
+/// opaque casters, tinted by translucent ones.
+fn shadow_visibility(light: Light, surface: Surface) -> f32 {
+    if light.shadow_view < 0 || frame.shadow.w == 0.0 {
+        return 1.0;
+    }
+    return opaque_visibility(light, surface) * transmittance(light, surface);
+}
+
+/// The light translucent casters let through to `surface`: the
+/// transmittance of the 2x2 texels around it, each where the surface lies
+/// behind the texel's nearest translucent caster (lifted off the surface
+/// like the opaque taps, so a translucent surface does not tint itself).
+fn transmittance(light: Light, surface: Surface) -> f32 {
+    let center = shadow_tap(light, surface.position);
+    let resolution = frame.shadow.z;
+    let receiver = linear_depth(center.view, center.at.z);
+    let perspective = center.view.params.w > 0.5;
+    let texel_world = select(center.view.params.z, receiver * center.view.params.z, perspective) / resolution;
+    let tap = shadow_tap(light, surface.position + surface.normal * texel_world * 1.5);
+    if !tap.inside {
+        return 1.0;
+    }
+    let distance = linear_depth(tap.view, tap.at.z);
+    let at = tap.at.xy * resolution - 0.5;
+    let base = vec2<i32>(floor(at));
+    let weight = at - floor(at);
+    let last = i32(resolution) - 1;
+    var through = 0.0;
+    for (var corner = 0; corner < 4; corner++) {
+        let step = vec2<i32>(corner & 1, corner >> 1);
+        let texel = clamp(base + step, vec2<i32>(0), vec2<i32>(last));
+        let share = mix(1.0 - weight.x, weight.x, f32(step.x)) * mix(1.0 - weight.y, weight.y, f32(step.y));
+        var light_through = 1.0;
+        if distance > textureLoad(shadow_translucent_depth, texel, tap.layer, 0).r + texel_world {
+            light_through = textureLoad(shadow_transmittance, texel, tap.layer, 0).r;
+        }
+        through += share * light_through;
+    }
+    return through;
+}
+
+/// 1 where `surface` sees `light` past every opaque caster, 0 in their
+/// full shadow.
 ///
 /// Every tap is a point on a disk in the surface's plane, lifted 1.5
 /// texels off it ("normal offset"), looked up in the shadow view it falls
 /// in (across a cube seam, the next face) and compared with its own
 /// depth. So a surface never shadows itself, whatever its angle to the
 /// light, and soft edges continue across the faces of a point light.
-fn shadow_visibility(light: Light, surface: Surface) -> f32 {
-    if light.shadow_view < 0 || frame.shadow.w == 0.0 {
-        return 1.0;
-    }
+fn opaque_visibility(light: Light, surface: Surface) -> f32 {
     let center = shadow_tap(light, surface.position);
     let view = center.view;
     let perspective = view.params.w > 0.5;

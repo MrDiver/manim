@@ -40,6 +40,8 @@
 @group(0) @binding(8) var<storage, read> shadow_views: array<ShadowView>;
 @group(0) @binding(9) var scope_samples: texture_multisampled_2d<f32>;
 @group(0) @binding(10) var<storage, read> scope_parents: array<i32>;
+@group(0) @binding(11) var shadow_transmittance: texture_2d_array<f32>;
+@group(0) @binding(12) var shadow_translucent_depth: texture_2d_array<f32>;
 
 
 /// Samples per pixel of the G-buffer (the renderer replaces this line).
@@ -93,7 +95,7 @@ fn shade(pixel: vec2<i32>, window: vec2<f32>, depth: f32, sample: i32) -> vec4<f
         world,
     );
     let scope = i32(round(textureLoad(scope_samples, pixel, sample).r));
-    let radiance = shade_surface(surface, view_direction(world), scope) * frame.exposure;
+    let radiance = light_surface(surface, view_direction(world), scope) * frame.exposure;
     return vec4<f32>(radiance, 1.0);
 }
 

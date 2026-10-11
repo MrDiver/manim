@@ -6,6 +6,13 @@
 //! Layers whose views say they are unchanged keep their depth from the
 //! previous render and get no pass, unless the maps were just made again.
 //!
+//! Translucent casters do not write depth: after a layer's opaque casters,
+//! a second pass draws them, depth-tested against those, into two more
+//! layers: the transmittance (1 - alpha of each caster, multiplied) and the
+//! linear depth of the nearest one. A surface behind that depth gets the
+//! light times the transmittance (shaders/shadows.wgsl), so a glass ball's
+//! shadow is as light as the ball is clear, with no grain.
+//!
 //! Casters inside clipping groups cast only the shadow of what their masks
 //! let through, as seen from the light: before a clip scope's casters, the
 //! masks between the light and them are drawn into the stencil, outermost
@@ -17,7 +24,7 @@
 //! scopes never match.
 
 use crate::render::buffer::GrowableBuffer;
-use crate::render::context::{Gpu, SHADOW_FORMAT};
+use crate::render::context::{Gpu, SHADOW_FORMAT, TRANSLUCENT_DEPTH_FORMAT, TRANSMITTANCE_FORMAT};
 use crate::render::packing::flatten::NO_CLIP;
 use crate::render::packing::records::{Frame, ShadowView};
 use crate::render::packing::shadows::ShadowViews;
@@ -38,6 +45,11 @@ pub struct ShadowPass {
     maps: wgpu::Texture,
     pub maps_view: wgpu::TextureView,
     layers: Vec<wgpu::TextureView>,
+    /// Transmittance and nearest translucent depth: whole arrays (for the
+    /// lighting) and one view per layer (to draw into).
+    pub transmittance_view: wgpu::TextureView,
+    pub translucent_depth_view: wgpu::TextureView,
+    translucent_layers: Vec<(wgpu::TextureView, wgpu::TextureView)>,
     resolution: u32,
     scopes: Vec<i32>,
     draw_layers: Vec<usize>,
@@ -54,6 +66,8 @@ impl ShadowPass {
             ..Default::default()
         });
         let (maps, maps_view, layers) = create_maps(&gpu.device, 1, 1);
+        let (transmittance_view, translucent_depth_view, translucent_layers) =
+            create_translucency(&gpu.device, 1, 1);
         ShadowPass {
             frames: GrowableBuffer::new(&gpu.device, "shadow frames", wgpu::BufferUsages::UNIFORM),
             views: GrowableBuffer::new(&gpu.device, "shadow views", wgpu::BufferUsages::STORAGE),
@@ -61,6 +75,9 @@ impl ShadowPass {
             maps,
             maps_view,
             layers,
+            transmittance_view,
+            translucent_depth_view,
+            translucent_layers,
             resolution: 1,
             scopes: Vec::new(),
             draw_layers: Vec::new(),
@@ -186,7 +203,60 @@ impl ShadowPass {
                     mesh_depth,
                 );
             }
+            drop(pass);
+            // Run even without translucent casters: it clears the layer's
+            // transmittance from an earlier render.
+            let mut pass = self.begin_translucent(encoder, layer, profiler);
+            if meshes.has_translucent_shadows(scope) {
+                meshes.draw_translucent_shadow(gpu, &mut pass, frames, offset, scope, mask_layers);
+            }
         }
+    }
+
+    fn begin_translucent<'e>(
+        &self,
+        encoder: &'e mut wgpu::CommandEncoder,
+        layer: usize,
+        profiler: &mut GpuProfiler,
+    ) -> wgpu::RenderPass<'e> {
+        let (transmittance, depth) = &self.translucent_layers[layer];
+        let clear = |view, value| {
+            Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: value,
+                        g: value,
+                        b: value,
+                        a: value,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })
+        };
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("translucent shadows"),
+            color_attachments: &[
+                clear(transmittance, 1.0),
+                clear(depth, NO_TRANSLUCENT_DEPTH),
+            ],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.layers[layer],
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(0),
+                    store: wgpu::StoreOp::Discard,
+                }),
+            }),
+            timestamp_writes: profiler.pass_timing("shadows"),
+            occlusion_query_set: None,
+            multiview_mask: None,
+        })
     }
 
     fn begin<'e>(
@@ -227,6 +297,11 @@ impl ShadowPass {
         }
         let layers = layers.max(current); // never fewer layers than before
         (self.maps, self.maps_view, self.layers) = create_maps(&gpu.device, resolution, layers);
+        (
+            self.transmittance_view,
+            self.translucent_depth_view,
+            self.translucent_layers,
+        ) = create_translucency(&gpu.device, resolution, layers);
         self.resolution = resolution;
         true
     }
@@ -268,6 +343,59 @@ fn create_maps(
         })
         .collect();
     (maps, view, layer_views)
+}
+
+/// The translucent depth of a texel no translucent caster covers: the
+/// largest half float, behind everything.
+const NO_TRANSLUCENT_DEPTH: f64 = 65504.0;
+
+/// The transmittance and translucent depth arrays (views of all layers)
+/// and a view of each layer of both.
+fn create_translucency(
+    device: &wgpu::Device,
+    resolution: u32,
+    layers: u32,
+) -> (
+    wgpu::TextureView,
+    wgpu::TextureView,
+    Vec<(wgpu::TextureView, wgpu::TextureView)>,
+) {
+    let array = |label, format| {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width: resolution,
+                height: resolution,
+                depth_or_array_layers: layers,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        })
+    };
+    let transmittance = array("shadow transmittance", TRANSMITTANCE_FORMAT);
+    let depth = array("shadow translucent depth", TRANSLUCENT_DEPTH_FORMAT);
+    let whole = |texture: &wgpu::Texture| {
+        texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        })
+    };
+    let layer = |texture: &wgpu::Texture, layer| {
+        texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            base_array_layer: layer,
+            array_layer_count: Some(1),
+            ..Default::default()
+        })
+    };
+    let layers = (0..layers)
+        .map(|index| (layer(&transmittance, index), layer(&depth, index)))
+        .collect();
+    (whole(&transmittance), whole(&depth), layers)
 }
 
 /// The clip scopes `clip` is inside, outermost first (with `clip`).

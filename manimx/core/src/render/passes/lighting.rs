@@ -5,6 +5,9 @@
 //! per sample and the rest once is Andrew Lauritzen's,
 //! [Deferred Rendering for Current and Future Rendering Pipelines](https://www.intel.com/content/www/us/en/developer/articles/technical/deferred-rendering-for-current-and-future-rendering-pipelines.html)
 //! (SIGGRAPH 2010).
+//!
+//! It also keeps the bind group the translucent meshes' forward pass lights
+//! with (mesh.wgsl, group 2): the same lights, scope parents and shadows.
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -24,6 +27,9 @@ pub struct LightingPass {
     /// edges, per pixel, per sample on edges).
     variants: HashMap<u32, (wgpu::BindGroupLayout, Vec<wgpu::RenderPipeline>)>,
     bind_group: Option<wgpu::BindGroup>,
+    /// What translucent meshes are lit with (mesh.wgsl's group 2).
+    pub forward_layout: wgpu::BindGroupLayout,
+    pub forward_group: Option<wgpu::BindGroup>,
     sample_count: u32,
     targets_generation: u64,
 }
@@ -36,6 +42,8 @@ impl LightingPass {
             scope_parents: GrowableBuffer::new(&gpu.device, "scope parents", storage),
             variants: HashMap::new(),
             bind_group: None,
+            forward_layout: create_forward_layout(&gpu.device),
+            forward_group: None,
             sample_count: 0,
             targets_generation: u64::MAX,
         }
@@ -121,11 +129,34 @@ impl LightingPass {
                     binding: 8,
                     resource: shadows.views.binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: view(&shadows.transmittance_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: view(&shadows.translucent_depth_view),
+                },
             ];
             self.bind_group = Some(gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("lighting"),
                 layout: &layout,
                 entries: &entries,
+            }));
+            let forward = [
+                (0, self.lights.binding()),
+                (1, view(&shadows.maps_view)),
+                (2, wgpu::BindingResource::Sampler(&shadows.sampler)),
+                (3, shadows.views.binding()),
+                (4, self.scope_parents.binding()),
+                (5, view(&shadows.transmittance_view)),
+                (6, view(&shadows.translucent_depth_view)),
+            ]
+            .map(|(binding, resource)| wgpu::BindGroupEntry { binding, resource });
+            self.forward_group = Some(gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("forward lighting"),
+                layout: &self.forward_layout,
+                entries: &forward,
             }));
         }
         Ok(())
@@ -301,6 +332,55 @@ fn create_layout(device: &wgpu::Device, multisampled: bool) -> wgpu::BindGroupLa
             entry(8, storage),
             entry(9, gbuffer),
             entry(10, storage),
+            entry(11, TRANSLUCENCY),
+            entry(12, TRANSLUCENCY),
+        ],
+    })
+}
+
+/// A translucent-shadow layer array (transmittance or depth), read with
+/// textureLoad.
+const TRANSLUCENCY: wgpu::BindingType = wgpu::BindingType::Texture {
+    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+    view_dimension: wgpu::TextureViewDimension::D2Array,
+    multisampled: false,
+};
+
+/// mesh.wgsl's group 2: lights, shadow maps, their sampler and views, and
+/// the clip scopes' parents.
+fn create_forward_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    let fragment = wgpu::ShaderStages::FRAGMENT;
+    let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: fragment,
+        ty,
+        count: None,
+    };
+    let storage = wgpu::BindingType::Buffer {
+        ty: wgpu::BufferBindingType::Storage { read_only: true },
+        has_dynamic_offset: false,
+        min_binding_size: None,
+    };
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("forward lighting"),
+        entries: &[
+            entry(0, storage),
+            entry(
+                1,
+                wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Depth,
+                    view_dimension: wgpu::TextureViewDimension::D2Array,
+                    multisampled: false,
+                },
+            ),
+            entry(
+                2,
+                wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+            ),
+            entry(3, storage),
+            entry(4, storage),
+            entry(5, TRANSLUCENCY),
+            entry(6, TRANSLUCENCY),
         ],
     })
 }

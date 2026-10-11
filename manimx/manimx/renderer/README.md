@@ -300,7 +300,8 @@ flowchart TD
         P1["mask passes<br/>one per clip scope -> mask layer"] --> P2
         P2["shadow passes (only with meshes)<br/>casters' depth per changed shadow view;<br/>clip masks first into the stencil"] --> P3
         P3["geometry pass<br/>meshes -> MSAA G-buffer + depth"] --> P4
-        P4["lighting pass<br/>marks edge pixels in a stencil, lights other<br/>pixels once, edge pixels per sample -> lit layer (HDR)"] --> P5
+        P4["lighting pass<br/>marks edge pixels in a stencil, lights other<br/>pixels once, edge pixels per sample -> lit layer (HDR)"] --> P4b
+        P4b["translucent pass (only with translucent meshes)<br/>lit forward, back to front, blended over the lit layer"] --> P5
         P5["vector pass<br/>2D shapes and curves -> vector layer,<br/>own depth + test against mesh depth"]
     end
 
@@ -483,6 +484,25 @@ lies, and only the marked ones per sample. Material evaluation and
 lighting live in separate shader modules, so moving lighting between
 passes does not touch materials.
 
+**Translucent meshes are shaded forward.** A G-buffer holds one surface
+per sample, so meshes whose opacity or alpha is below 1 are left out of
+it. After the lighting pass they are drawn sorted back to front by the
+view depth of their centers, lit in the fragment shader with the same
+material, surface shader and lighting code, and blended over the lit
+layer (premultiplied), depth-tested against the opaque meshes without
+writing depth. Each is drawn twice, back faces then front faces, so the
+far side of a closed mesh is behind its near side. A clip mask fades
+them softly instead of cutting at half coverage.
+
+**Translucent shadows tint the light.** Translucent casters write no
+shadow depth. A second pass per shadow layer draws them, depth-tested
+against the opaque casters, into two more layers: the light they let
+through (1 - alpha, multiplied, so two surfaces of a closed mesh both
+count) and the distance of the nearest one along the light's view. A
+receiver behind that distance gets the light times the transmittance,
+filtered over 2x2 texels, so the shadow is as light as the caster is
+clear, without the grain of a dithered depth map.
+
 **2D colors stay exact.** Lit meshes render to a linear HDR layer and 2D
 content to a separate sRGB layer. The composer tone-maps only the lit
 layer, then blends the vector layer over it in sRGB values, which is how
@@ -569,9 +589,14 @@ track the scene.
 - **Painter's order between non-coplanar 2D planes:** where two 2D planes
   intersect, their layer bias can flip single pixels along the
   intersection.
-- **Meshes are opaque** (no glTF alpha modes, and the deferred lighting
-  has no place for translucent ones), clip at 50% mask coverage, and
-  cannot be masks themselves.
+- **Translucent meshes** sort per mesh, not per triangle: two crossing
+  translucent meshes blend in one order everywhere. The vector layer is
+  composited over the lit layer, so 2D shapes behind a translucent mesh
+  show in front of it. Texture alpha does not make a mesh translucent
+  (no glTF alpha modes); opaque meshes clip at 50% mask coverage, and
+  meshes cannot be masks themselves.
+- **Translucent shadows** are hard-edged (2x2 texels, no PCSS penumbra)
+  and ignore the clip masks between the light and their casters.
 - **glTF import** skips animations, skins, morph targets, cameras, lights,
   sparse accessors, vertex colors, a second UV set, samplers and
   extensions.

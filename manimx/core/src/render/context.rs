@@ -15,6 +15,12 @@ pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Shadow maps: depth, and a stencil for the masks of clipped casters.
 pub const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32FloatStencil8;
+/// How much light translucent casters let through, per shadow map texel
+/// (multiplied together; 1 without any).
+pub const TRANSMITTANCE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
+/// The nearest translucent caster per shadow map texel, as a linear depth
+/// (`translucent_depth` in mesh.wgsl); half floats blend on every device.
+pub const TRANSLUCENT_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R16Float;
 /// The lighting pass's stencil, which marks the pixels on an edge.
 pub const EDGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Stencil8;
 /// Linear radiance of lit meshes, before tone mapping.

@@ -5,6 +5,8 @@
 //! shadow passes  one per changed shadow view
 //! geometry pass  meshes into the multisampled G-buffer
 //! lighting pass  every G-buffer sample x every light -> lit layer
+//! translucent    translucent meshes, lit and blended over the lit layer
+//!                back to front, depth-tested against the G-buffer
 //! vector pass    shapes and curves -> vector layer, depth-tested
 //!                against the meshes
 //! ```
@@ -216,6 +218,8 @@ impl Renderer {
                     written: index_ranges,
                 },
                 groups: &meshes.output.groups,
+                translucent: &meshes.output.translucent,
+                translucent_shadow_draws: &meshes.output.translucent_shadow_draws,
                 shadow_draws: &meshes.output.shadow_draws,
             };
             self.mesh_pass.prepare(
@@ -286,16 +290,38 @@ impl Renderer {
                     self.mesh_pass.draw(gpu, &mut pass, samples);
                 }
             }
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("lighting"),
-                color_attachments: &[Some(targets.lit_attachment())],
-                depth_stencil_attachment: targets.edge_attachment(),
-                timestamp_writes: self.profiler.pass_timing("lighting"),
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            if has_meshes {
-                self.lighting_pass.draw(gpu, &mut pass)?;
+            let translucent = has_meshes && self.mesh_pass.has_translucent();
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("lighting"),
+                    color_attachments: &[Some(targets.lit_attachment(translucent))],
+                    depth_stencil_attachment: targets.edge_attachment(),
+                    timestamp_writes: self.profiler.pass_timing("lighting"),
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                if has_meshes {
+                    self.lighting_pass.draw(gpu, &mut pass)?;
+                }
+            }
+            if translucent {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("translucent"),
+                    color_attachments: &[Some(targets.lit_over_attachment())],
+                    depth_stencil_attachment: Some(targets.depth_test_attachment()),
+                    timestamp_writes: self.profiler.pass_timing("translucent"),
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                if let Some(lighting) = &self.lighting_pass.forward_group {
+                    self.mesh_pass.draw_translucent(
+                        gpu,
+                        &mut pass,
+                        samples,
+                        &self.lighting_pass.forward_layout,
+                        lighting,
+                    );
+                }
             }
         }
         self.empty_3d = if has_meshes { None } else { Some(generation) };

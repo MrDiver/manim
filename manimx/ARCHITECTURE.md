@@ -871,9 +871,9 @@ flowchart LR
 - performance (PERFORMANCE.md): the benchmark project from 48.6 fps to
   123.5 with the core; light-show 70 to 23 ms per frame.
 
-Known gap: the deferred mesh pass ignores `PbrMaterial.opacity`, so
-fading a `Shape3D` does not show yet (FUTURE_IDEAS.md: translucent
-meshes).
+Translucent meshes (`PbrMaterial.opacity` or alpha below 1) are lit in
+a forward pass after the deferred lighting and cast tinted shadows
+(manimx/renderer/README.md).
 
 **Next, in the agreed order:** porting Manim's remaining classes
 (batches d, e, f), the rendering ideas, the web UI, then editing scenes

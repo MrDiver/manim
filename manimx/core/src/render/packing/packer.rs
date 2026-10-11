@@ -116,7 +116,7 @@ impl Packer {
         if self.meshes.too_much_garbage() {
             self.meshes.repack();
         }
-        let output = self.meshes.pack(&flat);
+        let output = self.meshes.pack(&flat, &settings.camera.inverse());
         let sources = lights::light_sources(&flat, settings.default_lights, &settings.camera);
         let mut rows: Vec<Light> = sources.iter().map(|light| light.record()).collect();
         let mut shadow_views = shadows::build_shadow_views(

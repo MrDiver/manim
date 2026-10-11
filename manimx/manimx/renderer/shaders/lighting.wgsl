@@ -31,7 +31,7 @@ const PI_LIGHTING: f32 = 3.14159265358979;
 /// Radiance leaving `surface` towards `view` (unit vector to the viewer).
 /// `scope` is the surface's clip scope: scoped lights only reach surfaces
 /// inside their scope (needs `scope_parents` from the including shader).
-fn shade_surface(surface: Surface, view: vec3<f32>, scope: i32) -> vec3<f32> {
+fn light_surface(surface: Surface, view: vec3<f32>, scope: i32) -> vec3<f32> {
     var color = surface.emissive;
     // Uniform ambient light, darkened by ambient occlusion. Without an
     // environment map, metals would only show their highlights and look

@@ -367,3 +367,29 @@ def test_shadows(update_references: bool) -> None:
     image = render_image(nodes, config=config(background_color="#3d3d3d", ambient_intensity=0.08, camera=perspective((9, -12, 8), (0, 0, 1))))
 
     check(image, "shadows", update_references)
+
+
+def test_translucent_meshes_show_what_is_behind_them() -> None:
+    behind = Shape3D(box_mesh(2.0, 2.0, 0.2), color="#ff0000").move_to((0.0, 0.0, -1.0))
+    front = Shape3D(box_mesh(2.0, 2.0, 0.2), color="#0000ff", opacity=0.5).move_to((0.0, 0.0, 1.0))
+    lit = DirectionalLight(direction=(0.0, 0.0, -1.0), intensity=1.0, cast_shadows=False)
+    seen = pixel(render(behind, front, lit), 0.0, 0.0)
+    opaque = pixel(render(behind, Shape3D(box_mesh(2.0, 2.0, 0.2), color="#0000ff").move_to((0.0, 0.0, 1.0)), lit), 0.0, 0.0)
+    assert seen[0] > opaque[0] + 30 and seen[2] > 40  # red through blue; an opaque mesh hides it
+    faded = Shape3D(box_mesh(2.0, 2.0, 0.2), color="#0000ff").move_to((0.0, 0.0, 1.0))
+    faded.alpha.set(0.0)
+    assert pixel(render(behind, faded, lit), 0.0, 0.0)[0] > 100  # alpha 0: not drawn
+
+
+def test_translucent_casters_tint_light_instead_of_blocking_it() -> None:
+    floor = Shape3D(box_mesh(8.0, 8.0, 0.1), color="#ffffff").move_to((0.0, 0.0, -0.05))
+    sun = DirectionalLight(direction=(1.0, 0.0, -1.0), intensity=2.0)  # the shadow falls 1 to the right
+
+    def shadow(opacity: float) -> int:
+        caster = Shape3D(box_mesh(2.0, 2.0, 0.05), color="#ffffff", opacity=opacity).move_to((0.0, 0.0, 1.0))
+        image = render(floor, caster, sun, default_lights=False)
+        return pixel(image, -3.0, 0.0)[0], pixel(image, 1.6, 0.0)[0]
+
+    lit, full = shadow(1.0)
+    _, half = shadow(0.5)
+    assert full < half < lit  # an opaque caster blocks, a translucent one tints
