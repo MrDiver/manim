@@ -40,6 +40,7 @@ may read ``frame.time``, so with one in the chain every frame is rendered.
 from __future__ import annotations
 
 import dataclasses
+import math
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
@@ -287,13 +288,25 @@ class FrameComposer:
             timing=profiler.pass_timing("depth of field"),
             replacements=_depth_samples(layers.samples),
         )
-        params = np.array([camera.focus_distance, camera.aperture, weight, 0.0], dtype=np.float32)
+        tile = blur_tile(layers.height)
+        params = self._uniform(np.array([camera.focus_distance, camera.aperture, weight, tile], dtype=np.float32))
+        tiles = self._textures.get("blur tiles", (-(-layers.width // tile), -(-layers.height // tile)), wgpu.TextureFormat.r32float)
+        self._passes.run(
+            encoder,
+            "depth_of_field_tiles.wgsl",
+            "fs_blur_tiles",
+            tiles,
+            [frame_uniform, params, self._resources.view(distances)],
+            blend=None,
+            clear=True,
+            timing=profiler.pass_timing("depth of field"),
+        )
         self._passes.run(
             encoder,
             "depth_of_field.wgsl",
             "fs_depth_of_field",
             target,
-            [frame_uniform, self._uniform(params), self._resources.view(image), self._resources.view(distances)],
+            [frame_uniform, params, self._resources.view(image), self._resources.view(distances), self._resources.view(tiles)],
             blend=blend,
             clear=first,
             timing=profiler.pass_timing("depth of field"),
@@ -375,6 +388,17 @@ class _TreeKeys:
             entry = (node, key, timed)
         self._current[id(node)] = entry
         return entry[1], entry[2]
+
+
+MAX_BLUR = 0.05
+"""The largest blur radius of depth of field, as a fraction of the image
+height (MAX_RADIUS in lens.wgsl)."""
+
+
+def blur_tile(height: int) -> int:
+    """Pixels per side of a depth of field blur tile: at least the largest
+    blur, so what reaches a pixel lies in its tile or the eight around."""
+    return max(1, math.ceil(MAX_BLUR * height))
 
 
 def _depth_samples(samples: int) -> tuple[tuple[str, str], ...]:

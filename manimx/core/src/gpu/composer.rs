@@ -41,7 +41,19 @@ struct DepthOfFieldParams {
     focus_distance: f32,
     aperture: f32,
     weight: f32,
-    _pad: f32,
+    /// Pixels per side of a blur tile (`blur_tile`).
+    tile: f32,
+}
+
+/// The largest blur radius of depth of field, as a fraction of the image
+/// height (`MAX_RADIUS` in lens.wgsl).
+const MAX_BLUR: f32 = 0.05;
+
+/// Pixels per side of a depth of field blur tile: at least the largest
+/// blur, so what reaches a pixel lies in its tile or the eight around
+/// (`blur_tile` in composer.py).
+fn blur_tile(height: u32) -> u32 {
+    ((MAX_BLUR * height as f32).ceil() as u32).max(1)
 }
 
 /// What the depth of field of one view needs besides its image: the
@@ -598,20 +610,49 @@ impl Composer {
             profiler,
             "depth of field",
         )?;
+        let tile = blur_tile(lens.size.1);
         let params = DepthOfFieldParams {
             focus_distance: lens.focus_distance,
             aperture: lens.aperture,
             weight: target.weight,
-            _pad: 0.0,
+            tile: tile as f32,
         };
         let params = self
             .composite_params
             .write(&gpu.queue, bytemuck::bytes_of(&params));
+        let tiles = self.textures.get(
+            &gpu.device,
+            "blur tiles",
+            (lens.size.0.div_ceil(tile), lens.size.1.div_ceil(tile)),
+            wgpu::TextureFormat::R32Float,
+            1,
+            wgpu::TextureUsages::empty(),
+        );
+        let tiles_view = tiles.create_view(&Default::default());
+        let resources = [
+            frame_uniform(),
+            params.clone(),
+            wgpu::BindingResource::TextureView(&distances_view),
+        ];
+        self.fullscreen.run(
+            gpu,
+            encoder,
+            "depth_of_field_tiles.wgsl",
+            "fs_blur_tiles",
+            &tiles_view,
+            wgpu::TextureFormat::R32Float,
+            &resources,
+            Blend::Replace,
+            true,
+            profiler,
+            "depth of field",
+        )?;
         let resources = [
             frame_uniform(),
             params,
             wgpu::BindingResource::TextureView(&image_view),
             wgpu::BindingResource::TextureView(&distances_view),
+            wgpu::BindingResource::TextureView(&tiles_view),
         ];
         self.fullscreen.run(
             gpu,
