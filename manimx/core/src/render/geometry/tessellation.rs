@@ -26,7 +26,7 @@ use glam::DVec2;
 /// Max distance between a cubic and its quadratic approximation.
 const TOLERANCE: f64 = 1e-5;
 const MAX_QUADRATICS_PER_CUBIC: usize = 32;
-/// `TOLERANCE_FOR_POINT_EQUALITY` of rbezier_path.py.
+/// Points closer than this are the same point.
 const POINT_EQUALITY: f64 = 1e-8;
 /// Quadratics bending less than this (relative to their chord) are lines.
 const BEND_EPSILON: f64 = 1e-9;

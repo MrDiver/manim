@@ -1,4 +1,4 @@
-//! The mesh records of `Shape3D` and `Particles` nodes, in the buffers
+//! The mesh records of `RShape3D` and `RParticles` nodes, in the buffers
 //! mesh.wgsl reads:
 //!
 //! ```text
@@ -11,22 +11,22 @@
 //! Vertices and indices are large and change only with a node's mesh, so
 //! they stay in arenas, a range per node, and only the written ranges are
 //! uploaded. Objects, materials and draws are small and built per frame.
-//! Draws are grouped by the material's texture set (textures are bound per
-//! group): one `multi_draw_indexed_indirect` per group. A mesh's interleaved vertices and a
-//! material's entry are built by Python once per version
-//! (manimx/renderer/core_callbacks.py).
+//! Draws are grouped by the material's texture set and surface shader
+//! (textures are bound per group, a pipeline per shader): one
+//! `multi_draw_indexed_indirect` per group. A mesh's interleaved vertices
+//! and a material's entry are built once per version of the mesh and the
+//! material.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use glam::{DMat3, DMat4, DQuat, DVec3};
-use pyo3::prelude::*;
 
-use crate::packing::arena::Arena;
-use crate::packing::callbacks::{bytes_of, Callbacks};
-use crate::packing::records::{self, DrawIndexed, Material, MeshObject};
-use crate::packing::scene_graph::{
-    FlatScene, MeshFields, NodeData, SceneGraph, ShadowList, Values,
-};
+use crate::render::color::linear_rgb;
+use crate::render::packing::arena::Arena;
+use crate::render::packing::flatten::{FlatScene, ShadowList};
+use crate::render::packing::records::{self, DrawIndexed, Material, MeshObject, MeshVertex};
+use crate::robjects::{self, Instances, Kind, Mesh, SurfaceShader, Texture};
 
 /// A mesh as the renderer needs it, built once per mesh version.
 pub struct MeshGeometry {
@@ -39,22 +39,99 @@ pub struct MeshGeometry {
     pub corners: Vec<DVec3>,
 }
 
-/// A node's material entry, with the versions it was built from and the
-/// identities of its textures and surface shader (draws are grouped by them).
-pub struct MaterialEntry {
-    versions: Vec<u64>,
-    entry: Material,
-    texture_key: Vec<u64>,
+impl MeshGeometry {
+    /// The interleaved vertices (tangents computed from the UVs when the
+    /// mesh has UVs but no tangents), indices and box of `mesh`.
+    fn new(mesh: &Mesh) -> MeshGeometry {
+        if mesh.triangle_count() == 0 {
+            return MeshGeometry {
+                version: mesh.version,
+                vertices: Vec::new(),
+                indices: Vec::new(),
+                index_count: 0,
+                triangle_count: 0,
+                corners: Vec::new(),
+            };
+        }
+        let tangents = mesh.tangents_or_computed();
+        let vertices: Vec<MeshVertex> = (0..mesh.positions.len())
+            .map(|i| {
+                let [u, v] = mesh.uvs.as_ref().map_or([0.0; 2], |uvs| uvs[i]);
+                MeshVertex {
+                    position: mesh.positions[i],
+                    u,
+                    normal: mesh.normals[i],
+                    v,
+                    tangent: tangents.as_ref().map_or([0.0; 4], |t| t[i]),
+                }
+            })
+            .collect();
+        let positions: Vec<DVec3> = mesh
+            .positions
+            .iter()
+            .map(|p| DVec3::from(p.map(f64::from)))
+            .collect();
+        MeshGeometry {
+            version: mesh.version,
+            vertices: bytemuck::cast_slice(&vertices).to_vec(),
+            indices: bytemuck::cast_slice(&mesh.indices).to_vec(),
+            index_count: mesh.indices.len() as u32,
+            triangle_count: mesh.triangle_count(),
+            corners: box_around(&positions),
+        }
+    }
+}
+
+/// The 8 corners of the axis-aligned box around `points`.
+pub fn box_around(points: &[DVec3]) -> Vec<DVec3> {
+    let low = points.iter().copied().fold(DVec3::INFINITY, DVec3::min);
+    let high = points.iter().copied().fold(DVec3::NEG_INFINITY, DVec3::max);
+    box_corners(low, high)
+}
+
+/// The 8 corners of the box from `low` to `high`.
+pub fn box_corners(low: DVec3, high: DVec3) -> Vec<DVec3> {
+    let mut corners = Vec::with_capacity(8);
+    for x in [low.x, high.x] {
+        for y in [low.y, high.y] {
+            for z in [low.z, high.z] {
+                corners.push(DVec3::new(x, y, z));
+            }
+        }
+    }
+    corners
+}
+
+/// The GPU entry of a material, in linear light.
+fn material_entry(material: &robjects::Material) -> Material {
+    let [r, g, b] = linear_rgb(material.base_color);
+    let emissive = linear_rgb(material.emissive).map(|c| c * material.emissive_strength);
+    Material {
+        base_color: [r as f32, g as f32, b as f32, material.opacity as f32],
+        emissive: [
+            emissive[0] as f32,
+            emissive[1] as f32,
+            emissive[2] as f32,
+            0.0,
+        ],
+        metallic: material.metallic as f32,
+        roughness: material.roughness as f32,
+        normal_scale: material.normal_scale as f32,
+        occlusion_strength: material.occlusion_strength as f32,
+    }
 }
 
 /// Meshes sharing one texture set and surface shader: one bind group, one
-/// pipeline, one multi-draw (`DrawGroup`).
+/// pipeline, one multi-draw.
 pub struct DrawGroup {
-    pub textures: Vec<Py<PyAny>>,
-    /// A `SurfaceShader`, or None.
-    pub surface_shader: Py<PyAny>,
+    pub textures: [Option<Arc<Texture>>; 5],
+    pub surface_shader: Option<Arc<SurfaceShader>>,
     pub draws: Vec<DrawIndexed>,
 }
+
+/// What draws are grouped by: the uids of a material's textures and its
+/// surface shader (0 for none).
+type GroupKey = [u64; 6];
 
 /// A frame's mesh records, without the arenas.
 pub struct MeshOutput {
@@ -72,8 +149,10 @@ pub struct MeshPacker {
     /// uid -> (mesh version, first vertex, vertex count, first index, index count).
     slots: HashMap<u64, (u64, usize, usize, usize, usize)>,
     seen: HashSet<u64>,
+    /// By node uid.
     pub geometry: HashMap<u64, MeshGeometry>,
-    pub materials: HashMap<u64, MaterialEntry>,
+    /// By node uid: the material's version and its entry.
+    pub materials: HashMap<u64, (u64, Material)>,
 }
 
 impl MeshPacker {
@@ -99,81 +178,23 @@ impl MeshPacker {
         self.slots.clear();
     }
 
-    /// The mesh of node `uid` (built by Python when its version changed).
-    pub fn mesh(
-        &mut self,
-        py: Python<'_>,
-        callbacks: &Callbacks,
-        values: &Values,
-        uid: u64,
-        fields: &MeshFields,
-    ) -> PyResult<&MeshGeometry> {
-        let version = values.state.versions[fields.mesh];
-        if self.geometry.get(&uid).map(|g| g.version) != Some(version) {
-            let mesh = values.state.kinds[fields.mesh].value_to_py(py, values.get(fields.mesh))?;
-            let result = callbacks.mesh_records.bind(py).call1((mesh,))?;
-            let corners = bytes_of(&result.get_item(3)?)?;
-            let corners: &[f64] = bytemuck::cast_slice(&corners);
-            let indices = bytes_of(&result.get_item(1)?)?;
-            self.geometry.insert(
-                uid,
-                MeshGeometry {
-                    version,
-                    vertices: bytes_of(&result.get_item(0)?)?,
-                    index_count: (indices.len() / 4) as u32,
-                    indices,
-                    triangle_count: result.get_item(2)?.extract()?,
-                    corners: corners
-                        .chunks_exact(3)
-                        .map(|c| DVec3::new(c[0], c[1], c[2]))
-                        .collect(),
-                },
-            );
+    /// The geometry of node `uid`'s mesh, built again when its version changed.
+    fn mesh(&mut self, uid: u64, mesh: &Mesh) -> &MeshGeometry {
+        if self.geometry.get(&uid).map(|g| g.version) != Some(mesh.version) {
+            self.geometry.insert(uid, MeshGeometry::new(mesh));
         }
-        Ok(&self.geometry[&uid])
+        &self.geometry[&uid]
     }
 
-    fn material(
-        &mut self,
-        py: Python<'_>,
-        callbacks: &Callbacks,
-        values: &Values,
-        uid: u64,
-        fields: &MeshFields,
-    ) -> PyResult<&MaterialEntry> {
-        let versions: Vec<u64> = fields
-            .material
-            .iter()
-            .map(|&slot| values.state.versions[slot])
-            .collect();
-        if self.materials.get(&uid).map(|m| &m.versions) != Some(&versions) {
-            let arguments = fields
-                .material
-                .iter()
-                .map(|&slot| values.state.kinds[slot].value_to_py(py, values.get(slot)))
-                .collect::<PyResult<Vec<_>>>()?;
-            let bytes = bytes_of(
-                &callbacks
-                    .material_entry
-                    .bind(py)
-                    .call1(pyo3::types::PyTuple::new(py, arguments)?)?,
-            )?;
-            let texture_key = fields
-                .textures
-                .iter()
-                .chain([&fields.surface_shader])
-                .map(|&slot| texture_uid(values, slot))
-                .collect::<PyResult<_>>()?;
-            self.materials.insert(
-                uid,
-                MaterialEntry {
-                    versions,
-                    entry: bytemuck::pod_read_unaligned(&bytes),
-                    texture_key,
-                },
-            );
+    fn material(&mut self, uid: u64, material: &robjects::Material) -> Material {
+        match self.materials.get(&uid) {
+            Some((version, entry)) if *version == material.version => *entry,
+            _ => {
+                let entry = material_entry(material);
+                self.materials.insert(uid, (material.version, entry));
+                entry
+            }
         }
-        Ok(&self.materials[&uid])
     }
 
     /// `(first index, base vertex)` of a node's mesh, placed in the arenas.
@@ -202,9 +223,8 @@ impl MeshPacker {
         (first_index, first_vertex)
     }
 
-    /// Free the ranges of meshes not placed since
-    /// the last call.
-    pub fn finish(&mut self) {
+    /// Free the ranges of meshes not placed since the last call.
+    fn finish(&mut self) {
         let gone: Vec<u64> = self
             .slots
             .keys()
@@ -220,57 +240,45 @@ impl MeshPacker {
     }
 
     /// The frame's mesh records, without the lights.
-    pub fn pack(
-        &mut self,
-        py: Python<'_>,
-        graph: &SceneGraph,
-        values: &Values,
-        scene: &FlatScene,
-        callbacks: &Callbacks,
-    ) -> PyResult<MeshOutput> {
+    pub fn pack(&mut self, scene: &FlatScene) -> MeshOutput {
         let mut objects = Vec::new();
         let mut materials = Vec::new();
-        let mut groups: Vec<(Vec<u64>, DrawGroup)> = Vec::new();
+        let mut groups: Vec<(GroupKey, DrawGroup)> = Vec::new();
         let mut shadow_draws: Vec<(DrawIndexed, i32)> = Vec::new();
         // A node drawn more than once (it sits in several groups) shares
         // its material entry while its alpha is the same.
         let mut material_slots: HashMap<(u64, u64), u32> = HashMap::new();
         for item in &scene.items {
-            let node = &graph.nodes[item.node];
-            let NodeData::Mesh(fields) = &node.data else {
-                continue;
+            let node = item.node;
+            let (surface, instances) = match &node.kind {
+                Kind::Shape3D(surface) => (surface, None),
+                Kind::Particles { surface, instances } => (surface, Some(instances)),
+                _ => continue,
             };
-            if self
-                .mesh(py, callbacks, values, node.uid, fields)?
-                .triangle_count
-                == 0
-            {
+            if self.mesh(node.uid, &surface.mesh).triangle_count == 0 {
                 continue;
             }
-            let mut entry = self
-                .material(py, callbacks, values, node.uid, fields)?
-                .entry;
+            let mut entry = self.material(node.uid, &surface.material);
             if item.alpha != 1.0 {
-                // The item's alpha (Node.alpha, times every one above) fades the material.
+                // The item's alpha (RNode.alpha, times every one above) fades the material.
                 entry.base_color[3] *= item.alpha as f32;
             }
             let first_object = objects.len() as u32;
-            let count = match fields.particles {
-                Some(particles) => {
-                    let placed = particle_objects(
-                        values,
-                        particles,
+            let count = match instances {
+                Some(instances) => {
+                    let (placed, tinted) = particle_objects(
+                        instances,
                         &item.world,
                         entry,
                         materials.len() as u32,
                         item.clip,
-                    )?;
-                    if placed.0.is_empty() {
+                    );
+                    if placed.is_empty() {
                         continue;
                     }
-                    let count = placed.0.len();
-                    objects.extend(placed.0);
-                    materials.extend(placed.1);
+                    let count = placed.len();
+                    objects.extend(placed);
+                    materials.extend(tinted);
                     count
                 }
                 None => {
@@ -284,23 +292,24 @@ impl MeshPacker {
                     1
                 }
             };
-            let texture_key = self.materials[&node.uid].texture_key.clone();
-            let group = match groups.iter().position(|(key, _)| *key == texture_key) {
+            let material = &surface.material;
+            let uid_of = |texture: &Option<Arc<Texture>>| texture.as_ref().map_or(0, |t| t.uid);
+            let key: GroupKey = [
+                uid_of(&material.textures[0]),
+                uid_of(&material.textures[1]),
+                uid_of(&material.textures[2]),
+                uid_of(&material.textures[3]),
+                uid_of(&material.textures[4]),
+                material.surface_shader.as_ref().map_or(0, |s| s.uid),
+            ];
+            let group = match groups.iter().position(|(seen, _)| *seen == key) {
                 Some(index) => index,
                 None => {
-                    let textures = fields
-                        .textures
-                        .iter()
-                        .map(|&slot| values.state.kinds[slot].value_to_py(py, values.get(slot)))
-                        .collect::<PyResult<Vec<_>>>()?;
-                    let slot = fields.surface_shader;
-                    let surface_shader =
-                        values.state.kinds[slot].value_to_py(py, values.get(slot))?;
                     groups.push((
-                        texture_key,
+                        key,
                         DrawGroup {
-                            textures,
-                            surface_shader,
+                            textures: material.textures.clone(),
+                            surface_shader: material.surface_shader.clone(),
                             draws: Vec::new(),
                         },
                     ));
@@ -316,28 +325,17 @@ impl MeshPacker {
                 first_instance: first_object,
             };
             groups[group].1.draws.push(draw);
-            if values.truthy(fields.cast_shadows)? {
+            if surface.cast_shadows {
                 shadow_draws.push((draw, item.clip));
             }
         }
         self.finish();
-        Ok(MeshOutput {
+        MeshOutput {
             objects,
             materials,
             groups: groups.into_iter().map(|(_, group)| group).collect(),
             shadow_draws: scene.shadow_lists(&shadow_draws),
-        })
-    }
-}
-
-/// The `uid` of a texture or surface shader, 0 for none (draws are
-/// grouped by texture sets).
-fn texture_uid(values: &Values, slot: usize) -> PyResult<u64> {
-    match values.get(slot) {
-        crate::evaluation::value::Value::Object(object) if !object.is_none(values.py) => {
-            object.bind(values.py).getattr("uid")?.extract()
         }
-        _ => Ok(0),
     }
 }
 
@@ -353,38 +351,38 @@ fn mesh_object(world: &DMat4, material: u32, clip: i32) -> MeshObject {
     }
 }
 
-/// One object and one material per shown particle (scale non-zero on
-/// every axis): `_particle_matrices` and `_tinted`.
+/// Whether particle `i` shows: scaled to something on every axis.
+pub fn particle_shown(instances: &Instances, i: usize) -> bool {
+    DVec3::from(instances.scales[i]).abs().min_element() > 1e-9
+}
+
+/// One object and one tinted material per shown particle.
 fn particle_objects(
-    values: &Values,
-    slots: [usize; 4],
+    instances: &Instances,
     world: &DMat4,
     entry: Material,
     first_material: u32,
     clip: i32,
-) -> PyResult<(Vec<MeshObject>, Vec<Material>)> {
-    let [positions, rotations, scales, colors] = slots.map(|slot| values.get(slot).array());
-    let (positions, rotations, scales, colors) = (positions?, rotations?, scales?, colors?);
+) -> (Vec<MeshObject>, Vec<Material>) {
     let mut objects = Vec::new();
     let mut materials = Vec::new();
-    for i in 0..positions.rows() {
-        let scale = DVec3::from_slice(&scales.data[3 * i..3 * i + 3]);
-        if scale.abs().min_element() <= 1e-9 {
+    for i in 0..instances.count() {
+        if !particle_shown(instances, i) {
             continue;
         }
-        let r = &rotations.data[4 * i..4 * i + 4]; // w, x, y, z; interpolated linearly, so normalized here
-        let rotation = DQuat::from_xyzw(r[1], r[2], r[3], r[0]).normalize();
+        // w, x, y, z; interpolated linearly, so normalized here.
+        let [w, x, y, z] = instances.rotations[i];
         let local = DMat4::from_scale_rotation_translation(
-            scale,
-            rotation,
-            DVec3::from_slice(&positions.data[3 * i..3 * i + 3]),
+            DVec3::from(instances.scales[i]),
+            DQuat::from_xyzw(x, y, z, w).normalize(),
+            DVec3::from(instances.positions[i]),
         );
         objects.push(mesh_object(
             &(*world * local),
             first_material + materials.len() as u32,
             clip,
         ));
-        let color = &colors.data[4 * i..4 * i + 4];
+        let color = instances.colors[i];
         let mut tinted = entry;
         for channel in 0..3 {
             tinted.base_color[channel] =
@@ -394,5 +392,5 @@ fn particle_objects(
         }
         materials.push(tinted);
     }
-    Ok((objects, materials))
+    (objects, materials)
 }

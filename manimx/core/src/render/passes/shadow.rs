@@ -16,11 +16,11 @@
 //! References only grow within a layer, so values left by earlier clip
 //! scopes never match.
 
-use crate::packing::records::{Frame, ShadowView};
-use crate::packing::scene_graph::NO_CLIP;
-use crate::packing::shadows::ShadowViews;
 use crate::render::buffer::GrowableBuffer;
 use crate::render::context::{Gpu, SHADOW_FORMAT};
+use crate::render::packing::flatten::NO_CLIP;
+use crate::render::packing::records::{Frame, ShadowView};
+use crate::render::packing::shadows::ShadowViews;
 use crate::render::passes::mesh::MeshPass;
 use crate::render::passes::vector::VectorPass;
 use crate::render::profiler::GpuProfiler;

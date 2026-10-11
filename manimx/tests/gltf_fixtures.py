@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pygltflib
-from manimx.robjects.mesh import MeshData
+from manimx.robjects import MeshData
 from PIL import Image
 
 FLOAT, UINT32 = 5126, 5125

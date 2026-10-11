@@ -9,9 +9,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use pyo3::prelude::*;
-
 use crate::render::context::{Gpu, HDR_FORMAT};
+use crate::render::error::Result;
 use crate::render::fullscreen::{TexturePool, UniformSlots};
 
 /// The settings of `ShaderEffect` (manimx/renderer/effects.py).
@@ -124,7 +123,7 @@ impl ShaderEffects {
         source: &wgpu::Texture,
         stage: &'static str,
         frame_uniform: &wgpu::Buffer,
-    ) -> PyResult<wgpu::Texture> {
+    ) -> Result<wgpu::Texture> {
         // Alternate between two outputs per stage so effects can be chained.
         self.uses += 1;
         let name: &'static str = match (stage, self.uses % 2) {
@@ -197,7 +196,7 @@ impl ShaderEffects {
     }
 
     /// The pipeline of the user's `code` in the template.
-    fn pipeline(&self, gpu: &Gpu, code: &str) -> PyResult<wgpu::RenderPipeline> {
+    fn pipeline(&self, gpu: &Gpu, code: &str) -> Result<wgpu::RenderPipeline> {
         let code = TEMPLATE.replace("{code}", code);
         let code = gpu.expand_includes(&code, &mut HashSet::new())?;
         let module = gpu.module("shader effect", &code);

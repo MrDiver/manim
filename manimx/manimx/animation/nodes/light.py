@@ -21,7 +21,6 @@ from collections.abc import Iterable, Iterator, Sequence
 
 import numpy as np
 
-from ...robjects import RDirectionalLight, RLight, RNode, RPointLight, RSpotLight
 from ...robjects.transform import rotation_towards
 from ...utils.color import WHITE, ParsableManimColor
 from .. import authoring
@@ -79,30 +78,15 @@ class Light(Node):
     def set_cast_shadows(self, cast_shadows: bool) -> ChangeList:
         return [(self.cast_shadows, ABS, cast_shadows)]
 
-    def _build_snapshot(self) -> RNode | None:
-        if self._hidden():
-            return None
-        return self._render_class()(
-            uid=self.uid,
-            color=np.array(self.color.value),
-            intensity=max(0.0, self.intensity.value),
-            size=max(0.0, self.size.value),
-            cast_shadows=bool(self.cast_shadows.value),
-            transform=self._transform(),
-            alpha=self.alpha.value,
-            **self._render_fields(),
-        )
-
-    def _render_class(self) -> type[RLight]:
-        raise NotImplementedError
-
-    def _render_fields(self) -> dict[str, object]:
-        """Fields of the render class beyond those of every light."""
-        return {}
+    def render_fields(self) -> Iterator[tuple[str, Signal]]:
+        yield from super().render_fields()
+        yield from (("color", self.color), ("intensity", self.intensity), ("size", self.size), ("cast_shadows", self.cast_shadows))
 
 
 class DirectionalLight(RotationMixin, Light):
     """Parallel light (like the sun): only its direction matters."""
+
+    render_kind = "directional_light"
 
     def __init__(
         self,
@@ -121,13 +105,13 @@ class DirectionalLight(RotationMixin, Light):
         """Shine in world ``direction`` (animated, it turns the short way)."""
         return [(self.rotation, ABS, rotation_towards(_vector(direction)))]
 
-    def _render_class(self) -> type[RLight]:
-        return RDirectionalLight
 
 
 class PointLight(PositionMixin, Light):
     """Light emitted in all directions from its position; ``range`` (0 for
     none) fades it to zero at that distance."""
+
+    render_kind = "point_light"
 
     def __init__(
         self,
@@ -150,11 +134,10 @@ class PointLight(PositionMixin, Light):
     def set_range(self, range: float) -> ChangeList:
         return [(self.range, ABS, range)]
 
-    def _render_class(self) -> type[RLight]:
-        return RPointLight
 
-    def _render_fields(self) -> dict[str, object]:
-        return {"range": _range(self.range.value)}
+    def render_fields(self) -> Iterator[tuple[str, Signal]]:
+        yield from super().render_fields()
+        yield "range", self.range
 
 
 class SpotLight(PositionMixin, RotationMixin, Light):
@@ -162,6 +145,8 @@ class SpotLight(PositionMixin, RotationMixin, Light):
     intensity inside ``inner_cone_angle``, fading to zero at
     ``outer_cone_angle`` (radians from the axis). While animated, the
     angles are kept valid (0 <= inner < outer <= pi / 2)."""
+
+    render_kind = "spot_light"
 
     def __init__(
         self,
@@ -213,17 +198,10 @@ class SpotLight(PositionMixin, RotationMixin, Light):
     def set_range(self, range: float) -> ChangeList:
         return [(self.range, ABS, range)]
 
-    def _render_class(self) -> type[RLight]:
-        return RSpotLight
 
-    def _render_fields(self) -> dict[str, object]:
-        outer = min(math.pi / 2, max(1e-6, self.outer_cone_angle.value))
-        inner = min(max(0.0, self.inner_cone_angle.value), outer * (1.0 - 1e-6))
-        return {"range": _range(self.range.value), "inner_cone_angle": inner, "outer_cone_angle": outer}
-
-
-def _range(value: float) -> float | None:
-    return value if value > 0.0 else None
+    def render_fields(self) -> Iterator[tuple[str, Signal]]:
+        yield from super().render_fields()
+        yield from (("range", self.range), ("inner_cone_angle", self.inner_cone_angle), ("outer_cone_angle", self.outer_cone_angle))
 
 
 __all__ = ["DirectionalLight", "Light", "PointLight", "SpotLight"]

@@ -26,9 +26,9 @@ signal                         kind      RShape3D field
 ``cast_shadows``               DISCRETE  ``cast_shadows``
 =============================  ========  =================================
 
-The mesh signal's version (and with it the ``mesh`` version token of
-every snapshot) changes only when another MeshData is set: DISCRETE
-compares MeshData by identity. So the renderer's per-mesh caches keep
+The mesh signal's version (and with it ``version("mesh")`` of every
+snapshot) changes only when another MeshData is set: DISCRETE compares
+MeshData by identity. So the renderer's per-mesh caches keep
 hitting while the shape moves, turns, scales or changes its material.
 """
 
@@ -38,14 +38,7 @@ from collections.abc import Iterable, Iterator
 
 import numpy as np
 
-from ...robjects import (
-    MeshData,
-    PbrMaterial,
-    RNode,
-    RShape3D,
-    SurfaceShader,
-    Texture,
-)
+from ...robjects import MeshData, PbrMaterial, SurfaceShader, Texture
 from ...utils.color import ParsableManimColor
 from ..signals.kinds import COLOR, DISCRETE, SCALAR, SignalKind
 from ..signals.signal import RootSignal, Signal
@@ -60,6 +53,13 @@ from .node import (
     animatable,
 )
 
+MATERIAL_FIELDS = (
+    "base_color", "opacity", "metallic", "roughness", "emissive", "emissive_strength", "normal_scale",
+    "occlusion_strength", "base_color_texture", "metallic_roughness_texture", "normal_texture",
+    "occlusion_texture", "emissive_texture", "surface_shader",
+)  # fmt: skip
+"""The material's fields, in the order of :meth:`Shape3D._material_signals`."""
+
 
 class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
     """A mesh with a metallic-roughness material (see the module docs).
@@ -69,6 +69,8 @@ class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
     ``emissive_strength`` override single ones, ``surface_shader``
     sets a :class:`~manimx.robjects.SurfaceShader`.
     """
+
+    render_kind = "shape3d"
 
     def __init__(
         self,
@@ -196,33 +198,11 @@ class Shape3D(PositionMixin, RotationMixin, ScalableMixin, Node):
     def set_cast_shadows(self, cast_shadows: bool) -> ChangeList:
         return [(self.cast_shadows, ABS, cast_shadows)]
 
-    def _build_snapshot(self) -> RNode | None:
-        if self._hidden():
-            return None
-        material = PbrMaterial(
-            base_color=np.array(self.base_color.value),
-            opacity=_unit(self.opacity.value),
-            metallic=_unit(self.metallic.value),
-            roughness=_unit(self.roughness.value),
-            emissive=np.array(self.emissive.value),
-            emissive_strength=max(0.0, self.emissive_strength.value),
-            normal_scale=self.normal_scale.value,
-            occlusion_strength=_unit(self.occlusion_strength.value),
-            base_color_texture=self.base_color_texture.value,
-            metallic_roughness_texture=self.metallic_roughness_texture.value,
-            normal_texture=self.normal_texture.value,
-            occlusion_texture=self.occlusion_texture.value,
-            emissive_texture=self.emissive_texture.value,
-            surface_shader=self.surface_shader.value,
-        )
-        return RShape3D(
-            uid=self.uid,
-            mesh=self.mesh.value,
-            material=material,
-            cast_shadows=bool(self.cast_shadows.value),
-            transform=self._transform(),
-            alpha=self.alpha.value,
-        )
+    def render_fields(self) -> Iterator[tuple[str, Signal]]:
+        yield from super().render_fields()
+        yield "mesh", self.mesh
+        yield from zip(MATERIAL_FIELDS, self._material_signals(), strict=True)
+        yield "cast_shadows", self.cast_shadows
 
 
 def _no_mesh() -> MeshData:
@@ -234,10 +214,6 @@ def _shader(shader: SurfaceShader | None) -> SurfaceShader | None:
     if shader is not None and not isinstance(shader, SurfaceShader):
         raise TypeError(f"a surface shader must be a SurfaceShader or None, got {type(shader).__name__}")
     return shader
-
-
-def _unit(value: float) -> float:
-    return min(1.0, max(0.0, float(value)))
 
 
 __all__ = ["Shape3D"]

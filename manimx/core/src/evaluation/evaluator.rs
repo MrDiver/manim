@@ -355,39 +355,34 @@ pub struct FrameState {
     pub versions: Arc<Vec<u64>>,
 }
 
-/// Slots given once and kept in Rust, so asking every frame for their
-/// key (`FrameState.key`) does not convert the list again.
-#[pyclass(module = "manimx._core", frozen)]
-pub struct Slots {
-    slots: Vec<usize>,
-}
-
-#[pymethods]
-impl Slots {
-    #[new]
-    fn new(slots: Vec<usize>) -> Slots {
-        Slots { slots }
-    }
-
-    fn __len__(&self) -> usize {
-        self.slots.len()
-    }
-}
-
 #[pymethods]
 impl FrameState {
+    /// The given values as one frame's (every version 1): `kinds` as for
+    /// `Evaluator`. `Node.snapshot()` builds the render object of a node's
+    /// current values from one.
+    #[new]
+    fn new(kinds: Vec<(String, Py<PyAny>)>, values: Vec<Bound<'_, PyAny>>) -> PyResult<Self> {
+        if kinds.len() != values.len() {
+            return Err(PyValueError::new_err("one kind per value"));
+        }
+        let kinds: Vec<Kind> = kinds
+            .into_iter()
+            .map(|(code, kind)| Kind::from_code(&code, kind))
+            .collect();
+        let values = kinds
+            .iter()
+            .zip(&values)
+            .map(|(kind, value)| kind.value_from_py(value))
+            .collect::<PyResult<Vec<_>>>()?;
+        Ok(FrameState {
+            versions: Arc::new(vec![1; values.len()]),
+            kinds: Arc::new(kinds),
+            values: Arc::new(values),
+        })
+    }
+
     /// The value of `slot`, as the Python signal holds it.
     fn value(&self, py: Python<'_>, slot: usize) -> PyResult<Py<PyAny>> {
         self.kinds[slot].value_to_py(py, &self.values[slot])
-    }
-
-    /// Versions of the given slots as bytes: equal bytes promise equal
-    /// values (a key for holding frames).
-    fn key(&self, slots: &Slots) -> Vec<u8> {
-        slots
-            .slots
-            .iter()
-            .flat_map(|&slot| self.versions[slot].to_le_bytes())
-            .collect()
     }
 }

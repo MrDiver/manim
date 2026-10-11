@@ -198,7 +198,7 @@ def test_held_frames_repeat_the_image_before_them() -> None:
             self.play(square.animate.shift(-RIGHT), run_time=0.1)  # at 5: back
 
     prepared = StillMovedStill().prepare()
-    frame_at = load_source(prepared).state_at
+    frame_at = load_source(prepared).frame_at
     pipeline = CoreFramePipeline((), config(64, 36), in_flight=2)
     futures = [pipeline.submit(index, float(index), frame_at) for index in range(6)]
     pipeline.flush()
@@ -210,8 +210,8 @@ def test_held_frames_repeat_the_image_before_them() -> None:
         np.testing.assert_array_equal(image, render_image(prepared, float(index), config(64, 36)))
 
 
-def test_sources_render_through_the_core() -> None:
-    from manimx.robjects.planned_frame import PlannedFrame
+def test_sources_give_render_object_trees() -> None:
+    from manimx.robjects import RGroup, RShape2D
     from manimx.userland import Square
 
     class Still(Scene):
@@ -219,5 +219,5 @@ def test_sources_render_through_the_core() -> None:
             self.add(Square())
             self.wait()
 
-    (view,) = load_source(Still).state_at(0.5)
-    assert isinstance(view.root, PlannedFrame)
+    (view,) = load_source(Still).frame_at(0.5)
+    assert isinstance(view.root, RGroup) and isinstance(view.root.children[0], RShape2D)

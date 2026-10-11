@@ -6,7 +6,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from manimx.animation import Scene, Shape3D
-from manimx.animation.plan import planned_frames
 from manimx.drivers import render_image
 from manimx.drivers.core_pipeline import CoreFramePipeline
 from manimx.renderer import RenderConfig
@@ -71,7 +70,7 @@ def test_the_shader_changes_the_surface() -> None:
 
 
 def test_frames_with_a_shader_follow_the_time() -> None:
-    planned = planned_frames(_scene(BLINK).prepare())
+    planned = _scene(BLINK).prepare()
     pipeline = CoreFramePipeline((), CONFIG)
     for time, lit in ((0.2, False), (0.8, True)):
         future = pipeline.submit(0, time, planned.frame_at)
@@ -88,7 +87,7 @@ def test_the_shader_is_a_signal() -> None:
 
 def test_wgsl_errors_are_reported() -> None:
     broken = SurfaceShader("fn shade(surface: Surface, in: SurfaceInput) -> Surface { return nothing; }")
-    planned = planned_frames(_scene(broken).prepare())
+    planned = _scene(broken).prepare()
     pipeline = CoreFramePipeline((), CONFIG)
     with pytest.raises(RuntimeError, match="mesh.wgsl"):
         pipeline.submit(0, 0.0, planned.frame_at(0.0))

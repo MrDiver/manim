@@ -12,13 +12,12 @@
 //! It decides nothing about the scene: what to draw and what changed is in
 //! the packet and the packer's arenas.
 
-use pyo3::prelude::*;
-
-use crate::packing::packer::{Packer, Packet};
-use crate::packing::records::Frame;
 use crate::render::buffer::Records;
 use crate::render::context::Gpu;
+use crate::render::error::Result;
 use crate::render::inspect::TextureKind;
+use crate::render::packing::packer::{Packer, Packet};
+use crate::render::packing::records::Frame;
 use crate::render::passes::lighting::LightingPass;
 use crate::render::passes::mesh::{MeshData, MeshPass};
 use crate::render::passes::shadow::ShadowPass;
@@ -48,7 +47,6 @@ pub struct Renderer {
     /// Whether the G-buffer and lit layer of these targets are known to be
     /// empty (the frames since they were cleared had no meshes).
     empty_3d: Option<u64>,
-    callbacks: Py<PyAny>,
 }
 
 impl Renderer {
@@ -113,7 +111,7 @@ impl Renderer {
         self.shadow_pass.layer_count()
     }
 
-    pub fn new(py: Python<'_>, gpu: &Gpu, profile: bool) -> PyResult<Renderer> {
+    pub fn new(gpu: &Gpu, profile: bool) -> Result<Renderer> {
         Ok(Renderer {
             frame_uniform: gpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("frame"),
@@ -129,10 +127,6 @@ impl Renderer {
             targets: None,
             targets_generation: 0,
             empty_3d: None,
-            callbacks: py
-                .import("manimx.renderer.core_callbacks")?
-                .into_any()
-                .unbind(),
         })
     }
 
@@ -147,14 +141,13 @@ impl Renderer {
     #[allow(clippy::too_many_arguments)]
     pub fn render_layers(
         &mut self,
-        py: Python<'_>,
         gpu: &Gpu,
         packer: &mut Packer,
         packet: &Packet,
         frame: &Frame,
         settings: TargetSettings,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> PyResult<&RenderTargets> {
+    ) -> Result<&RenderTargets> {
         self.ensure_targets(gpu, settings, packet.scope_parents.len() as u32);
         let generation = self.targets_generation;
         let targets = self.targets.as_ref().unwrap();
@@ -225,15 +218,12 @@ impl Renderer {
                 groups: &meshes.output.groups,
                 shadow_draws: &meshes.output.shadow_draws,
             };
-            let callbacks = self.callbacks.bind(py).clone();
             self.mesh_pass.prepare(
-                py,
                 gpu,
                 &data,
                 &self.frame_uniform,
                 &targets.mask_layers_view,
                 generation,
-                &callbacks,
             )?;
             let shadows_changed =
                 self.shadow_pass

@@ -1,16 +1,17 @@
 """Pipelined frame rendering on the core's renderer.
 
-:class:`CoreFramePipeline` renders the frames of a timeline or prepared
-scene (views whose root is a ``PlannedFrame``): the core
-(``manimx._core.FrameRenderer``) packs, renders, composites and reads
-back every frame in Rust, with up to ``in_flight`` frames on the GPU, so
-the CPU prepares the next frames while the GPU draws the earlier ones.
-Python only asks the timeline for the views of each sub-frame and builds
-each camera's Frame record.
+:class:`CoreFramePipeline` renders frames: views, each a render object
+tree (manimx.robjects) and the camera looking at it, as a timeline's or
+prepared scene's ``frame_at`` returns them. The core
+(``manimx._core.FrameRenderer``) gets each tree with its
+``RenderConfig`` and packs, renders, composites and reads back every
+frame in Rust, with up to ``in_flight`` frames on the GPU, so the CPU
+prepares the next frames while the GPU draws the earlier ones. Python
+only asks for the views of each sub-frame and sets their configs.
 
 A frame that shows exactly what the frame before showed is not rendered
-(the core compares keys of every view); its future gets the previous
-image.
+(the core compares the trees and configs of every view); its future gets
+the previous image.
 """
 
 from __future__ import annotations
@@ -25,8 +26,6 @@ import numpy as np
 from .. import _core
 from ..renderer.config import Frame, RenderConfig, ViewState
 from ..renderer.effects import Bloom, Effect, MotionBlur, ShaderEffect, ToneMap
-from ..renderer.frame import camera_frame, config_values
-from ..robjects.planned_frame import PlannedFrame
 
 SHADER_FOLDER = Path(__file__).resolve().parents[1] / "renderer" / "shaders"
 
@@ -41,11 +40,7 @@ class CoreFramePipeline:
         tone_map = next((effect for effect in effects if isinstance(effect, ToneMap)), ToneMap())
         self.renderer = _core.FrameRenderer(
             str(SHADER_FOLDER),
-            config.pixel_width,
-            config.pixel_height,
-            config.msaa_samples,
-            config.shadow_resolution,
-            tuple(float(c) for c in config.background_rgba),
+            config,
             tone_map.operator.value,
             [_effect_tuple(effect) for effect in effects if isinstance(effect, (Bloom, ShaderEffect))],
             in_flight,
@@ -92,10 +87,8 @@ class CoreFramePipeline:
         """GPU milliseconds per pass since the last call (with ``profile``)."""
         return self.renderer.gpu_timings()
 
-    def _deliver(self, finished: list[tuple[int, bytes]]) -> None:
-        height, width = self.config.pixel_height, self.config.pixel_width
-        for number, data in finished:
-            image = np.frombuffer(data, dtype=np.uint8).reshape(height, width, 4)
+    def _deliver(self, finished: list[tuple[int, np.ndarray]]) -> None:
+        for number, image in finished:
             self._futures.pop(number).set_result(image)
 
     def _sub_frames(self, scene: object, time: float) -> list[tuple[float, float]]:
@@ -105,29 +98,20 @@ class CoreFramePipeline:
         return blur.sample_times(time)
 
     def _views(self, frame: Frame, time: float, share: int = 1, index: int = 0) -> list[tuple]:
-        """Each view as the core takes it: graph, state, key, config values,
-        the camera's Frame record, the config values and Frame record of
-        each of its camera views, and whether its picture depends on the
-        time.
+        """Each view as every renderer takes it: the render object tree and
+        the ``RenderConfig`` to see it with (the view's camera and camera
+        views, the time, the sub-frame's share of the shadow taps).
         """
         views = [frame] if isinstance(frame, ViewState) else list(frame)
-        described = []
-        for view in views:
-            if not isinstance(view.root, PlannedFrame):
-                raise TypeError("CoreFramePipeline renders frames of the core (PlannedFrame views) only")
-            config = dataclasses.replace(
-                self.config, time=time, shadow_share=share, shadow_index=index, camera=view.camera or self.config.camera, camera_views=view.camera_views
+        return [
+            (
+                view.root,
+                dataclasses.replace(
+                    self.config, time=time, shadow_share=share, shadow_index=index, camera=view.camera or self.config.camera, camera_views=view.camera_views
+                ),
             )
-            root = view.root
-            pictures = [
-                (config_values(picture), camera_frame(picture, 0).tobytes())
-                for picture in (
-                    dataclasses.replace(config, camera=camera_view.camera, view_aspect=camera_view.aspect_ratio, hide_camera_views=True)
-                    for camera_view in view.camera_views
-                )
-            ]
-            described.append((root.graph, root.state, root.key, config_values(config), camera_frame(config, 0).tobytes(), pictures, root.uses_time))
-        return described
+            for view in views
+        ]
 
 
 def _effect_tuple(effect: Bloom | ShaderEffect) -> tuple:

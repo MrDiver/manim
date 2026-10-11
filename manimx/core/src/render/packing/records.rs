@@ -65,7 +65,7 @@ pub struct DrawIndirect {
     pub first_instance: u32,
 }
 
-/// Bytes per record of the vector buffers whose records Python builds.
+/// Bytes per record of the vector buffers whose records are built as bytes.
 pub const FILL_VERTEX_SIZE: usize = 32;
 pub const FILL_COLOR_SIZE: usize = 16;
 pub const STROKE_POINT_SIZE: usize = 32;
@@ -134,8 +134,19 @@ pub struct DrawIndexed {
     pub first_instance: u32,
 }
 
-/// Bytes per interleaved mesh vertex (`MESH_VERTEX_DTYPE`, built by Python).
-pub const MESH_VERTEX_SIZE: usize = 48;
+/// `MESH_VERTEX_DTYPE`: one mesh vertex, interleaved.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct MeshVertex {
+    pub position: [f32; 3],
+    pub u: f32,
+    pub normal: [f32; 3],
+    pub v: f32,
+    /// xyz and the bitangent's handedness in w (zero without UVs).
+    pub tangent: [f32; 4],
+}
+
+pub const MESH_VERTEX_SIZE: usize = size_of::<MeshVertex>();
 
 // -- frames and shadows (frame.wgsl, shadows.wgsl) ----------------------------
 
@@ -177,6 +188,7 @@ const _: () = {
     assert!(size_of::<Material>() == 48);
     assert!(size_of::<Light>() == 64);
     assert!(size_of::<DrawIndexed>() == 20);
+    assert!(size_of::<MeshVertex>() == 48);
     assert!(size_of::<Frame>() == 416);
     assert!(size_of::<ShadowView>() == 80);
 };

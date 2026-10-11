@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 
-from ...robjects import RClippingGroup, RNode
 from ..signals.kinds import DISCRETE
 from ..signals.signal import RootSignal, Signal
 from .node import (
@@ -26,6 +25,8 @@ class ClippingGroup(PositionMixin, RotationMixin, ScalableMixin, Node):
     mask: the mask's fill and stroke opacity, as drawn, multiply the
     content). The mask itself is never drawn. Transform and alpha apply to
     both, so scaling the group scales the mask with its content."""
+
+    render_kind = "clipping_group"
 
     def __init__(
         self, mask: Node, content: Node, name: str | None = None, one_sided: bool = False, tags: Iterable[str] = ()
@@ -58,13 +59,13 @@ class ClippingGroup(PositionMixin, RotationMixin, ScalableMixin, Node):
         yield from self.mask.family()
         yield from self.content.family()
 
-    def _build_snapshot(self) -> RNode | None:
-        if self._hidden():
-            return None
-        mask, content = self.mask.snapshot(), self.content.snapshot()
-        if mask is None or content is None:
-            return None  # nothing to show through
-        return RClippingGroup(mask=mask, content=content, one_sided=bool(self.one_sided.value), transform=self._transform(), alpha=self.alpha.value, uid=self.uid)
+    def render_fields(self) -> Iterator[tuple[str, Signal]]:
+        yield from super().render_fields()
+        yield "one_sided", self.one_sided
+
+    def render_children(self) -> list[Node]:
+        """The mask, then the content."""
+        return [self.mask, self.content]
 
 
 __all__ = ["ClippingGroup"]

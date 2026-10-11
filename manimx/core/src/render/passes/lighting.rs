@@ -11,6 +11,7 @@ use std::collections::HashMap;
 
 use crate::render::buffer::GrowableBuffer;
 use crate::render::context::{Gpu, EDGE_FORMAT, HDR_FORMAT};
+use crate::render::error::Result;
 use crate::render::passes::shadow::ShadowPass;
 
 /// The stencil value of a pixel on an edge.
@@ -55,7 +56,7 @@ impl LightingPass {
         shadows: &ShadowPass,
         shadows_changed: bool,
         targets_generation: u64,
-    ) -> pyo3::PyResult<()> {
+    ) -> Result<()> {
         let mut grown = self.lights.upload(&gpu.device, &gpu.queue, lights);
         let parents: &[i32] = if scope_parents.is_empty() {
             &[-1]
@@ -132,7 +133,7 @@ impl LightingPass {
 
     /// Light into `pass`, whose stencil (with MSAA) is the edge stencil
     /// (`RenderTargets::edge_attachment`), cleared.
-    pub fn draw(&mut self, gpu: &Gpu, pass: &mut wgpu::RenderPass) -> pyo3::PyResult<()> {
+    pub fn draw(&mut self, gpu: &Gpu, pass: &mut wgpu::RenderPass) -> Result<()> {
         let sample_count = self.sample_count;
         pass.set_bind_group(0, self.bind_group.as_ref(), &[]);
         pass.set_stencil_reference(EDGE);
@@ -150,7 +151,7 @@ impl LightingPass {
         &mut self,
         gpu: &Gpu,
         sample_count: u32,
-    ) -> pyo3::PyResult<&(wgpu::BindGroupLayout, Vec<wgpu::RenderPipeline>)> {
+    ) -> Result<&(wgpu::BindGroupLayout, Vec<wgpu::RenderPipeline>)> {
         if let Entry::Vacant(slot) = self.variants.entry(sample_count) {
             let multisampled = sample_count > 1;
             let samples = format!("const GBUFFER_SAMPLES: i32 = {sample_count};");

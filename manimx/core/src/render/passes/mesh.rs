@@ -5,23 +5,24 @@
 //! bind group and one `multi_draw_indexed_indirect` per group, and one
 //! pipeline per surface shader (mesh.wgsl with the shader's code in place
 //! of surface_shader.wgsl's default). Textures are uploaded once per
-//! (texture, color space) and kept while any frame uses them; their mip
-//! levels come from Python (core_callbacks.texture_levels).
+//! (texture, color space) and kept while any frame uses them, with their
+//! mip levels (textures.rs).
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
-use pyo3::prelude::*;
-
-use crate::packing::callbacks::bytes_of;
-use crate::packing::meshes::DrawGroup;
-use crate::packing::records::{DrawIndexed, Frame};
-use crate::packing::scene_graph::ShadowList;
 use crate::render::buffer::{GrowableBuffer, Records};
 use crate::render::context::{
     shadow_depth_stencil, Gpu, ShadowStencil, DEPTH_FORMAT, GBUFFER_FORMATS,
 };
+use crate::render::error::Result;
+use crate::render::packing::flatten::ShadowList;
+use crate::render::packing::meshes::DrawGroup;
+use crate::render::packing::records::{DrawIndexed, Frame};
+use crate::render::passes::textures::mip_levels;
 use crate::render::passes::vector::shadow_runs;
+use crate::robjects::values::DEFAULT_SURFACE_SHADER;
+use crate::robjects::SurfaceShader;
 
 /// Color space of each texture slot, in `PbrMaterial.textures` order: base
 /// color and emissive hold sRGB colors, the others linear data.
@@ -71,7 +72,7 @@ pub struct MeshPass {
 }
 
 impl MeshPass {
-    pub fn new(gpu: &Gpu) -> PyResult<MeshPass> {
+    pub fn new(gpu: &Gpu) -> Result<MeshPass> {
         let device = &gpu.device;
         let storage = wgpu::BufferUsages::STORAGE;
         let (scene_layout, material_layout) = create_layouts(device);
@@ -118,14 +119,12 @@ impl MeshPass {
     #[allow(clippy::too_many_arguments)]
     pub fn prepare(
         &mut self,
-        py: Python<'_>,
         gpu: &Gpu,
         data: &MeshData,
         frame_uniform: &wgpu::Buffer,
         mask_layers: &wgpu::TextureView,
         targets_generation: u64,
-        callbacks_module: &Bound<'_, PyAny>,
-    ) -> PyResult<()> {
+    ) -> Result<()> {
         let (device, queue) = (&gpu.device, &gpu.queue);
         let mut grown = self.objects.upload(device, queue, data.objects);
         grown |= self.vertices.write_records(device, queue, &data.vertices);
@@ -163,30 +162,17 @@ impl MeshPass {
         self.draw_groups.clear();
         let mut first = 0u64;
         for group in data.groups {
-            let uids = group
+            let uids: Vec<u64> = group
                 .textures
                 .iter()
-                .map(|texture| texture_uid(py, texture))
-                .collect::<PyResult<Vec<u64>>>()?;
+                .map(|texture| texture.as_ref().map_or(0, |t| t.uid))
+                .collect();
             used_groups.insert(uids.clone());
-            for ((uid, srgb), texture) in uids.iter().zip(SLOT_IS_SRGB).zip(&group.textures) {
-                if *uid != 0 {
-                    used_textures.insert((*uid, srgb));
-                    if let Entry::Vacant(slot) = self.textures.entry((*uid, srgb)) {
-                        let levels =
-                            callbacks_module.call_method1("texture_levels", (texture.bind(py),))?;
-                        let levels = levels
-                            .try_iter()?
-                            .map(|level| {
-                                let level = level?;
-                                Ok((
-                                    level.get_item(0)?.extract()?,
-                                    level.get_item(1)?.extract()?,
-                                    bytes_of(&level.get_item(2)?)?,
-                                ))
-                            })
-                            .collect::<PyResult<Vec<(u32, u32, Vec<u8>)>>>()?;
-                        slot.insert(upload_texture(gpu, &levels, srgb));
+            for (texture, srgb) in group.textures.iter().zip(SLOT_IS_SRGB) {
+                if let Some(texture) = texture {
+                    used_textures.insert((texture.uid, srgb));
+                    if let Entry::Vacant(slot) = self.textures.entry((texture.uid, srgb)) {
+                        slot.insert(upload_texture(gpu, &mip_levels(texture), srgb));
                     }
                 }
             }
@@ -194,7 +180,7 @@ impl MeshPass {
                 let bind_group = self.create_material_group(gpu, &uids);
                 self.material_groups.insert(uids.clone(), bind_group);
             }
-            let shader = self.surface_shader(py, gpu, &group.surface_shader, callbacks_module)?;
+            let shader = self.surface_shader(gpu, group.surface_shader.as_deref())?;
             used_shaders.insert(shader);
             self.draw_groups
                 .push((uids, shader, first, group.draws.len() as u32));
@@ -213,26 +199,15 @@ impl MeshPass {
 
     /// The uid of a group's surface shader (0 for none), its shader module
     /// compiled on first use.
-    fn surface_shader(
-        &mut self,
-        py: Python<'_>,
-        gpu: &Gpu,
-        shader: &Py<PyAny>,
-        callbacks_module: &Bound<'_, PyAny>,
-    ) -> PyResult<u64> {
-        let shader = shader.bind(py);
-        if shader.is_none() {
+    fn surface_shader(&mut self, gpu: &Gpu, shader: Option<&SurfaceShader>) -> Result<u64> {
+        let Some(shader) = shader else {
             return Ok(0);
+        };
+        if let Entry::Vacant(slot) = self.surface_shaders.entry(shader.uid) {
+            let code = shader.wgsl();
+            slot.insert(gpu.checked_shader("mesh.wgsl", &[(DEFAULT_SURFACE_SHADER, &code)])?);
         }
-        let uid: u64 = shader.getattr("uid")?.extract()?;
-        if let Entry::Vacant(slot) = self.surface_shaders.entry(uid) {
-            let default: String = callbacks_module
-                .getattr("DEFAULT_SURFACE_SHADER")?
-                .extract()?;
-            let code: String = shader.call_method0("wgsl")?.extract()?;
-            slot.insert(gpu.checked_shader("mesh.wgsl", &[(&default, &code)])?);
-        }
-        Ok(uid)
+        Ok(shader.uid)
     }
 
     pub fn draw(&mut self, gpu: &Gpu, pass: &mut wgpu::RenderPass, sample_count: u32) {
@@ -469,15 +444,6 @@ impl MeshPass {
             ],
         })
     }
-}
-
-/// `Texture.uid`, or 0 for a missing texture (None).
-fn texture_uid(py: Python<'_>, texture: &Py<PyAny>) -> PyResult<u64> {
-    let texture = texture.bind(py);
-    if texture.is_none() {
-        return Ok(0);
-    }
-    texture.getattr("uid")?.extract()
 }
 
 fn upload_texture(gpu: &Gpu, levels: &[(u32, u32, Vec<u8>)], srgb: bool) -> wgpu::TextureView {

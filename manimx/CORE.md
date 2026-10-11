@@ -3,7 +3,8 @@
 The plan that moved everything below the authoring API out of Python,
 and how far it got. The phases below describe the steps as they were
 planned (some mention the Python renderer, which the core replaced and
-which is removed now); ARCHITECTURE.md section 9 and core/README.md
+which is removed now); "The interface, corrected" at the end says what
+changed afterwards. ARCHITECTURE.md section 9 and core/README.md
 describe the core as it is.
 
 ## Why
@@ -152,3 +153,36 @@ wgpu-py bindings (12%) and the remaining per-pass Python.
 | 5 Switch over | done: the CLI, workers and `manimx ui` render through the core |
 | 6 Renderer in Rust | done: passes, composer, effects, readback (`FrameRenderer`, `CoreFramePipeline`); the Python renderer is removed (FUTURE_IDEAS.md), and the renderer is tested against reference images |
 | 7 Later | |
+
+## The interface, corrected
+
+The decision above packed GPU records "directly: no `RNode` tree". That
+coupled the renderer to the evaluator: the packer read the evaluator's
+slots and versions (`SceneGraph`, `FrameState`), and asked Python for
+meshes, materials and textures through callbacks. A renderer could not
+be given a scene without a `ScenePlan`, and the scene side's snapshot
+(`Node.snapshot()` in Python) described every node a second time.
+
+The render object tree is the interface again, as it was before the
+core: a renderer is given an `RNode` tree and a `RenderConfig`, nothing
+else. What changed is where the tree lives:
+
+* The render objects are Rust values (core/src/robjects/), exported to
+  Python as `manimx.robjects` (`RGroup`, `RShape2D`, ..., `Fill`,
+  `MeshData`, `PbrMaterial`; core/src/python/robjects.rs). Python builds
+  and reads them like before; a tree the core builds reaches its renderer
+  without a Python object per node.
+* The evaluator builds the tree from its slots (`SceneGraph::snapshot`),
+  reusing every value whose slots did not change, so versions hold while
+  nothing changes and a renderer's caches keep working.
+* The renderer (core/src/render/) reads trees and `ViewSettings` only: no
+  slots, no callbacks, no pyo3. A tree built by hand renders like a
+  scene's (tests/test_rendering.py).
+* Each node class says once how it is drawn (`Node.render_kind`,
+  `Node.render_fields()`); the Python `_build_snapshot` methods are gone,
+  and `Node.snapshot()` is built by the core too.
+
+It costs nothing: the benchmark project went from 121.8 to 130.2 fps
+with motion blur and from 606.9 to 628.5 without, light-show from 17.7
+to 15.8 ms per frame (PERFORMANCE.md, step W).
+

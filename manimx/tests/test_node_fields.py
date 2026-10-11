@@ -1,9 +1,7 @@
-"""Every field of a render class has its signal on the scene class that
-snapshots to it, and the list-valued style signals (COLORS, SCALARS)."""
+"""Every scene class snapshots to its render class, and the list-valued
+style signals (COLORS, SCALARS)."""
 
 from __future__ import annotations
-
-import dataclasses
 
 import numpy as np
 import pytest
@@ -37,37 +35,27 @@ from manimx.robjects import (
 from manimx.userland import Circle, Square
 from manimx.userland.rate_functions import linear
 
-# Render fields that are not signals: identity, structure and placement.
-NOT_SIGNALS = {"uid", "transform", "children", "mask", "content"}
-
-
-def render_fields(cls: type) -> set[str]:
-    return {f.name for f in dataclasses.fields(cls) if not f.name.startswith("_")} - NOT_SIGNALS
-
 
 @pytest.mark.parametrize(
-    ("scene_class", "render_class", "names"),
+    ("scene_class", "render_class"),
     [
-        (Shape2D, RShape2D, {"fill": ("fill_color", "fill_opacity"), "stroke": ("stroke_color", "stroke_opacity", "stroke_width", "stroke_joint", "stroke_cap")}),
-        (Curve3D, RCurve3D, {"stroke": ("stroke_color", "stroke_opacity", "stroke_width", "stroke_joint", "stroke_cap")}),
-        (Shape3D, RShape3D, {"material": tuple(f.name for f in dataclasses.fields(PbrMaterial))}),
-        (DirectionalLight, RDirectionalLight, {}),
-        (PointLight, RPointLight, {}),
-        (SpotLight, RSpotLight, {}),
-        (ClippingGroup, RClippingGroup, {}),
+        (Shape2D, RShape2D),
+        (Curve3D, RCurve3D),
+        (Shape3D, RShape3D),
+        (DirectionalLight, RDirectionalLight),
+        (PointLight, RPointLight),
+        (SpotLight, RSpotLight),
+        (ClippingGroup, RClippingGroup),
     ],
 )
-def test_every_render_field_has_a_signal(scene_class, render_class, names) -> None:
-    """A field of a style value (Fill, Stroke, PbrMaterial) maps to one
-    signal per field of that value."""
+def test_every_scene_class_gives_the_core_every_field(scene_class, render_class) -> None:
+    """The core builds a render object only from the fields it needs (it
+    names a missing one), so a snapshot shows that every field is given."""
     node = scene_class(Square(), Circle()) if scene_class is ClippingGroup else scene_class()
-    signals = {signal.name.split(".", 1)[1] for signal in node.signals()}
-    for field in render_fields(render_class):
-        for name in names.get(field, (field,)):
-            assert name in signals, f"{scene_class.__name__} has no signal for {render_class.__name__}.{field} ({name})"
-    # and the value types are covered field by field
-    assert {f.name for f in dataclasses.fields(Fill)} == {"color", "opacity"}
-    assert {f.name for f in dataclasses.fields(Stroke)} == {"color", "opacity", "width", "joint", "cap"}
+    assert isinstance(node.snapshot(), render_class)
+    assert node.render_kind is not None
+    signals = set(node.signals())
+    assert all(signal in signals for _, signal in node.render_fields())
 
 
 def test_shape2d_carries_gradients_widths_joints_and_caps() -> None:
@@ -160,7 +148,7 @@ def test_shape3d_carries_every_material_field() -> None:
     shape.set_material(normal_scale=2.0, occlusion_strength=1.5).set_textures(base_color=other, emissive=None)
     snapshot = shape.snapshot()
     assert snapshot.material.normal_scale == 2.0 and snapshot.material.occlusion_strength == 1.0  # clamped
-    assert snapshot.material.base_color_texture is other and snapshot.material.emissive_texture is None
+    assert snapshot.material.base_color_texture == other and snapshot.material.emissive_texture is None
     with pytest.raises(TypeError, match="Shape3D has no glow_texture"):
         shape.set_textures(glow=other)
     with pytest.raises(TypeError, match="a texture must be a Texture or None"):

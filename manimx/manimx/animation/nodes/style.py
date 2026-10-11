@@ -1,10 +1,9 @@
 """Fill and stroke style for the scene nodes that have them.
 
 Shape2D and Curve3D keep every field of the render side's Fill and Stroke
-as a signal (see their modules). These functions turn the current signal
-values into those Fill and Stroke values for a snapshot, and parse what
-authoring code passes in. They are functions, not a shared base class:
-Shape2D and Curve3D stay separate classes.
+as a signal (see their modules). These functions parse what authoring
+code passes in. They are functions, not a shared base class: Shape2D and
+Curve3D stay separate classes.
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from ...robjects import CapStyle, Fill, JointType, Stroke
+from ...robjects import CapStyle, JointType
 from ...utils.color import ManimColor, ParsableManimColor
 
 Colors = ParsableManimColor | Sequence[ParsableManimColor]
@@ -51,21 +50,6 @@ def cap(value: CapStyle) -> CapStyle:
     return value
 
 
-def fill(color: Any, opacity: Any) -> Fill:
-    """The Fill for signal values ``color`` (COLORS) and ``opacity``
-    (SCALARS, clamped to [0, 1]). A node's ``alpha`` is not part of it:
-    it becomes the snapshot's ``RNode.alpha``.
-    """
-    return Fill(_color_argument(color), opacity=_unit(opacity))
-
-
-def stroke(color: Any, opacity: Any, width: Any, joint: Any, cap: CapStyle) -> Stroke:
-    """The Stroke for the stroke signal values, opacity clamped to [0, 1]
-    and widths kept non-negative (``alpha`` as for :func:`fill`).
-    """
-    return Stroke(_color_argument(color), opacity=_unit(opacity), width=_non_negative(width), joint=joint, cap=cap)
-
-
 def _one_color(value: Any) -> ManimColor:
     # ManimColor.parse reads any sequence as a list of colors, so a color
     # given as numbers goes to the constructor (which takes a list).
@@ -82,35 +66,4 @@ def _is_one_color(value: Any) -> bool:
     return isinstance(value, Sequence) and len(value) in (3, 4) and all(isinstance(c, Real) for c in value)
 
 
-def _color_argument(value: Any) -> np.ndarray | list[tuple[float, ...]]:
-    """What Fill and Stroke take: a ``(3,)`` float array for one color, so
-    they skip parsing (the fast path), else a list of RGB float tuples
-    (their parser reads a list as colors, but a 2D array as one color)."""
-    array = np.asarray(value, dtype=np.float64)
-    if array.ndim == 1:
-        return array
-    if len(array) == 1:
-        return array[0]
-    return [tuple(row) for row in array.tolist()]
-
-
-def _unit(value: Any) -> float | np.ndarray:
-    """``value`` clamped to [0, 1]; plain floats for single values (Fill
-    and Stroke check those without numpy).
-    """
-    if isinstance(value, Real):
-        return min(1.0, max(0.0, float(value)))
-    if len(value) == 1:
-        return min(1.0, max(0.0, float(value[0])))
-    return np.clip(np.asarray(value, dtype=np.float64), 0.0, 1.0)
-
-
-def _non_negative(value: Any) -> float | np.ndarray:
-    if isinstance(value, Real):
-        return max(0.0, float(value))
-    if len(value) == 1:
-        return max(0.0, float(value[0]))
-    return np.maximum(np.asarray(value, dtype=np.float64), 0.0)
-
-
-__all__ = ["Colors", "Scalars", "cap", "colors", "fill", "joints", "stroke"]
+__all__ = ["Colors", "Scalars", "cap", "colors", "joints"]

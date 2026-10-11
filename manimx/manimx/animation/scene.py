@@ -8,7 +8,7 @@
             self.wait()
 
     prepared = Intro().prepare()      # pass 1: runs construct() once
-    frame = prepared.state_at(1.5)    # pass 2: any time, any order
+    frame = prepared.state_at(1.5)    # pass 2: any time, any order (a render object tree)
 
 ``construct()`` never renders and never sleeps. Each ``play`` places
 animations on the scene's local timeline at the current cursor and moves
@@ -41,6 +41,7 @@ import bisect
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -56,11 +57,13 @@ from .animations import (
 from .audio import DEFAULT_SAMPLE_RATE, Sound, SoundEvent, mix
 from .authoring import _active
 from .nodes.camera import Camera
-from .nodes.camera_view import camera_views, current_value
 from .nodes.node import Node
 from .signals.signal import RootSignal, Signal, TimeSignals
 from .signals.signal_tracks import Change, Placement, RateFunction, SignalTrack, linear
 from .simulation import Simulation
+
+if TYPE_CHECKING:
+    from .plan import ScenePlan
 
 SEGMENT_GAP = 1.0
 """Compiled time between two segments; nothing is ever placed inside it."""
@@ -397,7 +400,19 @@ class PreparedScene:
     placements: list[Placement] = field(default_factory=list)
     segments: list[Segment] = field(default_factory=list)
     uid: int = field(default_factory=new_uid, init=False, repr=False)
-    """Unique per prepared scene in a process; plans are kept by it."""
+    """Unique per prepared scene in a process: the uid of its render
+    object trees' root."""
+    _plan: ScenePlan | None = field(default=None, init=False, repr=False)
+
+    @property
+    def plan(self) -> ScenePlan:
+        """The scene in the core's evaluator (plan.py), made on first use
+        and again after :meth:`refresh`."""
+        if self._plan is None:
+            from .plan import ScenePlan
+
+            self._plan = ScenePlan(self)
+        return self._plan
 
     @property
     def playing_time(self) -> float:
@@ -405,24 +420,22 @@ class PreparedScene:
         return sum(segment.duration for segment in self.segments)
 
     def state_at(self, t: float, global_time: float | None = None) -> RGroup:
-        """Render state at compiled time ``t`` (pure: no dependence on earlier calls).
+        """The render object tree at compiled time ``t`` (pure: no
+        dependence on earlier calls), built by the core (:attr:`plan`).
 
-        ``scene_time`` becomes the playing time at ``t`` (frozen inside the
-        gaps between segments); ``global_time`` defaults to ``t``. Every
-        animated root signal is set to its value at ``t``; derived signals
-        follow by propagation; then the present nodes are snapshotted in
-        the order they were added.
+        ``scene_time`` is the playing time at ``t`` (frozen inside the gaps
+        between segments); ``global_time`` defaults to ``t``. Every
+        animated signal has its value at ``t``, derived signals follow; the
+        tree holds the present nodes in the order they were added. The
+        Python signals are not set (see :meth:`evaluate`).
         """
-        self.evaluate(t, global_time)
-        children = [snapshot for node in self.roots if node.present.value and (snapshot := node.snapshot()) is not None]
-        return RGroup(children=children)
+        return self.plan.state_at(t, global_time)
 
     def frame_at(self, t: float) -> tuple[ViewState, ...]:
-        """The render state at compiled time ``t`` seen through the scene's
-        camera (the same shape as ``Timeline.frame_at``).
+        """The render object tree at compiled time ``t`` seen through the
+        scene's camera (the same shape as ``Timeline.frame_at``).
         """
-        root = self.state_at(t)
-        return (ViewState(root, self.camera.render_camera(), camera_views(self.roots, current_value)),)
+        return (self.plan.frame_at(t),)
 
     def sounds(self) -> list[tuple[float, Sound, float]]:
         """``(compiled time, sound, volume)`` of every sound in the scene."""
@@ -435,16 +448,18 @@ class PreparedScene:
         return mix(placed, start, self.duration if end is None else end, sample_rate)
 
     def evaluate(self, t: float, global_time: float | None = None) -> None:
-        """Set every signal to its value at compiled time ``t`` without
-        building render state (e.g. to read a camera)."""
+        """Set every Python signal to its value at compiled time ``t``
+        (to read values, e.g. in tests and tools)."""
         self.time.set(scene_time=self.playing_time_at(t), global_time=t if global_time is None else global_time)
         for track in self.tracks:
             track.signal.set(track.value_at(t))
 
     def refresh(self) -> None:
-        """Recompute cached start values after placements were edited."""
+        """Recompute cached start values after placements were edited (the
+        plan is made again on next use)."""
         for track in self.tracks:
             track.refresh()
+        self._plan = None
 
     def playing_time_at(self, t: float) -> float:
         """Compiled time ``t`` without the gaps before it."""

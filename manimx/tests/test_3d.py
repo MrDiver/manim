@@ -95,7 +95,7 @@ def test_lights_point_along_their_local_minus_z() -> None:
 def test_parametric_curve_passes_through_samples() -> None:
     helix = RCurve3D(points=parametric_points(lambda t: (math.cos(t), math.sin(t), t), (0.0, math.tau), samples=16))
 
-    assert helix.num_curves == 16
+    assert len(helix.points) == 16 * 4
     np.testing.assert_allclose(helix.points[0], [1, 0, 0])
     np.testing.assert_allclose(helix.points[-1], [1, 0, math.tau], atol=1e-12)
     with pytest.raises(ValueError, match=r"\(N, 3\)"):
@@ -168,10 +168,10 @@ def test_gltf_import_decodes_shared_textures(tmp_path: Path) -> None:
     first, second = flatten(model.snapshot())
 
     texture_object = first.obj.material.base_color_texture
-    assert texture_object is not None and texture_object is second.obj.material.base_color_texture
+    assert texture_object is not None and texture_object == second.obj.material.base_color_texture
     np.testing.assert_array_equal(texture_object.image[0, 0], [0, 200, 0, 255])
     np.testing.assert_allclose(second.world[:3, 3], [3.0, 0.0, 0.0])  # from the node matrix
-    assert first.obj.mesh is second.obj.mesh  # instanced meshes share their data
+    assert first.obj.mesh == second.obj.mesh  # instanced meshes share their data
     assert first.obj.uid != second.obj.uid  # but are separate nodes
 
 

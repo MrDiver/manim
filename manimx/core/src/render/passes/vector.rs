@@ -11,12 +11,13 @@
 
 use std::collections::HashMap;
 
-use crate::packing::records::Frame;
-use crate::packing::scene_graph::ShadowList;
 use crate::render::buffer::{GrowableBuffer, Records};
 use crate::render::context::{
     shadow_depth_stencil, Gpu, ShadowStencil, COLOR_FORMAT, DEPTH_FORMAT,
 };
+use crate::render::error::Result;
+use crate::render::packing::flatten::ShadowList;
+use crate::render::packing::records::Frame;
 use crate::render::passes::camera_views::CameraViewTexture;
 
 /// Bytes of one indirect draw (`DrawIndirectArgs`).
@@ -124,7 +125,7 @@ impl VectorPass {
         mesh_depth: &wgpu::TextureView,
         multisampled: bool,
         targets_generation: u64,
-    ) -> pyo3::PyResult<()> {
+    ) -> Result<()> {
         let changed = self.use_variant(gpu, multisampled)?;
         let mut grown = false;
         for (buffer, records) in self.buffers.iter_mut().zip(&data.buffers) {
@@ -356,7 +357,7 @@ impl VectorPass {
 
     /// Build shader, layout and pipelines for the mesh depth's sample
     /// count; returns whether they changed.
-    fn use_variant(&mut self, gpu: &Gpu, multisampled: bool) -> pyo3::PyResult<bool> {
+    fn use_variant(&mut self, gpu: &Gpu, multisampled: bool) -> Result<bool> {
         if self.multisampled == Some(multisampled) {
             return Ok(false);
         }

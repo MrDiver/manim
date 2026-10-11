@@ -41,7 +41,6 @@ import numpy as np
 from ..renderer.config import ViewState
 from ..robjects import RGroup, new_uid
 from .audio import DEFAULT_SAMPLE_RATE, Sound, mix
-from .nodes.camera_view import camera_views, current_value
 from .scene import PreparedScene, Segment
 from .time_map import MonotoneMap
 
@@ -169,11 +168,7 @@ class Clip:
         independent of the clip's start, cut and time map. ``global_time`` (for idle motion) defaults to ``at``.
         """
         compiled = self.scene.compiled_time_at(at)
-        state = self.scene.state_at(compiled, global_time=at if global_time is None else global_time)
-        return self._group(state.children)
-
-    def _group(self, children: list) -> RGroup:
-        return RGroup(children=children, uid=self.uid)
+        return self.scene.plan.state_at(compiled, global_time=at if global_time is None else global_time, uid=self.uid)
 
     def event_of(self, cue: str) -> str:
         return self.cue_events.get(cue, cue)
@@ -326,8 +321,7 @@ class Timeline:
         for clip in sorted(self.clips, key=lambda clip: clip.layer):  # stable
             compiled = clip.compiled_time(t)
             if compiled is not None:
-                state = clip.scene.state_at(compiled, global_time=t)
-                views.append(ViewState(clip._group(state.children), clip.scene.camera.render_camera(), camera_views(clip.scene.roots, current_value)))
+                views.append(clip.scene.plan.frame_at(compiled, global_time=t, uid=clip.uid))
         return tuple(views)
 
     def state_at(self, t: float) -> RGroup:

@@ -22,14 +22,15 @@
 
 use std::f64::consts::PI;
 
-use glam::{DMat4, DVec3, DVec4};
-use pyo3::prelude::*;
+use std::collections::{BTreeSet, HashMap};
 
-use crate::packing::callbacks::{bytes_of, Callbacks};
-use crate::packing::lights::LightSource;
-use crate::packing::meshes::MeshPacker;
-use crate::packing::records::{self, Frame, Light, ShadowView};
-use crate::packing::scene_graph::{DrawItem, FlatScene, LightType, NodeData, SceneGraph, Values};
+use glam::{DMat4, DVec3, DVec4};
+
+use crate::render::packing::flatten::{DrawItem, FlatScene};
+use crate::render::packing::lights::LightSource;
+use crate::render::packing::meshes::{box_around, box_corners, particle_shown, MeshPacker};
+use crate::render::packing::records::{self, Frame, Light, ShadowView};
+use crate::robjects::{Instances, Kind, LightKind, Points};
 
 const NEAR: f64 = 0.05;
 /// Cube faces of a point light: (looking along, up), in the order of
@@ -43,7 +44,7 @@ const CUBE_FACES: [([f64; 3], [f64; 3]); 6] = [
     ([0.0, 0.0, -1.0], [0.0, 1.0, 0.0]),
 ];
 
-/// The config values a Frame record holds (`RenderConfig`).
+/// The settings a Frame record holds (from the `RenderConfig`).
 pub struct FrameSettings {
     pub time: f64,
     pub layer_depth_step: f64,
@@ -104,22 +105,17 @@ pub struct ShadowViews {
 
 /// `build_shadow_views`: assigns map layers to the lights that cast
 /// shadows (writing each light record's `shadow_view`).
-#[allow(clippy::too_many_arguments)]
 pub fn build_shadow_views(
-    py: Python<'_>,
-    graph: &SceneGraph,
-    values: &Values,
     scene: &FlatScene,
     lights: &[LightSource],
     rows: &mut [Light],
     bounds: &mut Bounds,
     meshes: &MeshPacker,
-    callbacks: &Callbacks,
     settings: &FrameSettings,
-) -> PyResult<ShadowViews> {
+) -> ShadowViews {
     let mut shadows = ShadowViews::default();
     if !settings.shadows {
-        return Ok(shadows);
+        return shadows;
     }
     let mut bounds_of: Vec<(i32, Option<(DVec3, f64)>)> = Vec::new();
     for (row, light) in rows.iter_mut().zip(lights) {
@@ -129,8 +125,7 @@ pub fn build_shadow_views(
         let scope_bounds = match bounds_of.iter().find(|(scope, _)| *scope == light.clip) {
             Some((_, found)) => *found,
             None => {
-                let found =
-                    bounds.scene_bounds(py, graph, values, scene, light.clip, meshes, callbacks)?;
+                let found = bounds.scene_bounds(scene, light.clip, meshes);
                 bounds_of.push((light.clip, found));
                 found
             }
@@ -156,7 +151,7 @@ pub fn build_shadow_views(
             shadows.scopes.push(light.clip);
         }
     }
-    Ok(shadows)
+    shadows
 }
 
 /// `_light_views`: (view, projection, position, params) of each view.
@@ -175,7 +170,7 @@ fn light_views(
         }
     };
     match light.light {
-        LightType::Directional => {
+        LightKind::Directional => {
             // Look at the scene's bounding sphere from outside it.
             let eye = center - direction * 2.0 * radius;
             let (near, far) = (radius * 0.5, radius * 3.5);
@@ -186,7 +181,7 @@ fn light_views(
                 [near, far, 2.0 * radius, 0.0],
             )]
         }
-        LightType::Spot => {
+        LightKind::Spot => {
             let far = far();
             let fov = (2.0 * light.cone.1 + 0.05).min(170f64.to_radians());
             vec![(
@@ -196,7 +191,7 @@ fn light_views(
                 [NEAR, far, 2.0 * (fov / 2.0).tan(), 1.0],
             )]
         }
-        LightType::Point => {
+        LightKind::Point => {
             let far = far();
             CUBE_FACES
                 .iter()
@@ -252,27 +247,22 @@ fn perspective(fov: f64, near: f64, far: f64) -> DMat4 {
     )
 }
 
-/// The boxes of paths (by points version), for `scene_bounds`; meshes
-/// keep theirs in `MeshPacker::geometry`.
+/// The boxes of paths (by node uid, with the points version), for
+/// `scene_bounds`; meshes keep theirs in `MeshPacker::geometry`.
 #[derive(Default)]
 pub struct Bounds {
-    paths: std::collections::HashMap<u64, (u64, Vec<DVec3>)>,
+    paths: HashMap<u64, (u64, Vec<DVec3>)>,
 }
 
 impl Bounds {
     /// `scene_bounds`: the bounding sphere `(center, radius)` of the drawn
     /// objects in `scope`, or None if there are none.
-    #[allow(clippy::too_many_arguments)]
     pub fn scene_bounds(
         &mut self,
-        py: Python<'_>,
-        graph: &SceneGraph,
-        values: &Values,
         scene: &FlatScene,
         scope: i32,
         meshes: &MeshPacker,
-        callbacks: &Callbacks,
-    ) -> PyResult<Option<(DVec3, f64)>> {
+    ) -> Option<(DVec3, f64)> {
         let mut low = DVec3::splat(f64::INFINITY);
         let mut high = DVec3::splat(f64::NEG_INFINITY);
         let mut any = false;
@@ -280,29 +270,30 @@ impl Bounds {
             if !scene.in_scope(item.clip, scope) {
                 continue;
             }
-            let node = &graph.nodes[item.node];
-            let corners = match &node.data {
-                NodeData::Mesh(fields) => {
+            let node = item.node;
+            let corners = match &node.kind {
+                Kind::Shape3D(_) | Kind::Particles { .. } => {
                     let Some(geometry) = meshes.geometry.get(&node.uid) else {
                         continue;
                     };
                     if geometry.corners.is_empty() {
                         continue;
                     }
-                    match fields.particles {
-                        Some(slots) => match particle_box(values, slots, &geometry.corners)? {
-                            Some(corners) => corners,
-                            None => continue,
-                        },
-                        None => geometry.corners.clone(),
+                    match &node.kind {
+                        Kind::Particles { instances, .. } => {
+                            match particle_box(instances, &geometry.corners) {
+                                Some(corners) => corners,
+                                None => continue,
+                            }
+                        }
+                        _ => geometry.corners.clone(),
                     }
                 }
-                NodeData::Path(fields) => {
-                    let points = values.get(fields.points).array()?;
-                    if points.rows() < 4 {
+                Kind::Shape2D { path, .. } | Kind::Curve3D { path } => {
+                    if path.points.count() < 4 {
                         continue;
                     }
-                    self.path_corners(py, values, node.uid, fields.points, callbacks)?
+                    self.path_corners(node.uid, &path.points)
                 }
                 _ => continue,
             };
@@ -314,82 +305,46 @@ impl Bounds {
             }
         }
         if !any {
-            return Ok(None);
+            return None;
         }
-        Ok(Some((
-            (low + high) / 2.0,
-            ((high - low).length() / 2.0).max(1e-3),
-        )))
+        Some(((low + high) / 2.0, ((high - low).length() / 2.0).max(1e-3)))
     }
 
-    fn path_corners(
-        &mut self,
-        py: Python<'_>,
-        values: &Values,
-        uid: u64,
-        slot: usize,
-        callbacks: &Callbacks,
-    ) -> PyResult<Vec<DVec3>> {
-        let version = values.state.versions[slot];
-        if self.paths.get(&uid).map(|entry| entry.0) != Some(version) {
-            let points = values.state.kinds[slot].value_to_py(py, values.get(slot))?;
-            let bytes = bytes_of(&callbacks.path_box.bind(py).call1((points,))?)?;
-            let corners: &[f64] = bytemuck::cast_slice(&bytes);
-            self.paths.insert(
-                uid,
-                (
-                    version,
-                    corners
-                        .chunks_exact(3)
-                        .map(|c| DVec3::new(c[0], c[1], c[2]))
-                        .collect(),
-                ),
-            );
+    /// The corners of the box around a path's points, kept per points version.
+    fn path_corners(&mut self, uid: u64, points: &Points) -> Vec<DVec3> {
+        if self.paths.get(&uid).map(|entry| entry.0) != Some(points.version) {
+            let all: Vec<DVec3> = (0..points.count()).map(|i| points.point(i)).collect();
+            self.paths.insert(uid, (points.version, box_around(&all)));
         }
-        Ok(self.paths[&uid].1.clone())
+        self.paths[&uid].1.clone()
+    }
+
+    /// Drop the boxes of the nodes `keep` says no.
+    pub fn forget(&mut self, keep: impl Fn(u64) -> bool) {
+        self.paths.retain(|uid, _| keep(*uid));
     }
 }
 
-/// `_particle_box`: a box around every shown particle, grown by the
-/// mesh's reach times the largest scale.
-fn particle_box(
-    values: &Values,
-    slots: [usize; 4],
-    mesh_corners: &[DVec3],
-) -> PyResult<Option<Vec<DVec3>>> {
-    let positions = values.get(slots[0]).array()?;
-    let scales = values.get(slots[2]).array()?;
+/// A box around every shown particle, grown by the mesh's reach times the
+/// largest scale.
+fn particle_box(instances: &Instances, mesh_corners: &[DVec3]) -> Option<Vec<DVec3>> {
     let mut low = DVec3::splat(f64::INFINITY);
     let mut high = DVec3::splat(f64::NEG_INFINITY);
     let mut largest_scale: f64 = 0.0;
-    for i in 0..positions.rows() {
-        let scale = DVec3::from_slice(&scales.data[3 * i..3 * i + 3]);
-        if scale.abs().min_element() <= 1e-9 {
+    for i in 0..instances.count() {
+        if !particle_shown(instances, i) {
             continue;
         }
-        largest_scale = largest_scale.max(scale.abs().max_element());
-        let position = DVec3::from_slice(&positions.data[3 * i..3 * i + 3]);
+        largest_scale = largest_scale.max(DVec3::from(instances.scales[i]).abs().max_element());
+        let position = DVec3::from(instances.positions[i]);
         low = low.min(position);
         high = high.max(position);
     }
     if largest_scale == 0.0 {
-        return Ok(None);
+        return None;
     }
     let reach = mesh_corners.iter().map(|c| c.length()).fold(0.0, f64::max) * largest_scale;
-    Ok(Some(box_corners(low - reach, high + reach)))
-}
-
-/// `_box`: the 8 corners of the box from `low` to `high`.
-fn box_corners(low: DVec3, high: DVec3) -> Vec<DVec3> {
-    let mut corners = Vec::with_capacity(8);
-    for x in [low.x, high.x] {
-        for y in [low.y, high.y] {
-            for z in [low.z, high.z] {
-                corners.push(DVec3::new(x, y, z));
-            }
-        }
-    }
-    corners
+    Some(box_corners(low - reach, high + reach))
 }
 
 /// `ShadowLayers`: tells which shadow map layers would come out exactly as
@@ -401,18 +356,12 @@ pub struct ShadowLayers {
 }
 
 impl ShadowLayers {
-    pub fn mark(
-        &mut self,
-        graph: &SceneGraph,
-        values: &Values,
-        scene: &FlatScene,
-        shadows: &mut ShadowViews,
-    ) -> PyResult<()> {
+    pub fn mark(&mut self, scene: &FlatScene, shadows: &mut ShadowViews) {
         let mut casters: Vec<(i32, Vec<u64>)> = Vec::new();
         let mut keys = Vec::with_capacity(shadows.frames.len());
         for (index, &scope) in shadows.scopes.iter().enumerate() {
             if !casters.iter().any(|(s, _)| *s == scope) {
-                casters.push((scope, caster_key(graph, values, scene, scope)?));
+                casters.push((scope, caster_key(scene, scope)));
             }
             let mut frame = shadows.frames[index];
             frame.time = 0.0; // no shader reads it in shadow passes
@@ -429,33 +378,26 @@ impl ShadowLayers {
             .map(|(index, key)| self.keys.get(index) != Some(key))
             .collect();
         self.keys = keys;
-        Ok(())
     }
 }
 
-fn caster_key(
-    graph: &SceneGraph,
-    values: &Values,
-    scene: &FlatScene,
-    scope: i32,
-) -> PyResult<Vec<u64>> {
+/// Everything the casters of `scope` look like: each caster's (and each
+/// mask's that clips one) fingerprint and world matrix.
+fn caster_key(scene: &FlatScene, scope: i32) -> Vec<u64> {
     let mut key = Vec::new();
     // The masks that clip the casters shape the shadow too.
-    let mut masks = std::collections::BTreeSet::new();
+    let mut masks = BTreeSet::new();
     let add = |key: &mut Vec<u64>, item: &DrawItem| {
-        let node = &graph.nodes[item.node];
-        key.push(node.uid);
-        key.extend(node.slots.iter().map(|&slot| values.state.versions[slot]));
+        item.node.fingerprint(key);
         key.extend(item.world.to_cols_array().iter().map(|v| v.to_bits()));
     };
     for item in &scene.items {
-        let node = &graph.nodes[item.node];
-        let cast_shadows = match &node.data {
-            NodeData::Path(fields) => fields.cast_shadows,
-            NodeData::Mesh(fields) => fields.cast_shadows,
+        let cast_shadows = match &item.node.kind {
+            Kind::Shape2D { path, .. } | Kind::Curve3D { path } => path.cast_shadows,
+            Kind::Shape3D(surface) | Kind::Particles { surface, .. } => surface.cast_shadows,
             _ => continue,
         };
-        if !values.truthy(cast_shadows)? || !scene.in_scope(item.clip, scope) {
+        if !cast_shadows || !scene.in_scope(item.clip, scope) {
             continue;
         }
         masks.extend(scene.mask_chain(item.clip));
@@ -466,5 +408,5 @@ fn caster_key(
             add(&mut key, item);
         }
     }
-    Ok(key)
+    key
 }

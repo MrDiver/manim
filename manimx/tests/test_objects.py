@@ -13,13 +13,13 @@ from manimx.robjects import (
     Transform,
     quaternion_from_axis_angle,
 )
-from manimx.robjects.rshape2d import is_closed
-from manimx.robjects.style import resample, to_rgb_array
+from manimx.robjects.style import to_rgb_array
 from manimx.userland.geometry import (
     arc_points,
     corner_points,
     rectangle_points,
     regular_polygon_points,
+    subpaths,
 )
 from manimx.utils.color import BLUE, RED
 
@@ -29,45 +29,59 @@ from manimx import CapStyle, JointType
 
 
 def test_render_object_defaults_to_identity_transform() -> None:
-    obj = RNode()
+    obj = RGroup()
 
+    assert isinstance(obj, RNode)
     assert obj.transform.rotation == Quaternion(1.0, 0.0, 0.0, 0.0)
     assert obj.alpha == 1.0
+    with pytest.raises(TypeError):
+        RNode()  # only its subclasses are render objects
 
 
 def test_uids_are_unique() -> None:
-    assert len({RNode().uid for _ in range(100)}) == 100
+    assert len({RGroup().uid for _ in range(100)}) == 100
 
 
-def test_shape_points_are_read_only() -> None:
+def test_render_objects_and_their_points_are_read_only() -> None:
     shape = RShape2D(points=corner_points([(0, 0), (1, 0)]))
 
     with pytest.raises(ValueError, match="read-only"):
         shape.points[0, 0] = 5.0
+    with pytest.raises(AttributeError):
+        shape.points = [(0, 0), (1, 1), (2, 2), (3, 3)]
+    with pytest.raises(AttributeError):
+        shape.alpha = 0.5
 
-    shape.points = [(0, 0), (1, 1), (2, 2), (3, 3)]
-    assert not shape.points.flags.writeable
-    with pytest.raises(ValueError, match="four entries"):
-        shape.points = [(0, 0)]
+
+def test_values_keep_their_versions_in_every_node_that_holds_them() -> None:
+    fill = Fill("#FF0000", opacity=1.0)
+    first, second = RShape2D(fill=fill), RShape2D(fill=fill)
+
+    assert first.version("fill") == second.version("fill")
+    assert first.version("points") != second.version("points")  # new points: a new version
+    with pytest.raises(ValueError, match="no versioned field"):
+        first.version("mesh")
 
 
 # --- Groups --------------------------------------------------------------------
 
 
-def test_group_children_are_mutable() -> None:
-    group = RGroup()
+def test_group_children_are_the_given_nodes() -> None:
     child = RShape2D()
 
-    group.children.append(child)
+    (held,) = RGroup(children=[child]).children
 
-    assert group.children == [child]
+    assert isinstance(held, RShape2D) and held.uid == child.uid
+    with pytest.raises(TypeError, match="render object"):
+        RGroup(children=["not a node"])
 
 
 def test_clipping_group_children_are_mask_and_content() -> None:
     mask, content = RShape2D(), RShape2D()
 
-    assert RClippingGroup(mask=mask, content=content).children == [mask, content]
-    assert RClippingGroup(content=content).children == [content]
+    assert [child.uid for child in RClippingGroup(mask=mask, content=content).children] == [mask.uid, content.uid]
+    assert [child.uid for child in RClippingGroup(content=content).children] == [content.uid]
+    assert RClippingGroup(content=content).mask is None
 
 
 # --- Transform -----------------------------------------------------------------
@@ -99,23 +113,14 @@ def test_transform_scaled_broadcasts_scalar() -> None:
 # --- Styles --------------------------------------------------------------------
 
 
-def test_style_lists_resample_over_points() -> None:
-    np.testing.assert_allclose(resample(np.array([0.0, 1.0]), 5), [0.0, 0.25, 0.5, 0.75, 1.0])
-    np.testing.assert_allclose(resample(np.array([2.0]), 3), [2.0, 2.0, 2.0])
-    values = np.array([1.0, 2.0, 3.0])
-    assert resample(values, 3) is values
-
-
-def test_stroke_per_point_values() -> None:
+def test_stroke_lists_are_kept_as_given() -> None:
     shape = RShape2D(points=corner_points([(0, 0), (1, 0), (2, 0)]), stroke=Stroke([RED, BLUE], width=[0.0, 8.0], opacity=0.5, joint=[JointType.ROUND, JointType.BEVEL]))
 
-    rgba = shape.stroke_rgba()
-    assert rgba.shape == (8, 4)
-    np.testing.assert_allclose(rgba[0, :3], RED.to_rgb())
-    np.testing.assert_allclose(rgba[-1, :3], BLUE.to_rgb())
-    np.testing.assert_allclose(rgba[:, 3], 0.5)
-    np.testing.assert_allclose(shape.stroke_widths()[[0, -1]], [0.0, 8.0])
-    assert shape.stroke_joints() == [JointType.ROUND, JointType.BEVEL]
+    stroke = shape.stroke
+    np.testing.assert_allclose(stroke.color, [RED.to_rgb(), BLUE.to_rgb()])
+    np.testing.assert_allclose(stroke.width, [0.0, 8.0])
+    np.testing.assert_allclose(stroke.opacity, [0.5])
+    assert stroke.joint == (JointType.ROUND, JointType.BEVEL) and stroke.cap is CapStyle.AUTO
 
 
 def test_style_validation() -> None:
@@ -154,22 +159,17 @@ def test_from_corners_builds_straight_cubics() -> None:
 
 
 def test_subpaths_split_at_gaps() -> None:
-    first = RShape2D(points=corner_points([(0, 0), (1, 0), (1, 1)], closed=True)).points
-    second = RShape2D(points=corner_points([(5, 5), (6, 5)])).points
-    shape = RShape2D(points=np.vstack([first, second]))
+    first = corner_points([(0, 0), (1, 0), (1, 1)], closed=True)
+    second = corner_points([(5, 5), (6, 5)])
 
-    subpaths = shape.subpaths()
-
-    assert [len(p) for p in subpaths] == [12, 4]
-    assert is_closed(subpaths[0]) and not is_closed(subpaths[1])
-    assert RShape2D().subpaths() == []
+    assert [len(p) for p in subpaths(np.vstack([first, second]))] == [12, 4]
 
 
 def test_geometry_matches_manim() -> None:
     # Values from manim's Circle() and Triangle().
     np.testing.assert_allclose(arc_points()[:4], [[1, 0], [1, 0.2652], [0.8946, 0.5196], [0.7071, 0.7071]], atol=1e-4)
     np.testing.assert_allclose(RShape2D(points=regular_polygon_points(3, 1.0)).points[::4], [[0, 1], [-0.866, -0.5], [0.866, -0.5]], atol=1e-3)
-    assert RShape2D(points=arc_points()).num_curves == 8
+    assert len(RShape2D(points=arc_points()).points) == 8 * 4
     np.testing.assert_allclose(RShape2D(points=rectangle_points(2.0, 2.0)).points[0], [1.0, 1.0])
     np.testing.assert_allclose(RShape2D(points=rectangle_points(4, 2)).points[0], [2.0, 1.0])
 
@@ -200,8 +200,7 @@ def test_assert_image_matches_creates_compares_and_reports(tmp_path) -> None:
     assert_image_matches(changed, reference)
 
 
-def test_style_and_point_fast_paths_match_the_general_parsers() -> None:
-    from manimx.robjects.rbezier_path import _validated_points
+def test_style_fast_paths_match_the_general_parsers() -> None:
     from manimx.robjects.style import to_rgb_array, to_scalar_array
 
     triple = np.array([0.25, 0.5, 1.5])  # floats pass through unchanged, even out of [0, 1]
@@ -212,11 +211,3 @@ def test_style_and_point_fast_paths_match_the_general_parsers() -> None:
     with pytest.raises(ValueError, match="opacity must be in"):
         to_scalar_array(1.5, "opacity", 0.0, 1.0)
     assert to_scalar_array(True, "flag", 0.0, 1.0).tolist() == [1.0]  # bools take the general path
-
-    frozen = np.zeros((4, 2))
-    frozen.setflags(write=False)
-    assert _validated_points(frozen, 2) is frozen  # owned and read-only: shared
-    writable = np.zeros((4, 2))
-    assert _validated_points(writable, 2) is not writable and not _validated_points(writable, 2).flags.writeable
-    with pytest.raises(ValueError, match="four entries"):
-        _validated_points(np.zeros((3, 2)), 2)

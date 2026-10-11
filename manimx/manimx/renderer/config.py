@@ -1,4 +1,6 @@
-"""Render settings and camera, passed to the renderer next to the scene tree."""
+"""Render settings and camera: the ``RenderConfig`` a renderer is given
+next to the render object tree (manimx.robjects), and the views a frame
+shows (``ViewState``)."""
 
 from __future__ import annotations
 
@@ -9,10 +11,9 @@ from dataclasses import dataclass, field
 import numpy as np
 import quaternion
 
-from ..robjects.material import linear_rgb
-from ..robjects.planned_frame import PlannedFrame
+from ..robjects import RNode
 from ..robjects.transform import Transform
-from ..utils.color import BLACK, WHITE, ManimColor, ParsableManimColor
+from ..utils.color import BLACK, WHITE, ManimColor, ParsableManimColor, linear_rgb
 
 DEFAULT_FRAME_HEIGHT = 8.0
 """Manim's default frame height in world units."""
@@ -180,6 +181,7 @@ class RenderConfig:
 
     @property
     def ambient_linear(self) -> tuple[float, float, float]:
+        """The ambient light in linear RGB, times its intensity."""
         r, g, b = np.array(linear_rgb(self.ambient_color)) * self.ambient_intensity
         return (float(r), float(g), float(b))
 
@@ -203,15 +205,14 @@ class CameraViewState:
 @dataclass(frozen=True, slots=True)
 class ViewState:
     """One scene at one time together with the camera looking at it: what
-    a timeline's or prepared scene's ``frame_at`` returns per active clip
-    (through :func:`~manimx.animation.plan.planned_frames`). The camera
-    replaces ``RenderConfig.camera`` for that render. With motion blur,
-    every sub-frame gets the camera of its own time, so camera moves blur
-    too.
+    a timeline's or prepared scene's ``frame_at`` returns per active clip.
+    A renderer draws ``root`` with a ``RenderConfig`` whose ``camera`` and
+    ``camera_views`` are this view's. With motion blur, every sub-frame
+    gets the camera of its own time, so camera moves blur too.
     """
 
-    root: PlannedFrame
-    """The core's scene graph and the values of its signals at the time."""
+    root: RNode
+    """The render object tree at the time."""
     camera: Camera
     camera_views: tuple[CameraViewState, ...] = ()
     """The camera views in the tree, rendered before it (see

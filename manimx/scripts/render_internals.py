@@ -30,7 +30,6 @@ from manimx.animation import (
     Scene,
     SpotLight,
 )
-from manimx.animation.plan import planned_frames
 from manimx.drivers import core_pipeline
 from manimx.drivers.core_pipeline import CoreFramePipeline
 from manimx.renderer import RenderConfig
@@ -103,7 +102,7 @@ class Frames:
     """Renders the scene's frame and reads its textures."""
 
     def __init__(self, config: RenderConfig) -> None:
-        self.planned = planned_frames(Internals().prepare())
+        self.planned = Internals().prepare()
         self.config = config
         self.pipeline = CoreFramePipeline((), config, in_flight=1)
 

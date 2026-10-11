@@ -12,9 +12,9 @@
 //! shaders/bloom.wgsl.
 
 use bytemuck::{Pod, Zeroable};
-use pyo3::prelude::*;
 
 use crate::render::context::{Gpu, HDR_FORMAT};
+use crate::render::error::Result;
 use crate::render::fullscreen::{Blend, Fullscreen, TexturePool, UniformSlots};
 use crate::render::profiler::GpuProfiler;
 
@@ -63,7 +63,7 @@ impl BloomPasses {
         lit: &wgpu::Texture,
         bloom: &Bloom,
         profiler: &mut GpuProfiler,
-    ) -> PyResult<wgpu::Texture> {
+    ) -> Result<wgpu::Texture> {
         let (width, height) = (lit.width(), lit.height());
         // The chain starts at half resolution; stop before mips get tiny.
         let smallest = (width.min(height) / 4).max(1);

@@ -4,16 +4,31 @@ for parts it lacks."""
 from __future__ import annotations
 
 import pytest
-from manimx.animation import Camera, ClippingGroup, Group, Node, PositionMixin, RotationMixin, ScalableMixin
-from manimx.userland import UP, Circle, FadeIn, FadeOut, GrowFromCenter, Indicate, Rotate, ShrinkToCenter, Square
+from manimx.animation import (
+    Camera,
+    ClippingGroup,
+    Group,
+    Node,
+    PositionMixin,
+    RotationMixin,
+    ScalableMixin,
+)
 from manimx.robjects import RShape2D
+from manimx.userland import (
+    UP,
+    Circle,
+    FadeIn,
+    FadeOut,
+    GrowFromCenter,
+    Indicate,
+    Rotate,
+    ShrinkToCenter,
+    Square,
+)
 
 
 class Bare(Node):
     """A node with no transform parts (like a light without position)."""
-
-    def snapshot(self):
-        return None
 
 
 def test_transform_parts_come_from_the_mixins() -> None:
@@ -30,10 +45,10 @@ def test_transform_parts_come_from_the_mixins() -> None:
 def test_a_missing_part_is_the_identity_and_has_no_signals() -> None:
     camera = Camera()
     assert not isinstance(camera, ScalableMixin)
-    assert camera._transform().scale == (1.0, 1.0, 1.0)
+    assert not any(name.startswith("scale") for name, _ in camera.render_fields())
     bare = Bare()
-    assert bare._transform().position == (0.0, 0.0, 0.0)
     assert list(bare.signals()) == [bare.alpha, bare.present]
+    assert [name for name, _ in bare.render_fields()] == ["alpha", "present"]
 
 
 def test_missing_parts_explain_themselves() -> None:
@@ -73,8 +88,7 @@ def test_animations_name_the_part_they_need() -> None:
 
 
 def test_a_plain_node_has_no_snapshot() -> None:
-    with pytest.raises(NotImplementedError):
-        Node().snapshot()
+    assert Node().render_kind is None and Node().snapshot() is None
 
 
 # --- names and tags ---------------------------------------------------------------

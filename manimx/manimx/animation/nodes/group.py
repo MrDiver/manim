@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator
 
-from ...robjects import RGroup, RNode
 from .node import Node, PositionMixin, RotationMixin, ScalableMixin, find, find_all
 
 
 class Group(PositionMixin, RotationMixin, ScalableMixin, Node):
     """Holds other nodes; its transform and alpha apply to all of them."""
+
+    render_kind = "group"
 
     def __init__(self, *children: Node, name: str | None = None, tags: Iterable[str] = ()) -> None:
         super().__init__(name, tags=tags)
@@ -44,11 +45,8 @@ class Group(PositionMixin, RotationMixin, ScalableMixin, Node):
         for child in self.children:
             yield from child.family()
 
-    def _build_snapshot(self) -> RNode | None:
-        if self._hidden():
-            return None
-        children = [snapshot for child in self.children if (snapshot := child.snapshot()) is not None]
-        return RGroup(children=children, transform=self._transform(), alpha=self.alpha.value, uid=self.uid)
+    def render_children(self) -> list[Node]:
+        return self.children
 
 
 __all__ = ["Group"]

@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from ...robjects import CapStyle, JointType, RNode, RShape2D
+from ...robjects import CapStyle, JointType
 from ...utils.color import WHITE
 from ..signals.kinds import COLORS, DISCRETE, PATH, SCALARS
 from ..signals.paths import PointSignal, drawn_part, point_signal
@@ -60,6 +60,8 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
     ``drawn_points`` is derived from the three and is what the snapshot
     draws.
     """
+
+    render_kind = "shape2d"
 
     def __init__(
         self,
@@ -157,22 +159,15 @@ class Shape2D(PositionMixin, RotationMixin, ScalableMixin, Node):
         """Whether this shape blocks light for lit meshes behind it."""
         return [(self.cast_shadows, ABS, cast_shadows)]
 
-    def _build_snapshot(self) -> RNode | None:
-        if self._hidden():
-            return None
-        # alpha is not part of the fill and stroke: it becomes the snapshot's alpha.
-        return RShape2D(
-            uid=self.uid,
-            points=self.drawn_points.value,
-            fill=style.fill(self.fill_color.value, self.fill_opacity.value),
-            stroke=style.stroke(
-                self.stroke_color.value, self.stroke_opacity.value, self.stroke_width.value,
-                self.stroke_joint.value, self.stroke_cap.value,
-            ),  # fmt: skip
-            cast_shadows=bool(self.cast_shadows.value),
-            transform=self._transform(),
-            alpha=self.alpha.value,
-        )
+    def render_fields(self) -> Iterator[tuple[str, Signal]]:
+        yield from super().render_fields()
+        # The render object draws the part of the points from draw_start to draw_end.
+        yield from (
+            ("points", self.drawn_points), ("fill_color", self.fill_color), ("fill_opacity", self.fill_opacity),
+            ("stroke_color", self.stroke_color),
+            ("stroke_opacity", self.stroke_opacity), ("stroke_width", self.stroke_width),
+            ("stroke_joint", self.stroke_joint), ("stroke_cap", self.stroke_cap), ("cast_shadows", self.cast_shadows),
+        )  # fmt: skip
 
 
 __all__ = ["Shape2D"]

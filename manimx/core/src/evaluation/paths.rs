@@ -5,7 +5,7 @@
 
 use crate::evaluation::value::Array;
 
-const POINTS_PER_CURVE: usize = 4;
+use crate::robjects::values::POINTS_PER_CURVE;
 
 type Point = Vec<f64>;
 

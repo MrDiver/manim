@@ -1,4 +1,4 @@
-//! The retained vector records of `Shape2D` and `Curve3D` nodes, in the
+//! The retained vector records of `RShape2D` and `RCurve3D` nodes, in the
 //! buffers vector.wgsl reads:
 //!
 //! ```text
@@ -16,7 +16,7 @@
 //! From one frame to the next usually only a few transforms change, so the
 //! records stay in arenas that mirror the GPU buffers, with one slot per
 //! node (its uid, and whether it is drawn as a mask). Each frame compares
-//! the scene with the slots by signal versions:
+//! the tree with the slots by uid and by the versions of the values:
 //!
 //! - same node, same placement: nothing is written;
 //! - new world matrix, layer, clip or alpha: its object entry;
@@ -32,25 +32,21 @@
 //! that leave the scene free their slots; when garbage outweighs live
 //! records, everything is packed again from scratch.
 //!
-//! What depends on geometry or style alone (a fill's triangles, a stroke's
-//! curve links, per-point colors) is built by Python once per version of
-//! the signals it comes from (manimx/renderer/core_callbacks.py) and kept
-//! in `PathCache`.
+//! What depends on geometry or style alone (a fill's triangles and
+//! per-point colors, a stroke's curve links and points, a path's center)
+//! is built once per version of the values it comes from and kept in
+//! `PathCache`.
 
 use std::collections::{HashMap, HashSet};
 
-use pyo3::prelude::*;
-
-use crate::evaluation::value::Value;
-use crate::geometry::strokes::{stroke_records, StrokeStyle};
-use crate::geometry::tessellation::tessellate_fill;
-use crate::packing::arena::Arena;
-use crate::packing::callbacks::{bytes_of, Callbacks};
-use crate::packing::records::{self, DrawIndirect, Instance, Object, StrokeCurve};
-use crate::packing::scene_graph::{
-    DrawItem, FlatScene, Node, NodeData, PathFields, SceneGraph, ShadowList, Values, NO_CLIP,
-};
 use glam::{DMat4, DVec2, DVec3};
+
+use crate::render::geometry::strokes::{stroke_records, StrokeStyle};
+use crate::render::geometry::tessellation::tessellate_fill;
+use crate::render::packing::arena::Arena;
+use crate::render::packing::flatten::{DrawItem, FlatScene, ShadowList, NO_CLIP};
+use crate::render::packing::records::{self, DrawIndirect, Instance, Object, StrokeCurve};
+use crate::robjects::{Fill, Kind, Path, Points};
 
 /// Where one path's records live, and what they were built from (`_Slot`).
 struct Slot {
@@ -98,13 +94,12 @@ impl Slot {
     }
 }
 
-/// Records built by Python for one path, each with the versions it was
-/// built from.
+/// Records built for one path, each with the versions it was built from.
 #[derive(Default)]
 pub struct PathCache {
-    center: Option<(u64, [f64; 3])>,
+    center: Option<(u64, DVec3)>,
     fill_vertices: Option<(u64, Vec<u8>)>,
-    fill_colors: Option<(Vec<u64>, Vec<u8>, bool, bool)>,
+    fill_colors: Option<(Vec<u64>, FillColors)>,
     stroke: Option<(Vec<u64>, StrokeRecords)>,
     pub last_used: u64,
 }
@@ -112,6 +107,14 @@ pub struct PathCache {
 struct StrokeRecords {
     curves: Vec<u8>,
     points: Vec<u8>,
+    visible: bool,
+    opaque: bool,
+}
+
+/// A fill's per-point RGBA records, whether any of it shows and whether
+/// all of it is opaque.
+struct FillColors {
+    records: Vec<u8>,
     visible: bool,
     opaque: bool,
 }
@@ -184,19 +187,15 @@ impl VectorPacker {
             .any(|(_, arena)| arena.too_much_garbage(4096))
     }
 
-    /// Update the records for `scene` and return the frame's draws
-    #[allow(clippy::too_many_arguments)]
+    /// Update the records for the flattened `scene` and return the
+    /// frame's draws.
     pub fn pack(
         &mut self,
-        py: Python<'_>,
-        graph: &SceneGraph,
-        values: &Values,
-        scene: &FlatScene,
+        flat: &FlatScene,
         view: DMat4,
         camera_views: &CameraViews,
-        callbacks: &Callbacks,
         generation: u64,
-    ) -> PyResult<VectorDraws> {
+    ) -> VectorDraws {
         if self.too_much_garbage() {
             // Repack everything from scratch (keeps the per-path cache).
             let paths = std::mem::take(&mut self.paths);
@@ -206,31 +205,23 @@ impl VectorPacker {
         let mut draws = Vec::new();
         let mut seen = HashSet::new();
         let context = PathContext {
-            py,
-            graph,
-            values,
-            callbacks,
             view,
             camera_views,
             generation,
         };
-        for item in &scene.items {
-            self.add(&context, item, NO_CLIP, false, &mut draws, &mut seen)?;
+        for item in &flat.items {
+            self.add(&context, item, NO_CLIP, false, &mut draws, &mut seen);
         }
-        for (index, scope) in scene.clips.iter().enumerate() {
-            let NodeData::ClippingGroup { one_sided, .. } = graph.nodes[scope.node].data else {
-                unreachable!()
-            };
-            let front_only = values.truthy(one_sided)?;
+        for (index, scope) in flat.clips.iter().enumerate() {
             for item in &scope.mask {
                 self.add(
                     &context,
                     item,
                     index as i32,
-                    front_only,
+                    scope.one_sided,
                     &mut draws,
                     &mut seen,
-                )?;
+                );
             }
         }
         let gone: Vec<(u64, i32)> = self
@@ -243,7 +234,7 @@ impl VectorPacker {
             let slot = self.slots.remove(&key).unwrap();
             self.free(&slot);
         }
-        Ok(batch(scene, draws))
+        batch(flat, draws)
     }
 
     fn add(
@@ -254,15 +245,16 @@ impl VectorPacker {
         front_only: bool,
         draws: &mut Vec<Draw>,
         seen: &mut HashSet<(u64, i32)>,
-    ) -> PyResult<()> {
-        let graph: &SceneGraph = context.graph;
-        let node = &graph.nodes[item.node];
-        let NodeData::Path(fields) = &node.data else {
-            return Ok(());
+    ) {
+        let node = item.node;
+        let (path, fill) = match &node.kind {
+            Kind::Shape2D { path, fill } => (path, Some(fill.as_ref())),
+            Kind::Curve3D { path } => (path, None),
+            _ => return,
         };
-        let points = context.values.get(fields.points).array()?.clone();
-        if points.rows() / 4 == 0 {
-            return Ok(());
+        let curve_count = path.points.count() / 4;
+        if curve_count == 0 {
+            return;
         }
         let key = (node.uid, mask_of);
         seen.insert(key);
@@ -270,7 +262,7 @@ impl VectorPacker {
             let object = self.object_slot();
             self.slots.insert(key, Slot::new(object));
         }
-        let points_version = context.values.state.versions[fields.points];
+        let points_version = path.points.version;
         let mut slot = self.slots.remove(&key).unwrap();
         if slot.points_version != points_version {
             // New geometry: every range built from the points moves.
@@ -281,7 +273,7 @@ impl VectorPacker {
         }
 
         let layer = 2 * item.order;
-        let is_shape2d = fields.fill.is_some();
+        let is_shape2d = fill.is_some();
         let flags = (if is_shape2d {
             0
         } else {
@@ -310,26 +302,28 @@ impl VectorPacker {
         }
         if item.alpha <= 0.0 {
             self.slots.insert(key, slot);
-            return Ok(()); // invisible: the slot stays, nothing is drawn
+            return; // invisible: the slot stays, nothing is drawn
         }
 
         let cache = self.paths.entry(node.uid).or_default();
         cache.last_used = context.generation;
-        let center = context.center(cache, fields, points_version)?;
-        let world_center = item.world.transform_point3(DVec3::from(center));
+        let center = path_center(cache, &path.points);
+        let world_center = item.world.transform_point3(center);
         let distance = -context.view.transform_point3(world_center).z;
         let clipped = item.clip != NO_CLIP;
-        let casts_shadow = context.values.truthy(fields.cast_shadows)? && mask_of == NO_CLIP;
-        let fill = self.fill(context, node, fields, &mut slot, distance, layer)?;
-        let stroke = self.stroke(
-            context,
-            node,
-            fields,
-            &mut slot,
-            distance,
-            layer + 1,
-            points.rows() / 4,
-        )?;
+        let casts_shadow = path.cast_shadows && mask_of == NO_CLIP;
+        let fill = fill.and_then(|fill| {
+            self.fill(
+                context,
+                node.uid,
+                &path.points,
+                fill,
+                &mut slot,
+                distance,
+                layer,
+            )
+        });
+        let stroke = self.stroke(node.uid, path, &mut slot, distance, layer + 1, curve_count);
         for mut draw in [fill, stroke].into_iter().flatten() {
             draw.opaque &= !clipped && item.alpha >= 1.0;
             draw.mask_of = mask_of;
@@ -338,40 +332,34 @@ impl VectorPacker {
             draws.push(draw);
         }
         self.slots.insert(key, slot);
-        Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn fill(
         &mut self,
         context: &PathContext,
-        node: &Node,
-        fields: &PathFields,
+        uid: u64,
+        points: &Points,
+        fill: &Fill,
         slot: &mut Slot,
         distance: f64,
         layer: usize,
-    ) -> PyResult<Option<Draw>> {
-        let Some((color, opacity)) = fields.fill else {
-            return Ok(None);
-        };
+    ) -> Option<Draw> {
         let points_version = slot.points_version;
-        let cache = self.paths.get_mut(&node.uid).unwrap();
-        let colors_key = vec![
-            points_version,
-            context.values.state.versions[color],
-            context.values.state.versions[opacity],
-        ];
-        let colors = context.fill_colors(cache, fields, color, opacity, &colors_key)?;
+        let cache = self.paths.get_mut(&uid).unwrap();
+        let colors_key = vec![points_version, fill.version];
+        let colors = fill_colors(cache, points, fill, &colors_key);
         // A picture may be see-through anywhere (a transparent background).
         let (visible, opaque) = (
-            colors.2,
-            colors.3 && !context.camera_views.contains_key(&node.uid),
+            colors.visible,
+            colors.opaque && !context.camera_views.contains_key(&uid),
         );
         if !visible {
-            return Ok(None);
+            return None;
         }
-        let vertices = context.fill_vertices(cache, fields, points_version)?;
+        let vertices = fill_vertices(cache, points);
         if vertices.is_empty() {
-            return Ok(None);
+            return None;
         }
         if slot.fill_version != Some(points_version) {
             slot.fill_first = self
@@ -381,7 +369,7 @@ impl VectorPacker {
             slot.fill_version = Some(points_version);
         }
         if slot.colors_key.as_ref() != Some(&colors_key) {
-            let colors = &cache.fill_colors.as_ref().unwrap().1;
+            let colors = &cache.fill_colors.as_ref().unwrap().1.records;
             let first = self
                 .fill_colors
                 .place(colors, slot.colors_first, slot.colors_count);
@@ -404,7 +392,7 @@ impl VectorPacker {
             self.instances.write(instance, bytemuck::bytes_of(&record));
             slot.fill_instance = Some(instance);
         }
-        Ok(Some(Draw {
+        Some(Draw {
             args: DrawIndirect {
                 vertex_count: slot.fill_count as u32,
                 instance_count: 1,
@@ -417,33 +405,23 @@ impl VectorPacker {
             mask_of: NO_CLIP,
             casts_shadow: false,
             clip: NO_CLIP,
-        }))
+        })
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn stroke(
         &mut self,
-        context: &PathContext,
-        node: &Node,
-        fields: &PathFields,
+        uid: u64,
+        path: &Path,
         slot: &mut Slot,
         distance: f64,
         layer: usize,
         curve_count: usize,
-    ) -> PyResult<Option<Draw>> {
-        let versions = &context.values.state.versions;
-        let stroke_key = vec![
-            slot.points_version,
-            versions[fields.stroke_color],
-            versions[fields.stroke_opacity],
-            versions[fields.stroke_width],
-            versions[fields.stroke_joint],
-            versions[fields.stroke_cap],
-        ];
-        let cache = self.paths.get_mut(&node.uid).unwrap();
-        let stroke = context.stroke(cache, fields, &stroke_key)?;
+    ) -> Option<Draw> {
+        let stroke_key = vec![slot.points_version, path.stroke.version];
+        let cache = self.paths.get_mut(&uid).unwrap();
+        let stroke = stroke(cache, path, &stroke_key);
         if !stroke.visible {
-            return Ok(None);
+            return None;
         }
         let opaque = stroke.opaque;
         if slot.stroke_key.as_ref() != Some(&stroke_key) {
@@ -485,7 +463,7 @@ impl VectorPacker {
             slot.curves_count = count;
             slot.stroke_key = Some(stroke_key);
         }
-        Ok(Some(Draw {
+        Some(Draw {
             args: DrawIndirect {
                 vertex_count: records::STROKE_VERTEX_COUNT,
                 instance_count: curve_count as u32,
@@ -498,7 +476,7 @@ impl VectorPacker {
             mask_of: NO_CLIP,
             casts_shadow: false,
             clip: NO_CLIP,
-        }))
+        })
     }
 
     fn object_slot(&mut self) -> usize {
@@ -579,10 +557,6 @@ const NOT_A_VIEW: CameraView = (records::NO_VIEW, [0.0, 0.0]);
 
 /// What building one path's records needs, besides the packer itself.
 struct PathContext<'a> {
-    py: Python<'a>,
-    graph: &'a SceneGraph,
-    values: &'a Values<'a>,
-    callbacks: &'a Callbacks,
     /// World to view space: transparent draws sort by depth along the
     /// view direction.
     view: DMat4,
@@ -590,179 +564,105 @@ struct PathContext<'a> {
     generation: u64,
 }
 
-impl PathContext<'_> {
-    fn python(&self, slot: usize) -> PyResult<Py<PyAny>> {
-        self.values.state.kinds[slot].value_to_py(self.py, self.values.get(slot))
+/// The mean of a path's points in 3D (its distance to the camera sorts
+/// transparent draws).
+fn path_center(cache: &mut PathCache, points: &Points) -> DVec3 {
+    if let Some((cached, center)) = cache.center {
+        if cached == points.version {
+            return center;
+        }
     }
+    let count = points.count();
+    let center = (0..count).map(|index| points.point(index)).sum::<DVec3>() / count as f64;
+    cache.center = Some((points.version, center));
+    center
+}
 
-    fn center(
-        &self,
-        cache: &mut PathCache,
-        fields: &PathFields,
-        version: u64,
-    ) -> PyResult<[f64; 3]> {
-        if let Some((cached, center)) = cache.center {
-            if cached == version {
-                return Ok(center);
-            }
-        }
-        let center: (f64, f64, f64) = self
-            .callbacks
-            .path_center
-            .bind(self.py)
-            .call1((self.python(fields.points)?,))?
-            .extract()?;
-        let center = [center.0, center.1, center.2];
-        cache.center = Some((version, center));
-        Ok(center)
-    }
-
-    fn fill_vertices<'c>(
-        &self,
-        cache: &'c mut PathCache,
-        fields: &PathFields,
-        version: u64,
-    ) -> PyResult<&'c Vec<u8>> {
-        if cache.fill_vertices.as_ref().map(|entry| entry.0) != Some(version) {
-            let points = self.values.get(fields.points).array()?;
-            let corners: Vec<DVec2> = points
-                .data
-                .chunks_exact(points.cols())
-                .map(|row| DVec2::new(row[0], row[1]))
-                .collect();
-            let bytes = bytemuck::cast_slice(&tessellate_fill(&corners)).to_vec();
-            cache.fill_vertices = Some((version, bytes));
-        }
-        Ok(&cache.fill_vertices.as_ref().unwrap().1)
-    }
-
-    fn fill_colors<'c>(
-        &self,
-        cache: &'c mut PathCache,
-        fields: &PathFields,
-        color: usize,
-        opacity: usize,
-        key: &[u64],
-    ) -> PyResult<&'c (Vec<u64>, Vec<u8>, bool, bool)> {
-        if cache.fill_colors.as_ref().map(|entry| entry.0.as_slice()) != Some(key) {
-            let count = self.values.get(fields.points).array()?.rows();
-            let result = self.callbacks.fill_colors.bind(self.py).call1((
-                self.python(color)?,
-                self.python(opacity)?,
-                count,
-            ))?;
-            let bytes = bytes_of(&result.get_item(0)?)?;
-            let (visible, opaque): (bool, bool) = (
-                result.get_item(1)?.extract()?,
-                result.get_item(2)?.extract()?,
-            );
-            cache.fill_colors = Some((key.to_vec(), bytes, visible, opaque));
-        }
-        Ok(cache.fill_colors.as_ref().unwrap())
-    }
-
-    /// The stroke records built in Rust (strokes.rs), or None for style
-    /// values it does not read (then `stroke_records` in Python builds
-    /// them).
-    fn native_stroke(&self, fields: &PathFields) -> PyResult<Option<StrokeRecords>> {
-        let (
-            Value::Array(points),
-            Value::Array(colors),
-            Value::Array(opacities),
-            Value::Array(widths),
-        ) = (
-            self.values.get(fields.points),
-            self.values.get(fields.stroke_color),
-            self.values.get(fields.stroke_opacity),
-            self.values.get(fields.stroke_width),
-        )
-        else {
-            return Ok(None);
-        };
-        let dimension = points.cols();
-        let rgb = colors.shape.last() == Some(&3) && colors.shape.len() <= 2;
-        if points.shape.len() != 2
-            || !(dimension == 2 || dimension == 3)
-            || !rgb
-            || colors.data.is_empty()
-        {
-            return Ok(None);
-        }
-        if opacities.data.is_empty() || widths.data.is_empty() || points.rows() % 4 != 0 {
-            return Ok(None);
-        }
-        let (Value::Object(joint), Value::Object(cap)) = (
-            self.values.get(fields.stroke_joint),
-            self.values.get(fields.stroke_cap),
-        ) else {
-            return Ok(None);
-        };
-        let joint = joint.bind(self.py);
-        let joints: Vec<u32> = if joint.hasattr("value")? {
-            vec![joint.getattr("value")?.extract()?]
-        } else {
-            joint
-                .try_iter()?
-                .map(|item| item?.getattr("value")?.extract())
-                .collect::<PyResult<_>>()?
-        };
-        if joints.is_empty() {
-            return Ok(None);
-        }
-        let cap: u32 = cap.bind(self.py).getattr("value")?.extract()?;
-        let colors: Vec<[f64; 3]> = colors
-            .data
-            .chunks_exact(3)
-            .map(|c| [c[0], c[1], c[2]])
+fn fill_vertices<'c>(cache: &'c mut PathCache, points: &Points) -> &'c Vec<u8> {
+    if cache.fill_vertices.as_ref().map(|entry| entry.0) != Some(points.version) {
+        let corners: Vec<DVec2> = (0..points.count())
+            .map(|index| points.point(index).truncate())
             .collect();
-        let style = StrokeStyle {
-            colors: &colors,
-            opacities: &opacities.data,
-            widths: &widths.data,
-            joints: &joints,
-            cap,
-        };
-        let stroke = stroke_records(&points.data, dimension, &style);
-        Ok(Some(StrokeRecords {
-            curves: stroke.curves,
-            points: stroke.points,
-            visible: stroke.visible,
-            opaque: stroke.opaque,
-        }))
+        let bytes = bytemuck::cast_slice(&tessellate_fill(&corners)).to_vec();
+        cache.fill_vertices = Some((points.version, bytes));
     }
+    &cache.fill_vertices.as_ref().unwrap().1
+}
 
-    fn stroke<'c>(
-        &self,
-        cache: &'c mut PathCache,
-        fields: &PathFields,
-        key: &[u64],
-    ) -> PyResult<&'c StrokeRecords> {
-        if cache.stroke.as_ref().map(|entry| entry.0.as_slice()) != Some(key) {
-            if let Some(records) = self.native_stroke(fields)? {
-                cache.stroke = Some((key.to_vec(), records));
-                return Ok(&cache.stroke.as_ref().unwrap().1);
-            }
-            let arguments = (
-                self.python(fields.points)?,
-                self.python(fields.stroke_color)?,
-                self.python(fields.stroke_opacity)?,
-                self.python(fields.stroke_width)?,
-                self.python(fields.stroke_joint)?,
-                self.python(fields.stroke_cap)?,
-            );
-            let result = self
-                .callbacks
-                .stroke_records
-                .bind(self.py)
-                .call1(arguments)?;
-            let records = StrokeRecords {
-                curves: bytes_of(&result.get_item(0)?)?,
-                points: bytes_of(&result.get_item(1)?)?,
-                visible: result.get_item(2)?.extract()?,
-                opaque: result.get_item(3)?.extract()?,
-            };
-            cache.stroke = Some((key.to_vec(), records));
-        }
-        Ok(&cache.stroke.as_ref().unwrap().1)
+/// Per-point fill RGBA (float32): the fill's colors and opacities (clamped
+/// to [0, 1]) spread over the points like `resample` spreads them.
+fn fill_colors<'c>(
+    cache: &'c mut PathCache,
+    points: &Points,
+    fill: &Fill,
+    key: &[u64],
+) -> &'c FillColors {
+    if cache.fill_colors.as_ref().map(|entry| entry.0.as_slice()) != Some(key) {
+        let count = points.count();
+        let opacities: Vec<f64> = fill.opacities.iter().map(|o| o.clamp(0.0, 1.0)).collect();
+        let channels: Vec<Vec<f64>> = (0..3)
+            .map(|channel| {
+                let values: Vec<f64> = fill.colors.iter().map(|color| color[channel]).collect();
+                crate::render::geometry::strokes::resample(&values, count)
+            })
+            .collect();
+        let alpha = crate::render::geometry::strokes::resample(&opacities, count);
+        let records: Vec<[f32; 4]> = (0..count)
+            .map(|index| {
+                [
+                    channels[0][index] as f32,
+                    channels[1][index] as f32,
+                    channels[2][index] as f32,
+                    alpha[index] as f32,
+                ]
+            })
+            .collect();
+        let colors = FillColors {
+            records: bytemuck::cast_slice(&records).to_vec(),
+            visible: opacities.iter().any(|&o| o > 0.0),
+            opaque: opacities.iter().all(|&o| o >= 1.0),
+        };
+        cache.fill_colors = Some((key.to_vec(), colors));
     }
+    &cache.fill_colors.as_ref().unwrap().1
+}
+
+fn stroke<'c>(cache: &'c mut PathCache, path: &Path, key: &[u64]) -> &'c StrokeRecords {
+    if cache.stroke.as_ref().map(|entry| entry.0.as_slice()) != Some(key) {
+        let points = &path.points;
+        let style = &path.stroke;
+        let records = if points.data.is_empty()
+            || style.colors.is_empty()
+            || style.opacities.is_empty()
+            || style.widths.is_empty()
+            || style.joints.is_empty()
+        {
+            StrokeRecords {
+                curves: Vec::new(),
+                points: Vec::new(),
+                visible: false,
+                opaque: false,
+            }
+        } else {
+            let stroke = stroke_records(
+                &points.data,
+                points.dimension,
+                &StrokeStyle {
+                    colors: &style.colors,
+                    opacities: &style.opacities,
+                    widths: &style.widths,
+                    joints: &style.joints,
+                    cap: style.cap,
+                },
+            );
+            StrokeRecords {
+                curves: stroke.curves,
+                points: stroke.points,
+                visible: stroke.visible,
+                opaque: stroke.opaque,
+            }
+        };
+        cache.stroke = Some((key.to_vec(), records));
+    }
+    &cache.stroke.as_ref().unwrap().1
 }

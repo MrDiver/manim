@@ -26,7 +26,7 @@ from manimx.animation import (
     SpotLight,
     Timeline,
 )
-from manimx.animation.plan import PlannedTimeline, ScenePlan, planned_frames
+from manimx.animation.plan import ScenePlan
 from manimx.drivers import CoreFramePipeline
 from manimx.examples.animated_logo import AnimatedLogo
 from manimx.examples.bouncing import Bouncing
@@ -118,34 +118,32 @@ def check(name: str, frame_at, times, update: bool, effects=()) -> None:
 @pytest.mark.parametrize("scene_class", [EveryAnimation, EveryNode, AnimatedLogo, Bouncing, Navigation])
 def test_scenes_render_like_their_references(scene_class: type[Scene], update_references: bool) -> None:
     scene = scene_class().prepare()
-    check(scene_class.__name__, planned_frames(scene).frame_at, scene.duration * np.array([0.25, 0.5, 0.75]), update_references)
+    check(scene_class.__name__, scene.frame_at, scene.duration * np.array([0.25, 0.5, 0.75]), update_references)
 
 
 def test_effects_render_like_their_reference(update_references: bool) -> None:
     effects = (MotionBlur(samples=3), Bloom(intensity=0.5), DARKEN_LIT, VIGNETTE, ToneMap(ToneMapOperator.ACES))
-    check("EveryNode_effects", planned_frames(EveryNode().prepare()).frame_at, [1.2], update_references, effects)
+    check("EveryNode_effects", EveryNode().prepare().frame_at, [1.2], update_references, effects)
 
 
 @pytest.mark.parametrize("project", ["example-project", "tests/projects/benchmark"])
 def test_projects_render_like_their_references(project: str, update_references: bool) -> None:
     timeline = Project.load(ROOT / project).build_timeline()
-    planned = PlannedTimeline(timeline)
-    assert planned.duration == timeline.duration  # the timeline's own attributes pass through
-    check(Path(project).name, planned.frame_at, timeline.duration * np.array([0.25, 0.5, 0.75]), update_references)
+    check(Path(project).name, timeline.frame_at, timeline.duration * np.array([0.25, 0.5, 0.75]), update_references)
 
 
 def test_several_views_draw_over_each_other_and_no_view_shows_the_background() -> None:
     timeline = Timeline()
     timeline.add(EveryNode().prepare(), start=0.0)
     timeline.add(Navigation().prepare(), start=0.0, layer=1)  # two views at once, the second on top
-    planned = PlannedTimeline(timeline)
+    planned = timeline
     assert len(planned.frame_at(0.5)) == 2
     after = timeline.duration + 1.0  # after every clip
     assert planned.frame_at(after) == ()
     both, empty = render(planned.frame_at, [0.5, after])
     background = np.array(CONFIG.background_rgba) * 255
     assert np.allclose(empty.reshape(-1, 4), background, atol=1)
-    alone = render(planned_frames(Navigation().prepare()).frame_at, [0.5])[0]
+    alone = render(Navigation().prepare().frame_at, [0.5])[0]
     assert not np.array_equal(both, alone)  # the lower view shows where the upper one is empty
 
 
@@ -165,29 +163,35 @@ def test_frames_like_the_one_before_are_held_and_shader_effects_never() -> None:
     assert b.result() is not a.result()
 
 
-def test_only_frames_of_the_core_are_accepted() -> None:
-    scene = EveryNode().prepare()
-    pipeline = CoreFramePipeline((), CONFIG, 1)
-    with pytest.raises(TypeError, match="PlannedFrame"):
-        pipeline.submit(0, 0.5, scene.frame_at)
+def test_a_tree_built_by_hand_renders_like_the_scene_it_copies() -> None:
+    """The renderer is given a render object tree and a RenderConfig, and
+    nothing else: a tree built by hand is drawn like a scene's."""
+    from manimx.renderer import ViewState
+    from manimx.robjects import Fill, RGroup, RShape2D, Stroke, Transform
 
-
-def test_a_node_class_that_changes_how_it_is_drawn_is_refused() -> None:
-    class Custom(Square):
-        def _build_snapshot(self):  # a node class with its own render state
-            return super()._build_snapshot()
-
-    class WithCustom(Scene):
+    class Plain(Scene):
         def construct(self) -> None:
-            self.add(Custom(fill_opacity=1.0))
-            self.wait()
+            self.add(Square(side_length=2.0, color="#FC6255", fill_opacity=1.0).shift((1.0, 0.0, 0.0)))
 
-    with pytest.raises(TypeError, match="cannot draw"):
-        planned_frames(WithCustom().prepare())
+    (scene_view,) = Plain().prepare().frame_at(0.0)
+    (scene_shape,) = scene_view.root.children
+    tree = RGroup(
+        children=[
+            RShape2D(
+                Transform(position=(1.0, 0.0, 0.0)),
+                points=scene_shape.points,
+                fill=Fill("#FC6255", opacity=1.0),
+                stroke=Stroke("#FC6255"),
+            )
+        ]
+    )
+    by_scene = render(lambda t: (scene_view,), [0.0])[0]
+    by_hand = render(lambda t: (ViewState(tree, scene_view.camera),), [0.0])[0]
+    assert np.array_equal(by_scene, by_hand)
 
 
 def test_clipped_casters_cast_the_shadow_of_what_their_masks_let_through() -> None:
-    (image,) = render(planned_frames(ClippedShadow().prepare()).frame_at, [0.5])
+    (image,) = render(ClippedShadow().prepare().frame_at, [0.5])
     image = image.astype(float)
     width, height = CONFIG.pixel_width, CONFIG.pixel_height
 

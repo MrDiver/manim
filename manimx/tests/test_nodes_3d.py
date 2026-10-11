@@ -68,12 +68,12 @@ def test_shape3d_snapshots_to_rshape3d_with_its_material() -> None:
 
     snapshot = shape.snapshot()
     assert isinstance(snapshot, RShape3D) and snapshot.uid == shape.uid
-    assert snapshot.mesh is shape.mesh.value and not snapshot.cast_shadows
+    assert snapshot.mesh == shape.mesh.value and not snapshot.cast_shadows
     material = snapshot.material
     assert material.base_color_linear == pytest.approx((1.0, 0.0, 0.0, 1.0))
     assert (material.metallic, material.roughness, material.normal_scale) == (0.75, 0.25, 0.5)
     assert material.emissive_linear == pytest.approx((0.0, 1.0, 0.0))
-    assert material.base_color_texture is texture  # constants come from the template
+    assert material.base_color_texture == texture  # constants come from the template
 
 
 def test_moving_keeps_mesh_and_material() -> None:
@@ -81,15 +81,15 @@ def test_moving_keeps_mesh_and_material() -> None:
     first = shape.snapshot()
     shape.shift(RIGHT).rotate(1.0).scale_by(2.0)
     moved = shape.snapshot()
-    assert moved.mesh is first.mesh and moved.material.roughness == first.material.roughness
+    assert moved.version("mesh") == first.version("mesh") and moved.material.roughness == first.material.roughness
     assert moved.transform.position == (1.0, 0.0, 0.0)
 
     shape.set_material(roughness=0.9)
     recolored = shape.snapshot()
-    assert recolored.mesh is first.mesh and recolored.material.roughness == 0.9
+    assert recolored.version("mesh") == first.version("mesh") and recolored.material.roughness == 0.9
 
     shape.set_mesh(sphere_mesh())
-    assert shape.snapshot().mesh is not first.mesh
+    assert shape.snapshot().version("mesh") != first.version("mesh")
     shape.set_mesh(shape.mesh.value)  # the same MeshData is no change
     with pytest.raises(TypeError, match="a mesh must be a MeshData"):
         shape.set_mesh("sphere")
@@ -169,8 +169,7 @@ def test_lights_snapshot_to_their_render_classes_with_their_parts() -> None:
     # Lights shine along local -z: the spot points down at its target.
     np.testing.assert_allclose(-spot_state.transform.matrix()[:3, 2], [0.0, 0.0, -1.0], atol=1e-12)
     np.testing.assert_allclose(-sun_state.transform.matrix()[:3, 2], [0.0, 0.0, -1.0], atol=1e-12)
-    with pytest.raises(NotImplementedError):
-        Light().snapshot()
+    assert Light().snapshot() is None  # a light of no kind draws nothing
 
 
 def test_lights_change_direction_and_keep_valid_cones() -> None:
@@ -230,7 +229,7 @@ def test_fade_animate_rotate_derive_and_follow_on_3d_nodes() -> None:
     assert end[lamp.uid].transform.position == (2.0, 0.0, 2.0)  # followed the ball
     assert end[sun.uid].intensity == pytest.approx(2.8)  # derived from the roughness
     mid = {child.uid: child for child in prepared.state_at(1.5).children}
-    assert mid[ball.uid].mesh is end[ball.uid].mesh  # the mesh never changed
+    assert mid[ball.uid].version("mesh") == end[ball.uid].version("mesh")  # the mesh never changed
 
 
 def test_simulation_moves_a_shape3d() -> None:
@@ -267,12 +266,8 @@ def test_a_faded_light_darkens_the_mesh() -> None:
     assert lit[18, 32, :3].mean() > 100 and dark[18, 32, :3].max() < lit[18, 32, :3].max() / 4
 
 
-def test_meshes_are_interleaved_once_while_shapes_move(monkeypatch: pytest.MonkeyPatch) -> None:
-    from manimx.renderer import core_callbacks
-
-    calls = []
-    original = core_callbacks._interleave
-    monkeypatch.setattr(core_callbacks, "_interleave", lambda mesh: calls.append(mesh) or original(mesh))
+def test_the_mesh_keeps_its_version_while_shapes_move_and_recolor() -> None:
+    """Renderers build a mesh's records once per version of it."""
     box = Box(name="box")
 
     def construct(scene):
@@ -280,15 +275,15 @@ def test_meshes_are_interleaved_once_while_shapes_move(monkeypatch: pytest.Monke
         scene.play(box.animate.shift(RIGHT).rotate(1.0).set_color("#FF0000"), run_time=1.0)
 
     prepared = prepare(construct)
-    config = RenderConfig(pixel_width=32, pixel_height=18)
-    for t in np.linspace(0.0, 1.0, 5):
-        render_image(prepared, t, config)
-    assert len(calls) == 1
+    states = [prepared.state_at(t).children[0] for t in np.linspace(0.0, 1.0, 5)]
+    assert len({state.version("mesh") for state in states}) == 1
+    assert len({state.version("material") for state in states}) == 5
+    assert prepared.state_at(1.0).children[0].version("material") == prepared.state_at(1.0).children[0].version("material")
 
 
 def test_mesh_data_is_shared_not_copied() -> None:
     mesh = box_mesh()
-    assert Shape3D(mesh).snapshot().mesh is mesh and isinstance(mesh, MeshData)
+    assert Shape3D(mesh).snapshot().mesh == mesh and isinstance(mesh, MeshData)
 
 
 # --- Particles ----------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Drivers: everything that turns a clock into ``state_at(t)`` queries and
+"""Drivers: everything that turns a clock into ``frame_at(t)`` queries and
 the results into output (section 10 of docs/animation_engine_design.md).
 
 For now the offline driver: render every frame of a scene, timeline or

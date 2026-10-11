@@ -18,8 +18,8 @@ from typing import Any
 import numpy as np
 
 from ..animation.nodes.node import Node
-from ..animation.plan import planned_frames
 from ..animation.scene import PreparedScene, Scene
+from ..animation.timing import Timeline
 from ..renderer.config import Frame, RenderConfig
 from ..renderer.effects import Effect
 from .core_pipeline import CoreFramePipeline
@@ -74,17 +74,16 @@ def render_image(
 def _frames(source: Any, config: RenderConfig) -> Callable[[float], Frame]:
     if isinstance(source, Node) or (isinstance(source, (list, tuple)) and all(isinstance(node, Node) for node in source)):
         nodes = [source] if isinstance(source, Node) else list(source)
-        planned = planned_frames(_still(nodes))
+        still = _still(nodes)
         # Nodes have no scene to bring a camera: use the config's.
-        return lambda t: tuple(dataclasses.replace(view, camera=config.camera) for view in planned.frame_at(t))
+        return lambda t: tuple(dataclasses.replace(view, camera=config.camera) for view in still.frame_at(t))
     if isinstance(source, type) and issubclass(source, Scene):
         source = source()
     if isinstance(source, Scene):
         source = source.prepare()
-    planned = planned_frames(source)
-    if planned is None:
+    if not isinstance(source, (PreparedScene, Timeline)):
         raise TypeError(f"cannot render {source!r}: give nodes, a Scene, a prepared scene or a timeline")
-    return planned.frame_at
+    return source.frame_at
 
 
 def _still(nodes: list[Node]) -> PreparedScene:

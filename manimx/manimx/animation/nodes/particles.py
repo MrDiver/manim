@@ -29,7 +29,7 @@ from typing import Any
 
 import numpy as np
 
-from ...robjects import MeshData, RNode, RParticles
+from ...robjects import MeshData
 from ..signals.kinds import ARRAY
 from ..signals.signal import RootSignal, Signal
 from .node import ABS, ChangeList, animatable
@@ -40,6 +40,8 @@ class Particles(Shape3D):
     """``count`` copies of ``mesh``: at the node's origin, unrotated, at
     full size, untinted, until set. The keyword arguments are those of
     :class:`Shape3D` and apply to all particles."""
+
+    render_kind = "particles"
 
     def __init__(self, count: int, mesh: MeshData | None = None, name: str | None = None, **style: Any) -> None:
         super().__init__(mesh, name, **style)
@@ -81,22 +83,9 @@ class Particles(Shape3D):
     def set_colors(self, colors: Any) -> ChangeList:
         return [(self.colors, ABS, self._rows(colors, 4))]
 
-    def _build_snapshot(self) -> RNode | None:
-        shape = super()._build_snapshot()
-        if shape is None:
-            return None
-        return RParticles(
-            uid=self.uid,
-            mesh=shape.mesh,
-            material=shape.material,
-            cast_shadows=shape.cast_shadows,
-            transform=shape.transform,
-            alpha=shape.alpha,
-            positions=self.positions.value,
-            rotations=self.rotations.value,
-            scales=self.scales.value,
-            colors=self.colors.value,
-        )
+    def render_fields(self) -> Iterator[tuple[str, Signal]]:
+        yield from super().render_fields()
+        yield from (("positions", self.positions), ("rotations", self.rotations), ("scales", self.scales), ("colors", self.colors))
 
 
 __all__ = ["Particles"]

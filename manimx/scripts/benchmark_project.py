@@ -27,14 +27,14 @@ import time
 from collections import defaultdict
 
 import numpy as np
-from manimx.animation import plan
+from manimx.animation.timing import Timeline
 from manimx.drivers.core_pipeline import CoreFramePipeline
 from manimx.drivers.stills import StillRenderer
 from manimx.project import Project
 
 # Stages that are timed.
 STAGES = [
-    (plan.PlannedTimeline, "frame_at", "frame_at (evaluate)"),
+    (Timeline, "frame_at", "frame_at (evaluate, snapshot)"),
     (CoreFramePipeline, "submit", "submit (pack, render, composite)"),
     (CoreFramePipeline, "flush", "flush"),
 ]
@@ -85,7 +85,7 @@ def main() -> None:
 
     project = Project.load(args.project)
     started = time.perf_counter()
-    timeline = plan.PlannedTimeline(project.build_timeline())
+    timeline = project.build_timeline()
     print(f"prepare: {time.perf_counter() - started:.2f} s")
 
     if args.save_reference or args.check_reference:

@@ -30,7 +30,7 @@ from typing import Any
 import numpy as np
 
 from ..animation import Group, Shape2D
-from ..renderer.core_callbacks import STROKE_WIDTH_SCALE
+from ..robjects.style import STROKE_WIDTH_SCALE
 
 UNITS_PER_INCH = 1.0
 """Scene units per inch: the size an SVG keeps when none is asked for."""

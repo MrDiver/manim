@@ -60,7 +60,6 @@ from urllib.parse import parse_qs, urlparse
 
 from PIL import Image
 
-from ..animation.plan import planned_frames
 from ..animation.timing import NEVER, Timeline
 from ..drivers.offline import RenderSettings
 from ..drivers.stills import StillRenderer
@@ -139,7 +138,7 @@ class PreviewServer:
     def _use(self, timeline: Timeline, settings: RenderSettings) -> None:
         self.timeline = timeline
         self.settings = settings
-        self._frame_at = planned_frames(timeline).frame_at
+        self._frame_at = timeline.frame_at
         self._effects = tuple(effect for effect in settings.effects if not isinstance(effect, MotionBlur))
 
     def _bump(self, error: str | None) -> None:

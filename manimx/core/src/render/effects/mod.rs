@@ -1,6 +1,6 @@
 //! The effects of the frame composer, each with its settings (from
 //! manimx/renderer/effects.py) and the GPU work it does. `MotionBlur` is
-//! not here: Python decides the sub-frames (their times and weights), and
+//! not here: the caller decides the sub-frames (their times and weights), and
 //! the composer averages them.
 //!
 //! | Module | What it does |

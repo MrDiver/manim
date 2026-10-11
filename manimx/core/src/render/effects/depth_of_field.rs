@@ -24,11 +24,11 @@
 //! per pixel by interleaved gradient noise (also from Jimenez 2014).
 
 use bytemuck::{Pod, Zeroable};
-use pyo3::prelude::*;
 
-use crate::packing::records::Frame;
 use crate::render::context::{Gpu, HDR_FORMAT};
+use crate::render::error::Result;
 use crate::render::fullscreen::{Blend, Fullscreen, FullscreenPass, TexturePool, UniformSlots};
+use crate::render::packing::records::Frame;
 use crate::render::profiler::GpuProfiler;
 
 /// `DepthOfFieldParams` (lens.wgsl).
@@ -97,7 +97,7 @@ impl DepthOfFieldPasses {
         lens: &DepthOfField,
         target: BlurTarget,
         profiler: &mut GpuProfiler,
-    ) -> PyResult<()> {
+    ) -> Result<()> {
         let frame_uniform = || {
             wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                 buffer: lens.frame_uniform,

@@ -19,7 +19,7 @@ overlaps them on three levels:
    own GPU device. This scales the Python part, which a single process
    cannot (the GIL, for the Python a scene runs per frame). It is
    correct only because evaluation is pure:
-   ``state_at(t)`` gives the same frame in every process (rule 4 of the
+   ``frame_at(t)`` gives the same frame in every process (rule 4 of the
    render contract). Consecutive frames per chunk keep each worker's
    renderer caches warm.
 
@@ -64,9 +64,9 @@ Progress = Callable[[int, int], None]
 class FrameSource:
     """Something to render: a function of time and how long it lasts."""
 
-    state_at: Callable[[float], Frame]
-    """What to render at a time: the views of a planned timeline or scene
-    (:func:`~manimx.animation.plan.planned_frames`)."""
+    frame_at: Callable[[float], Frame]
+    """What to render at a time: the views of a timeline or prepared scene
+    (``frame_at``)."""
     duration: float
     audio: Callable[[float, float, int], np.ndarray] | None = None
     """``audio(start, end, sample_rate)``: stereo float32 samples, if any."""
@@ -107,11 +107,10 @@ class RenderStats:
 
 def load_source(spec: Any) -> FrameSource:
     """A :class:`FrameSource` from ``"module:attr"``, a Scene class, a
-    factory, a prepared scene or a timeline: its frames come from the core
-    (:func:`~manimx.animation.plan.planned_frames`).
+    factory, a prepared scene or a timeline: its ``frame_at``.
     """
-    from ..animation.plan import planned_frames
-    from ..animation.scene import Scene
+    from ..animation.scene import PreparedScene, Scene
+    from ..animation.timing import Timeline
 
     target = spec
     if isinstance(spec, str):
@@ -121,15 +120,13 @@ def load_source(spec: Any) -> FrameSource:
         target = getattr(importlib.import_module(module), attr)
     if isinstance(target, type) and issubclass(target, Scene):
         target = target().prepare()
-    elif callable(target) and not hasattr(target, "state_at"):
+    elif callable(target) and not hasattr(target, "frame_at"):
         target = target()
     if isinstance(target, FrameSource):
         return target
-    planned = planned_frames(target)
-    if planned is None:
+    if not isinstance(target, (PreparedScene, Timeline)):
         raise TypeError(f"cannot render {target!r}: give a Scene, a prepared scene or a timeline")
-    audio = getattr(target, "audio", None)
-    return FrameSource(planned.frame_at, target.duration, audio if callable(audio) else None)
+    return FrameSource(target.frame_at, target.duration, target.audio)
 
 
 def _format(source: FrameSource, settings: RenderSettings, times: list[float]) -> FrameFormat:
@@ -252,7 +249,7 @@ def _render_here(source: FrameSource, sink: FrameSink, settings: RenderSettings,
         writer = _Writer(sink, len(times), progress, capacity=2 * settings.in_flight + 4)
         for index, t in enumerate(times):
             writer.raise_error()  # stop early if the sink failed
-            future = pipeline.submit(index, t, source.state_at)
+            future = pipeline.submit(index, t, source.frame_at)
             future.add_done_callback(lambda done, index=index: writer.put(index, done.result()))
         pipeline.flush()
         writer.finish()
@@ -362,7 +359,7 @@ def _worker_main(
 
         while (chunk := tasks.get()) is not None:
             for index in range(*chunk):
-                future = pipeline.submit(index, times[index], source.state_at)
+                future = pipeline.submit(index, times[index], source.frame_at)
                 future.add_done_callback(lambda result, index=index: deliver(index, result.result()))
         pipeline.flush()
         done.put(("done", worker))

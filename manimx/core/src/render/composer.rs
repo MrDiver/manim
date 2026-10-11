@@ -12,18 +12,18 @@
 //! output = encode to sRGB
 //! ```
 //!
-//! Which sub-frames and views there are is decided in Python (they come
-//! from the timeline); frame_renderer.rs runs the loops and calls the
+//! Which sub-frames and views there are is decided by the caller (in
+//! manimx, the timeline); frame_renderer.rs runs the loops and calls the
 //! steps here. The effects themselves are in effects/.
 
 use bytemuck::{Pod, Zeroable};
-use pyo3::prelude::*;
 
 use crate::render::context::{Gpu, COLOR_FORMAT, HDR_FORMAT};
 use crate::render::effects::bloom::BloomPasses;
 use crate::render::effects::depth_of_field::{BlurTarget, DepthOfField, DepthOfFieldPasses};
 use crate::render::effects::shader_effect::ShaderEffects;
 use crate::render::effects::Effect;
+use crate::render::error::Result;
 use crate::render::fullscreen::{Blend, Fullscreen, TexturePool, UniformSlots};
 use crate::render::profiler::GpuProfiler;
 
@@ -87,7 +87,7 @@ impl Composer {
         lit: &wgpu::Texture,
         frame_uniform: &wgpu::Buffer,
         profiler: &mut GpuProfiler,
-    ) -> PyResult<wgpu::Texture> {
+    ) -> Result<wgpu::Texture> {
         let mut lit = lit.clone();
         for effect in &self.effects {
             lit = match effect {
@@ -122,7 +122,7 @@ impl Composer {
         encoder: &mut wgpu::CommandEncoder,
         frame: &wgpu::Texture,
         frame_uniform: &wgpu::Buffer,
-    ) -> PyResult<wgpu::Texture> {
+    ) -> Result<wgpu::Texture> {
         let mut frame = frame.clone();
         for effect in &self.effects {
             if let Effect::Shader(effect) = effect {
@@ -156,7 +156,7 @@ impl Composer {
         background: [f32; 4],
         profiler: &mut GpuProfiler,
         depth_of_field: Option<DepthOfField>,
-    ) -> PyResult<()> {
+    ) -> Result<()> {
         let Some(lens) = depth_of_field else {
             return self.composite_layers(gpu, encoder, lit, vector, target, background, profiler);
         };
@@ -206,7 +206,7 @@ impl Composer {
         target: CompositeTarget,
         background: [f32; 4],
         profiler: &mut GpuProfiler,
-    ) -> PyResult<()> {
+    ) -> Result<()> {
         let params = CompositeParams {
             background: if target.background {
                 background
@@ -253,7 +253,7 @@ impl Composer {
         weight: f32,
         clear: bool,
         profiler: &mut GpuProfiler,
-    ) -> PyResult<()> {
+    ) -> Result<()> {
         let params = CompositeParams {
             background: [0.0; 4],
             tone_map: self.tone_map,
@@ -288,7 +288,7 @@ impl Composer {
         frame: &wgpu::Texture,
         output: &wgpu::TextureView,
         profiler: &mut GpuProfiler,
-    ) -> PyResult<()> {
+    ) -> Result<()> {
         let frame_view = frame.create_view(&Default::default());
         let resources = [wgpu::BindingResource::TextureView(&frame_view)];
         self.fullscreen.run(

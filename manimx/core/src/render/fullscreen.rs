@@ -8,9 +8,8 @@
 
 use std::collections::HashMap;
 
-use pyo3::prelude::*;
-
 use crate::render::context::Gpu;
+use crate::render::error::Result;
 use crate::render::profiler::GpuProfiler;
 
 const UNIFORM_STRIDE: u64 = 256; // minimum uniform buffer offset alignment
@@ -147,7 +146,7 @@ impl Fullscreen {
         clear: bool,
         profiler: &mut GpuProfiler,
         timing: &'static str,
-    ) -> PyResult<()> {
+    ) -> Result<()> {
         let pass = FullscreenPass {
             shader,
             entry_point,
@@ -172,7 +171,7 @@ impl Fullscreen {
         clear: bool,
         profiler: &mut GpuProfiler,
         timing: &'static str,
-    ) -> PyResult<()> {
+    ) -> Result<()> {
         let FullscreenPass {
             shader,
             entry_point,

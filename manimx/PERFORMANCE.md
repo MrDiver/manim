@@ -672,6 +672,32 @@ forced on, power profile `balanced`, fps:
 | Measures | 166.5 | 201.2 |
 | Lines | 148.4 | 184.5 |
 
+### W. The render object tree as the interface
+
+The renderer no longer reads the evaluator's slots: the evaluator builds
+the render object tree in Rust (`SceneGraph::snapshot`, every value kept
+while its slots keep their versions), and the renderer packs the tree
+(CORE.md, "The interface, corrected"). The Python callbacks for meshes,
+materials, light colors, the default light and texture mips are Rust
+now. Power profile `balanced`, against the commit before on the same
+machine:
+
+| | fps (blur 8) | fps (no blur) | frame_at |
+|---|---|---|---|
+| before (packing from slots) | 121.8 | 606.9 | 1.43 ms |
+| after (packing a tree) | 130.2 | 628.5 | 1.49 ms |
+
+light-show, seconds 10 to 12: 17.7 to 15.8 ms per frame. Building the
+tree costs about 0.01 ms per sub-frame over evaluating alone; the gain
+comes from the callbacks into Python that are gone.
+
+The read-back first measured 453 fps without blur: the image now goes
+to Python as a numpy array that takes over a Rust `Vec`, and copying the
+mapped rows into a fresh `Vec` faulted its pages in one by one between
+the slow reads from mapped memory (1.6 ms per 1080p frame). Zeroing the
+`Vec` first (`vec![0; n]`), as `PyBytes::new_with` did before, takes the
+copy back to 1.1 ms.
+
 ## Where the time goes now
 
 Benchmark project with `PortalOrbit`, after steps L to O: 48.6 to about

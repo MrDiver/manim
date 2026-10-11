@@ -1,11 +1,14 @@
 """Scene nodes: the authoring-side objects whose properties are signals.
 
 A :class:`Node` is what scene code creates and animates. Every animatable
-property is a signal, and :meth:`Node.snapshot` turns the current signal
-values into render state (an :class:`~manimx.robjects.RNode`) for the
-renderer. Snapshots reuse the node's ``uid`` and carry version tokens from
-the signals, so renderer caches survive any number of snapshots (section
-9 of the design doc).
+property is a signal. A node says once how it is drawn: its
+:attr:`~Node.render_kind` (which render object it becomes) and
+:meth:`~Node.render_fields` (which signal feeds which field). From that
+the core builds the render object (an :class:`~manimx.robjects.RNode`) of
+any time (manimx/animation/plan.py); :meth:`Node.snapshot` builds the one
+of the current values. Snapshots carry the node's ``uid``, and their
+values keep their versions while the signals do not change, so renderer
+caches survive any number of snapshots.
 
 The scene tree is parallel to the render tree: every node class
 snapshots to exactly one render class. Only :class:`Group` and
@@ -35,7 +38,7 @@ from typing import Any
 import numpy as np
 import quaternion
 
-from ...robjects import RNode, Transform, new_uid
+from ...robjects import RNode, new_uid
 from ...robjects.transform import quaternion_from_axis_angle
 from ...utils.color import ManimColor, ParsableManimColor
 from .. import authoring
@@ -85,10 +88,13 @@ class Node:
     docs).
     """
 
-    drawn: bool = True
-    """False for nodes that never draw anything (a Camera, a Value): they
-    snapshot to None, and the core's plan leaves them out of the scene
-    graph."""
+    render_kind: str | None = None
+    """Which render object the node becomes: ``"group"``,
+    ``"clipping_group"``, ``"shape2d"``, ``"curve3d"``, ``"shape3d"``,
+    ``"particles"``, ``"directional_light"``, ``"point_light"`` or
+    ``"spot_light"`` (core/src/evaluation/scene_graph.rs builds them).
+    None for nodes that are never drawn (a Camera, a Value): they snapshot
+    to None."""
 
     def __init__(self, name: str | None = None, *, tags: Iterable[str] = ()) -> None:
         self.uid = new_uid()
@@ -132,30 +138,28 @@ class Node:
 
     # -- render state -------------------------------------------------------
 
+    def render_fields(self) -> Iterator[tuple[str, Signal]]:
+        """``(field, signal)`` of everything the render object of this node
+        is made of: ``alpha`` and ``present`` here, the transform parts
+        from the mixins, the rest from each node class."""
+        yield "alpha", self.alpha
+        yield "present", self.present
+
+    def render_children(self) -> list[Node]:
+        """The nodes whose render objects are this one's children."""
+        return []
+
     def snapshot(self) -> RNode | None:
-        """Render state for the current signal values (None if invisible).
+        """The render object of this node and everything below it for the
+        current signal values, built by the core like every frame's; None
+        for a node that is not drawn (never drawn, or scaled to nothing).
 
-        A snapshot depends on this node's signals alone: ``alpha`` becomes
-        its ``RNode.alpha``; the alphas of the enclosing groups are
-        multiplied in by whoever reads the tree.
+        ``alpha`` becomes its ``RNode.alpha``; the alphas of the
+        enclosing groups are multiplied in by whoever reads the tree.
         """
-        return self._build_snapshot()
+        from ..plan import snapshot
 
-    def _build_snapshot(self) -> RNode | None:
-        """Build the render state (see :meth:`snapshot`)."""
-        raise NotImplementedError
-
-    def _hidden(self) -> bool:
-        """Nothing to draw (e.g. scaled to nothing)."""
-        return False
-
-    def _transform_parts(self) -> dict[str, Any]:
-        """Keyword arguments of the snapshot's :class:`Transform`; each
-        mixin adds its part."""
-        return {}
-
-    def _transform(self) -> Transform:
-        return Transform(**self._transform_parts())
+        return snapshot(self)
 
 
 class PositionMixin:
@@ -172,8 +176,10 @@ class PositionMixin:
         yield from super().signals()  # type: ignore[misc]
         yield from self.position.axes
 
-    def _transform_parts(self) -> dict[str, Any]:
-        return {**super()._transform_parts(), "position": self.position.value}  # type: ignore[misc]
+    def render_fields(self) -> Iterator[tuple[str, Signal]]:
+        yield from super().render_fields()  # type: ignore[misc]
+        yield from ((f"position.{name}", axis) for name, axis in zip("xyz", self.position.axes, strict=True))
+
 
     def get_center(self) -> np.ndarray:
         """Position after everything recorded so far (while composing a scene)."""
@@ -248,8 +254,10 @@ class RotationMixin:
         yield from super().signals()  # type: ignore[misc]
         yield self.rotation
 
-    def _transform_parts(self) -> dict[str, Any]:
-        return {**super()._transform_parts(), "rotation": self.rotation.value}  # type: ignore[misc]
+    def render_fields(self) -> Iterator[tuple[str, Signal]]:
+        yield from super().render_fields()  # type: ignore[misc]
+        yield "rotation", self.rotation
+
 
     @animatable
     def rotate(self, angle: float, axis: Sequence[float] = (0.0, 0.0, 1.0)) -> ChangeList:
@@ -273,11 +281,10 @@ class ScalableMixin:
         yield from super().signals()  # type: ignore[misc]
         yield from self.scale.axes
 
-    def _transform_parts(self) -> dict[str, Any]:
-        return {**super()._transform_parts(), "scale": self.scale.value}  # type: ignore[misc]
+    def render_fields(self) -> Iterator[tuple[str, Signal]]:
+        yield from super().render_fields()  # type: ignore[misc]
+        yield from ((f"scale.{name}", axis) for name, axis in zip("xyz", self.scale.axes, strict=True))
 
-    def _hidden(self) -> bool:
-        return super()._hidden() or any(abs(axis.value) < 1e-9 for axis in self.scale.axes)  # type: ignore[misc]
 
     @animatable
     def scale_by(self, factor: float | Sequence[float]) -> ChangeList:

@@ -24,9 +24,9 @@ from dataclasses import dataclass
 import numpy as np
 from manimx.animation import Particles, PointLight, Scene, Simulation
 from manimx.examples.manim_logo import LOGO_BLUE, LOGO_GREEN, LOGO_RED
-from manimx.robjects.material import linear_rgb
 from manimx.userland import Box, FadeIn
 from manimx.userland.geometry import sphere_mesh
+from manimx.utils.color import linear_rgb
 
 from .lights import Aim, Fade, Flash, Recolor
 from .music import FINALE_BEATS, FINALE_LENGTH, FINALE_X, boom, finale_track, whoosh

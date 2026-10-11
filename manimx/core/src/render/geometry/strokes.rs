@@ -1,25 +1,16 @@
 //! A path's stroke records from its points and stroke style: the curve
 //! records linked inside each subpath and the per-point position, width
-//! and color, so paths whose points change every frame (morphs, plots,
-//! anything derived) do not call Python for them. `stroke_records` in
-//! manimx/renderer/core_callbacks.py builds them for styles that are not
-//! plain numbers; every value here is computed as numpy computes it there,
-//! so both give the same bytes (tests/test_core_strokes.py).
+//! and color.
 //!
-//! The style comes as signal values: one color or a list (COLORS, rows of
-//! RGB), opacities and widths (SCALARS), joints (one per curve list,
-//! spread over the curves) and a cap. Lists are spread over the points
-//! like `resample` does: linear interpolation of the list stretched over
-//! them.
+//! The style is one color or a list (rows of RGB), opacities and widths,
+//! joints (one, or a list spread over the curves) and a cap. Lists are
+//! spread over the points like `resample` does: linear interpolation of
+//! the list stretched over them, as numpy's `interp` computes it.
 
-use crate::packing::records::{StrokeCurve, NO_NEIGHBOR, STROKE_POINT_SIZE};
-
-/// `POINTS_PER_CURVE`: a cubic Bezier's four control points.
-const POINTS_PER_CURVE: usize = 4;
-/// `TOLERANCE_FOR_POINT_EQUALITY` (rbezier_path.py).
-const TOLERANCE: f64 = 1e-6;
-/// `STROKE_WIDTH_SCALE`: world units per unit of stroke width.
-const WIDTH_SCALE: f64 = 0.01;
+use crate::render::packing::records::{StrokeCurve, NO_NEIGHBOR, STROKE_POINT_SIZE};
+use crate::robjects::values::{
+    POINTS_PER_CURVE, STROKE_WIDTH_SCALE as WIDTH_SCALE, TOLERANCE_FOR_POINT_EQUALITY as TOLERANCE,
+};
 
 /// A stroke's style, lists as given (a single value is a list of one).
 pub struct StrokeStyle<'a> {
@@ -193,7 +184,7 @@ fn spread_joints(joints: &[u32], count: usize) -> Vec<u32> {
 
 /// `resample`: `values` spread over `count` slots (one value repeated,
 /// as many returned as they are, else linear interpolation).
-fn resample(values: &[f64], count: usize) -> Vec<f64> {
+pub fn resample(values: &[f64], count: usize) -> Vec<f64> {
     if values.len() == count {
         return values.to_vec();
     }

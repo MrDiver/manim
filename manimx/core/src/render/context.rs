@@ -1,15 +1,15 @@
 //! The GPU device and shader loading (`#include "file.wgsl"` lines are
 //! expanded, each file at most once per shader).
 //!
-//! The WGSL files stay in the Python package (renderer/shaders);
-//! the core reads them from there, so there is one copy of every shader.
+//! The WGSL files are read from a folder given when the device is made
+//! (manimx passes its package's renderer/shaders), so there is one copy
+//! of every shader.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use pyo3::exceptions::PyRuntimeError;
-use pyo3::PyResult;
+use crate::render::error::{Error, Result};
 
 pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -89,8 +89,8 @@ static SHARED: Mutex<Option<Arc<Gpu>>> = Mutex::new(None);
 impl Gpu {
     /// The device every renderer of this process uses: drivers refuse more
     /// than a few devices at once, and pipelines and textures are cheaper
-    /// shared. Like `RenderService.shared()` on the Python side.
-    pub fn shared(shader_folder: PathBuf) -> PyResult<Arc<Gpu>> {
+    /// shared.
+    pub fn shared(shader_folder: PathBuf) -> Result<Arc<Gpu>> {
         let mut shared = SHARED.lock().expect("not poisoned");
         if let Some(gpu) = shared.as_ref() {
             return Ok(gpu.clone());
@@ -103,20 +103,20 @@ impl Gpu {
     /// A high-performance device with `indirect-first-instance` (draws
     /// select their instance records with it), and timestamp queries when
     /// the adapter has them.
-    pub fn create(shader_folder: PathBuf) -> PyResult<Gpu> {
+    pub fn create(shader_folder: PathBuf) -> Result<Gpu> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             ..Default::default()
         }))
-        .map_err(|error| PyRuntimeError::new_err(format!("no GPU adapter: {error}")))?;
+        .map_err(|error| Error::Gpu(format!("no GPU adapter: {error}")))?;
         // first_instance in indirect draws selects the per-draw instance
         // records; shadow maps have a stencil (SHADOW_FORMAT).
         let required =
             wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::DEPTH32FLOAT_STENCIL8;
         if !adapter.features().contains(required) {
-            return Err(PyRuntimeError::new_err(
-                "GPU adapter lacks indirect-first-instance or depth32float-stencil8",
+            return Err(Error::Gpu(
+                "GPU adapter lacks indirect-first-instance or depth32float-stencil8".into(),
             ));
         }
         let timestamps = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
@@ -131,7 +131,7 @@ impl Gpu {
             required_limits: adapter.limits(),
             ..Default::default()
         }))
-        .map_err(|error| PyRuntimeError::new_err(format!("no GPU device: {error}")))?;
+        .map_err(|error| Error::Gpu(format!("no GPU device: {error}")))?;
         Ok(Gpu {
             device,
             queue,
@@ -146,7 +146,7 @@ impl Gpu {
         &self,
         filename: &str,
         replacements: &[(&str, &str)],
-    ) -> PyResult<wgpu::ShaderModule> {
+    ) -> Result<wgpu::ShaderModule> {
         let mut code = self.load_wgsl(filename, &mut HashSet::new())?;
         for (old, new) in replacements {
             code = code.replace(old, new);
@@ -160,12 +160,12 @@ impl Gpu {
         &self,
         filename: &str,
         replacements: &[(&str, &str)],
-    ) -> PyResult<wgpu::ShaderModule> {
+    ) -> Result<wgpu::ShaderModule> {
         let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let module = self.shader(filename, replacements)?;
         match pollster::block_on(scope.pop()) {
             None => Ok(module),
-            Some(error) => Err(PyRuntimeError::new_err(format!("{filename}: {error}"))),
+            Some(error) => Err(Error::Shader(format!("{filename}: {error}"))),
         }
     }
 
@@ -179,17 +179,16 @@ impl Gpu {
 
     /// A file's source with its `#include "file.wgsl"` lines
     /// expanded, each file at most once.
-    fn load_wgsl(&self, filename: &str, included: &mut HashSet<String>) -> PyResult<String> {
+    fn load_wgsl(&self, filename: &str, included: &mut HashSet<String>) -> Result<String> {
         included.insert(filename.to_string());
         let path = self.shader_folder.join(filename);
-        let code = std::fs::read_to_string(&path).map_err(|error| {
-            PyRuntimeError::new_err(format!("cannot read {}: {error}", path.display()))
-        })?;
+        let code = std::fs::read_to_string(&path)
+            .map_err(|error| Error::Gpu(format!("cannot read {}: {error}", path.display())))?;
         self.expand_includes(&code, included)
     }
 
     /// `expand_includes` for WGSL given as a string.
-    pub fn expand_includes(&self, code: &str, included: &mut HashSet<String>) -> PyResult<String> {
+    pub fn expand_includes(&self, code: &str, included: &mut HashSet<String>) -> Result<String> {
         let mut out = String::with_capacity(code.len());
         for line in code.split_inclusive('\n') {
             let trimmed = line.trim_end();

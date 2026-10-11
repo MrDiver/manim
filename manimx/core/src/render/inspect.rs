@@ -8,10 +8,8 @@
 //! multisampled one, `layer` of an array) unchanged, and the image is
 //! copied out. Turning values into colors is left to the caller.
 
-use pyo3::exceptions::PyRuntimeError;
-use pyo3::PyResult;
-
 use crate::render::context::Gpu;
+use crate::render::error::{Error, Result};
 
 /// How a texture is read in WGSL.
 #[derive(Clone, Copy)]
@@ -78,7 +76,7 @@ pub fn read(
     kind: TextureKind,
     size: (u32, u32),
     layer: u32,
-) -> PyResult<Vec<f32>> {
+) -> Result<Vec<f32>> {
     let device = &gpu.device;
     let (texture_type, load) = kind.wgsl();
     let code = SHADER
@@ -180,9 +178,9 @@ pub fn read(
     let slice = buffer.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
     let _ = device.poll(wgpu::PollType::wait_indefinitely());
-    let data = slice.get_mapped_range().map_err(|error| {
-        PyRuntimeError::new_err(format!("reading the texture back failed: {error}"))
-    })?;
+    let data = slice
+        .get_mapped_range()
+        .map_err(|error| Error::Gpu(format!("reading the texture back failed: {error}")))?;
     let mut texels = Vec::with_capacity((4 * size.0 * size.1) as usize);
     for row in data.chunks(row_bytes as usize) {
         texels.extend_from_slice(bytemuck::cast_slice(&row[..(16 * size.0) as usize]));

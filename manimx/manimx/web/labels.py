@@ -20,8 +20,7 @@ import numpy as np
 
 from ..animation import Curve3D, Group, Node, Shape2D
 from ..animation.timing import Timeline
-from ..robjects import RNode
-from ..robjects.rbezier_path import RBezierPath
+from ..robjects import RBezierPath, RNode
 
 
 def index_labels(timeline: Timeline, time: float, aspect_ratio: float) -> list[dict[str, Any]]:

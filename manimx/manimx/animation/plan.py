@@ -1,7 +1,7 @@
 """Scene plans: a prepared scene as data, evaluated by the core.
 
-    plan = ScenePlan(prepared)        # once, after Scene.prepare()
-    plan.evaluate(2.5)                # any time, any order
+    plan = ScenePlan(prepared)        # once (prepared.plan makes it)
+    plan.state_at(2.5)                # the render object tree at 2.5
     plan.value(square.position.x)     # what the signal has at 2.5
 
 A :class:`ScenePlan` turns a :class:`~.scene.PreparedScene` into the
@@ -19,6 +19,10 @@ tables of the core's evaluator (``manimx._core.Evaluator``, see CORE.md):
   ``smooth``, else called back.
 * **derived signals:** offsets of :meth:`~.node.PositionMixin.follow` are
   data; every other function is called back with the input values.
+* **scene graph:** every drawn node with its ``render_kind``, the slots of
+  its ``render_fields`` and its ``render_children``. From the values at
+  a time the core builds the render object tree (``manimx.robjects``),
+  the one interface between a scene and whatever renders it.
 
 Evaluating sets the evaluator's slots, not the Python signals: the
 :class:`~.scene.PreparedScene` keeps its own state, and both can be
@@ -27,21 +31,14 @@ compared value by value (tests/test_plan.py).
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from .. import _core
 from ..renderer.config import ViewState
-from ..robjects.planned_frame import PlannedFrame
+from ..robjects import RGroup, RNode
 from .nodes.camera_view import camera_views, view_cameras
-from .nodes.clipping_group import ClippingGroup
-from .nodes.curve3d import Curve3D
-from .nodes.group import Group
-from .nodes.light import DirectionalLight, PointLight, SpotLight
-from .nodes.node import Node, Offset, PositionMixin, RotationMixin, ScalableMixin
-from .nodes.particles import Particles
-from .nodes.shape2d import Shape2D
-from .nodes.shape3d import Shape3D
+from .nodes.node import Node, Offset
 from .scene import PreparedScene
 from .signals.contributions import (
     Between,
@@ -106,11 +103,8 @@ class ScenePlan:
         for signal in self._signals:
             if isinstance(signal, DerivedSignal):
                 self.evaluator.add_derived(self.slot(signal), [self.slot(i) for i in signal.inputs], _derivation(signal))
-        self.graph = self._scene_graph()
+        self.graph = scene_graph(scene.roots, self.slot, lambda root: self.slot(root.present))
         """The core's scene graph."""
-        self._render_slots = _core.Slots(sorted({self._slots[s.id] for root in scene.roots for node in root.family() for s in node.signals()}))
-        self._shader_slots = sorted({self.slot(node.surface_shader) for root in scene.roots for node in root.family() if isinstance(node, Shape3D)})
-        """Slots of every surface shader: one in use makes a frame depend on time."""
 
     @property
     def signals(self) -> list[Signal]:
@@ -134,47 +128,22 @@ class ScenePlan:
         """Increases exactly when the value of ``signal`` changes."""
         return self.evaluator.version(self.slot(signal))
 
-    def frame_at(self, t: float, global_time: float | None = None) -> ViewState:
-        """The view at compiled time ``t``: a :class:`PlannedFrame` and the
-        scene's camera (what ``PreparedScene.frame_at`` returns as a tree).
+    def state_at(self, t: float, global_time: float | None = None, uid: int | None = None) -> RGroup:
+        """The render object tree at compiled time ``t``: an RGroup (with
+        uid ``uid``, by default the scene's) holding the present roots in
+        the order they were added.
         """
         self.evaluate(t, global_time)
-        state = self.evaluator.state()
-        value = lambda signal: state.value(self.slot(signal))  # noqa: E731
-        return ViewState(
-            PlannedFrame(self.graph, state, state.key(self._render_slots), any(state.value(slot) is not None for slot in self._shader_slots)),
-            self.scene.camera.render_camera(value),
-            camera_views(self.scene.roots, value),
-        )
+        return self.graph.snapshot(self.evaluator.state(), self.scene.uid if uid is None else uid)
 
-    def _scene_graph(self) -> Any:
-        nodes: list[Node] = []
-        index: dict[int, int] = {}  # node uid -> position in nodes
-        # Nodes that are never drawn (cameras, values) can be roots too,
-        # when animated; their signals reach the plan as inputs.
-        drawn_roots = [root for root in self.scene.roots if root.drawn]
-        for root in drawn_roots:
-            for node in root.family():
-                if node.uid not in index:
-                    index[node.uid] = len(nodes)
-                    nodes.append(node)
-        described = []
-        for node in nodes:
-            kind = _node_kind(node)
-            if kind is None:
-                raise TypeError(
-                    f"the renderer cannot draw {node!r}: {type(node).__name__} overrides how its class is drawn "
-                    "(_build_snapshot or _render_fields); build it from the classes the renderer draws instead"
-                )
-            children: list[Node] = []
-            if isinstance(node, Group):
-                children = node.children
-            elif isinstance(node, ClippingGroup):
-                children = [node.mask, node.content]
-            fields = {name: self.slot(signal) for name, signal in _node_fields(node)}
-            described.append((kind, node.uid, fields, [index[child.uid] for child in children]))
-        roots = [(index[root.uid], self.slot(root.present)) for root in drawn_roots]
-        return _core.SceneGraph(described, roots)
+    def frame_at(self, t: float, global_time: float | None = None, uid: int | None = None) -> ViewState:
+        """The view at compiled time ``t``: :meth:`state_at` seen through
+        the scene's camera, with the scene's camera views.
+        """
+        root = self.state_at(t, global_time, uid)
+        evaluator = self.evaluator
+        value = lambda signal: evaluator.value(self.slot(signal))  # noqa: E731
+        return ViewState(root, self.scene.camera.render_camera(value), camera_views(self.scene.roots, value))
 
     def _add_signal(self, signal: Signal) -> None:
         if signal.id in self._slots:
@@ -186,117 +155,57 @@ class ScenePlan:
         self._signals.append(signal)
 
 
-class PlannedTimeline:
-    """A :class:`~.timing.Timeline` whose frames come from the core.
-
-    ``frame_at(t)`` returns the same views as ``Timeline.frame_at(t)``,
-    each with a :class:`PlannedFrame` instead of a tree. Everything else
-    (duration, audio, events) is the timeline's.
+def scene_graph(roots: Sequence[Node], slot: Callable[[Signal], int], present: Callable[[Node], int | None]) -> Any:
+    """The core's ``SceneGraph`` of the drawn nodes under ``roots``: each
+    node's ``render_kind``, uid, the slot (``slot(signal)``) of each of
+    its ``render_fields`` and its drawn ``render_children``; each root with
+    the slot of the signal that says whether it is shown (None: always).
+    Nodes that are never drawn (cameras, values) are left out.
     """
+    nodes: list[Node] = []
+    index: dict[int, int] = {}  # node uid -> position in nodes
 
-    def __init__(self, timeline: Any) -> None:
-        self.timeline = timeline
-        self._plans: dict[int, ScenePlan] = {}  # by PreparedScene.uid
+    def add(node: Node) -> None:
+        if node.uid in index:
+            return
+        index[node.uid] = len(nodes)
+        nodes.append(node)
+        for child in node.render_children():
+            if child.render_kind is not None:
+                add(child)
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self.timeline, name)
-
-    def plan(self, scene: PreparedScene) -> ScenePlan:
-        plan = self._plans.get(scene.uid)
-        if plan is None:
-            plan = self._plans[scene.uid] = ScenePlan(scene)
-        return plan
-
-    def frame_at(self, t: float) -> tuple[ViewState, ...]:
-        """Like ``Timeline.frame_at``: one view per active clip, in layer order."""
-        timeline = self.timeline
-        timeline._ensure_resolved()
-        views = []
-        for clip in sorted(timeline.clips, key=lambda clip: clip.layer):  # stable
-            compiled = clip.compiled_time(t)
-            if compiled is None:
-                continue
-            views.append(self.plan(clip.scene).frame_at(compiled, global_time=t))
-        return tuple(views)
+    drawn_roots = [root for root in roots if root.render_kind is not None]
+    for root in drawn_roots:
+        add(root)
+    described = []
+    for node in nodes:
+        children = node.render_children()
+        if node.render_kind == "clipping_group" and any(child.render_kind is None for child in children):
+            raise TypeError(f"{node!r}: the mask and the content of a ClippingGroup must be nodes that are drawn")
+        fields = {name: slot(signal) for name, signal in node.render_fields()}
+        described.append((node.render_kind, node.uid, fields, [index[child.uid] for child in children if child.uid in index]))
+    return _core.SceneGraph(described, [(index[root.uid], present(root)) for root in drawn_roots])
 
 
-_NODE_KINDS: tuple[tuple[type, str, str], ...] = (
-    (Group, "group", "_build_snapshot"),
-    (ClippingGroup, "clipping_group", "_build_snapshot"),
-    (Particles, "particles", "_build_snapshot"),
-    (Shape3D, "shape3d", "_build_snapshot"),
-    (Shape2D, "shape2d", "_build_snapshot"),
-    (Curve3D, "curve3d", "_build_snapshot"),
-    (DirectionalLight, "directional_light", "_render_fields"),
-    (PointLight, "point_light", "_render_fields"),
-    (SpotLight, "spot_light", "_render_fields"),
-)
-"""Node classes the core draws: a subclass counts only while it keeps the
-method that turns the class into render state."""
+def snapshot(node: Node) -> RNode | None:
+    """``node.snapshot()``: the render object of ``node`` (and everything
+    below it) for the current values of its signals, built by the core
+    like every frame's; None if it is not drawn."""
+    if node.render_kind is None:
+        return None
+    signals: list[Signal] = []
+    slots: dict[int, int] = {}
 
-_FIELDS: dict[str, tuple[str, ...]] = {
-    "group": (),
-    "clipping_group": ("one_sided",),
-    "shape2d": ("points", "fill_color", "fill_opacity", "stroke_color", "stroke_opacity", "stroke_width", "stroke_joint", "stroke_cap", "cast_shadows"),
-    "curve3d": ("points", "stroke_color", "stroke_opacity", "stroke_width", "stroke_joint", "stroke_cap", "cast_shadows"),
-    "shape3d": (
-        "mesh", "base_color", "opacity", "metallic", "roughness", "emissive", "emissive_strength", "normal_scale",
-        "occlusion_strength", "base_color_texture", "metallic_roughness_texture", "normal_texture",
-        "occlusion_texture", "emissive_texture", "surface_shader", "cast_shadows",
-    ),  # fmt: skip
-    "directional_light": ("color", "intensity", "size", "cast_shadows"),
-    "point_light": ("color", "intensity", "size", "cast_shadows", "range"),
-    "spot_light": ("color", "intensity", "size", "cast_shadows", "range", "inner_cone_angle", "outer_cone_angle"),
-}
-_FIELDS["particles"] = (*_FIELDS["shape3d"], "positions", "rotations", "scales", "colors")
+    def slot(signal: Signal) -> int:
+        if signal.id not in slots:
+            slots[signal.id] = len(signals)
+            signals.append(signal)
+        return slots[signal.id]
 
-
-def _node_kind(node: Node) -> str | None:
-    for cls, kind, method in _NODE_KINDS:
-        if isinstance(node, cls):
-            return kind if getattr(type(node), method) is getattr(cls, method) else None
-    return None
-
-
-def _node_fields(node: Node) -> Iterator[tuple[str, Signal]]:
-    """``(field name, signal)`` of everything the core reads from ``node``."""
-    yield "alpha", node.alpha
-    yield "present", node.present
-    if isinstance(node, PositionMixin):
-        yield from ((f"position.{name}", axis) for name, axis in zip("xyz", node.position.axes, strict=True))
-    if isinstance(node, RotationMixin):
-        yield "rotation", node.rotation
-    if isinstance(node, ScalableMixin):
-        yield from ((f"scale.{name}", axis) for name, axis in zip("xyz", node.scale.axes, strict=True))
-    for name in _FIELDS[_node_kind(node) or "group"]:
-        # A path draws the part of its points from draw_start to draw_end.
-        yield name, getattr(node, "drawn_points" if name == "points" else name)
-
-
-def planned_frames(source: Any) -> PlannedTimeline | PlannedScene | None:
-    """The frames of a timeline or prepared scene through the core (an
-    object with ``frame_at``); None for anything else. Raises TypeError
-    for a scene with a node the core cannot draw.
-    """
-    from .timing import Timeline
-
-    if isinstance(source, Timeline):
-        return PlannedTimeline(source)
-    if isinstance(source, PreparedScene):
-        return PlannedScene(ScenePlan(source))
-    return None
-
-
-class PlannedScene:
-    """A prepared scene's frames from the core, shaped like
-    ``PreparedScene.frame_at`` (one view).
-    """
-
-    def __init__(self, plan: ScenePlan) -> None:
-        self.plan = plan
-
-    def frame_at(self, t: float) -> tuple[ViewState, ...]:
-        return (self.plan.frame_at(t),)
+    graph = scene_graph([node], slot, lambda root: None)
+    state = _core.FrameState([_kind_code(signal.kind) for signal in signals], [signal.value for signal in signals])
+    children = graph.snapshot(state, 0).children
+    return children[0] if children else None
 
 
 def _readable_signals(scene: PreparedScene) -> list[Signal]:
@@ -367,4 +276,4 @@ def _derivation(signal: DerivedSignal) -> tuple:
     return ("python", function)
 
 
-__all__ = ["PlannedScene", "PlannedTimeline", "ScenePlan", "planned_frames"]
+__all__ = ["ScenePlan", "scene_graph", "snapshot"]

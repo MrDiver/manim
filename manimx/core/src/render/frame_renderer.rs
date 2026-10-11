@@ -1,38 +1,69 @@
-//! `FrameRenderer`: the core's whole render chain behind one Python class,
-//! for frames of the core (PlannedFrames), driven by `CoreFramePipeline`
-//! (manimx/drivers/core_pipeline.py).
+//! `FrameRenderer`: the whole render chain for frames of render object
+//! trees. Python drives it through python/frame_renderer.rs.
 //!
-//! Per frame, Python hands over the sub-frames (time weight and views, each
-//! view a scene graph, its frame state and the camera's Frame record);
-//! the renderer packs, renders, composites and finalizes them, then copies
-//! the output into a staging buffer that is mapped while the next frames
-//! are prepared. Up to `in_flight` frames are on the GPU at once; finished
-//! frames come back in submission order.
+//! A frame is a list of sub-frames (time weight and views; motion blur
+//! averages several), each view a render object tree and its
+//! `ViewSettings`. The renderer packs, renders, composites and finalizes
+//! them, then copies the output into a staging buffer that is mapped
+//! while the next frames are prepared. Up to `in_flight` frames are on
+//! the GPU at once; finished frames come back in submission order.
+//!
+//! A frame that shows exactly what the frame before showed is not
+//! rendered: equal trees (`RNode::fingerprint`) seen with equal settings
+//! give equal pictures.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
-use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
-
-use crate::evaluation::evaluator::FrameState;
-use crate::packing::packer::{parse_settings, Packer, Packet};
-use crate::packing::records::Frame;
-use crate::packing::scene_graph::SceneGraph;
-use crate::packing::vectors::VectorDraws;
 use crate::render::composer::{Composer, CompositeTarget};
 use crate::render::context::{Gpu, COLOR_FORMAT, HDR_FORMAT};
 use crate::render::effects::depth_of_field::DepthOfField;
-use crate::render::effects::{Bloom, Effect, ShaderEffect};
+use crate::render::effects::Effect;
+use crate::render::error::{Error, Result};
 use crate::render::fullscreen::Blend;
 use crate::render::inspect::TextureKind;
+use crate::render::packing::packer::{Packer, Packet};
+use crate::render::packing::records::Frame;
+use crate::render::packing::vectors::VectorDraws;
 use crate::render::renderer::{Renderer, TargetSettings};
+use crate::render::settings::ViewSettings;
+use crate::robjects::RNode;
 
 /// Bytes per row of texture-to-buffer copies must be multiples of this.
 const ROW_ALIGNMENT: u32 = 256;
+
+/// One scene seen from one camera.
+pub struct View {
+    pub root: Arc<RNode>,
+    pub settings: ViewSettings,
+}
+
+/// Views drawn over each other (lowest first), weighted into the frame.
+pub struct SubFrame {
+    pub weight: f32,
+    pub views: Vec<View>,
+}
+
+/// What stays the same for every frame of a renderer.
+pub struct RendererOptions {
+    pub shader_folder: PathBuf,
+    pub width: u32,
+    pub height: u32,
+    /// MSAA samples per pixel.
+    pub samples: u32,
+    pub shadow_resolution: u32,
+    /// Straight RGBA, sRGB.
+    pub background: [f32; 4],
+    /// The `ToneMapOperator` value.
+    pub tone_map: u32,
+    /// The image effects, in chain order.
+    pub effects: Vec<Effect>,
+    pub in_flight: usize,
+    /// Measure GPU time per pass.
+    pub profile: bool,
+}
 
 /// A frame whose copy into `staging` is on its way.
 struct InFlight {
@@ -43,7 +74,6 @@ struct InFlight {
     mapped: Arc<AtomicBool>,
 }
 
-#[pyclass(module = "manimx._core")]
 pub struct FrameRenderer {
     gpu: Arc<Gpu>,
     packer: Packer,
@@ -54,45 +84,23 @@ pub struct FrameRenderer {
     row_bytes: u32,
     free: Vec<wgpu::Buffer>,
     pending: VecDeque<InFlight>,
-    /// Frames read back but not yet handed to Python, `(index, RGBA bytes)`.
-    ready: VecDeque<(u64, Py<PyBytes>)>,
+    /// Frames read back but not yet taken, `(index, RGBA bytes)`.
+    ready: VecDeque<(u64, Vec<u8>)>,
     /// The key of the last rendered frame (None: never held).
-    last_key: Option<Vec<u8>>,
+    last_key: Option<Vec<u64>>,
 }
 
-#[pymethods]
 impl FrameRenderer {
-    /// `effects` is a list of `("bloom", threshold, knee, intensity,
-    /// radius, levels)` and `("shader", code, stage, values)`, in chain
-    /// order; see core_pipeline.py.
-    #[new]
-    #[pyo3(signature = (shader_folder, width, height, samples, shadow_resolution, background, tone_map, effects, in_flight, profile=false))]
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        py: Python<'_>,
-        shader_folder: PathBuf,
-        width: u32,
-        height: u32,
-        samples: u32,
-        shadow_resolution: u32,
-        background: (f32, f32, f32, f32),
-        tone_map: u32,
-        effects: Vec<Bound<'_, PyTuple>>,
-        in_flight: usize,
-        profile: bool,
-    ) -> PyResult<Self> {
-        if in_flight < 1 {
-            return Err(PyValueError::new_err(
-                "a pipeline needs at least one frame in flight",
+    pub fn new(options: RendererOptions) -> Result<FrameRenderer> {
+        if options.in_flight < 1 {
+            return Err(Error::Invalid(
+                "a pipeline needs at least one frame in flight".into(),
             ));
         }
-        let gpu = Gpu::shared(shader_folder)?;
-        let effects = effects
-            .iter()
-            .map(parse_effect)
-            .collect::<PyResult<Vec<_>>>()?;
+        let gpu = Gpu::shared(options.shader_folder)?;
+        let (width, height) = (options.width, options.height);
         let row_bytes = (4 * width).div_ceil(ROW_ALIGNMENT) * ROW_ALIGNMENT;
-        let free = (0..in_flight)
+        let free = (0..options.in_flight)
             .map(|index| {
                 gpu.device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(&format!("readback {index}")),
@@ -103,17 +111,17 @@ impl FrameRenderer {
             })
             .collect();
         Ok(FrameRenderer {
-            packer: Packer::new(py)?,
-            renderer: Renderer::new(py, &gpu, profile)?,
-            composer: Composer::new(&gpu, effects, tone_map),
+            packer: Packer::new(),
+            renderer: Renderer::new(&gpu, options.profile)?,
+            composer: Composer::new(&gpu, options.effects, options.tone_map),
             gpu,
             settings: TargetSettings {
                 width,
                 height,
-                samples,
-                shadow_resolution,
+                samples: options.samples,
+                shadow_resolution: options.shadow_resolution,
             },
-            background: [background.0, background.1, background.2, background.3],
+            background: options.background,
             row_bytes,
             free,
             pending: VecDeque::new(),
@@ -122,20 +130,11 @@ impl FrameRenderer {
         })
     }
 
-    /// Render frame `index` from `sub_frames`: a list of `(weight, views)`,
-    /// each view `(graph, state, key, config, frame, camera_views)` with
-    /// the `config_values()` tuple, the camera's Frame record (bytes) and
-    /// a `(config, frame)` pair per camera view of the view, and whether
-    /// the view's picture depends on the time.
-    /// Returns True when the frame shows exactly what the frame before
-    /// showed: then nothing is rendered or read back for it.
-    fn render(
-        &mut self,
-        py: Python<'_>,
-        index: u64,
-        sub_frames: Vec<(f32, Vec<Bound<'_, PyTuple>>)>,
-    ) -> PyResult<bool> {
-        let key = self.frame_key(&sub_frames)?;
+    /// Render frame `index`. Returns true when the frame shows exactly
+    /// what the frame before showed: then nothing is rendered or read
+    /// back for it.
+    pub fn render(&mut self, index: u64, sub_frames: &[SubFrame]) -> Result<bool> {
+        let key = self.frame_key(sub_frames);
         if key.is_some() && key == self.last_key {
             return Ok(true);
         }
@@ -151,34 +150,25 @@ impl FrameRenderer {
             wgpu::TextureUsages::empty(),
         );
         let accumulator_view = accumulator.create_view(&Default::default());
-        for (position, (weight, views)) in sub_frames.iter().enumerate() {
+        for (position, sub_frame) in sub_frames.iter().enumerate() {
             let first = position == 0;
-            if views.is_empty() {
-                // Nothing active: the background alone.
-                let mut encoder = device.create_command_encoder(&Default::default());
-                let target = CompositeTarget {
-                    view: &accumulator_view,
-                    weight: *weight,
-                    clear: first,
-                    background: true,
-                    blend: Blend::Additive,
-                };
-                self.render_empty(py, &mut encoder, target)?;
-                self.gpu.queue.submit([encoder.finish()]);
-                continue;
-            }
-            if views.len() == 1 {
+            let weight = sub_frame.weight;
+            if sub_frame.views.len() <= 1 {
                 // One submission per sub-frame: the renderer's passes and
-                // the composite share an encoder.
+                // the composite share an encoder. Without a view, the
+                // background alone.
                 let mut encoder = device.create_command_encoder(&Default::default());
                 let target = CompositeTarget {
                     view: &accumulator_view,
-                    weight: *weight,
+                    weight,
                     clear: first,
                     background: true,
                     blend: Blend::Additive,
                 };
-                self.render_view(py, &mut encoder, &views[0], target)?;
+                match sub_frame.views.first() {
+                    Some(view) => self.render_view(&mut encoder, view, target)?,
+                    None => self.render_empty(&mut encoder, target)?,
+                }
                 self.gpu.queue.submit([encoder.finish()]);
                 continue;
             }
@@ -194,7 +184,7 @@ impl FrameRenderer {
                 wgpu::TextureUsages::empty(),
             );
             let stack_view = stack.create_view(&Default::default());
-            for (number, view) in views.iter().enumerate() {
+            for (number, view) in sub_frame.views.iter().enumerate() {
                 let mut encoder = device.create_command_encoder(&Default::default());
                 let target = CompositeTarget {
                     view: &stack_view,
@@ -203,7 +193,7 @@ impl FrameRenderer {
                     background: number == 0,
                     blend: Blend::Over,
                 };
-                self.render_view(py, &mut encoder, view, target)?;
+                self.render_view(&mut encoder, view, target)?;
                 self.gpu.queue.submit([encoder.finish()]);
             }
             let mut encoder = device.create_command_encoder(&Default::default());
@@ -212,7 +202,7 @@ impl FrameRenderer {
                 &mut encoder,
                 &stack,
                 &accumulator_view,
-                *weight,
+                weight,
                 first,
                 &mut self.renderer.profiler,
             )?;
@@ -240,7 +230,7 @@ impl FrameRenderer {
             &mut self.renderer.profiler,
         )?;
         if self.free.is_empty() {
-            self.finish_oldest(py)?;
+            self.finish_oldest()?;
         }
         let staging = self.free.pop().unwrap();
         encoder.copy_texture_to_buffer(
@@ -280,43 +270,29 @@ impl FrameRenderer {
 
     /// Frames finished so far, `(index, RGBA bytes)` in submission order;
     /// with `wait`, waits for every frame on the GPU.
-    #[pyo3(signature = (wait=false))]
-    fn finished<'py>(&mut self, py: Python<'py>, wait: bool) -> PyResult<Bound<'py, PyList>> {
+    pub fn finished(&mut self, wait: bool) -> Result<Vec<(u64, Vec<u8>)>> {
         let _ = self.gpu.device.poll(wgpu::PollType::Poll);
         while let Some(front) = self.pending.front() {
             if !wait && !front.mapped.load(Ordering::Acquire) {
                 break;
             }
-            self.finish_oldest(py)?;
+            self.finish_oldest()?;
         }
-        let done = PyList::empty(py);
-        for (index, image) in self.ready.drain(..) {
-            done.append((index, image))?;
-        }
-        Ok(done)
+        Ok(self.ready.drain(..).collect())
     }
 
     /// A texture of the last frame as RGBA floats, to look at how it was
-    /// made (see inspect.rs): `(width, height, bytes)`. Names: "lit",
-    /// "vector", "albedo", "normal", "emissive", "scope", "depth",
-    /// "masks" and "shadow_maps" (with `layer`), and the composer's
-    /// "view distances" and "blur tiles". `shadow_layers()` says how many
-    /// shadow map layers there are.
-    #[pyo3(signature = (name, layer=0))]
-    fn inspect<'py>(
-        &mut self,
-        py: Python<'py>,
-        name: &str,
-        layer: u32,
-    ) -> PyResult<(u32, u32, Bound<'py, PyBytes>)> {
+    /// made (see inspect.rs): `(width, height, texels)`.
+    pub fn inspect(&mut self, name: &str, layer: u32) -> Result<(u32, u32, Vec<f32>)> {
         let _ = self.gpu.device.poll(wgpu::PollType::wait_indefinitely());
         let (view, kind, size) = match self.renderer.inspected(name) {
             Some(found) => found,
             None => {
-                let texture =
-                    self.composer.textures.find(name).ok_or_else(|| {
-                        PyValueError::new_err(format!("no texture named {name:?}"))
-                    })?;
+                let texture = self
+                    .composer
+                    .textures
+                    .find(name)
+                    .ok_or_else(|| Error::Invalid(format!("no texture named {name:?}")))?;
                 let size = (texture.width(), texture.height());
                 (
                     texture.create_view(&Default::default()),
@@ -326,94 +302,55 @@ impl FrameRenderer {
             }
         };
         let texels = crate::render::inspect::read(&self.gpu, &view, kind, size, layer)?;
-        Ok((
-            size.0,
-            size.1,
-            PyBytes::new(py, bytemuck::cast_slice(&texels)),
-        ))
+        Ok((size.0, size.1, texels))
     }
 
     /// How many shadow map layers there are.
-    fn shadow_layers(&self) -> u32 {
+    pub fn shadow_layers(&self) -> u32 {
         self.renderer.shadow_layers()
     }
 
     /// GPU milliseconds per pass name since the last call (with `profile`).
-    fn gpu_timings<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let timings = PyDict::new(py);
-        for (name, ms) in self
-            .renderer
+    pub fn gpu_timings(&mut self) -> Vec<(String, f64)> {
+        self.renderer
             .profiler
             .read(&self.gpu.device, &self.gpu.queue)
-        {
-            timings.set_item(name, ms)?;
-        }
-        Ok(timings)
+            .into_iter()
+            .map(|(name, ms)| (name.to_string(), ms))
+            .collect()
     }
-}
 
-impl FrameRenderer {
-    /// Equal keys promise equal frames: every view's graph id, state key and
-    /// Frame record (without the time). None with a shader effect or a
-    /// surface shader in a view, which may read the time.
-    fn frame_key(
-        &self,
-        sub_frames: &[(f32, Vec<Bound<'_, PyTuple>>)],
-    ) -> PyResult<Option<Vec<u8>>> {
+    /// Equal keys promise equal frames: per sub-frame its weight and per
+    /// view the tree's and the settings' fingerprints. None with a shader
+    /// effect or a surface shader in a view, which may read the time.
+    fn frame_key(&self, sub_frames: &[SubFrame]) -> Option<Vec<u64>> {
         if self.composer.has_shader_effects() {
-            return Ok(None);
+            return None;
+        }
+        let views = || sub_frames.iter().flat_map(|sub_frame| &sub_frame.views);
+        if views().any(|view| view.root.uses_time()) {
+            return None;
         }
         let mut key = Vec::new();
-        for (_, views) in sub_frames {
-            for view in views {
-                // A surface shader may read the time: such frames are never held.
-                if view.get_item(6)?.extract::<bool>()? {
-                    return Ok(None);
-                }
+        for sub_frame in sub_frames {
+            key.extend([
+                sub_frame.weight.to_bits() as u64,
+                sub_frame.views.len() as u64,
+            ]);
+            for view in &sub_frame.views {
+                view.root.fingerprint(&mut key);
+                view.settings.fingerprint(&mut key);
             }
         }
-        for (weight, views) in sub_frames {
-            key.extend(weight.to_le_bytes());
-            key.extend((views.len() as u64).to_le_bytes());
-            for view in views {
-                key.extend(
-                    view.get_item(0)?
-                        .cast::<SceneGraph>()?
-                        .get()
-                        .id
-                        .to_le_bytes(),
-                );
-                key.extend(view.get_item(2)?.cast::<PyBytes>()?.as_bytes());
-                let mut frame = frame_record(&view.get_item(4)?)?;
-                frame.time = 0.0;
-                key.extend(bytemuck::bytes_of(&frame));
-                // The Frame record holds the camera and every config value a
-                // pack reads, except whether the default light is on.
-                key.push(parse_settings(&view.get_item(3)?)?.default_lights as u8);
-                // The lens is not part of the Frame record.
-                let (focus_distance, aperture) = lens(&view.get_item(3)?)?;
-                key.extend(focus_distance.to_le_bytes());
-                key.extend(aperture.to_le_bytes());
-                for camera_view in view.get_item(5)?.cast::<PyList>()?.iter() {
-                    let mut frame = frame_record(&camera_view.get_item(1)?)?;
-                    frame.time = 0.0;
-                    key.extend(bytemuck::bytes_of(&frame));
-                    let (focus_distance, aperture) = lens(&camera_view.get_item(0)?)?;
-                    key.extend(focus_distance.to_le_bytes());
-                    key.extend(aperture.to_le_bytes());
-                }
-            }
-        }
-        Ok(Some(key))
+        Some(key)
     }
 
     /// Render an empty scene and composite it into `target`.
     fn render_empty(
         &mut self,
-        py: Python<'_>,
         encoder: &mut wgpu::CommandEncoder,
         target: CompositeTarget,
-    ) -> PyResult<()> {
+    ) -> Result<()> {
         let packet = Packet {
             draws: VectorDraws::default(),
             scope_parents: Vec::new(),
@@ -421,7 +358,6 @@ impl FrameRenderer {
         };
         let frame: Frame = bytemuck::Zeroable::zeroed();
         let targets = self.renderer.render_layers(
-            py,
             &self.gpu,
             &mut self.packer,
             &packet,
@@ -446,13 +382,11 @@ impl FrameRenderer {
     /// pictures of its camera views are rendered and submitted first.
     fn render_view(
         &mut self,
-        py: Python<'_>,
         encoder: &mut wgpu::CommandEncoder,
-        view: &Bound<'_, PyTuple>,
+        view: &View,
         target: CompositeTarget,
-    ) -> PyResult<()> {
-        let camera_views = view.get_item(5)?;
-        let camera_views = camera_views.cast::<PyList>()?;
+    ) -> Result<()> {
+        let camera_views = &view.settings.camera_views;
         if !camera_views.is_empty() {
             let size = (self.settings.width, self.settings.height);
             self.renderer
@@ -470,52 +404,31 @@ impl FrameRenderer {
                     background: true,
                     blend: Blend::Replace,
                 };
-                self.render_layers_into(
-                    py,
-                    &mut picture_encoder,
-                    view,
-                    &camera_view.get_item(0)?,
-                    &camera_view.get_item(1)?,
-                    picture,
-                )?;
+                let settings = view.settings.picture(camera_view);
+                self.render_layers_into(&mut picture_encoder, &view.root, &settings, picture)?;
                 self.gpu.queue.submit([picture_encoder.finish()]);
             }
         }
-        self.render_layers_into(
-            py,
-            encoder,
-            view,
-            &view.get_item(3)?,
-            &view.get_item(4)?,
-            target,
-        )
+        self.render_layers_into(encoder, &view.root, &view.settings, target)
     }
 
-    /// Pack and render the graph and state of `view`, seen with `config`
-    /// (a `config_values()` tuple) and `frame` (a Frame record), and
+    /// Pack and render the tree under `root` seen with `settings`, and
     /// composite the result into `target`.
     fn render_layers_into(
         &mut self,
-        py: Python<'_>,
         encoder: &mut wgpu::CommandEncoder,
-        view: &Bound<'_, PyTuple>,
-        config: &Bound<'_, PyAny>,
-        frame: &Bound<'_, PyAny>,
+        root: &RNode,
+        settings: &ViewSettings,
         target: CompositeTarget,
-    ) -> PyResult<()> {
-        let graph = view.get_item(0)?;
-        let graph = graph.cast::<SceneGraph>()?.get();
-        let state = view.get_item(1)?;
-        let state = state.cast::<FrameState>()?.get();
-        let settings = parse_settings(config)?;
-        let mut frame = frame_record(frame)?;
-        let packet = self.packer.pack_frame(py, graph, state, &settings)?;
-        frame.light_count = packet
+    ) -> Result<()> {
+        let size = (self.settings.width, self.settings.height);
+        let packet = self.packer.pack_frame(root, &settings.pack_settings())?;
+        let light_count = packet
             .meshes
             .as_ref()
             .map_or(0, |meshes| meshes.lights.len() as u32);
+        let frame = settings.camera_frame(size, light_count);
         let targets = self.renderer.render_layers(
-            py,
             &self.gpu,
             &mut self.packer,
             &packet,
@@ -536,15 +449,15 @@ impl FrameRenderer {
             &frame_uniform,
             &mut self.renderer.profiler,
         )?;
-        let (focus_distance, aperture) = lens(config)?;
-        let depth_of_field = (aperture > 0.0).then_some(DepthOfField {
-            focus_distance,
-            aperture,
+        let camera = &settings.camera;
+        let depth_of_field = (camera.aperture > 0.0).then_some(DepthOfField {
+            focus_distance: camera.focus_distance as f32,
+            aperture: camera.aperture as f32,
             mesh_depth: &depths.0,
             vector_depth: &depths.1,
             samples: self.settings.samples,
             frame_uniform: &frame_uniform,
-            size: (self.settings.width, self.settings.height),
+            size,
         });
         self.composer.composite(
             &self.gpu,
@@ -560,11 +473,11 @@ impl FrameRenderer {
 
     /// Read the oldest frame on the GPU back into `ready`, without the row
     /// padding (waits for it).
-    fn finish_oldest(&mut self, py: Python<'_>) -> PyResult<()> {
+    fn finish_oldest(&mut self) -> Result<()> {
         let frame = self
             .pending
             .pop_front()
-            .ok_or_else(|| PyRuntimeError::new_err("no frame in flight"))?;
+            .ok_or_else(|| Error::Invalid("no frame in flight".into()))?;
         // Wait for this frame's copy only; later frames keep running.
         while !frame.mapped.load(Ordering::Acquire) {
             let wait = wgpu::PollType::Wait {
@@ -574,7 +487,7 @@ impl FrameRenderer {
             self.gpu
                 .device
                 .poll(wait)
-                .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+                .map_err(|error| Error::Gpu(error.to_string()))?;
         }
         let (width, height) = (self.settings.width as usize, self.settings.height as usize);
         let row_bytes = self.row_bytes as usize;
@@ -583,58 +496,22 @@ impl FrameRenderer {
                 .staging
                 .slice(..)
                 .get_mapped_range()
-                .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
-            // One copy, straight from the mapped memory into the Python
-            // object, dropping the row padding.
-            PyBytes::new_with(py, 4 * width * height, |image| {
-                for (row, target) in data
-                    .chunks_exact(row_bytes)
-                    .zip(image.chunks_exact_mut(4 * width))
-                {
-                    target.copy_from_slice(&row[..4 * width]);
-                }
-                Ok(())
-            })?
-            .unbind()
+                .map_err(|error| Error::Gpu(error.to_string()))?;
+            // Zeroed first: the new pages are faulted in by a plain
+            // memset, not one by one in the middle of the slow reads from
+            // mapped memory (measured: 1.6 against 1.1 ms per 1080p frame).
+            let mut image = vec![0u8; 4 * width * height];
+            for (row, target) in data
+                .chunks_exact(row_bytes)
+                .zip(image.chunks_exact_mut(4 * width))
+            {
+                target.copy_from_slice(&row[..4 * width]);
+            }
+            image
         };
         frame.staging.unmap();
         self.free.push(frame.staging);
         self.ready.push_back((frame.index, image));
         Ok(())
-    }
-}
-
-/// The camera's focus distance and aperture in a `config_values()` tuple.
-fn lens(config: &Bound<'_, PyAny>) -> PyResult<(f32, f32)> {
-    Ok((
-        config.get_item(12)?.extract()?,
-        config.get_item(13)?.extract()?,
-    ))
-}
-
-fn frame_record(bytes: &Bound<'_, PyAny>) -> PyResult<Frame> {
-    let bytes = bytes.cast::<PyBytes>()?.as_bytes();
-    if bytes.len() != size_of::<Frame>() {
-        return Err(PyValueError::new_err("a Frame record has 400 bytes"));
-    }
-    Ok(bytemuck::pod_read_unaligned(bytes))
-}
-
-fn parse_effect(effect: &Bound<'_, PyTuple>) -> PyResult<Effect> {
-    let kind: String = effect.get_item(0)?.extract()?;
-    match kind.as_str() {
-        "bloom" => Ok(Effect::Bloom(Bloom {
-            threshold: effect.get_item(1)?.extract()?,
-            knee: effect.get_item(2)?.extract()?,
-            intensity: effect.get_item(3)?.extract()?,
-            radius: effect.get_item(4)?.extract()?,
-            levels: effect.get_item(5)?.extract()?,
-        })),
-        "shader" => Ok(Effect::Shader(ShaderEffect {
-            code: effect.get_item(1)?.extract()?,
-            frame_stage: effect.get_item(2)?.extract::<String>()? == "frame",
-            values: effect.get_item(3)?.extract()?,
-        })),
-        _ => Err(PyValueError::new_err(format!("unknown effect {kind:?}"))),
     }
 }

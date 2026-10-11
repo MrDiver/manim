@@ -21,7 +21,7 @@ import quaternion
 
 from ...renderer.config import DEFAULT_FRAME_HEIGHT
 from ...renderer.config import Camera as RenderCamera
-from ...robjects import RNode, Transform
+from ...robjects import Transform
 from .. import authoring
 from ..signals.kinds import DISCRETE, FACTOR, SCALAR
 from ..signals.signal import RootSignal, Signal
@@ -56,8 +56,6 @@ class Camera(PositionMixin, RotationMixin, Node):
       along the view axis are sharp; ``aperture`` is the blur of something
       infinitely far, as a fraction of the image height (0: no blur).
     """
-
-    drawn = False
 
     def __init__(
         self,
@@ -136,9 +134,6 @@ class Camera(PositionMixin, RotationMixin, Node):
         return [(self.aperture, ABS, float(aperture))]
 
     # -- render state -------------------------------------------------------
-
-    def snapshot(self) -> RNode | None:
-        return None  # cameras are never drawn
 
     def render_camera(self, value: Callable[[Signal], Any] = _current) -> RenderCamera:
         """The renderer camera for the signal values ``value`` reads (by

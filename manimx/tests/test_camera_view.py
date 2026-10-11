@@ -6,7 +6,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from manimx.animation import Camera, CameraView, ClippingGroup, Scene
-from manimx.animation.plan import planned_frames
 from manimx.drivers import render_image
 from manimx.renderer import RenderConfig
 from manimx.userland import Circle, FadeOut, Square
@@ -50,9 +49,6 @@ def test_view_states_follow_the_scene() -> None:
     assert camera_view.camera.transform.position[0] == pytest.approx(20.0)
     (later,) = prepared.frame_at(1.5)
     assert later.camera_views[0].camera.transform.position[0] == pytest.approx(30.0)
-    # The core reads the side camera's signals too.
-    (planned,) = planned_frames(prepared).frame_at(1.5)
-    assert planned.camera_views == later.camera_views
 
 
 def test_faded_out_views_are_not_rendered() -> None:

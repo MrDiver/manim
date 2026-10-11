@@ -11,7 +11,7 @@ from typing import Any
 
 import numpy as np
 
-from ...robjects import CapStyle, JointType, RCurve3D, RNode
+from ...robjects import CapStyle, JointType
 from ...utils.color import WHITE
 from ..signals.kinds import COLORS, DISCRETE, PATH, SCALARS
 from ..signals.paths import PointSignal, drawn_part, point_signal
@@ -50,6 +50,8 @@ class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
     ``draw_start`` and ``draw_end`` say which part of the path is drawn and
     ``drawn_points`` is that part, as for Shape2D.
     """
+
+    render_kind = "curve3d"
 
     def __init__(
         self,
@@ -122,20 +124,14 @@ class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
     def set_cast_shadows(self, cast_shadows: bool) -> ChangeList:
         return [(self.cast_shadows, ABS, cast_shadows)]
 
-    def _build_snapshot(self) -> RNode | None:
-        if self._hidden():
-            return None
-        return RCurve3D(
-            uid=self.uid,
-            points=self.drawn_points.value,
-            stroke=style.stroke(
-                self.stroke_color.value, self.stroke_opacity.value, self.stroke_width.value,
-                self.stroke_joint.value, self.stroke_cap.value,
-            ),  # fmt: skip
-            cast_shadows=bool(self.cast_shadows.value),
-            transform=self._transform(),
-            alpha=self.alpha.value,
-        )
+    def render_fields(self) -> Iterator[tuple[str, Signal]]:
+        yield from super().render_fields()
+        # The render object draws the part of the points from draw_start to draw_end.
+        yield from (
+            ("points", self.drawn_points), ("stroke_color", self.stroke_color),
+            ("stroke_opacity", self.stroke_opacity), ("stroke_width", self.stroke_width),
+            ("stroke_joint", self.stroke_joint), ("stroke_cap", self.stroke_cap), ("cast_shadows", self.cast_shadows),
+        )  # fmt: skip
 
 
 __all__ = ["Curve3D"]

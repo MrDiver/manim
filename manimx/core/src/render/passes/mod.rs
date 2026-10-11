@@ -13,4 +13,5 @@ pub mod camera_views;
 pub mod lighting;
 pub mod mesh;
 pub mod shadow;
+pub mod textures;
 pub mod vector;

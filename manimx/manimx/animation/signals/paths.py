@@ -21,6 +21,8 @@ from .kinds import ARRAY, PATH, SCALAR
 from .signal import DerivedSignal, RootSignal, Signal
 
 POINTS_PER_CURVE = 4
+TOLERANCE_FOR_POINT_EQUALITY = 1e-6
+"""Points closer than this are the same point (where subpaths join)."""
 
 
 def split_curve(curve: np.ndarray, t: float) -> tuple[np.ndarray, np.ndarray]:

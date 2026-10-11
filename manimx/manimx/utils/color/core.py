@@ -1296,6 +1296,16 @@ def color_to_int_rgba(color: ParsableManimColor, alpha: float = 1.0) -> IntRGBA:
     return ManimColor(color).to_int_rgba_with_alpha(alpha)
 
 
+def linear_rgb(color: ParsableManimColor) -> tuple[float, float, float]:
+    """The color (sRGB, as colors are written) in linear light, in which
+    lighting and particle tints work: the sRGB transfer function undone
+    (IEC 61966-2-1,
+    https://en.wikipedia.org/wiki/SRGB#Transfer_function_(%22gamma%22))."""
+    srgb = np.asarray(ManimColor.parse(color).to_rgb(), dtype=np.float64)
+    linear = np.where(srgb <= 0.04045, srgb / 12.92, ((srgb + 0.055) / 1.055) ** 2.4)
+    return (float(linear[0]), float(linear[1]), float(linear[2]))
+
+
 def rgb_to_color(rgb: FloatRGBLike | IntRGBLike) -> ManimColor:
     """Helper function for use in functional style programming. Refer to
     :meth:`ManimColor.from_rgb`.
@@ -1644,6 +1654,7 @@ __all__ = [
     "color_to_rgba",
     "color_to_int_rgb",
     "color_to_int_rgba",
+    "linear_rgb",
     "rgb_to_color",
     "rgba_to_color",
     "rgb_to_hex",

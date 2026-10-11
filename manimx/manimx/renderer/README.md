@@ -1,18 +1,17 @@
 # manimx.renderer
 
-How manimx turns a scene at one time into an image. The renderer itself
-is Rust on [wgpu](https://wgpu.rs), in the core
+How manimx turns a scene at one time into an image. A renderer is given
+a render object tree (`manimx.robjects`: `RGroup`, `RShape2D`, ...) and a
+`RenderConfig`, nothing else. The renderer itself is Rust on
+[wgpu](https://wgpu.rs), in the core
 ([core/src/render/](../../core/src/render/mod.rs), `manimx._core.FrameRenderer`);
-this package holds what Python gives it:
+this package holds what it is given next to the tree:
 
 - `RenderConfig` and `Camera` (config.py): size, background, camera,
-  MSAA, lighting and shadow settings;
+  MSAA, lighting and shadow settings; `ViewState`, a tree with the
+  camera looking at it;
 - the effect settings (effects.py): motion blur, bloom, tone mapping,
   custom WGSL;
-- the camera's Frame record (frame.py), the uniform block every shader
-  reads;
-- the functions the core calls back for what it builds once per version
-  (core_callbacks.py);
 - the WGSL shaders (shaders/), which the core loads from here.
 
 `CoreFramePipeline` (manimx/drivers/core_pipeline.py) drives the
@@ -21,24 +20,25 @@ and `render_image` all go through it. The renderer keeps no scene state
 of its own beyond caches, so frames can be rendered in any order and in
 parallel processes.
 
-What it draws:
+What it draws (each render object is the snapshot of the scene node of
+the same name without the R):
 
-- **`Shape2D`**: vector shapes. Exact curved fills, strokes with
+- **`RShape2D`**: vector shapes. Exact curved fills, strokes with
   per-point color, opacity and width, all joint and cap styles, painter's
   order.
-- **`Curve3D`**: stroke-only Bezier curves in 3D, always facing the
+- **`RCurve3D`**: stroke-only Bezier curves in 3D, always facing the
   camera, thinner with distance.
-- **`Shape3D`** and **`Particles`**: lit triangle meshes with glTF
+- **`RShape3D`** and **`RParticles`**: lit triangle meshes with glTF
   metallic-roughness materials, textures and custom surface shaders.
   glTF/GLB files are imported with `manimx.userland.load_gltf`, which
   builds scene nodes.
 - **Lights**: directional, point and spot, with shadows: PCF (a fixed
   narrow soft edge) or PCSS (soft edges that widen with the distance to
   the caster).
-- **`ClippingGroup`**: soft alpha masks, optionally one-sided (portals),
+- **`RClippingGroup`**: soft alpha masks, optionally one-sided (portals),
   with lights scoped to the group; casters inside one cast only the
   shadow of what their masks let through.
-- **`CameraView`**: another camera's picture on a plane.
+- **Camera views**: another camera's picture on an `RShape2D` (the snapshot of a `CameraView`).
 - **Effects**: motion blur, depth of field (a camera's `aperture`),
   bloom, tone mapping and custom WGSL shaders.
 
@@ -171,11 +171,10 @@ vignette = ShaderEffect("""
 ### Profiling
 
 ```python
-from manimx.animation.plan import planned_frames
 from manimx.drivers import CoreFramePipeline
 
 pipeline = CoreFramePipeline((), config, profile=True)
-pipeline.render(planned_frames(MyScene().prepare()).frame_at, 1.0)
+pipeline.render(MyScene().prepare().frame_at, 1.0)
 print(pipeline.gpu_timings())  # {"shadows": 0.4, "geometry": 0.2, "lighting": 0.6, ...} ms on the GPU
 ```
 
@@ -259,23 +258,26 @@ red ball.
 flowchart LR
     S["Scene"] -->|"prepare()"| P["PreparedScene"]
     P -->|"ScenePlan"| Plan["Evaluator + SceneGraph<br/>(the core)"]
-    Plan -->|"frame_at(t)"| V["ViewState<br/>PlannedFrame + camera"]
-    V -->|"CoreFramePipeline"| FR["FrameRenderer<br/>(the core)"]
+    Plan -->|"frame_at(t)"| V["ViewState<br/>RNode tree + camera"]
+    V -->|"CoreFramePipeline:<br/>tree + RenderConfig"| FR["FrameRenderer<br/>(the core)"]
     FR --> Out["frame"]
 ```
 
 - **`ScenePlan`** (manimx/animation/plan.py) gives every signal of a
-  prepared scene a slot in the core's `Evaluator` and describes the node
-  tree as a `SceneGraph` (which node reads which slot). `frame_at(t)`
+  prepared scene a slot in the core's `Evaluator` and describes the
+  nodes as a `SceneGraph` (which node reads which slot). `frame_at(t)`
   sets every slot to its value at `t` and returns a `ViewState` whose
-  root is a `PlannedFrame`: the graph, the `FrameState` (the slot
-  values), and a key of the versions of every slot a node reads.
+  root is the render object tree of that time, built in Rust: values
+  whose slots did not change are the same values, with the same
+  versions.
 - **`CoreFramePipeline`** (manimx/drivers/core_pipeline.py) asks for the
-  views of each sub-frame (one, or the motion blur samples), builds each
-  camera's Frame record, and hands them to the `FrameRenderer`.
+  views of each sub-frame (one, or the motion blur samples) and hands the
+  `FrameRenderer` each view's tree with its `RenderConfig` (the view's
+  camera and camera views, the time).
 - **`FrameRenderer`** (core/src/render/frame_renderer.rs) does the rest in
-  Rust: for each sub-frame and view, the `Packer` (core/src/packing/packer.rs)
-  turns the graph and state into records, the `Renderer`
+  Rust, reading only the tree and the config: for each sub-frame and
+  view, the `Packer` (core/src/render/packing/packer.rs) turns the tree
+  into records, the `Renderer`
   (core/src/render/renderer.rs) draws them into two layers, and the
   `Composer` (core/src/render/composer.rs) applies effects and composites
   them into the frame. The frame is copied into a buffer that is read
@@ -286,7 +288,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    A["SceneGraph + FrameState + Frame record"] --> B["SceneGraph.flatten():<br/>world matrices, painter's order,<br/>clip scopes, lights"]
+    A["RNode tree + ViewSettings"] --> B["flatten():<br/>world matrices, painter's order,<br/>clip scopes, lights"]
     B --> C["vectors.rs: patch per-node slots<br/>in the arenas + this frame's draw lists"]
     B --> D["meshes.rs, lights.rs:<br/>mesh objects, materials, lights<br/>(skipped without meshes)"]
     D --> E["shadows.rs: one view per directional or spot light,<br/>six per point light; which layers changed"]
@@ -408,34 +410,33 @@ A `FrameRenderer` lives as long as its pipeline, and keeps:
 
 | What | Kept by | Key | Dropped |
 |---|---|---|---|
-| a path's fill triangles, stroke links, colors | `PathCache` (vectors.rs) | node uid + versions of the signals they come from | when the node is not drawn for 1024 packs |
+| a path's fill triangles, stroke links, colors | `PathCache` (vectors.rs) | node uid + versions of the values they come from | when the node is not drawn for 1024 packs |
 | a mesh's interleaved vertices, a material's entry | `MeshPacker` (meshes.rs) | node uid + mesh or material versions | when the node is not drawn for 1024 packs |
 | vector records on the GPU | the arenas of `VectorPacker` (vectors.rs, arena.rs) | (node uid, drawn as a mask) | when the node leaves the scene; everything packed again when garbage outweighs live records |
 | mesh vertices and indices on the GPU | the arenas of `MeshPacker` | node uid + mesh version | when the mesh is not placed in a frame with meshes; packed again when garbage outweighs live data |
-| shadow map layers | `ShadowLayers` (shadows.rs) decides, the shadow pass keeps the depth | the layer's Frame record and its scope's casters (identity, versions, world matrix) | rendered again when the key changes or the maps are made again |
-| textures | the mesh pass | texture and color space | when no frame uses them |
+| shadow map layers | `ShadowLayers` (shadows.rs) decides, the shadow pass keeps the depth | the layer's Frame record and its scope's casters (fingerprint, world matrix) | rendered again when the key changes or the maps are made again |
+| textures and their mip levels | the mesh pass (textures.rs) | texture uid and color space | when no frame uses them |
 | render targets | `RenderTargets` (core/src/render/targets.rs) | size, MSAA, mask layers | on a size change |
-| the last frame | `FrameRenderer` | every view's graph id, state key, Frame record (without the time) and lens | when a frame with another key is rendered |
+| the last frame | `FrameRenderer` | every view's tree fingerprint (uids, transforms, plain values, versions) and settings without the time | when a frame with another key is rendered |
 
-Every node has a uid and every signal a version that grows exactly when
-its value changes (core/src/evaluation/evaluator.rs), so the caches never need to
-be told what changed. Every `SceneGraph` gets an id of its own when it is
-made, never reused, so a frame of one scene is never mistaken for a frame
-of another. Moving a node (its world matrix) never invalidates its
-records; it only patches its object entry. Changing its points does.
+Every render object has its node's uid and every costly value a version
+that is new exactly when the value is (`RNode.version()`,
+core/src/robjects/), so the caches never need to be told what changed.
+Moving a node (its world matrix) never invalidates its records; it only
+patches its object entry. Changing its points does.
 
 ### Module map
 
 | Module | Role |
 |---|---|
 | `config.py` | `RenderConfig`, `Camera`, `ViewState`, `CameraViewState` |
-| `frame.py` | the camera's Frame record (the per-frame uniform block), `config_values` for the core |
 | `effects.py` | effect settings |
-| `core_callbacks.py` | what the core asks Python for, once per version (stroke records of styles that are not plain numbers, fill colors, meshes, materials, texture levels) |
 | `shaders/` | every WGSL shader |
-| core/src/packing/packer.rs, graph.rs, vectors.rs, meshes.rs, lights.rs, shadows.rs | records of a frame (core/README.md maps them) |
+| core/src/render/settings.rs | `ViewSettings`: what the renderer reads from a `RenderConfig`; the camera's Frame record |
+| core/src/render/packing/ | records of a frame (core/README.md maps them) |
 | core/src/render/ | the passes, the composer, the `FrameRenderer` (its `mod.rs` maps them) |
-| manimx/drivers/core_pipeline.py | `CoreFramePipeline`: views and Frame records to the `FrameRenderer` |
+| core/src/python/frame_renderer.rs | the `FrameRenderer`'s Python class |
+| manimx/drivers/core_pipeline.py | `CoreFramePipeline`: views with their configs to the `FrameRenderer` |
 
 ---
 
@@ -545,9 +546,9 @@ vectors. The composer renders the scene at several times inside the
 shutter and averages them in linear light. That is exact for any change,
 including morphing points, at the cost of one render per sample.
 
-**Stateless renderer, versioned signals.** The renderer receives the
-whole scene every frame: a scene graph and the values of its signals.
-Per-node data is cached by node uid and signal versions and dropped when
+**Stateless renderer, versioned values.** The renderer receives the
+whole scene every frame: a render object tree and a `RenderConfig`.
+Per-node data is cached by node uid and value versions and dropped when
 a node is not drawn for a while, so caching never needs the renderer to
 track the scene.
 
