@@ -1,6 +1,14 @@
 // Shadow lookups with percentage-closer soft shadows (PCSS, Randima
-// Fernando 2005), so shadows are sharp where an object touches the surface
-// and grow softer with distance, the way a light of finite size behaves.
+// Fernando 2005, https://developer.download.nvidia.com/shaderlibrary/docs/shadow_PCSS.pdf),
+// so shadows are sharp where an object touches the surface and grow softer
+// with distance, the way a light of finite size behaves.
+//
+// The shadow maps themselves are Lance Williams's (1978, "Casting curved
+// shadows on curved surfaces", https://history.siggraph.org/?p=120268);
+// filtering many depth comparisons is percentage-closer filtering (PCF,
+// Reeves, Salesin and Cook 1987, https://graphics.pixar.com/library/ShadowMaps/);
+// a point light's six maps are the faces of a cube (GPU Gems ch. 12,
+// https://developer.nvidia.com/gpugems/gpugems/part-ii-lighting-and-shadows/chapter-12-omnidirectional-shadow-mapping).
 //
 // For one light and one surface point:
 //
@@ -13,7 +21,7 @@
 //   4. filter: compare depths at `samples` points spread over the
 //      penumbra (hardware 2x2 comparison per tap) and average
 //
-// Taps lie on a Vogel (sunflower) disk in the receiving surface's plane,
+// Taps lie on a Vogel (sunflower) disk (https://doi.org/10.1016/0025-5564(79)90080-4) in the receiving surface's plane,
 // turned per pixel and sample by white noise (a PCG hash), which leaves no
 // pattern once the samples and renders of a frame are averaged. The lighting pass
 // sets `shadow_pixel` before shading.
@@ -21,7 +29,7 @@
 // Needs `shadow_maps`, `shadow_sampler` and `shadow_views` declared by the
 // including shader (deferred_lighting.wgsl).
 
-// Mirrors SHADOW_VIEW_DTYPE in shadow_views.py.
+// Mirrors `ShadowView` in core/src/packing/records.rs.
 struct ShadowView {
     view_projection: mat4x4<f32>,
     params: vec4<f32>,          // near, far, frustum width, perspective (1) / orthographic (0)
@@ -175,7 +183,7 @@ fn vogel(index: u32, count: u32, rotation: f32) -> vec2<f32> {
     return radius * vec2<f32>(cos(angle), sin(angle));
 }
 
-/// Cube face of a direction, in the order of shadow_views.py's _CUBE_FACES.
+/// Cube face of a direction, in the order of `CUBE_FACES` in core/src/packing/shadows.rs.
 fn cube_face(direction: vec3<f32>) -> u32 {
     let a = abs(direction);
     if a.x >= a.y && a.x >= a.z {
@@ -188,7 +196,8 @@ fn cube_face(direction: vec3<f32>) -> u32 {
 }
 
 /// A turn in [0, 1) for a pixel and sample: the PCG hash (Jarzynski and
-/// Olano 2020) of their coordinates, without any spatial pattern.
+/// Olano 2020, https://jcgt.org/published/0009/03/02/) of their
+/// coordinates, without any spatial pattern.
 fn pixel_noise(pixel: vec3<u32>) -> f32 {
     var state = pixel.x * 1664525u + pixel.y * 22695477u + pixel.z * 1013904223u;
     state = state * 747796405u + 2891336453u;

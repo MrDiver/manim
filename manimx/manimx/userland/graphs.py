@@ -22,7 +22,11 @@ Zooming in, finer marks fade in between the others; zooming out, they
 fade out. Nothing jumps, and what shows depends on the range alone, so
 it is the same however the range got there. The thresholds come from the
 range a line is made with: there, exactly the multiples of the step
-show. ``adaptive=False`` puts marks on the step's multiples only.
+show. ``adaptive=False`` puts marks on the step's multiples only. The
+levels use the "nice numbers" of Paul Heckbert ("Nice Numbers for Graph
+Labels", Graphics Gems 1990,
+https://www.ri.cmu.edu/publications/nice-numbers-for-graph-labels/),
+here only 1 and 5 times powers of ten, so every level divides the next.
 
 Labels are DecimalNumbers from a pool, the ones beyond the range hidden.
 Graphs and points are in the space of the Axes' parent, so they follow

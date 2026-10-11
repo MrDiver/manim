@@ -9,6 +9,7 @@
 //! directional  1 view, orthographic, fitted around its scope's bounds
 //! spot         1 view, perspective, covering the light's outer cone
 //! point        6 views, perspective 90 degrees, one per cube face
+//!              (GPU Gems ch. 12, Omnidirectional Shadow Mapping)
 //!              (+x, -x, +y, -y, +z, -z; the shader picks the face from
 //!              the direction to the light)
 //! ```

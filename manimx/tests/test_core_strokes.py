@@ -1,4 +1,4 @@
-"""The core's stroke records (core/src/strokes.rs) match the Python reference."""
+"""The core's stroke records (core/src/geometry/strokes.rs) match the Python reference."""
 
 from __future__ import annotations
 

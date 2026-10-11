@@ -35,7 +35,9 @@ def arc_points(
     """Cubic Bezier approximation of a circular arc.
 
     Each piece spans ``angle / num_curves``; its handles lie on the tangents
-    at distance ``4/3 * tan(theta / 4)`` times the radius.
+    at distance ``4/3 * tan(theta / 4)`` times the radius, which puts the
+    curve's middle on the circle
+    (https://spencermortensen.com/articles/bezier-circle/).
     """
     angles = start_angle + np.linspace(0.0, angle, num_curves + 1)
     theta = angle / num_curves

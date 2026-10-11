@@ -83,7 +83,7 @@ def camera_frame(config: RenderConfig, light_count: int) -> np.ndarray:
 
 def config_values(config: RenderConfig) -> tuple:
     """What the core's packer reads from ``config`` (see parse_settings in
-    core/src/packer.rs)."""
+    core/src/packing/packer.rs)."""
     camera = config.camera
     return (
         config.time,

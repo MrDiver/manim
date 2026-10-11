@@ -3,7 +3,8 @@
 A clip's segments map global time to the scene's compiled time through
 *knots*: the segment's start, cues synced to events, the edges of slow
 motion ranges, the segment's end. Between knots the map is a monotone
-cubic Hermite interpolation (PCHIP, Fritsch and Carlson 1980):
+cubic Hermite interpolation (PCHIP, Fritsch and Carlson 1980,
+https://doi.org/10.1137/0717021):
 
 * it passes exactly through every knot (a cue lands exactly on its word),
 * it never overshoots and never runs backwards (time only moves forward),

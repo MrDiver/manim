@@ -1,4 +1,4 @@
-//! The part of a path drawn so far. Ports manimx/animation/paths.py with
+//! The part of a path drawn so far. Ports manimx/animation/signals/paths.py with
 //! the same operations in the same order, so both agree; keep them in step.
 //!
 //! Points are rows of `dimension` floats, four per cubic curve.
@@ -14,7 +14,8 @@ fn lerp(p: &[f64], q: &[f64], t: f64) -> Point {
     p.iter().zip(q).map(|(a, b)| a + (b - a) * t).collect()
 }
 
-/// `split_curve`: the curve cut at `t` (de Casteljau).
+/// `split_curve`: the curve cut at `t`
+/// ([de Casteljau](https://pomax.github.io/bezierinfo/#splitting)).
 fn split_curve(curve: &[Point], t: f64) -> ([Point; 4], [Point; 4]) {
     let (p0, p1, p2, p3) = (&curve[0], &curve[1], &curve[2], &curve[3]);
     let a = lerp(p0, p1, t);

@@ -41,7 +41,7 @@ pub struct MeshGeometry {
 
 /// A node's material entry, with the versions it was built from and the
 /// identities of its textures and surface shader (draws are grouped by them).
-struct MaterialEntry {
+pub struct MaterialEntry {
     versions: Vec<u64>,
     entry: Material,
     texture_key: Vec<u64>,
@@ -73,7 +73,7 @@ pub struct MeshPacker {
     slots: HashMap<u64, (u64, usize, usize, usize, usize)>,
     seen: HashSet<u64>,
     pub geometry: HashMap<u64, MeshGeometry>,
-    materials: HashMap<u64, MaterialEntry>,
+    pub materials: HashMap<u64, MaterialEntry>,
 }
 
 impl MeshPacker {

@@ -470,7 +470,7 @@ classDiagram
 - **`View(world, camera)`:** `Timeline.view(view)` is a function of time
   returning `ViewState(root, camera)`. `FrameComposer` uses
   `ViewState.camera` for every motion-blur sample.
-- **`CameraView(camera, width, height)`** (`animation/camera_view.py`): a
+- **`CameraView(camera, width, height)`** (`animation/nodes/camera_view.py`): a
   `Shape2D` rectangle whose fill is the picture of another
   `animation.Camera`, tinted by the fill color. It moves, fades and is
   masked by a `ClippingGroup` like any `Shape2D`. Every `ViewState` lists
@@ -530,7 +530,7 @@ cache correct:
 
 ## 8. The renderer
 
-The renderer is part of the core (`core/src/gpu/`, section 9); how a
+The renderer is part of the core (`core/src/render/`, section 9); how a
 frame is drawn, pass by pass, with pictures, what it keeps between
 frames and why it is built this way is in
 [manimx/renderer/README.md](manimx/renderer/README.md). The Python

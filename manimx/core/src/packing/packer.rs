@@ -180,6 +180,9 @@ impl Packer {
         let live = &self.last_used;
         self.vectors.paths.retain(|uid, _| live.contains_key(uid));
         self.meshes.geometry.retain(|uid, _| live.contains_key(uid));
+        self.meshes
+            .materials
+            .retain(|uid, _| live.contains_key(uid));
     }
 }
 

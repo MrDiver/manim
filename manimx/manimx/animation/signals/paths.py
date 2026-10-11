@@ -6,7 +6,7 @@ while they play: the part of a path drawn so far (:func:`partial_path`,
 Points are laid out as in ``RBezierPath``: four per curve (anchor,
 handle, handle, anchor), a new subpath wherever a curve does not start
 where the previous one ended. The core computes the same in Rust
-(core/src/paths.rs) with the same operations in the same order, so both
+(core/src/evaluation/paths.rs) with the same operations in the same order, so both
 agree; keep them in step. Points along a path are Python only.
 """
 
@@ -24,7 +24,8 @@ POINTS_PER_CURVE = 4
 
 
 def split_curve(curve: np.ndarray, t: float) -> tuple[np.ndarray, np.ndarray]:
-    """The curve ``(4, D)`` cut at parameter ``t`` (de Casteljau)."""
+    """The curve ``(4, D)`` cut at parameter ``t`` (the de Casteljau
+    algorithm, https://pomax.github.io/bezierinfo/#splitting)."""
     p0, p1, p2, p3 = curve
     a = p0 + (p1 - p0) * t
     b = p1 + (p2 - p1) * t

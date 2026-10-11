@@ -81,7 +81,9 @@ def _smooth_normals(positions: np.ndarray, indices: np.ndarray) -> np.ndarray:
 
 
 def _tangents(positions: np.ndarray, normals: np.ndarray, uvs: np.ndarray, indices: np.ndarray) -> np.ndarray:
-    """Per-vertex tangents from UV gradients (Lengyel's method)."""
+    """Per-vertex tangents from UV gradients (Eric Lengyel, "Computing
+    Tangent Space Basis Vectors for an Arbitrary Mesh",
+    https://terathon.com/code/tangent.html)."""
     triangles = indices.reshape(-1, 3)
     p = positions[triangles].astype(np.float64)
     t = uvs[triangles].astype(np.float64)

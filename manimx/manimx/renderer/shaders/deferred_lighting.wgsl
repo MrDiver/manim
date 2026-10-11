@@ -14,6 +14,11 @@
 //      `sample_index`, so it runs once per sample of an edge pixel and
 //      writes each its own: lit edges keep their MSAA antialiasing.
 //
+// Shading edge pixels per sample and the rest once follows Andrew
+// Lauritzen, "Deferred Rendering for Current and Future Rendering
+// Pipelines" (SIGGRAPH 2010),
+// https://www.intel.com/content/www/us/en/developer/articles/technical/deferred-rendering-for-current-and-future-rendering-pipelines.html
+//
 // Without MSAA, `fs_light_pixel` alone shades every pixel.
 //
 // Output: linear HDR radiance with alpha = 1 where a mesh covers the

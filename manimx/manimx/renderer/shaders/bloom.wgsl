@@ -10,6 +10,7 @@
 //
 // The wide, smooth glow comes from summing all mip levels; the 13-tap and
 // tent filters keep it free of blocky or flickering artifacts.
+// Slides: https://www.iryoku.com/next-generation-post-processing-in-call-of-duty-advanced-warfare/
 
 #include "fullscreen.wgsl"
 

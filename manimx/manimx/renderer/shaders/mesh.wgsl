@@ -17,7 +17,7 @@
 #include "gbuffer.wgsl"
 #include "surface_shader.wgsl"
 
-// Mirrors MESH_OBJECT_DTYPE in mesh_batch.py.
+// Mirrors `MeshObject` in core/src/packing/records.rs.
 struct MeshObject {
     model: mat4x4<f32>,
     normal_matrix: mat4x4<f32>, // inverse transpose of the model's 3x3 part
@@ -27,7 +27,7 @@ struct MeshObject {
     _pad1: u32,
 };
 
-// Mirrors MESH_VERTEX_DTYPE in mesh_batch.py.
+// Interleaved as `MESH_VERTEX_SIZE` in core/src/packing/records.rs says (built by core_callbacks.py).
 struct MeshVertex {
     position: vec3<f32>,
     u: f32,

@@ -81,7 +81,8 @@ class FactorKind(ScalarKind):
 
 
 class RotationKind(SignalKind):
-    """Unit quaternions. Interpolation follows the shortest arc (slerp);
+    """Unit quaternions. Interpolation follows the shortest arc (slerp,
+    Shoemake 1985, https://doi.org/10.1145/325165.325242);
     relative changes compose (``change * value``, i.e. applied after)."""
 
     name = "rotation"

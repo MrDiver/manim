@@ -1,6 +1,6 @@
 //! One root signal's track: its base value and the entries of the
 //! animations on it. Ports `SignalTrack` and `Placement.progress` from
-//! manimx/animation/signal_tracks.py.
+//! manimx/animation/signals/signal_tracks.py.
 
 use pyo3::prelude::*;
 

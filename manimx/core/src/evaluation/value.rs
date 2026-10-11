@@ -1,5 +1,5 @@
 //! Signal values and the operations of their kinds, ported from
-//! manimx/animation/kinds.py. Every operation computes what the Python
+//! manimx/animation/signals/kinds.py. Every operation computes what the Python
 //! kind computes, in the same order, so both paths agree.
 
 use std::sync::Arc;

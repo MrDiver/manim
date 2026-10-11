@@ -5,11 +5,11 @@ geometry or style and change rarely: a mesh's interleaved vertices, a
 material entry, a texture's mip levels. The core builds those once per
 version of the signals they come from by calling these functions, and
 keeps the result until a version changes. Fills are tessellated in Rust
-(core/src/tessellation.rs), and stroke records are built in Rust
-(core/src/strokes.rs) whenever the style values are plain numbers;
+(core/src/geometry/tessellation.rs), and stroke records are built in Rust
+(core/src/geometry/strokes.rs) whenever the style values are plain numbers;
 :func:`stroke_records` builds them for other values and is what the
 Rust version is tested against. Every function returns plain bytes in
-the record layouts below (they mirror core/src/records.rs and the
+the record layouts below (they mirror core/src/packing/records.rs and the
 shaders).
 """
 
@@ -35,7 +35,7 @@ STROKE_WIDTH_SCALE = 0.01
 """World units per unit of stroke width (Manim: width 4 = 0.04 units)."""
 NO_NEIGHBOR = -1
 
-# Mirror the structs of core/src/records.rs (and the shaders reading them).
+# Mirror the structs of core/src/packing/records.rs (and the shaders reading them).
 STROKE_POINT_DTYPE = np.dtype([("position", "<f4", 3), ("width", "<f4"), ("color", "<f4", 4)])
 STROKE_CURVE_DTYPE = np.dtype(
     [
@@ -204,7 +204,11 @@ def texture_levels(texture: Any) -> list[tuple[int, int, bytes]]:
 
 
 def _mip_chain(image: np.ndarray) -> list[np.ndarray]:
-    """The image and successive half-size versions down to 1x1."""
+    """The image and successive half-size versions down to 1x1, each pixel
+    the average of four (a box filter): the mip map of Lance Williams,
+    "Pyramidal parametrics" (SIGGRAPH 1983,
+    https://en.wikipedia.org/wiki/Mipmap), which the GPU samples between
+    levels."""
     levels = [image]
     current = Image.fromarray(image)
     while current.width > 1 or current.height > 1:

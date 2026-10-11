@@ -1,13 +1,19 @@
 //! Fills of 2D paths as triangles with exact curves.
 //!
-//! The approach is ManimGL's (Loop & Blinn 2005):
+//! The approach is ManimGL's, after Charles Loop and Jim Blinn,
+//! [Resolution Independent Curve Rendering using Programmable Graphics
+//! Hardware](https://www.microsoft.com/en-us/research/publication/resolution-independent-curve-rendering-using-programmable-graphics-hardware/)
+//! (SIGGRAPH 2005):
 //!
 //! 1. Every cubic Bezier becomes quadratics within a bounded error.
 //! 2. Every subpath becomes a polygon *ring*: a quadratic that bulges into
 //!    the filled region (concave) adds its control point to the ring, one
 //!    that bulges out (convex) only its chord.
 //! 3. Rings are grouped into outer rings and their holes (even-odd rule)
-//!    and triangulated with earcut.
+//!    and triangulated with [earcut](https://github.com/mapbox/earcut)
+//!    (ear clipping with holes bridged in, see David Eberly,
+//!    [Triangulation by Ear Clipping](https://www.geometrictools.com/Documentation/TriangulationByEarClipping.pdf);
+//!    the Rust port is the [earcutr](https://crates.io/crates/earcutr) crate).
 //! 4. Every bending quadratic adds one *curve triangle* (start, control,
 //!    end); the fragment shader keeps the side of the curve that is inside.
 //!
@@ -162,7 +168,8 @@ fn ring(curves: &[[DVec2; 4]], first_curve: usize) -> Ring {
 
 /// One cubic as quadratics whose error stays below `TOLERANCE`. A single
 /// quadratic with control `(3 (p1 + p2) - p0 - p3) / 4` is off by at most
-/// `sqrt(3) / 36 * |p3 - 3 p2 + 3 p1 - p0|`; `n` pieces divide that by `n^3`.
+/// `sqrt(3) / 36 * |p3 - 3 p2 + 3 p1 - p0|`; `n` pieces divide that by `n^3`
+/// (<http://caffeineowl.com/graphics/2d/vectorial/cubic2quad01.html>).
 fn cubic_to_quadratics(curve: &[DVec2; 4], curve_index: u32) -> Vec<Quadratic> {
     let [p0, p1, p2, p3] = *curve;
     let error = 3f64.sqrt() / 36.0 * (p3 - 3.0 * p2 + 3.0 * p1 - p0).length();

@@ -4,6 +4,8 @@
 //      dither it, and put it over the background, in linear light
 //   2. encode to sRGB and put the vector layer over it in sRGB values,
 //      which is how Manim blends, so 2D colors come out exactly
+//      ("over" of Porter and Duff 1984, "Compositing digital images",
+//      https://doi.org/10.1145/800031.808606, on premultiplied colors)
 //   3. decode back to linear and add `weight` times the result to the
 //      accumulator (premultiplied), so motion-blur sub-frames average in
 //      linear light; finalize.wgsl encodes the sum at the end
@@ -72,7 +74,9 @@ fn dithered(premultiplied: vec3<f32>, coverage: f32, pixel: vec2<u32>) -> vec3<f
     return srgb_to_linear(clamp(srgb + noise, vec3<f32>(0.0), vec3<f32>(1.0))) * coverage;
 }
 
-/// Noise in (-0.49, 0.49) / 255 for one channel of a pixel (a PCG hash).
+/// Noise in (-0.49, 0.49) / 255 for one channel of a pixel: the PCG hash
+/// of Jarzynski and Olano 2020, "Hash Functions for GPU Rendering",
+/// https://jcgt.org/published/0009/03/02/
 fn pixel_dither(pixel: vec2<u32>, channel: u32) -> f32 {
     var state = pixel.x * 1664525u + pixel.y * 22695477u + channel * 1013904223u;
     state = state * 747796405u + 2891336453u;

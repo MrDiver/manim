@@ -1,5 +1,5 @@
 //! Rate functions: how an animation's linear progress becomes its eased
-//! progress. Ports `linear` and `smooth` from manimx/animation/rates.py;
+//! progress. Ports `linear` and `smooth` from manimx/animation/signals/rates.py;
 //! any other rate function stays in Python and is called back.
 
 use pyo3::prelude::*;

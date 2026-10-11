@@ -2,7 +2,7 @@
 
 How manimx turns a scene at one time into an image. The renderer itself
 is Rust on [wgpu](https://wgpu.rs), in the core
-([core/src/gpu/](../../core/src/gpu/mod.rs), `manimx._core.FrameRenderer`);
+([core/src/render/](../../core/src/render/mod.rs), `manimx._core.FrameRenderer`);
 this package holds what Python gives it:
 
 - `RenderConfig` and `Camera` (config.py): size, background, camera,
@@ -273,11 +273,11 @@ flowchart LR
 - **`CoreFramePipeline`** (manimx/drivers/core_pipeline.py) asks for the
   views of each sub-frame (one, or the motion blur samples), builds each
   camera's Frame record, and hands them to the `FrameRenderer`.
-- **`FrameRenderer`** (core/src/gpu/frame_renderer.rs) does the rest in
-  Rust: for each sub-frame and view, the `Packer` (core/src/packer.rs)
+- **`FrameRenderer`** (core/src/render/frame_renderer.rs) does the rest in
+  Rust: for each sub-frame and view, the `Packer` (core/src/packing/packer.rs)
   turns the graph and state into records, the `Renderer`
-  (core/src/gpu/renderer.rs) draws them into two layers, and the
-  `Composer` (core/src/gpu/composer.rs) applies effects and composites
+  (core/src/render/renderer.rs) draws them into two layers, and the
+  `Composer` (core/src/render/composer.rs) applies effects and composites
   them into the frame. The frame is copied into a buffer that is read
   back while the next frames are prepared; up to `in_flight` frames are
   on the GPU at once.
@@ -367,7 +367,7 @@ sequenceDiagram
 ### Shader modules
 
 WGSL has no module system. The core expands `#include "file.wgsl"` lines
-(each file at most once per shader, core/src/gpu/context.rs).
+(each file at most once per shader, core/src/render/context.rs).
 
 ```mermaid
 flowchart BT
@@ -409,17 +409,16 @@ A `FrameRenderer` lives as long as its pipeline, and keeps:
 | What | Kept by | Key | Dropped |
 |---|---|---|---|
 | a path's fill triangles, stroke links, colors | `PathCache` (vectors.rs) | node uid + versions of the signals they come from | when the node is not drawn for 1024 packs |
-| a mesh's interleaved vertices | `MeshPacker` (meshes.rs) | node uid + mesh version | when the node is not drawn for 1024 packs |
-| a material's entry | `MeshPacker` (meshes.rs) | node uid + material versions | with the renderer |
+| a mesh's interleaved vertices, a material's entry | `MeshPacker` (meshes.rs) | node uid + mesh or material versions | when the node is not drawn for 1024 packs |
 | vector records on the GPU | the arenas of `VectorPacker` (vectors.rs, arena.rs) | (node uid, drawn as a mask) | when the node leaves the scene; everything packed again when garbage outweighs live records |
 | mesh vertices and indices on the GPU | the arenas of `MeshPacker` | node uid + mesh version | when the mesh is not placed in a frame with meshes; packed again when garbage outweighs live data |
 | shadow map layers | `ShadowLayers` (shadows.rs) decides, the shadow pass keeps the depth | the layer's Frame record and its scope's casters (identity, versions, world matrix) | rendered again when the key changes or the maps are made again |
 | textures | the mesh pass | texture and color space | when no frame uses them |
-| render targets | `RenderTargets` (gpu/targets.rs) | size, MSAA, mask layers | on a size change |
+| render targets | `RenderTargets` (core/src/render/targets.rs) | size, MSAA, mask layers | on a size change |
 | the last frame | `FrameRenderer` | every view's graph id, state key, Frame record (without the time) and lens | when a frame with another key is rendered |
 
 Every node has a uid and every signal a version that grows exactly when
-its value changes (core/src/evaluator.rs), so the caches never need to
+its value changes (core/src/evaluation/evaluator.rs), so the caches never need to
 be told what changed. Every `SceneGraph` gets an id of its own when it is
 made, never reused, so a frame of one scene is never mistaken for a frame
 of another. Moving a node (its world matrix) never invalidates its
@@ -434,8 +433,8 @@ records; it only patches its object entry. Changing its points does.
 | `effects.py` | effect settings |
 | `core_callbacks.py` | what the core asks Python for, once per version (stroke records of styles that are not plain numbers, fill colors, meshes, materials, texture levels) |
 | `shaders/` | every WGSL shader |
-| core/src/packer.rs, graph.rs, vectors.rs, meshes.rs, lights.rs, shadows.rs | records of a frame (core/README.md maps them) |
-| core/src/gpu/ | the passes, the composer, the `FrameRenderer` (its `mod.rs` maps them) |
+| core/src/packing/packer.rs, graph.rs, vectors.rs, meshes.rs, lights.rs, shadows.rs | records of a frame (core/README.md maps them) |
+| core/src/render/ | the passes, the composer, the `FrameRenderer` (its `mod.rs` maps them) |
 | manimx/drivers/core_pipeline.py | `CoreFramePipeline`: views and Frame records to the `FrameRenderer` |
 
 ---

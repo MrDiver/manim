@@ -35,11 +35,11 @@ src/
 |---|---|---|
 | `lib.rs` | the Python module `manimx._core` | |
 | `evaluation/evaluator.rs` | `Evaluator`: all signals of a scene in slots, set to their values at a time; `FrameState`, `Slots` | `PreparedScene.evaluate()`, `ScenePlan` (animation/plan.py) |
-| `evaluation/track.rs` | one signal's track and its entries, folded at a time | `SignalTrack`, `Entry`, `Placement` (animation/signal_tracks.py) |
-| `evaluation/contribution.rs` | what one animation does to one signal at a progress | `Animation.contribution()`, animation/contributions.py |
-| `evaluation/rates.rs` | rate functions | animation/rates.py |
-| `evaluation/value.rs` | signal values and the operations of their kinds | animation/kinds.py |
-| `evaluation/paths.rs` | the part of a path drawn so far | animation/paths.py |
+| `evaluation/track.rs` | one signal's track and its entries, folded at a time | `SignalTrack`, `Entry`, `Placement` (animation/signals/signal_tracks.py) |
+| `evaluation/contribution.rs` | what one animation does to one signal at a progress | `Animation.contribution()`, animation/signals/contributions.py |
+| `evaluation/rates.rs` | rate functions | animation/signals/rates.py |
+| `evaluation/value.rs` | signal values and the operations of their kinds | animation/signals/kinds.py |
+| `evaluation/paths.rs` | the part of a path drawn so far | animation/signals/paths.py |
 | `packing/packer.rs` | `Packer`: a scene graph and a `FrameState` in, the records of a packet out | |
 | `packing/scene_graph.rs` | `SceneGraph`: nodes, nesting, which slot feeds which field; flattening to drawable leaves | `Node.snapshot()` |
 | `packing/vectors.rs` | retained records of `Shape2D` and `Curve3D` | |

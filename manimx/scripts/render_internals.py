@@ -5,7 +5,7 @@ images a frame of it goes through on the way.
 
 The default output folder is manimx/renderer/images/. The scene is
 rendered once, and the renderer's textures are read back after the frame
-(``FrameRenderer.inspect``, core/src/gpu/inspect.rs): the shadow maps,
+(``FrameRenderer.inspect``, core/src/render/inspect.rs): the shadow maps,
 the clip masks, the G-buffer, the lit and vector layers and the depth of
 field's distances and tiles. This script turns their values into colors.
 The lighting pass's edge pixels are shown by rendering once more, in a

@@ -6,7 +6,7 @@
 
 #include "surface.wgsl"
 
-// Mirrors MATERIAL_DTYPE in mesh_batch.py.
+// Mirrors `Material` in core/src/packing/records.rs.
 struct Material {
     base_color: vec4<f32>,      // linear RGBA factor
     emissive: vec4<f32>,        // linear RGB factor (strength applied), w unused

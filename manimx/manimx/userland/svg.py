@@ -407,7 +407,8 @@ def _quadratic(start: np.ndarray, control: np.ndarray, end: np.ndarray) -> tuple
 
 def _arc(start: np.ndarray, rx: float, ry: float, rotation: float, large: bool, sweep: bool, end: np.ndarray) -> list[tuple[np.ndarray, ...]]:
     """An elliptical arc as cubic curves of at most 90 degrees each
-    (endpoint to center parameterization, SVG 1.1 appendix F.6)."""
+    (endpoint to center parameterization, SVG 1.1 appendix F.6,
+    https://www.w3.org/TR/SVG11/implnote.html#ArcImplementationNotes)."""
     if np.allclose(start, end):
         return []
     rx, ry = abs(rx), abs(ry)

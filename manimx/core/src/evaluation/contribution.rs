@@ -1,5 +1,5 @@
 //! What one animation does to one signal at a given progress: the data
-//! form of `Animation.contribution()` (manimx/animation/contributions.py
+//! form of `Animation.contribution()` (manimx/animation/signals/contributions.py
 //! lists the same cases on the Python side).
 //!
 //! The progress `alpha` is already rate-mapped. `start` is the signal's

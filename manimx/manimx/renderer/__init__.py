@@ -1,7 +1,7 @@
 """The Python side of the renderer: how a frame is configured.
 
 Rendering itself happens in the core (``manimx._core.FrameRenderer``,
-core/src/gpu/), driven by :mod:`manimx.drivers`. This package holds what
+core/src/render/), driven by :mod:`manimx.drivers`. This package holds what
 Python gives it: :class:`RenderConfig` and :class:`Camera` (size,
 lighting, shadows, the point of view), the effect settings, the camera's
 Frame record, the functions the core calls back, and the WGSL shaders

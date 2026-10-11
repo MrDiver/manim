@@ -4,7 +4,10 @@
 // The blur radius of a pixel (its circle of confusion) follows a thin
 // lens: aperture * |distance - focus| / distance, as a fraction of the
 // image height; so `aperture` is the blur of something infinitely far
-// away. Distances come from view_distance.wgsl, rendered before.
+// away (Potmesil and Chakravarty 1981, "A lens and aperture camera model
+// for synthetic image generation"; derived in
+// https://pbr-book.org/3ed-2018/Camera_Models/Projective_Camera_Models#TheThinLensModelandDepthofField).
+// Distances come from view_distance.wgsl, rendered before.
 //
 // The blur gathers pixels in a disk (golden-angle spiral) as large as the
 // largest blur that can reach the pixel: the largest in its tile and the
@@ -17,6 +20,12 @@
 // only as far as this pixel's blur reaches, so a sharp object never gets
 // the blurred background spread over it, while a blurred one in front
 // spreads over sharp things behind it.
+//
+// Scatter as gather, the tiles and interleaved gradient noise follow Jorge
+// Jimenez, "Next Generation Post Processing in Call of Duty: Advanced
+// Warfare" (SIGGRAPH 2014),
+// https://www.iryoku.com/next-generation-post-processing-in-call-of-duty-advanced-warfare/
+// The spiral is Vogel's (1979), https://doi.org/10.1016/0025-5564(79)90080-4
 
 #include "fullscreen.wgsl"
 #include "frame.wgsl"

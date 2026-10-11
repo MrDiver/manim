@@ -1,14 +1,16 @@
 // Lighting: Surface + lights -> linear radiance towards the viewer.
 //
-// The BRDF is the one from the glTF 2.0 specification (appendix B):
+// The BRDF is the one from the glTF 2.0 specification (appendix B,
+// https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#appendix-b-brdf-implementation):
 // Lambert diffuse plus GGX / Smith-correlated visibility / Schlick Fresnel
-// specular. Light kinds and falloffs follow KHR_lights_punctual.
+// specular. Light kinds and falloffs follow KHR_lights_punctual,
+// https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Khronos/KHR_lights_punctual
 
 const LIGHT_DIRECTIONAL: u32 = 0u;
 const LIGHT_POINT: u32 = 1u;
 const LIGHT_SPOT: u32 = 2u;
 
-// Mirrors LIGHT_DTYPE in mesh_batch.py.
+// Mirrors `Light` in core/src/packing/records.rs.
 struct Light {
     position: vec3<f32>,        // world (point, spot)
     kind: u32,

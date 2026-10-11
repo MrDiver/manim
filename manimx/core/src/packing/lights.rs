@@ -1,6 +1,6 @@
 //! The lights of a frame and their GPU records (the `Light` struct of
 //! lighting.wgsl), and the default lights of a scene without any. The
-//! fields come from the light nodes (manimx/animation/light.py).
+//! fields come from the light nodes (manimx/animation/nodes/light.py).
 
 use std::collections::HashMap;
 use std::f64::consts::FRAC_PI_2;

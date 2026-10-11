@@ -13,6 +13,8 @@ fn tone_map(color: vec3<f32>, curve: u32) -> vec3<f32> {
         case TONE_MAP_PBR_NEUTRAL: { return tone_map_pbr_neutral(color); }
         case TONE_MAP_ACES: { return tone_map_aces(color); }
         case TONE_MAP_AGX: { return tone_map_agx(color); }
+        // Reinhard et al. 2002, "Photographic tone reproduction for digital
+        // images", https://doi.org/10.1145/566654.566575 (the simple global curve).
         case TONE_MAP_REINHARD: { return color / (1.0 + color); }
         default: { return clamp(color, vec3<f32>(0.0), vec3<f32>(1.0)); }
     }
@@ -39,6 +41,7 @@ fn tone_map_pbr_neutral(color: vec3<f32>) -> vec3<f32> {
 
 /// Krzysztof Narkowicz's fit of the ACES filmic curve: punchy contrast,
 /// desaturated highlights.
+/// https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
 fn tone_map_aces(color: vec3<f32>) -> vec3<f32> {
     let x = color * 0.6;  // the fit expects pre-exposed input
     return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3<f32>(0.0), vec3<f32>(1.0));
@@ -46,6 +49,7 @@ fn tone_map_aces(color: vec3<f32>) -> vec3<f32> {
 
 /// Troy Sobotka's AgX (Blender 4's default view transform), in the minimal
 /// polynomial fit by Benjamin Wrensch.
+/// https://iolite-engine.com/blog_posts/minimal_agx_implementation
 fn tone_map_agx(color: vec3<f32>) -> vec3<f32> {
     let inset = mat3x3<f32>(
         0.842479062253094, 0.0423282422610123, 0.0423756549057051,
@@ -69,6 +73,8 @@ fn tone_map_agx(color: vec3<f32>) -> vec3<f32> {
     return clamp(pow(max(x, vec3<f32>(0.0)), vec3<f32>(2.2)), vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
+/// The sRGB transfer function (IEC 61966-2-1),
+/// https://en.wikipedia.org/wiki/SRGB#Transfer_function_(%22gamma%22).
 fn linear_to_srgb(color: vec3<f32>) -> vec3<f32> {
     let c = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
     let low = c * 12.92;

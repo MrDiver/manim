@@ -34,7 +34,7 @@
 // (linear, premultiplied, see composite.wgsl). The fill color tints it.
 
 // ---------------------------------------------------------------------------
-// Bindings (layouts mirror the numpy dtypes in vector_batch.py)
+// Bindings (layouts mirror the record structs in core/src/packing/records.rs)
 // ---------------------------------------------------------------------------
 
 #include "frame.wgsl"
@@ -266,7 +266,9 @@ fn premultiplied(color: vec4<f32>) -> vec4<f32> {
 
 fn shade(in: VertexOutput) -> vec4<f32> {
     // Loop-Blinn curve test: u^2 - v is negative on the chord side of the
-    // quadratic and positive on the control-point side.
+    // quadratic and positive on the control-point side (Loop and Blinn 2005,
+    // "Resolution Independent Curve Rendering using Programmable Graphics
+    // Hardware", https://www.microsoft.com/en-us/research/publication/resolution-independent-curve-rendering-using-programmable-graphics-hardware/).
     if in.side != 0.0 {
         let implicit = in.uv.x * in.uv.x - in.uv.y;
         if implicit * in.side < 0.0 {
@@ -301,7 +303,7 @@ fn tinted_picture(tint: vec4<f32>, in: VertexOutput) -> vec4<f32> {
 }
 
 // ---------------------------------------------------------------------------
-// Fill: pre-tessellated triangles (see tessellation.py)
+// Fill: pre-tessellated triangles (see core/src/geometry/tessellation.rs)
 // ---------------------------------------------------------------------------
 
 /// The fill color at a vertex: the cubic Bezier of its source curve's four
@@ -362,7 +364,7 @@ const SEGMENTS: u32 = 24u;
 const FAN_TRIANGLES: u32 = 8u;
 const RIBBON_VERTICES: u32 = SEGMENTS * 6u;
 const FAN_VERTICES: u32 = FAN_TRIANGLES * 3u;
-// Keep in sync with STROKE_VERTEX_COUNT in vector_batch.py.
+// Keep in sync with STROKE_VERTEX_COUNT in core/src/packing/records.rs.
 const STROKE_VERTEX_COUNT: u32 = RIBBON_VERTICES + 2u * FAN_VERTICES;
 
 // Values of manimx.robjects.style.JointType / CapStyle.

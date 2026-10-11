@@ -1,6 +1,6 @@
 //! The pictures of a frame's camera views: one layer each of a 2D array
 //! texture, rendered before the frame and sampled by the vector pass.
-//! See manimx/animation/camera_view.py.
+//! See manimx/animation/nodes/camera_view.py.
 
 use crate::render::context::HDR_FORMAT;
 

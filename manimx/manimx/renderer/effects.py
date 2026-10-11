@@ -1,4 +1,4 @@
-"""Frame effects: settings for the core's composer (core/src/gpu/composer.rs).
+"""Frame effects: settings for the core's composer (core/src/render/composer.rs).
 
 Effects are plain settings; the composer turns them into GPU work. There
 are two kinds:
@@ -37,7 +37,9 @@ class MotionBlur(Effect):
     time (``RenderConfig.time``). Film's "180 degree shutter" at 60 fps is
     ``shutter=1/120``. Because every sub-frame is a full render of the scene
     at its own time, the blur is exact for any change: movement, morphing
-    points, colors, even objects appearing.
+    points, colors, even objects appearing. This is the accumulation
+    buffer's motion blur (Haeberli and Akeley 1990,
+    https://doi.org/10.1145/97880.97913).
     """
 
     samples: int = 16

@@ -1,5 +1,7 @@
 //! Shadow map rendering: one depth layer per shadow view, casters drawn
-//! with the mesh and vector pipelines seen from the light.
+//! with the mesh and vector pipelines seen from the light: Lance Williams's
+//! [shadow maps](https://history.siggraph.org/?p=120268) (1978). How they
+//! are filtered (PCF, PCSS) is in shaders/shadows.wgsl.
 //!
 //! Layers whose views say they are unchanged keep their depth from the
 //! previous render and get no pass, unless the maps were just made again.
