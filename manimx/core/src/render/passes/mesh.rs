@@ -311,6 +311,12 @@ impl MeshPass {
         pass.set_bind_group(0, self.scene_group.as_ref(), &[]);
         pass.set_index_buffer(self.indices.buffer.slice(..), wgpu::IndexFormat::Uint32);
         for (key, shader, first, count) in &self.draw_groups {
+            // A group whose meshes are all translucent has no draws; a
+            // multi-draw of count 0 still draws its first record on some
+            // backends (seen on Vulkan).
+            if *count == 0 {
+                continue;
+            }
             pass.set_pipeline(&self.pipelines[&(sample_count, *shader)]);
             pass.set_bind_group(1, self.material_groups.get(key), &[]);
             pass.multi_draw_indexed_indirect(&self.indirect.buffer, first * DRAW_SIZE, *count);

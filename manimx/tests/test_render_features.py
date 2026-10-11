@@ -381,6 +381,14 @@ def test_translucent_meshes_show_what_is_behind_them() -> None:
     assert pixel(render(behind, faded, lit), 0.0, 0.0)[0] > 100  # alpha 0: not drawn
 
 
+def test_a_mesh_alone_in_its_material_group_still_fades() -> None:
+    opaque = pixel(render(Shape3D(box_mesh(2.0, 2.0, 0.2), color="#ffffff")), 0.0, 0.0)
+    faded = Shape3D(box_mesh(2.0, 2.0, 0.2), color="#ffffff")
+    faded.alpha.set(0.5)
+    seen = pixel(render(faded), 0.0, 0.0)
+    assert 20 < seen[0] < opaque[0] - 20  # not drawn opaque into the G-buffer as well
+
+
 def test_translucent_casters_tint_light_instead_of_blocking_it() -> None:
     floor = Shape3D(box_mesh(8.0, 8.0, 0.1), color="#ffffff").move_to((0.0, 0.0, -0.05))
     sun = DirectionalLight(direction=(1.0, 0.0, -1.0), intensity=2.0)  # the shadow falls 1 to the right
