@@ -31,7 +31,9 @@ from .style import Colors, Scalars
 
 class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
     """Points ``(N, 3)`` in the RBezierPath layout (four per cubic curve)
-    with a stroke. The stroke width is in world units.
+    with a stroke. The stroke width is in the units of a Shape2D's (one
+    is ``STROKE_WIDTH_SCALE``, 0.01 world units), so the default 4 is
+    0.04 world units wide.
 
     Every field of its render counterpart is a signal:
 
@@ -59,7 +61,7 @@ class Curve3D(PositionMixin, RotationMixin, ScalableMixin, Node):
         name: str | None = None,
         *,
         color: Colors = WHITE,
-        stroke_width: Scalars = 0.04,
+        stroke_width: Scalars = 4.0,
         stroke_opacity: Scalars = 1.0,
         stroke_joint: JointType | Sequence[JointType] = JointType.AUTO,
         stroke_cap: CapStyle = CapStyle.AUTO,
