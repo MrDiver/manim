@@ -858,8 +858,9 @@ flowchart LR
 - the core (CORE.md): evaluation, render objects and rendering in Rust,
   with the render object tree as the interface; the only renderer;
 - graphs with adaptive ticks, number lines, Typst, SVG; `Code` with
-  focus, regions, scrolling windows and `MorphCode`;
-- `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`;
+  focus, regions, scrolling windows, `MorphCode`, `Flipboard`,
+  `TypeCode`, `Untype` and `Blink`;
+- `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`, `Unwrite`;
 - `manimx ui` with reload on save;
 - performance (PERFORMANCE.md): the benchmark project from 48.6 fps to
   123.5 with the core; light-show 70 to 23 ms per frame.

@@ -22,9 +22,10 @@ from .animations import (
     Rotate,
     ShrinkToCenter,
     Uncreate,
+    Unwrite,
     Write,
 )
-from .code import Code, MorphCode
+from .code import Blink, Code, Flipboard, MorphCode, TypeCode, Untype
 from .constants import (
     DEGREES,
     DL,
@@ -120,6 +121,7 @@ __all__ = [
     "Arrow",
     "Axes",
     "BackgroundRectangle",
+    "Blink",
     "Box",
     "Brace",
     "BraceLabel",
@@ -138,6 +140,7 @@ __all__ = [
     "Ellipse",
     "FadeIn",
     "FadeOut",
+    "Flipboard",
     "FunctionGraph",
     "GrowFromCenter",
     "Indicate",
@@ -166,10 +169,13 @@ __all__ = [
     "SurroundingRectangle",
     "Torus",
     "Triangle",
+    "TypeCode",
     "Typst",
     "TypstMath",
     "Uncreate",
     "Underline",
+    "Untype",
+    "Unwrite",
     "Value",
     "Vector",
     "Write",

@@ -102,3 +102,64 @@ def test_morph_code_moves_shared_tokens_and_fades_the_rest() -> None:
     assert after.present.value and not before.present.value
     with pytest.raises(TypeError, match="Code into a Code"):
         MorphCode(before, Code("x").lines[0])
+
+
+def test_flaps_count_through_the_alphabet_up_or_down() -> None:
+    from manimx.userland.code import _flaps
+
+    assert _flaps("C", "F", "ABCDEFG") == "CDEF"
+    assert _flaps("F", "C", "ABCDEFG") == "FEDC"
+    assert _flaps("x", "B", "ABC") == "xB"  # not on a flap: straight there
+    assert _flaps("A", "A", "ABC") == "A"
+
+
+def test_a_flipboard_flips_every_cell_to_the_target() -> None:
+    from manimx.userland import Flipboard
+    from manimx.userland.code import glyph_points
+
+    before, after = Code("AB 1"), Code("AD 3\nZ")
+    flip = Flipboard(before, after, lag_ratio=0.2)
+    slots = flip.board.children
+    assert len(slots) == 4  # A, B to D, 1 to 3 and the new row's Z; spaces get no cell
+    prepared = prepare(lambda s: (s.add(before), s.play(flip, run_time=2.0)))
+    prepared.evaluate(0.6)
+    middle = [slot.points.value for slot in slots]
+    prepared.evaluate(2.0)
+    assert after.present.value and not before.present.value and not flip.board.present.value
+    pen = after.grid.pen(0, 1)
+    np.testing.assert_allclose(slots[1].points.value, glyph_points("D", after.setup) + pen)
+    assert any(len(a) != len(b) or not np.allclose(a, b) for a, b in zip(middle, [slot.points.value for slot in slots], strict=True))
+    assert len(glyph_points(" ", after.setup)) == 0
+    with pytest.raises(TypeError, match="Code into a Code"):
+        Flipboard(before, before.lines[0])  # type: ignore[arg-type]
+
+
+def test_typing_shows_characters_key_by_key_and_untyping_takes_them_back() -> None:
+    from manimx.userland import Blink, TypeCode, Untype
+
+    code = Code("ab\ncd")
+    cursor = code.cursor(fill_opacity=1.0)
+    typing = TypeCode(code, cursor)
+    assert typing.run_time == pytest.approx(5 / 20.0)  # four characters and a line break
+    prepared = prepare(lambda s: (s.play(typing), s.play(Blink(cursor, times=2), run_time=1.0), s.play(Untype(code, cursor, run_time=1.0))))
+    prepared.evaluate(0.1)
+    assert [glyph.alpha.value for glyph in code.glyphs] == [1.0, 1.0, 0.0, 0.0]
+    assert cursor.position.y.value == pytest.approx(code.in_parent(code.grid.caret(1, 0))[1])  # after the line break
+    prepared.evaluate(0.25 + 0.3)
+    assert cursor.alpha.value == 0.0  # blinking
+    prepared.evaluate(1.25 + 0.5)
+    assert [glyph.alpha.value for glyph in code.glyphs] == [1.0, 1.0, 0.0, 0.0]  # "cd" taken back
+    prepared.evaluate(2.25)
+    assert not code.present.value and cursor.present.value and cursor.alpha.value == 1.0
+    assert cursor.position.x.value == pytest.approx(code.in_parent(code.grid.caret(0, 0))[0])
+    with pytest.raises(TypeError, match="position"):
+        TypeCode(code, code.lines[0].children[0].alpha)  # type: ignore[arg-type]
+
+
+def test_jitter_varies_the_pauses_the_same_way_for_a_seed() -> None:
+    from manimx.userland import TypeCode
+
+    code = Code("abcdef")
+    first, again, other = (TypeCode(code, jitter=0.8, seed=seed)._presses for seed in (1, 1, 2))
+    np.testing.assert_allclose(first, again)
+    assert not np.allclose(first, other)

@@ -282,3 +282,25 @@ def test_a_morph_target_counts_as_visible_after_the_morph_whatever_the_float_tim
     (inbetween,) = morphs[0].inbetweens
     prepared.evaluate(2.4)
     assert inbetween.alpha.value == 1.0  # not fading in from 0
+
+
+def test_unwrite_undoes_write_from_the_last_shape_and_removes_the_node() -> None:
+    from manimx.animation import Group, Scene
+    from manimx.userland import Square, Unwrite
+
+    first, last = Square(1.0, fill_opacity=1.0), Square(1.0, fill_opacity=1.0)
+    group = Group(first, last)
+    unwrite = Unwrite(group, run_time=1.0, lag_ratio=1.0)
+
+    class Built(Scene):
+        def construct(self):
+            self.add(group)
+            self.play(unwrite)
+
+    prepared = Built().prepare()
+    prepared.evaluate(0.3)
+    assert first.fill_opacity.value == 1.0 and last.fill_opacity.value < 1.0  # the last shape goes first
+    prepared.evaluate(0.9)
+    assert first.draw_end.value < 1.0 and last.draw_end.value == 0.0
+    prepared.evaluate(1.0)
+    assert not group.present.value

@@ -14,13 +14,21 @@ some lines or characters), clipped to a window of rows and scrolled
 (``code.clip(rows=6)``, ``code.scroll_to(10)``), and :class:`MorphCode`
 turns one version of a program into the next: characters of the tokens
 both versions share move to their new cells, the rest fade out and in.
+
+The grid also makes text animations of editors and boards simple:
+:class:`Flipboard` turns code (or plain text) into other text the way a
+split-flap display does, every cell counting through an alphabet with
+glyphs compiled once each (:func:`glyph_points`); :class:`TypeCode` and
+:class:`Untype` type it in and take it back key by key behind a cursor
+(``code.cursor()``), which :class:`Blink` blinks.
 """
 
 from __future__ import annotations
 
 import difflib
+import math
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -28,11 +36,26 @@ from typing import Any
 
 import numpy as np
 
-from ..animation import ClippingGroup, Group, Node, Shape2D
+from ..animation import (
+    SCALAR,
+    Animation,
+    Change,
+    ClippingGroup,
+    Group,
+    Node,
+    PositionMixin,
+    RootSignal,
+    Shape2D,
+    Signal,
+    Target,
+)
 from ..animation.authoring import current as authoring_current
-from ..animation.nodes.node import ABS, ChangeList, animatable
+from ..animation.nodes.node import ABS, ChangeList, animatable, require
+from ..animation.signals.contributions import Contribution
+from ..animation.signals.rates import linear
+from ..animation.signals.signal_tracks import RateFunction
 from ..utils.color import ManimColor, ParsableManimColor
-from .animations import Morph, _world_alpha
+from .animations import Morph, _lagged, _PlannedAnimation, _world_alpha
 from .shapes2d import Rectangle
 from .svg import read_svg
 from .typst import PAGE, compile_typst
@@ -62,9 +85,14 @@ class Grid:
     def cell(self, row: int, column: int) -> tuple[float, float, float, float]:
         """``(left, bottom, right, top)`` of a cell: a row is one pitch
         high, centered on its digits."""
-        x, y = self.pen(row, column)
-        middle = y + self.cap_height / 2
+        x, middle = self.caret(row, column)
         return (x, middle - self.pitch / 2, x + self.advance, middle + self.pitch / 2)
+
+    def caret(self, row: int, column: int) -> np.ndarray:
+        """The middle of the cell's left edge: where a text cursor before
+        the cell stands."""
+        x, y = self.pen(row, column)
+        return np.array([x, y + self.cap_height / 2])
 
 
 class Code(Group):
@@ -99,6 +127,8 @@ class Code(Group):
         self.source = source.expandtabs(TAB_SIZE)
         self.rows = self.source.split("\n")
         setup = preamble + "\n" + _theme_rule(colors, theme)
+        self.setup = setup
+        """The Typst rules the code is set with (preamble and theme)."""
         self.grid = _grid(setup)
         self.glyphs: list[Shape2D] = []
         """Every glyph, in reading order."""
@@ -168,10 +198,25 @@ class Code(Group):
         boxes = np.array([self.grid.cell(row, column) for row, column in cells])
         low = np.array([boxes[:, 0].min(), boxes[:, 1].min()]) - padding
         high = np.array([boxes[:, 2].max(), boxes[:, 3].max()]) + padding
-        scale = np.array([authoring_current(axis) for axis in self.scale.axes])
-        center = self.get_center() + np.append((low + high) / 2, 0.0) * scale
-        size = (high - low) * scale[:2]
-        return center, float(size[0]), float(size[1])
+        size = (high - low) * self._scale()[:2]
+        return self.in_parent((low + high) / 2), float(size[0]), float(size[1])
+
+    def in_parent(self, point: Sequence[float]) -> np.ndarray:
+        """``point`` of the code's own space (such as a cell corner of
+        :attr:`grid`) in its parent's space, where the code is now
+        (rotation is not followed)."""
+        return self.get_center() + np.append(np.asarray(point, dtype=np.float64)[:2], 0.0) * self._scale()
+
+    def _scale(self) -> np.ndarray:
+        return np.array([authoring_current(axis) for axis in self.scale.axes])
+
+    def cursor(self, width: float = 0.12, height: float = 0.8, **style: Any) -> Rectangle:
+        """A text cursor for :class:`TypeCode`: a bar ``width`` columns
+        wide and ``height`` rows high, on the left edge of the first cell.
+        ``style`` as for any Shape2D (it has no color of its own)."""
+        scale = self._scale()
+        bar = Rectangle(width * self.grid.advance * scale[0], height * self.grid.pitch * scale[1], name=f"{self.name}.cursor", **style)
+        return bar.move_to(self.in_parent(self.grid.caret(0, 0)))
 
     # -- windows ------------------------------------------------------------
 
@@ -185,9 +230,9 @@ class Code(Group):
         columns = max((len(row) for row in self.rows), default=0)
         left = self.grid.left - padding
         right = self.grid.left + (width if width is not None else columns * self.grid.advance) + padding
-        scale = np.array([authoring_current(axis) for axis in self.scale.axes])
+        scale = self._scale()
         mask = Rectangle((right - left) * scale[0], (top - bottom) * scale[1], name=f"{self.name}.window", fill_opacity=1.0, stroke_width=0.0)
-        mask.move_to(self.get_center() + np.array([(left + right) / 2 * scale[0], (top + bottom) / 2 * scale[1], 0.0]))
+        mask.move_to(self.in_parent(((left + right) / 2, (top + bottom) / 2)))
         self._scroll_home = float(authoring_current(self.position.y)) - (first - 1) * self.grid.pitch * scale[1]
         return ClippingGroup(mask, self, name or f"{self.name}.clip")
 
@@ -230,6 +275,235 @@ class MorphCode(Morph[Code]):
         for glyph in target.glyphs:
             if glyph.uid not in taken:
                 self._inbetween(glyph, glyph, (0.0, _world_alpha(glyph)), window=(1.0 - self.fade, 1.0))
+
+
+ALPHABET = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;!?'\"-+*/=<>()[]{}_#@&%$|\\^~`"
+"""The order a :class:`Flipboard` counts characters in, like the flaps of
+a split-flap display: a space (an empty flap) first."""
+
+
+@dataclass(eq=False)
+class Flipboard(_PlannedAnimation):
+    """Turn ``source`` into ``target`` cell by cell like a split-flap
+    display: each cell counts from its character to the target's through
+    ``alphabet``, up or down, flap after flap. All cells flip at the same
+    speed, so short ways arrive first; ``lag_ratio`` starts the columns
+    one after another instead. A character not in the alphabet flips
+    straight to its target. ``flap`` folds each character away and the
+    next one in, as a flap falls; colors go from the source's to the
+    target's. Plain text flips too: it is ``Code`` without a language.
+
+    The cells are ``target``'s: place both at the same point. Like
+    :class:`Morph`, it changes neither side; ``target`` takes ``source``'s
+    place in the scene when it ends.
+    """
+
+    source: Code
+    target: Code
+    alphabet: str = ALPHABET
+    lag_ratio: float = 0.0
+    flap: bool = True
+    run_time: float = 1.5
+    rate: RateFunction = linear
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source, Code) or not isinstance(self.target, Code):
+            raise TypeError("Flipboard turns a Code into a Code")
+        self._plan()
+        before = {self.source.cells[glyph.uid]: glyph for glyph in self.source.glyphs}
+        after = {self.target.cells[glyph.uid]: glyph for glyph in self.target.glyphs}
+        cells = sorted(set(before) | set(after))
+        ways = {cell: _flaps(_character(self.source, cell), _character(self.target, cell), self.alphabet) for cell in cells}
+        span = max((len(way) - 1 for way in ways.values()), default=0)
+        columns = sorted({column for _, column in cells})
+        windows = dict(zip(columns, _lagged(len(columns), self.lag_ratio), strict=True)) if columns else {}
+        self.board = _Board(self.target, name=f"{self.target.name}.flipboard")
+        grid = self.target.grid
+        for cell in cells:
+            ends = [glyph for glyph in (before.get(cell), after.get(cell)) if glyph is not None]
+            first, last = (before.get(cell) or ends[0]), (after.get(cell) or ends[-1])
+            slot = Shape2D((), f"{self.board.name}.{cell[0]}.{cell[1]}", **_glyph_style(last))
+            slot._derive_points(_Flap(ways[cell], span, windows[cell[1]], grid.pen(*cell), grid.cap_height / 2, self.target.setup, self.flap), self.board.progress)
+            for name in ("fill_color", "stroke_color"):
+                self._between(getattr(slot, name), authoring_current(getattr(first, name)), authoring_current(getattr(last, name)))
+            alpha = (_world_alpha(first) if cell in before else _world_alpha(last), _world_alpha(last) if cell in after else 0.0)
+            slot.alpha.set(alpha[0])
+            self._between(slot.alpha, *alpha)
+            self.board.add(slot)
+        self._between(self.board.progress, 0.0, 1.0)
+        self._between(self.source.alpha, authoring_current(self.source.alpha), 0.0, 0.0, 0.0)
+        self._between(self.target.alpha, 0.0, authoring_current(self.target.alpha), 1.0, 1.0)
+
+    def nodes(self) -> Sequence[Node]:
+        return (self.source, self.target, self.board)
+
+    def removes(self) -> Sequence[Node]:
+        return (self.source, self.board)
+
+
+class _Board(Group):
+    """The cells of a Flipboard while it plays, where ``code`` is, and the
+    progress they flip by."""
+
+    def __init__(self, code: Code, name: str) -> None:
+        super().__init__(name=name)
+        self.progress = RootSignal(0.0, SCALAR, name=f"{name}.progress")
+        self.move_to(code.get_center())
+        self.set_scale(code._scale())
+
+    def signals(self) -> Iterator[Signal]:
+        yield from super().signals()
+        yield self.progress
+
+
+def _character(code: Code, cell: tuple[int, int]) -> str:
+    row, column = cell
+    return code.rows[row][column] if row < len(code.rows) and column < len(code.rows[row]) else " "
+
+
+def _flaps(start: str, end: str, alphabet: str) -> str:
+    """The characters a cell shows on its way from ``start`` to ``end``."""
+    if start == end:
+        return start
+    if start not in alphabet or end not in alphabet:
+        return start + end
+    first, last = alphabet.index(start), alphabet.index(end)
+    step = 1 if last > first else -1
+    return "".join(alphabet[index] for index in range(first, last + step, step))
+
+
+def _glyph_style(glyph: Shape2D) -> dict[str, Any]:
+    names = ("fill_opacity", "stroke_width", "stroke_opacity")
+    return {name: authoring_current(getattr(glyph, name)) for name in names}
+
+
+@lru_cache(maxsize=4096)
+def glyph_points(character: str, setup: str) -> np.ndarray:
+    """``character`` set as code with ``setup``, its pen position at the
+    origin (empty for a space); each compiled once."""
+    if not character.strip():
+        return np.zeros((0, 2))
+    paths = [path for path in read_svg(compile_typst(PAGE + setup + "\n" + _raw(character, None)), centered=False) if path.origin is not None]
+    if not paths:
+        return np.zeros((0, 2))
+    return np.concatenate([path.points for path in paths]) - np.array(paths[0].origin)
+
+
+class _Flap:
+    """The points of a Flipboard cell at a progress (its derivation): the
+    flap it has counted to, folded while it falls."""
+
+    __slots__ = ("way", "span", "window", "pen", "middle", "setup", "fold")
+
+    def __init__(self, way: str, span: int, window: tuple[float, float], pen: np.ndarray, middle: float, setup: str, fold: bool) -> None:
+        self.way, self.span, self.window, self.pen, self.middle, self.setup, self.fold = way, span, window, pen, middle, setup, fold
+
+    def __call__(self, progress: float) -> np.ndarray:
+        lower, upper = self.window
+        local = min(1.0, max(0.0, (progress - lower) / (upper - lower))) if upper > lower else float(progress >= upper)
+        steps = len(self.way) - 1
+        reached = local * self.span
+        if reached >= steps:
+            return glyph_points(self.way[-1], self.setup) + self.pen
+        flap = int(reached)
+        turned = reached - flap
+        character = self.way[flap] if turned < 0.5 else self.way[flap + 1]
+        points = glyph_points(character, self.setup)
+        if self.fold:
+            height = max(abs(math.cos(math.pi * turned)), 0.02)
+            points = points * [1.0, height] + [0.0, self.middle * (1.0 - height)]
+        return points + self.pen
+
+
+@dataclass(eq=False)
+class TypeCode(_PlannedAnimation):
+    """Type ``code`` in, key by key: each character appears when its key
+    is pressed, in reading order, spaces and line breaks taking a key
+    press too. ``cursor`` (a node with a position, such as
+    ``code.cursor(color=...)``) stands after the last character typed.
+    ``speed`` is in key presses per second and sets the run time unless
+    one is given; ``jitter`` (0 to 1) varies the time between presses, as
+    a hand does, the same way for the same ``seed``.
+    """
+
+    code: Code
+    cursor: Node | None = None
+    speed: float = 20.0
+    jitter: float = 0.0
+    seed: int = 0
+    run_time: float | None = None  # type: ignore[assignment]
+    rate: RateFunction = linear
+
+    backwards = False
+
+    def __post_init__(self) -> None:
+        if self.cursor is not None:
+            require(self.cursor, PositionMixin, type(self).__name__)
+        self._plan()
+        keys = [(row, column) for row, line in enumerate(self.code.rows) for column in range(len(line) + 1)][:-1]
+        if self.run_time is None:
+            self.run_time = max(len(keys), 1) / self.speed
+        pauses = 1.0 + self.jitter * (2.0 * np.random.default_rng(self.seed).random(len(keys)) - 1.0)
+        presses = np.concatenate([[0.0], np.cumsum(pauses)])[:-1] / max(float(pauses.sum()), 1e-12)
+        if self.backwards:
+            presses = 1.0 - presses  # the last key is taken back first
+        self._presses = np.sort(presses)
+        self._carets = [self.code.in_parent(self.code.grid.caret(*key)) for key in keys]
+        self._carets.append(self.code.in_parent(self.code.grid.caret(*keys[-1]) + [self.code.grid.advance, 0.0]) if keys else self.code.get_center())
+        press_of = {key: index for index, key in enumerate(keys)}
+        for glyph in self.code.glyphs:
+            press = float(presses[press_of[self.code.cells[glyph.uid]]])
+            shown = authoring_current(glyph.alpha)
+            self._between(glyph.alpha, *((shown, 0.0) if self.backwards else (0.0, shown)), press, press)
+
+    def targets(self) -> Sequence[Target]:
+        moves = [Target(axis, Change.ABSOLUTE) for axis in self.cursor.position.axes] if self.cursor is not None else []
+        return [*super().targets(), *moves]
+
+    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
+        if signal.id in self._planned:
+            return super().contribution(signal, alpha, start_value)
+        typed = int(np.searchsorted(self._presses, alpha, side="right"))
+        if self.backwards:
+            typed = len(self._presses) - typed
+        return float(self._carets[typed][self.cursor.position.axes.index(signal)])
+
+    def planned_contribution(self, signal: RootSignal) -> Contribution | None:
+        return self._planned[signal.id][1] if signal.id in self._planned else None
+
+    def nodes(self) -> Sequence[Node]:
+        return (self.code,) if self.cursor is None else (self.code, self.cursor)
+
+
+@dataclass(eq=False)
+class Untype(TypeCode):
+    """Take ``code`` back key by key from its end, as backspace does, the
+    cursor going along, and remove it (the cursor stays)."""
+
+    backwards = True
+
+    def removes(self) -> Sequence[Node]:
+        return (self.code,)
+
+
+@dataclass(eq=False)
+class Blink(Animation):
+    """Blink a node (a cursor) ``times`` times: it is hidden for the
+    second half of each blink, and shown at the end."""
+
+    node: Node
+    times: int = 3
+    run_time: float = 2.0
+    rate: RateFunction = linear
+
+    def targets(self) -> Sequence[Target]:
+        return [Target(self.node.alpha, Change.ABSOLUTE)]
+
+    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
+        return 1.0 if alpha >= 1.0 or math.floor(alpha * self.times * 2) % 2 == 0 else 0.0
+
+    def nodes(self) -> Sequence[Node]:
+        return (self.node,)
 
 
 # --------------------------------------------------------------------------
@@ -337,4 +611,4 @@ def _matching_cells(source: str, target: str) -> dict[tuple[int, int], tuple[int
     return cells
 
 
-__all__ = ["Code", "Grid", "MorphCode", "TAB_SIZE"]
+__all__ = ["ALPHABET", "TAB_SIZE", "Blink", "Code", "Flipboard", "Grid", "MorphCode", "TypeCode", "Untype", "glyph_points"]

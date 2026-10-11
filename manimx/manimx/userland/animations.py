@@ -581,6 +581,30 @@ class Write(DrawBorderThenFill):
         super().__post_init__()
 
 
+@dataclass(eq=False)
+class Unwrite(Write):
+    """Undo :class:`Write` and remove the node (Manim's ``Unwrite``): shape
+    after shape from the last one, each fill and stroke fading back to
+    its outline, then the outline undrawn. Run time and lag as for Write.
+    """
+
+    def _draw_border_then_fill(self, path: Node, window: tuple[float, float]) -> None:
+        lower, upper = 1.0 - window[1], 1.0 - window[0]  # the last shape first
+        middle = lower + (upper - lower) / 2
+        width = authoring_current(path.stroke_width)
+        has_stroke = bool(np.any(np.asarray(width) > 0.0))
+        outline_color = authoring_current(path.stroke_color if has_stroke or not hasattr(path, "fill_color") else path.fill_color)
+        self._between(path.stroke_color, authoring_current(path.stroke_color), outline_color, lower, middle)
+        self._between(path.stroke_width, width, self.stroke_width, lower, middle)
+        self._between(path.stroke_opacity, authoring_current(path.stroke_opacity), 1.0, lower, middle)
+        if hasattr(path, "fill_opacity"):
+            self._between(path.fill_opacity, authoring_current(path.fill_opacity), 0.0, lower, middle)
+        self._between(path.draw_end, authoring_current(path.draw_end), 0.0, middle, upper)
+
+    def removes(self) -> Sequence[Node]:
+        return (self.node,)
+
+
 _STYLE_SIGNALS = ("fill_color", "fill_opacity", "stroke_color", "stroke_width", "stroke_opacity", "stroke_joint", "stroke_cap")
 
 
@@ -721,5 +745,6 @@ __all__ = [
     "Rotate",
     "ShrinkToCenter",
     "Uncreate",
+    "Unwrite",
     "Write",
 ]
