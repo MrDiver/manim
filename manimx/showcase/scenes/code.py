@@ -15,14 +15,15 @@ from manimx.userland import (
     DOWN,
     LEFT,
     UP,
+    Blink,
     Code,
     FadeIn,
     FadeOut,
     Morph,
     MorphCode,
     RoundedRectangle,
+    TypeCode,
     Typst,
-    Write,
 )
 
 from .style import BLUE, GREEN, INK, MUTED, RED, SAND, VIOLET, caption
@@ -95,7 +96,10 @@ class Fibonacci(Scene):
         self.play(FadeIn(title), run_time=0.6)
 
         naive = code(NAIVE)
-        self.play(Write(naive), run_time=2.0)
+        cursor = naive.cursor(fill_color=INK, fill_opacity=1.0, stroke_width=0.0)
+        self.play(TypeCode(naive, cursor, speed=28.0, jitter=0.5))
+        self.play(Blink(cursor, times=2), run_time=1.0)
+        self.play(FadeOut(cursor), run_time=0.2)
         note = self.say("The definition, read literally", None)
 
         box = RoundedRectangle(*self.box_size(naive, naive.line(2), naive.line(3)), corner_radius=0.08, stroke_color=SAND, stroke_width=3.0)

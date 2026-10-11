@@ -116,6 +116,10 @@
     "Code": {
       "module": "scenes.code",
       "class": "Fibonacci"
+    },
+    "Flipboard": {
+      "module": "scenes.flipboard",
+      "class": "Departures"
     }
   },
   "timeline": {
@@ -167,6 +171,9 @@
       },
       {
         "scene": "Code"
+      },
+      {
+        "scene": "Flipboard"
       },
       {
         "scene": "LowerThird",
