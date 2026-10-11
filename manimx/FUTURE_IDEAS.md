@@ -47,6 +47,16 @@ thought about from scratch again.
   operations into an expression graph that the core evaluates. Tracing
   fails on branches like `if x > 0` and on unknown calls; those fall
   back to Python. Open: automatic with a report of fallbacks, or opt-in.
+- **Render object fields read from Python without copies (todo).**
+  Reading a field of an `RNode` from Python (`shape.points`,
+  `shape.fill`, `group.children`) makes a new Python object every time,
+  and copies the arrays (points, particle arrays) into new numpy arrays.
+  Rendering is not affected (the core reads the tree in Rust), but every
+  Python reader is: tests, `web/labels.py`, a renderer written in
+  Python. Fix: read-only numpy views onto the Rust memory, kept alive by
+  the render object (numpy arrays with a base object), and each field's
+  Python object made once on first read and kept in the render object,
+  so `shape.fill is shape.fill` holds again.
 - **Everything not strictly Python in Rust:** the node classes and
   signals in the core, Python as a thin authoring layer. Open: what must
   stay Python (`construct()`, `derive()` functions, custom animations
