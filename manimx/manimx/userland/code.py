@@ -16,9 +16,10 @@ turns one version of a program into the next: characters of the tokens
 both versions share move to their new cells, the rest fade out and in.
 
 The grid also makes text animations of editors and boards simple:
-:class:`Flipboard` turns code (or plain text) into other text the way a
-split-flap display does, every cell counting through an alphabet with
-glyphs compiled once each (:func:`glyph_points`); :class:`TypeCode` and
+:class:`CycleCharacters` turns code (or plain text) into other text by
+counting every cell through an alphabet, with glyphs compiled once each
+(:func:`glyph_points`), and :class:`Flipboard` folds each step like the
+flap of a split-flap display; :class:`TypeCode` and
 :class:`Untype` type it in and take it back key by key behind a cursor
 (``code.cursor()``), which :class:`Blink` blinks.
 """
@@ -278,20 +279,19 @@ class MorphCode(Morph[Code]):
 
 
 ALPHABET = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;!?'\"-+*/=<>()[]{}_#@&%$|\\^~`"
-"""The order a :class:`Flipboard` counts characters in, like the flaps of
+"""The order :class:`CycleCharacters` counts characters in, like the flaps of
 a split-flap display: a space (an empty flap) first."""
 
 
 @dataclass(eq=False)
-class Flipboard(_PlannedAnimation):
-    """Turn ``source`` into ``target`` cell by cell like a split-flap
-    display: each cell counts from its character to the target's through
-    ``alphabet``, up or down, flap after flap. All cells flip at the same
-    speed, so short ways arrive first; ``lag_ratio`` starts the columns
-    one after another instead. A character not in the alphabet flips
-    straight to its target. ``flap`` folds each character away and the
-    next one in, as a flap falls; colors go from the source's to the
-    target's. Plain text flips too: it is ``Code`` without a language.
+class CycleCharacters(_PlannedAnimation):
+    """Turn ``source`` into ``target`` cell by cell, each cell counting
+    from its character to the target's through ``alphabet``, up or down,
+    one character after another. All cells count at the same speed, so
+    short ways arrive first; ``lag_ratio`` starts the columns one after
+    another instead. A character not in the alphabet changes straight to
+    its target. Colors go from the source's to the target's. Plain text
+    counts too: it is ``Code`` without a language.
 
     The cells are ``target``'s: place both at the same point. Like
     :class:`Morph`, it changes neither side; ``target`` takes ``source``'s
@@ -302,13 +302,14 @@ class Flipboard(_PlannedAnimation):
     target: Code
     alphabet: str = ALPHABET
     lag_ratio: float = 0.0
-    flap: bool = True
     run_time: float = 1.5
     rate: RateFunction = linear
 
+    fold = False
+
     def __post_init__(self) -> None:
         if not isinstance(self.source, Code) or not isinstance(self.target, Code):
-            raise TypeError("Flipboard turns a Code into a Code")
+            raise TypeError(f"{type(self).__name__} turns a Code into a Code")
         self._plan()
         before = {self.source.cells[glyph.uid]: glyph for glyph in self.source.glyphs}
         after = {self.target.cells[glyph.uid]: glyph for glyph in self.target.glyphs}
@@ -317,16 +318,17 @@ class Flipboard(_PlannedAnimation):
         span = max((len(way) - 1 for way in ways.values()), default=0)
         columns = sorted({column for _, column in cells})
         windows = dict(zip(columns, _lagged(len(columns), self.lag_ratio), strict=True)) if columns else {}
-        self.board = _Board(self.target, name=f"{self.target.name}.flipboard")
+        self.board = _Board(self.target, name=f"{self.target.name}.cells")
         grid = self.target.grid
         for cell in cells:
             ends = [glyph for glyph in (before.get(cell), after.get(cell)) if glyph is not None]
             first, last = (before.get(cell) or ends[0]), (after.get(cell) or ends[-1])
             slot = Shape2D((), f"{self.board.name}.{cell[0]}.{cell[1]}", **_glyph_style(last))
-            slot._derive_points(_Flap(ways[cell], span, windows[cell[1]], grid.pen(*cell), grid.cap_height / 2, self.target.setup, self.flap), self.board.progress)
+            slot._derive_points(_Flap(ways[cell], span, windows[cell[1]], grid.pen(*cell), grid.cap_height / 2, self.target.setup, self.fold), self.board.progress)
             for name in ("fill_color", "stroke_color"):
                 self._between(getattr(slot, name), authoring_current(getattr(first, name)), authoring_current(getattr(last, name)))
-            alpha = (_world_alpha(first) if cell in before else _world_alpha(last), _world_alpha(last) if cell in after else 0.0)
+            # A space has no glyph to fade: a cell counting from or to one keeps the other side's alpha.
+            alpha = (_world_alpha(first), _world_alpha(last))
             slot.alpha.set(alpha[0])
             self._between(slot.alpha, *alpha)
             self.board.add(slot)
@@ -341,8 +343,17 @@ class Flipboard(_PlannedAnimation):
         return (self.source, self.board)
 
 
+@dataclass(eq=False)
+class Flipboard(CycleCharacters):
+    """:class:`CycleCharacters` as a split-flap display shows it: each
+    character folds away about its row's middle and the next one folds
+    in, as a flap falls."""
+
+    fold = True
+
+
 class _Board(Group):
-    """The cells of a Flipboard while it plays, where ``code`` is, and the
+    """The cells of a CycleCharacters while it plays, where ``code`` is, and the
     progress they flip by."""
 
     def __init__(self, code: Code, name: str) -> None:
@@ -390,8 +401,9 @@ def glyph_points(character: str, setup: str) -> np.ndarray:
 
 
 class _Flap:
-    """The points of a Flipboard cell at a progress (its derivation): the
-    flap it has counted to, folded while it falls."""
+    """The points of a CycleCharacters cell at a progress (its
+    derivation): the character it has counted to, folded while it changes
+    for a Flipboard."""
 
     __slots__ = ("way", "span", "window", "pen", "middle", "setup", "fold")
 
@@ -407,12 +419,11 @@ class _Flap:
             return glyph_points(self.way[-1], self.setup) + self.pen
         flap = int(reached)
         turned = reached - flap
+        if not self.fold:
+            return glyph_points(self.way[flap], self.setup) + self.pen
         character = self.way[flap] if turned < 0.5 else self.way[flap + 1]
-        points = glyph_points(character, self.setup)
-        if self.fold:
-            height = max(abs(math.cos(math.pi * turned)), 0.02)
-            points = points * [1.0, height] + [0.0, self.middle * (1.0 - height)]
-        return points + self.pen
+        height = max(abs(math.cos(math.pi * turned)), 0.02)
+        return glyph_points(character, self.setup) * [1.0, height] + [0.0, self.middle * (1.0 - height)] + self.pen
 
 
 @dataclass(eq=False)
@@ -611,4 +622,4 @@ def _matching_cells(source: str, target: str) -> dict[tuple[int, int], tuple[int
     return cells
 
 
-__all__ = ["ALPHABET", "TAB_SIZE", "Blink", "Code", "Flipboard", "Grid", "MorphCode", "TypeCode", "Untype", "glyph_points"]
+__all__ = ["ALPHABET", "TAB_SIZE", "Blink", "Code", "CycleCharacters", "Flipboard", "Grid", "MorphCode", "TypeCode", "Untype", "glyph_points"]

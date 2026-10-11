@@ -163,3 +163,16 @@ def test_jitter_varies_the_pauses_the_same_way_for_a_seed() -> None:
     first, again, other = (TypeCode(code, jitter=0.8, seed=seed)._presses for seed in (1, 1, 2))
     np.testing.assert_allclose(first, again)
     assert not np.allclose(first, other)
+
+
+def test_cycle_characters_swaps_whole_glyphs_without_folding() -> None:
+    from manimx.userland import CycleCharacters
+    from manimx.userland.code import glyph_points
+
+    before, after = Code("A"), Code("E")
+    cycle = CycleCharacters(before, after, alphabet="ABCDE")
+    prepared = prepare(lambda s: (s.add(before), s.play(cycle, run_time=1.0)))
+    pen = after.grid.pen(0, 0)
+    for time, character in ((0.1, "A"), (0.3, "B"), (0.6, "C"), (0.9, "D"), (1.0, "E")):
+        prepared.evaluate(time)
+        np.testing.assert_allclose(cycle.board.children[0].points.value, glyph_points(character, after.setup) + pen)

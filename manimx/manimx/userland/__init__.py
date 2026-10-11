@@ -25,7 +25,7 @@ from .animations import (
     Unwrite,
     Write,
 )
-from .code import Blink, Code, Flipboard, MorphCode, TypeCode, Untype
+from .code import Blink, Code, CycleCharacters, Flipboard, MorphCode, TypeCode, Untype
 from .constants import (
     DEGREES,
     DL,
@@ -131,6 +131,7 @@ __all__ = [
     "Cross",
     "CubicBezier",
     "CurvedArrow",
+    "CycleCharacters",
     "DashedLine",
     "DecimalNumber",
     "Dot",

@@ -1,8 +1,9 @@
 """Flipboard: a departures board whose cells count through the alphabet.
 
-Flipboard turns one Code into another cell by cell, like a split-flap
-display: each cell counts up or down to its new character, all at the
-same speed, or column after column with a lag. Plain text is Code
+CycleCharacters turns one Code into another cell by cell: each cell
+counts up or down to its new character, all at the same speed, or
+column after column with a lag. Flipboard does the same with every step
+folded like the flap of a split-flap display. Plain text is Code
 without a language. TypeCode types text in behind a cursor, Untype takes
 it back, and Unwrite undoes Write.
 """
@@ -16,6 +17,7 @@ from manimx.userland import (
     UP,
     Blink,
     Code,
+    CycleCharacters,
     FadeIn,
     FadeOut,
     Flipboard,
@@ -73,7 +75,7 @@ def flaps(code: Code, columns: int) -> Group:
 
 class Departures(Scene):
     def construct(self) -> None:
-        title = caption("Flipboard", "Cells count through the alphabet; TypeCode, Untype and Unwrite")
+        title = caption("Flipboard", "CycleCharacters and Flipboard count cells through the alphabet; TypeCode, Untype, Unwrite")
         self.play(FadeIn(title), run_time=0.6)
 
         heading = Typst("Departures", f'#set text(size: 28pt, weight: "bold", fill: rgb("{INK}"))').move_to(UP * 2.45 + LEFT * 2.55)
@@ -84,9 +86,9 @@ class Departures(Scene):
         self.play(FadeIn(background), FadeIn(current), run_time=0.8)
         self.wait(0.6)
 
-        for text, lag in zip(TIMES[1:], (0.0, 0.08), strict=True):
+        for text, change in zip(TIMES[1:], (CycleCharacters, Flipboard), strict=True):
             following = board(text)
-            self.play(Flipboard(current, following, alphabet=FLAPS, lag_ratio=lag), run_time=2.4)
+            self.play(change(current, following, alphabet=FLAPS, lag_ratio=0.08 if change is Flipboard else 0.0), run_time=2.4)
             current = following
             self.wait(0.8)
 
