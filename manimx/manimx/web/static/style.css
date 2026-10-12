@@ -496,3 +496,41 @@ button.toggle:focus-visible {
   max-height: calc(100vh - 64px);
   overflow-y: auto;
 }
+
+.clip-body .handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  background: color-mix(in srgb, var(--segment) 35%, transparent);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.clip-body .handle.in {
+  left: 0;
+  border-radius: 4px 0 0 4px;
+}
+
+.clip-body .handle.out {
+  right: 0;
+  border-radius: 0 4px 4px 0;
+}
+
+.clip-body:hover .handle,
+.clip-body.selected .handle {
+  opacity: 1;
+}
+
+.clip-body .handle:hover {
+  background: var(--segment);
+}
+
+#marquee {
+  position: absolute;
+  z-index: 10;
+  border: 1px solid var(--segment);
+  background: color-mix(in srgb, var(--segment) 15%, transparent);
+  pointer-events: none;
+}

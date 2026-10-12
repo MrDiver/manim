@@ -24,7 +24,7 @@
 // under its sticky labels. Ctrl+wheel zooms around the pointer, the keys
 // and buttons around the playhead; a moved playhead is scrolled into view.
 
-import { clipBar, eventMarkers, initEditing, timelineLoaded } from "./editing.js";
+import { clipBar, clipLane, eventMarkers, initEditing, timelineLoaded } from "./editing.js";
 
 const elements = {
   problem: document.getElementById("problem"),
@@ -57,6 +57,7 @@ const state = {
   open: loadOpen(), // keys of the rows whose tracks are shown
   indices: loadIndices(), // index labels over the frame
   zoom: 1, // lanes width / the width beside the labels
+  dragging: false, // an edit is being dragged: the timeline is not redrawn meanwhile
 };
 
 /** Horizontal position of a time, as a percentage of the timeline. */
@@ -152,6 +153,7 @@ function drawTimeline() {
     body.title = `${clip.name}: ${clip.start.toFixed(2)} – ${clip.end === null ? "waits" : `${end.toFixed(2)} s`}`;
     lane.append(body);
     clipBar(body, clip, index);
+    clipLane(lane);
     for (const segment of segments.filter((segment) => segment.clip === index)) {
       const bar = document.createElement("div");
       bar.className = "segment";
@@ -440,6 +442,7 @@ async function followChanges() {
       const response = await fetch(`/api/changes?since=${state.timeline.version}`);
       const { version } = await response.json();
       if (version !== state.timeline.version) {
+        while (state.dragging) await new Promise((resolve) => setTimeout(resolve, 50));
         await loadTimeline();
         show(snap(state.intended), state.intended);
       }
@@ -450,7 +453,16 @@ async function followChanges() {
 }
 
 async function start() {
-  initEditing({ state, elements, percent, snap, timeAt, redraw: drawTimeline });
+  initEditing({
+    state,
+    elements,
+    percent,
+    snap,
+    timeAt,
+    redraw: drawTimeline,
+    refreshFrame: () => show(state.time, state.intended),
+    showTime: (time) => show(snap(time)),
+  });
   showIndices(state.indices);
   await loadTimeline();
   listen();

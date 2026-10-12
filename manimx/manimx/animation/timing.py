@@ -150,6 +150,33 @@ class Clip:
         self.cue_events[cue] = event
         return self._changed()
 
+    def move(self, start: float) -> Clip:
+        """Start the clip at global time ``start``."""
+        self.start = float(start)
+        return self._changed()
+
+    def set_layer(self, layer: int) -> Clip:
+        """Draw the clip over clips of lower layers."""
+        self.layer = int(layer)
+        return self._changed()
+
+    def set_speed(self, speed: float) -> Clip:
+        """Play every segment ``speed`` times as fast (0.5: slow motion)."""
+        if speed <= 0.0:
+            raise ValueError("a clip's speed must be positive")
+        self.scales = dict.fromkeys(range(len(self.scene.segments)), 1.0 / speed)
+        return self._changed()
+
+    def replace_scene(self, scene: PreparedScene) -> Clip:
+        """Show ``scene`` instead (the same scene prepared again after its
+        file changed); start, cut, layer and speed stay."""
+        speeds = set(self.scales.values())
+        self.scene = scene
+        self.timings = []
+        if len(speeds) == 1:  # one speed for the whole clip: the new segments get it too
+            self.scales = dict.fromkeys(range(len(scene.segments)), speeds.pop())
+        return self._changed()
+
     def set_scale(self, segment: int, scale: float) -> Clip:
         if scale <= 0.0:
             raise ValueError("a segment's scale must be positive")
@@ -292,6 +319,11 @@ class Timeline:
         """Set the time of ``event`` (a presenter's click, or a fixed time)."""
         self.events[event] = time
         self._dirty = True
+
+    def unfire(self, event: str) -> None:
+        """Forget the time set for ``event``: clips waiting for it wait again."""
+        if self.events.pop(event, None) is not None:
+            self._dirty = True
 
     def event_times(self) -> dict[str, float]:
         """The time of every event known so far: set (:meth:`fire`) or

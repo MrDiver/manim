@@ -334,10 +334,13 @@ keeps the time (`#t=2.5`), so a link opens at the same place. Frames are
 rendered once each (no motion blur or render samples), at the size of the
 page. Ctrl+wheel, + and − zoom the timeline; 0 shows all of it.
 
-The page also edits the project, and every edit is saved to `manimx.json`
-at once (the file's history is the undo):
+The page also edits the project, live: the frame shows every edit while
+you drag, and `manimx.json` is saved a moment after the last edit
+(saving a scene file prepares only the scenes in that file again):
 
-- drag a clip to move it, drag its ends to cut it; click it to type its
+- drag a clip to move it, the handles at its ends to cut its start or
+  end; drag on empty space in the clip rows to select several clips (or
+  Shift/Ctrl click) and move them together; click a clip to type its
   start, layer, cut and `speed` (2 plays twice as fast, 0.5 is slow
   motion);
 - a clip that waits for an event (`wait_for`) holds until the event has a

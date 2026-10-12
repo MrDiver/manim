@@ -19,13 +19,14 @@ request, answered by the standard library's HTTP server:
                              `since` (or 25 s), then answers the version
                              and the last build error
 
-With a project editor (editing.py, given by ``manimx ui``) the page can
-change the project; each edit is saved to ``manimx.json``, and the
-reloader's rebuild then shows it:
+With a project editor (editing.py, given by ``manimx ui``) the page
+edits the project live: an edit changes the timeline the next frame
+shows, and ``manimx.json`` is saved shortly after (see editing.py):
 
     GET  /api/settings       every setting, its value and limits
     POST /api/clip           {"index", and any of "start", "layer",
-                             "cut", "speed"}
+                             "cut", "speed"}, or {"clips": [...]} of
+                             those for clips moved together
     POST /api/event          {"name", "time"} (time null: remove it)
     POST /api/setting        {"path": [...], "value"}
 
@@ -100,6 +101,8 @@ class PreviewServer:
         self.title = title
         self.editor = editor
         """Changes the project when the page edits it (None: read only)."""
+        if editor is not None:
+            editor.attach(self)
         self._renderer = renderer or StillRenderer()
         self._lock = threading.Lock()
         """Held while rendering or replacing the timeline."""
@@ -138,6 +141,13 @@ class PreviewServer:
         with self._lock:
             self._use(timeline, settings or self.settings)
         self._bump(error=None)
+
+    def change(self, edit: Callable[[], None]) -> None:
+        """Run ``edit`` on the timeline shown (between frames), then tell
+        the page."""
+        with self._lock:
+            edit()
+        self._bump(error=self.error)
 
     def report(self, error: str) -> None:
         """A rebuild failed: keep showing the current timeline, tell the page."""
@@ -202,6 +212,7 @@ class PreviewServer:
                     "start": clip.start,
                     "end": None if clip.end == NEVER else clip.end,
                     "layer": clip.layer,
+                    "length": clip.scene.playing_time,
                     "entry": entry,
                     "waits": [
                         segment.waits_for
@@ -285,7 +296,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - the name http.server calls
         editor = self.preview.editor
         routes: dict[str, Callable[[ProjectEditor, dict[str, Any]], None]] = {
-            "/api/clip": lambda editor, body: editor.edit_clip(_field(body, "index", int), {k: v for k, v in body.items() if k != "index"}),
+            "/api/clip": lambda editor, body: editor.edit_clips(_field(body, "clips", list) if "clips" in body else [body]),
             "/api/event": lambda editor, body: editor.set_event(_field(body, "name", str), body.get("time")),
             "/api/setting": lambda editor, body: editor.set_setting(_field(body, "path", list), body.get("value")),
         }
@@ -305,7 +316,7 @@ class _Handler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 raise _BadRequest("the body must be a JSON object")
             route(editor, body)
-            self._json({"ok": True})
+            self._json({"ok": True, "version": self.preview.version})
         except (_BadRequest, EditError) as error:
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
 

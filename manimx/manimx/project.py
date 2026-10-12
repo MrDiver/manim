@@ -231,6 +231,15 @@ class Project:
         except Exception as error:
             raise SceneError(name) from error
 
+    def module_file(self, name: str) -> Path | None:
+        """The file of scene ``name``'s module, if it is the project's own."""
+        entry = self._check_scene(name)
+        base = self.root / Path(*entry.module.split("."))
+        for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+            if candidate.is_file():
+                return candidate.resolve()
+        return None
+
     def _check_scene(self, name: str) -> SceneEntry:
         entry = self.scenes.get(name)
         if entry is None:
@@ -239,14 +248,21 @@ class Project:
             raise ProjectError(f"the project has no scene named {name!r}", hint=hint)
         return entry
 
-    def build_timeline(self, progress: Callable[[ClipEntry], None] | None = None) -> Timeline:
+    def build_timeline(
+        self,
+        progress: Callable[[ClipEntry], None] | None = None,
+        prepare: Callable[[int, ClipEntry], PreparedScene] | None = None,
+    ) -> Timeline:
         """The live timeline: every clip of ``manimx.json``, prepared and
-        placed. ``progress`` is called before each clip is prepared."""
+        placed. ``progress`` is called before each clip is prepared;
+        ``prepare(index, entry)`` gives clip ``index``'s prepared scene
+        (default: prepare it now; the preview reuses scenes whose files did
+        not change)."""
         timeline = Timeline(events=dict(self.events))
         previous_end = 0.0
         used: set[str] = set()
         previous_name = ""
-        for entry in self.timeline:
+        for index, entry in enumerate(self.timeline):
             if progress is not None:
                 progress(entry)
             if entry.start is None and previous_end == NEVER:
@@ -255,12 +271,12 @@ class Project:
                     hint="give the next clip an explicit start, or set the event's time under \"events\" in manimx.json",
                 )
             start = previous_end if entry.start is None else entry.start
-            clip = timeline.add(self.prepare(entry.scene), start=start, name=_unique(entry.name or entry.scene, used), layer=entry.layer)
+            scene = self.prepare(entry.scene) if prepare is None else prepare(index, entry)
+            clip = timeline.add(scene, start=start, name=_unique(entry.name or entry.scene, used), layer=entry.layer)
             if entry.cut is not None:
                 clip.cut(*entry.cut)
             if entry.speed != 1.0:
-                for index in range(len(clip.scene.segments)):
-                    clip.set_scale(index, 1.0 / entry.speed)
+                clip.set_speed(entry.speed)
             previous_end, previous_name = clip.end, clip.name
         return timeline
 

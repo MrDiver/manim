@@ -404,12 +404,12 @@ def ui_command(
     # fixed by saving) instead of stopping the command. Edits in the page
     # are saved to manimx.json, so they show only with reload.
     timeline = Timeline() if reload else _build(project)
-    editor = ProjectEditor(project.root) if reload else None
+    editor = ProjectEditor(project.root, _preview_settings) if reload else None
     try:
         server = PreviewServer(timeline, _preview_settings(project), title=project.name, port=port, editor=editor)
     except OSError as error:
         raise ProjectError(f"cannot serve on port {port}: {error.strerror}", hint="pick another one with --port, or 0 for any free port") from None
-    reloader = ProjectReloader(server, project.root, _preview_settings) if reload else None
+    reloader = ProjectReloader(server, project.root, _preview_settings, editor=editor) if reload else None
     if reloader is not None:
         with ui.console.status("Preparing scenes…", spinner="dots"):
             reloader.reload()
@@ -427,6 +427,8 @@ def ui_command(
     finally:
         if reloader is not None:
             reloader.stop()
+        if editor is not None:
+            editor.save()  # an autosave still waiting
         server.close()
 
 

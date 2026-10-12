@@ -24,6 +24,9 @@ Design decisions:
 * **What is watched:** ``manimx.json`` and ``*.py`` files in the project
   folder, except hidden folders (a ``.venv``), ``__pycache__`` and the
   output folder.
+* **With a project editor** (editing.py, as in ``manimx ui``) the
+  reloader only says which files changed: the editor prepares again just
+  the scenes in them, and ignores its own autosaves of ``manimx.json``.
 """
 
 from __future__ import annotations
@@ -37,6 +40,7 @@ from pathlib import Path
 
 from ..drivers.offline import RenderSettings
 from ..project import PROJECT_FILE, Project
+from .editing import ProjectEditor
 from .server import PreviewServer
 
 Snapshot = dict[Path, int]
@@ -51,8 +55,10 @@ class ProjectReloader:
         root: Path,
         settings: Callable[[Project], RenderSettings],
         interval: float = 0.25,
+        editor: ProjectEditor | None = None,
     ) -> None:
         self.server = server
+        self.editor = editor
         self.root = Path(root).resolve()
         self.settings = settings
         self.interval = interval
@@ -86,11 +92,18 @@ class ProjectReloader:
         current = self.snapshot()
         if current == self._seen:
             return False
+        changed = {path for path in current.keys() | self._seen.keys() if current.get(path) != self._seen.get(path)}
         self._seen = current
-        self.reload()
+        if self.editor is not None:
+            self.editor.files_changed(changed)
+        else:
+            self.reload()
         return True
 
     def reload(self) -> None:
+        if self.editor is not None:
+            self.editor.load()
+            return
         try:
             project = Project.load(self.root)
             project.unload_modules()
