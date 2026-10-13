@@ -4,10 +4,10 @@
 
 use glam::{DMat4, DVec3};
 
-use crate::render::packing::packer::PackSettings;
-use crate::render::packing::records::Frame;
-use crate::render::packing::shadows::{frame_record, FrameSettings};
-use crate::render::packing::vectors::CameraViews;
+use crate::render::pack::packer::PackSettings;
+use crate::render::pack::records::Frame;
+use crate::render::pack::shadows::{frame_record, FrameSettings};
+use crate::render::pack::vectors::CameraViews;
 use crate::robjects::Transform;
 
 /// A camera looking along its local -z (`Camera`).

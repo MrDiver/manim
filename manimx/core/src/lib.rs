@@ -14,7 +14,7 @@
 //! 2. `robjects`: the render object tree, plain values. In Python it is
 //!    `manimx.robjects` (python/robjects.rs).
 //! 3. `render`: a tree and its settings drawn on the GPU into a frame
-//!    (`FrameRenderer`); it knows nothing of signals or Python.
+//!    (`RenderPipeline`); it knows nothing of signals or Python.
 //!
 //! `python` holds the Python classes of `robjects` and `render`.
 //! CORE.md (in the folder above) explains why the core exists;
@@ -33,13 +33,13 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<evaluation::evaluator::Evaluator>()?;
     module.add_class::<evaluation::evaluator::FrameState>()?;
     module.add_class::<evaluation::scene_graph::SceneGraph>()?;
-    module.add_class::<python::frame_renderer::FrameRenderer>()?;
+    module.add_class::<python::render_pipeline::RenderPipeline>()?;
     module.add_function(wrap_pyfunction!(
-        python::frame_renderer::shader_source,
+        python::render_pipeline::shader_source,
         module
     )?)?;
     module.add_function(wrap_pyfunction!(
-        python::frame_renderer::override_shader,
+        python::render_pipeline::override_shader,
         module
     )?)?;
     python::robjects::register(module)?;

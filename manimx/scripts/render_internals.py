@@ -5,7 +5,7 @@ images a frame of it goes through on the way.
 
 The default output folder is manimx/renderer/images/. The scene is
 rendered once, and the renderer's textures are read back after the frame
-(``FrameRenderer.inspect``, core/src/render/inspect.rs): the shadow maps,
+(``RenderPipeline.inspect``, core/src/render/gpu/inspect.rs): the shadow maps,
 the clip masks, the G-buffer, the lit and vector layers and the depth of
 field's distances and tiles. This script turns their values into colors.
 The lighting pass's edge pixels are shown by rendering once more, in a
@@ -111,7 +111,7 @@ class Frames:
         return self.pipeline.render(frame_at, self.config.time)[..., :3]
 
     def texture(self, name: str, layer: int = 0) -> np.ndarray:
-        width, height, data = self.pipeline.renderer.inspect(name, layer)
+        width, height, data = self.pipeline.core.inspect(name, layer)
         return np.frombuffer(data, np.float32).reshape(height, width, 4)
 
 
@@ -135,7 +135,7 @@ def main() -> None:
     # Shadow maps: every layer, in rows of four (a point light has six).
     tile = 256
     maps = []
-    for layer in range(frames.pipeline.renderer.shadow_layers()):
+    for layer in range(frames.pipeline.core.shadow_layers()):
         depth = frames.texture("shadow_maps", layer)[..., 0]
         image = Image.fromarray(gray(depth, depth >= 1.0)).resize((tile, tile), Image.Resampling.BOX)
         maps.append(np.asarray(image))

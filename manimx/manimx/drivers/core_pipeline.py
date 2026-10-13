@@ -3,7 +3,7 @@
 :class:`CoreFramePipeline` renders frames: views, each a render object
 tree (manimx.robjects) and the camera looking at it, as a timeline's or
 prepared scene's ``frame_at`` returns them. The core
-(``manimx._core.FrameRenderer``) gets each tree with its
+(``manimx._core.RenderPipeline``) gets each tree with its
 ``RenderConfig`` and packs, renders, composites and reads back every
 frame in Rust, with up to ``in_flight`` frames on the GPU, so the CPU
 prepares the next frames while the GPU draws the earlier ones. Python
@@ -41,7 +41,7 @@ class CoreFramePipeline:
         self.config = config
         self.in_flight = in_flight
         tone_map = next((effect for effect in effects if isinstance(effect, ToneMap)), ToneMap())
-        self.renderer = _core.FrameRenderer(
+        self.core = _core.RenderPipeline(
             config,
             tone_map.operator.value,
             [_effect_tuple(effect) for effect in effects if isinstance(effect, (Bloom, ShaderEffect))],
@@ -65,14 +65,14 @@ class CoreFramePipeline:
         future.set_running_or_notify_cancel()
         number = self._submitted
         self._submitted += 1
-        held = self.renderer.render(number, sub_frames)
+        held = self.core.render(number, sub_frames)
         if held and self._last is not None:
             # The same picture as the frame before: no render, no readback.
             self._last.add_done_callback(lambda done: _pass_on(done, future))
         else:
             self._futures[number] = future
         self._last = future
-        self._deliver(self.renderer.finished())
+        self._deliver(self.core.finished())
         return future
 
     def render(self, scene: Frame | Callable[[float], Frame], time: float) -> np.ndarray:
@@ -83,11 +83,11 @@ class CoreFramePipeline:
 
     def flush(self) -> None:
         """Wait for every submitted frame."""
-        self._deliver(self.renderer.finished(wait=True))
+        self._deliver(self.core.finished(wait=True))
 
     def gpu_timings(self) -> dict[str, float]:
         """GPU milliseconds per pass since the last call (with ``profile``)."""
-        return self.renderer.gpu_timings()
+        return self.core.gpu_timings()
 
     def _deliver(self, finished: list[tuple[int, np.ndarray]]) -> None:
         for number, image in finished:

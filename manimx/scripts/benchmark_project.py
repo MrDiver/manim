@@ -62,12 +62,12 @@ def render_all(frame_at, settings, times) -> tuple[float, dict[str, float]]:
     for t in times[:5]:  # warm up: shaders, caches, buffers
         pipeline.submit(0, t, frame_at)
     pipeline.flush()
-    pipeline.renderer.stage_timings()
+    pipeline.core.stage_timings()
     start = time.perf_counter()
     for index, t in enumerate(times):
         pipeline.submit(index, t, frame_at)
     pipeline.flush()
-    return time.perf_counter() - start, pipeline.renderer.stage_timings()
+    return time.perf_counter() - start, pipeline.core.stage_timings()
 
 
 def reference_frames(project: Project, frame_at, duration: float) -> np.ndarray:
