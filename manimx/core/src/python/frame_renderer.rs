@@ -164,6 +164,16 @@ impl FrameRenderer {
         self.renderer.shadow_layers()
     }
 
+    /// CPU milliseconds per stage since the last call: "render (all)" is
+    /// the whole of `render`, the others parts of it or of `finished`.
+    fn stage_timings<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let timings = PyDict::new(py);
+        for (name, ms) in self.renderer.stage_timings() {
+            timings.set_item(name, ms)?;
+        }
+        Ok(timings)
+    }
+
     /// GPU milliseconds per pass name since the last call (with `profile`).
     fn gpu_timings<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let timings = PyDict::new(py);

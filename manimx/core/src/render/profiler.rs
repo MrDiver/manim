@@ -88,3 +88,30 @@ impl GpuProfiler {
         timings
     }
 }
+
+/// CPU time per stage of the frame renderer (pack, draw, composite,
+/// submit, read-back wait and copy), summed until read; cheap enough to
+/// run always.
+#[derive(Default)]
+pub struct StageClock {
+    spent: Vec<(&'static str, std::time::Duration)>,
+}
+
+impl StageClock {
+    /// Add the time since `start` to `stage`.
+    pub fn add(&mut self, stage: &'static str, start: std::time::Instant) {
+        let elapsed = start.elapsed();
+        match self.spent.iter_mut().find(|(name, _)| *name == stage) {
+            Some((_, total)) => *total += elapsed,
+            None => self.spent.push((stage, elapsed)),
+        }
+    }
+
+    /// Milliseconds per stage since the last read.
+    pub fn read(&mut self) -> Vec<(&'static str, f64)> {
+        self.spent
+            .drain(..)
+            .map(|(name, total)| (name, total.as_secs_f64() * 1e3))
+            .collect()
+    }
+}

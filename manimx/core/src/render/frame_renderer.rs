@@ -20,6 +20,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::render::composer::{Composer, CompositeTarget};
 use crate::render::context::{Gpu, CHROMA_FORMAT, COLOR_FORMAT, HDR_FORMAT, LUMA_FORMAT};
@@ -31,6 +32,7 @@ use crate::render::inspect::TextureKind;
 use crate::render::packing::packer::{Packer, Packet};
 use crate::render::packing::records::Frame;
 use crate::render::packing::vectors::VectorDraws;
+use crate::render::profiler::StageClock;
 use crate::render::renderer::{Renderer, TargetSettings};
 use crate::render::settings::ViewSettings;
 use crate::robjects::RNode;
@@ -116,6 +118,7 @@ pub struct FrameRenderer {
     ready: VecDeque<(u64, Vec<u8>)>,
     /// The key of the last rendered frame (None: never held).
     last_key: Option<Vec<u64>>,
+    clock: StageClock,
 }
 
 impl FrameRenderer {
@@ -162,6 +165,7 @@ impl FrameRenderer {
             pending: VecDeque::new(),
             ready: VecDeque::new(),
             last_key: None,
+            clock: StageClock::default(),
         })
     }
 
@@ -169,6 +173,13 @@ impl FrameRenderer {
     /// what the frame before showed: then nothing is rendered or read
     /// back for it.
     pub fn render(&mut self, index: u64, sub_frames: &[SubFrame]) -> Result<bool> {
+        let start = Instant::now();
+        let held = self.render_frame(index, sub_frames);
+        self.clock.add("render (all)", start);
+        held
+    }
+
+    fn render_frame(&mut self, index: u64, sub_frames: &[SubFrame]) -> Result<bool> {
         let key = self.frame_key(sub_frames);
         if key.is_some() && key == self.last_key {
             return Ok(true);
@@ -204,7 +215,7 @@ impl FrameRenderer {
                     Some(view) => self.render_view(&mut encoder, view, target)?,
                     None => self.render_empty(&mut encoder, target)?,
                 }
-                self.gpu.queue.submit([encoder.finish()]);
+                self.submit(encoder);
                 continue;
             }
             // Several views: each is rendered and submitted on its own (the
@@ -229,7 +240,7 @@ impl FrameRenderer {
                     blend: Blend::Over,
                 };
                 self.render_view(&mut encoder, view, target)?;
-                self.gpu.queue.submit([encoder.finish()]);
+                self.submit(encoder);
             }
             let mut encoder = device.create_command_encoder(&Default::default());
             self.composer.accumulate(
@@ -241,7 +252,7 @@ impl FrameRenderer {
                 first,
                 &mut self.renderer.profiler,
             )?;
-            self.gpu.queue.submit([encoder.finish()]);
+            self.submit(encoder);
         }
 
         let mut encoder = device.create_command_encoder(&Default::default());
@@ -296,7 +307,9 @@ impl FrameRenderer {
             );
             offset += (self.row_bytes * plane.height()) as u64;
         }
+        let start = Instant::now();
         let submission = self.gpu.queue.submit([encoder.finish()]);
+        self.clock.add("submit", start);
         let mapped = Arc::new(AtomicBool::new(false));
         let signal = mapped.clone();
         staging
@@ -453,7 +466,7 @@ impl FrameRenderer {
                 };
                 let settings = view.settings.picture(camera_view);
                 self.render_layers_into(&mut picture_encoder, &view.root, &settings, picture)?;
-                self.gpu.queue.submit([picture_encoder.finish()]);
+                self.submit(picture_encoder);
             }
         }
         self.render_layers_into(encoder, &view.root, &view.settings, target)
@@ -469,12 +482,15 @@ impl FrameRenderer {
         target: CompositeTarget,
     ) -> Result<()> {
         let size = (self.settings.width, self.settings.height);
+        let start = Instant::now();
         let packet = self.packer.pack_frame(root, &settings.pack_settings())?;
+        self.clock.add("pack", start);
         let light_count = packet
             .meshes
             .as_ref()
             .map_or(0, |meshes| meshes.lights.len() as u32);
         let frame = settings.camera_frame(size, light_count);
+        let start = Instant::now();
         let targets = self.renderer.render_layers(
             &self.gpu,
             &mut self.packer,
@@ -483,6 +499,7 @@ impl FrameRenderer {
             self.settings,
             encoder,
         )?;
+        self.clock.add("draw (upload, record)", start);
         let (lit, vector) = (targets.lit.clone(), targets.vector.clone());
         let depths = (
             targets.depth_view.clone(),
@@ -518,6 +535,17 @@ impl FrameRenderer {
         )
     }
 
+    /// CPU milliseconds per stage since the last call.
+    pub fn stage_timings(&mut self) -> Vec<(&'static str, f64)> {
+        self.clock.read()
+    }
+
+    fn submit(&mut self, encoder: wgpu::CommandEncoder) {
+        let start = Instant::now();
+        self.gpu.queue.submit([encoder.finish()]);
+        self.clock.add("submit", start);
+    }
+
     /// A texture of the composer's pool that frames are copied out of.
     fn texture(
         &mut self,
@@ -543,6 +571,7 @@ impl FrameRenderer {
             .pop_front()
             .ok_or_else(|| Error::Invalid("no frame in flight".into()))?;
         // Wait for this frame's copy only; later frames keep running.
+        let start = Instant::now();
         while !frame.mapped.load(Ordering::Acquire) {
             let wait = wgpu::PollType::Wait {
                 submission_index: Some(frame.submission.clone()),
@@ -556,6 +585,8 @@ impl FrameRenderer {
         let size = (self.settings.width, self.settings.height);
         let (row_length, rows) = self.pixel_format.layout(size);
         let (row_length, rows) = (row_length as usize, rows as usize);
+        self.clock.add("read-back wait", start);
+        let start = Instant::now();
         let row_bytes = self.row_bytes as usize;
         let image = {
             let data = frame
@@ -578,6 +609,7 @@ impl FrameRenderer {
         frame.staging.unmap();
         self.free.push(frame.staging);
         self.ready.push_back((frame.index, image));
+        self.clock.add("read-back copy", start);
         Ok(())
     }
 }

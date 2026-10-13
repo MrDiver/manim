@@ -10,6 +10,7 @@ settings (and once without motion blur), and prints:
 * frames per second and milliseconds per frame,
 * the wall time of evaluating frames and of handing them to the core
   (measured by wrapping those functions, no profiler),
+* the core's CPU time per stage (pack, draw, submit, read-back),
 * the GPU time of each render pass (timestamp queries, when supported).
 
 ``--save-reference`` / ``--check-reference`` store or compare a set of
@@ -55,16 +56,18 @@ def wrap_stages(spent: dict[str, float]) -> None:
         setattr(owner, name, timed)
 
 
-def render_all(frame_at, settings, times) -> float:
+def render_all(frame_at, settings, times) -> tuple[float, dict[str, float]]:
+    """Seconds for every frame, and the core's CPU milliseconds per stage."""
     pipeline = CoreFramePipeline(settings.effects, settings.config, settings.in_flight)
     for t in times[:5]:  # warm up: shaders, caches, buffers
         pipeline.submit(0, t, frame_at)
     pipeline.flush()
+    pipeline.renderer.stage_timings()
     start = time.perf_counter()
     for index, t in enumerate(times):
         pipeline.submit(index, t, frame_at)
     pipeline.flush()
-    return time.perf_counter() - start
+    return time.perf_counter() - start, pipeline.renderer.stage_timings()
 
 
 def reference_frames(project: Project, frame_at, duration: float) -> np.ndarray:
@@ -104,17 +107,18 @@ def main() -> None:
     times = settings.frame_times(timeline.duration)
     sharp_settings = copy.deepcopy(project.settings)
     sharp_settings.output.samples = 1
-    sharp_wall = render_all(timeline.frame_at, project.render_settings(sharp_settings), times)
+    sharp_wall, _ = render_all(timeline.frame_at, project.render_settings(sharp_settings), times)
 
     spent: dict[str, float] = defaultdict(float)
     wrap_stages(spent)
-    wall = render_all(timeline.frame_at, settings, times)
+    wall, stages = render_all(timeline.frame_at, settings, times)
     count = len(times)
     out = project.output
     print(f"{out.width}x{out.height}, {count} frames, {project.settings.output.samples} samples: {count / wall:6.1f} fps  {wall / count * 1e3:6.2f} ms/frame")
     print(f"{out.width}x{out.height}, {count} frames, 1 sample: {count / sharp_wall:6.1f} fps  {sharp_wall / count * 1e3:6.2f} ms/frame")
     for label, seconds in ((label, spent[label]) for _, _, label in STAGES if label in spent):
         print(f"  {label:<36} {seconds / count * 1e3:6.2f} ms/frame  {seconds / wall * 100:5.1f}%")
+    print("core CPU: " + ", ".join(f"{name} {ms / count:.2f}" for name, ms in stages.items()) + " ms/frame")
 
     gpu: dict[str, float] = defaultdict(float)
     sample = times[:: max(1, count // 60)]
