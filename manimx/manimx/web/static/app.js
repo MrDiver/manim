@@ -18,7 +18,8 @@
 //
 // Tracks: one per layer, the highest on top, each clip of that layer on it.
 // Under a track, its events: a bar from where a clip starts waiting to the
-// event, and the event's pill. A clip's arrow opens its scene's nodes; under a
+// event, and the event's pill; and its clips' cues, where the event each
+// is synced to (a spoken word) puts it. A clip's arrow opens its scene's nodes; under a
 // node, the signals animations change; under a signal, those animations.
 // Which clips and nodes are open is kept in localStorage by key (clip,
 // node path), so a reload keeps them.
@@ -37,6 +38,10 @@
 // background. Ctrl+wheel zooms around the pointer, the keys and buttons
 // around the playhead; a moved playhead is scrolled into view.
 //
+// Subtitles: the words of the audio clips' transcripts, a line at a time,
+// over the frame (the Subtitles button or C hides them); a render puts them
+// into the video and an .srt file next to it.
+//
 // Reload on save: /api/changes answers when the timeline changed (an edit,
 // or a scene file saved); the page then fetches the timeline again, except
 // during a drag, and keeps its time.
@@ -50,7 +55,7 @@ import { initThumbs, thumbnails } from "./thumbs.js";
 const elements = Object.fromEntries(
   [
     "problem", "title", "time", "frame", "error", "timeline", "ruler", "rows", "playhead", "collapse", "indices",
-    "labels", "playhead-frame", "play", "mute", "loop", "to-start", "to-end", "previous-frame", "next-frame", "after-end", "cached", "stage", "picture", "resolution", "prefetch",
+    "labels", "subtitles", "captions", "playhead-frame", "play", "mute", "loop", "to-start", "to-end", "previous-frame", "next-frame", "after-end", "cached", "stage", "picture", "resolution", "prefetch",
     "zoom-in", "zoom-out", "zoom-fit",
   ].map((id) => [id.replace(/-(\w)/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]),
 );
@@ -71,6 +76,7 @@ const state = {
   prefetch: loadNumber("manimx.prefetch", 240), // frames fetched ahead of the playhead
   open: loadSet("manimx.open"), // keys of the clips and nodes whose tracks are shown
   indices: loadFlag("manimx.indices"), // index labels over the frame
+  captions: !loadFlag("manimx.no-captions"), // subtitles over the frame
   zoom: 1, // lanes width / the width beside the labels
   dragging: false, // an edit is being dragged: the timeline is not redrawn meanwhile
   scrubbing: false,
@@ -271,10 +277,11 @@ function clipBody(clip, index) {
   return body;
 }
 
-/** The events row under a track: per wait, a bar and a pill (none: no row). */
+/** The events row under a track: per wait, a bar and a pill; per synced cue, a mark (none: no row). */
 function drawEvents(onTrack) {
   const waits = onTrack.flatMap(({ clip, index }) => clip.waits.map((wait) => ({ ...wait, clip, index })));
-  if (!waits.length) return;
+  const cues = onTrack.flatMap(({ clip }) => (clip.cues ?? []).filter((cue) => cue.time !== null).map((cue) => ({ ...cue, clip })));
+  if (!waits.length && !cues.length) return;
   const { lane } = addRow(`events:${onTrack[0].clip.layer}`, 1, "events", "events", false);
   const fixed = new Set(state.timeline.events.filter((event) => event.fixed).map((event) => event.name));
   for (const wait of waits) {
@@ -294,6 +301,14 @@ function drawEvents(onTrack) {
       : `${wait.event} at frame ${frameOf(wait.time)}${fixed.has(wait.event) ? "" : " (emitted by a scene)"}: drag to time it`;
     lane.append(pill);
     eventPill(pill, wait, bar);
+  }
+  for (const cue of cues) {
+    const mark = document.createElement("div");
+    mark.className = "cue";
+    mark.style.left = `${percent(cue.time)}%`;
+    mark.textContent = cue.name;
+    mark.title = `${cue.clip.name}'s cue ${cue.name} is at ${cue.event}, frame ${frameOf(cue.time)} (bind it to another event in the clip's panel)`;
+    lane.append(mark);
   }
 }
 
@@ -519,6 +534,7 @@ function show(time, intended = time, reveal = false) {
   elements.playheadFrame.textContent = frameOf(time);
   elements.playheadFrame.style.left = `${percent(time)}%`;
   elements.time.textContent = `${time.toFixed(2)} s · frame ${frameOf(time)}`;
+  drawSubtitle(time);
   if (reveal) revealPlayhead();
   if (state.playing) return;
   if (state.loading) {
@@ -526,6 +542,20 @@ function show(time, intended = time, reveal = false) {
   } else {
     load(time);
   }
+}
+
+/** The subtitle said at `time`, over the frame. */
+function drawSubtitle(time) {
+  const said = state.captions ? (state.timeline.subtitles ?? []).find((item) => item.start <= time && time < item.end) : null;
+  elements.subtitles.hidden = !said;
+  if (said && elements.subtitles.textContent !== said.text) elements.subtitles.textContent = said.text;
+}
+
+function setCaptions(on) {
+  state.captions = on;
+  elements.captions.setAttribute("aria-pressed", String(on));
+  saveFlag("manimx.no-captions", !on);
+  drawSubtitle(state.time);
 }
 
 /** The width frames are rendered at: the output's divided by the chosen resolution. */
@@ -776,6 +806,7 @@ function listen() {
     saveFlag("manimx.indices", state.indices);
     drawLabels(state.time);
   });
+  elements.captions.addEventListener("click", () => setCaptions(!state.captions));
   const timeline = elements.timeline;
   // Scrubbing: on the ruler, and on node and signal rows.
   timeline.addEventListener("pointerdown", (event) => {
@@ -841,6 +872,7 @@ function listen() {
     const keys = {
       " ": togglePlay,
       m: () => setMuted(!state.muted),
+      c: () => setCaptions(!state.captions),
       l: () => elements.loop.click(),
       "+": () => zoomBy(1.5),
       "=": () => zoomBy(1.5),
@@ -914,6 +946,7 @@ async function start() {
     setVersion,
   });
   elements.indices.setAttribute("aria-pressed", String(state.indices));
+  elements.captions.setAttribute("aria-pressed", String(state.captions));
   elements.resolution.value = String(state.resolution);
   elements.prefetch.value = state.prefetch;
   elements.mute.setAttribute("aria-pressed", String(state.muted));

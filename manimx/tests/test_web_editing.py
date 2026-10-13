@@ -76,7 +76,7 @@ def test_clip_edits_change_the_live_timeline_and_save_later(root, editor) -> Non
     editor.edit_clip(0, {"speed": 0.5, "layer": 2})
     first = editor.timeline.clips[0]
     assert (first.end - first.start, first.layer) == (pytest.approx(3.0), 2)
-    assert editor.clips()[0] == {"scene": "Short", "start": 1.0, "layer": 2, "cut": [0.5, None], "speed": 0.5}
+    assert editor.clips()[0] == {"scene": "Short", "start": 1.0, "layer": 2, "cut": [0.5, None], "speed": 0.5, "cues": {}}
 
     editor.save()
     entry = Project.load(root).timeline[0]
@@ -375,7 +375,7 @@ def test_audio_clips_are_uploaded_placed_mixed_and_saved(root, editor) -> None:
     assert not mixed[: 5 * 8000 - 10].any() and not mixed[6 * 8000 + 10 :].any()
     assert 0.2 < np.abs(mixed[5 * 8000 : 6 * 8000]).max() <= 0.26  # half the tone's loudness
     assert editor.audio_clips()[0] | {"length": 0} == {
-        "name": "my-voice", "file": file, "start": 5.0, "end": 6.0, "track": 1, "cut": [0.5, 1.5], "volume": 0.5, "length": 0,
+        "name": "my-voice", "file": file, "start": 5.0, "end": 6.0, "track": 1, "cut": [0.5, 1.5], "volume": 0.5, "length": 0, "transcript": None,
     }
     peaks = editor.waveform(0, 0.0, 2.0, 4)
     assert len(peaks) == 4 and all(low < -0.4 and high > 0.4 for low, high in peaks)
@@ -526,3 +526,74 @@ def test_the_page_gets_the_timelines_sound_as_wav(renderer) -> None:
         assert (file.getnchannels(), file.getframerate()) == (2, 24_000)
         assert file.getnframes() == pytest.approx(1.5 * 24_000, abs=2)
     server.close()
+
+
+def test_transcripts_and_cues_are_edited_live(root, renderer, monkeypatch) -> None:
+    from manimx.voice import Transcript, Word, alignment
+
+    write(
+        root / "scenes" / "short.py",
+        "from manimx import Scene\n\n\nclass Short(Scene):\n    def construct(self):\n        self.wait(1)\n        self.cue('hit')\n        self.wait(1)\n",
+    )
+    file = "assets/audio/voice.wav"
+    (root / "assets" / "audio").mkdir(parents=True, exist_ok=True)
+    (root / file).write_bytes(tone(root, 4.0))
+    heard = Transcript("go now go", (Word("go", 0.5, 0.9), Word("now", 1.5, 1.9), Word("go", 2.5, 2.9)))
+    calls = []
+
+    def fake_transcribe(sound, text=None, model="small", language=None):  # Whisper is not run in tests
+        calls.append(text)
+        return heard if text is None else alignment.align(text, heard.words)
+
+    monkeypatch.setattr(alignment, "transcribe", fake_transcribe)
+    editor = ProjectEditor(root, lambda project: SETTINGS, save_delay=60.0)
+    server = PreviewServer(Timeline(), SETTINGS, renderer=renderer, editor=editor)
+    editor.load()
+    server.start()
+    try:
+        assert request(server, "/api/audio/add", {"file": file, "start": 1.0})[0] == 200
+        with pytest.raises(EditError, match="is on no audio track"):
+            editor.transcribe("assets/audio/other.wav")
+        assert request(server, "/api/transcript/transcribe", {"file": file, "text": None})[0] == 200
+        assert Transcript.load(root / "assets/audio/voice.transcript.json").text == "go now go"
+        timeline = request(server, "/api/timeline")[1]
+        assert {"name": "voice.now", "time": 2.5} in timeline["said"]
+        assert timeline["subtitles"] == [{"start": 1.5, "end": 3.9, "text": "go now go"}]
+        assert timeline["audio"][0]["transcript"]["words"][1] == {"text": "now", "start": 1.5, "end": 1.9}
+
+        # A cue bound to a word: the clip's time bends to put it there, and follows the word.
+        first = editor.timeline.clips[0]
+        assert request(server, "/api/clip", {"index": 0, "cues": {"hit": "voice.go.2"}})[0] == 200
+        assert first.compiled_time(3.5) == pytest.approx(1.0)
+        assert request(server, "/api/timeline")[1]["clips"][0]["cues"] == [{"name": "hit", "event": "voice.go.2", "time": 3.5}]
+        assert request(server, "/api/transcript/words", {"file": file, "words": [{"index": 2, "start": 3.0, "end": 3.3}], "gesture": "g"})[0] == 200
+        assert request(server, "/api/transcript/words", {"file": file, "words": [{"index": 2, "start": 3.2, "end": 3.5}], "gesture": "g"})[0] == 200
+        assert first.compiled_time(4.2) == pytest.approx(1.0)
+        editor.undo()  # the whole drag
+        assert first.compiled_time(3.5) == pytest.approx(1.0)
+        assert request(server, "/api/audio/edit", {"index": 0, "start": 2.0})[0] == 200
+        assert first.compiled_time(4.5) == pytest.approx(1.0)  # moved with the audio
+
+        # The text changes; the words keep their times.
+        assert request(server, "/api/transcript", {"file": file, "text": "go now, go!\n[end]\nmore"})[0] == 200
+        words = editor.timeline.audio_clips[0].transcript.words
+        assert [word.text for word in words] == ["go", "now,", "go!", "more"] and words[2].start == 2.5
+        assert request(server, "/api/transcript/transcribe", {"file": file, "text": "go now go"})[0] == 200
+        assert calls == [None, "go now go"]
+        editor.save()
+        assert Project.load(root).timeline[0].cues == {"hit": "voice.go.2"}
+        assert request(server, "/api/transcript", {"file": file, "remove": True})[0] == 200
+        assert not (root / "assets/audio/voice.transcript.json").exists() and first.compiled_time(2.0) == pytest.approx(2.0 - first.start)
+        editor.undo()
+        assert (root / "assets/audio/voice.transcript.json").exists()
+        assert request(server, "/api/transcript", {"file": "assets/audio/none.wav", "text": "x"})[1] == {"error": "assets/audio/none.wav has no transcript yet: transcribe it first"}
+        assert request(server, "/api/transcript/words", {"file": file, "words": [{"index": 9, "start": 0, "end": 1}]})[0] == 400
+        assert request(server, "/api/transcript/words", {"file": file, "words": [{"index": 0, "start": 2, "end": 1}]})[0] == 400
+        assert request(server, "/api/clip", {"index": 0, "cues": {"hit": 3}})[1] == {"error": "cues map cue names to event names"}
+
+        # Someone else writes the transcript (manimx transcribe): read again.
+        heard.save(root / "assets/audio/voice.transcript.json")
+        editor.files_changed({root / "assets/audio/voice.transcript.json"})
+        assert [word.text for word in editor.timeline.audio_clips[0].transcript.words] == ["go", "now", "go"]
+    finally:
+        server.close()

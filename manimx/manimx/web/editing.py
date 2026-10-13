@@ -33,6 +33,12 @@ Design decisions:
 * **Clips that follow the previous one** (no ``start`` in the file) are
   placed again after every edit, so moving or cutting a clip carries the
   clips that follow it along.
+* **Transcripts are files of their own** (``voice.transcript.json`` next
+  to ``voice.m4a``), written at once when edited: they are not part of
+  ``manimx.json``. Their words are events, so an edit moves the clips
+  synced to them in the next frame, like timing an event by hand.
+  Transcribing (Whisper) takes seconds, so it runs without holding the
+  editor; its result is one edit, undone like any other.
 * **Every edit can be undone.** Edits are commands (commands.py), run by
   :meth:`ProjectEditor.run`, which keeps each one's inverse; the history
   is cleared when someone else's ``manimx.json`` is read, since its clips
@@ -56,6 +62,7 @@ from ..animation.timing import NEVER
 from ..drivers.offline import RenderSettings
 from ..project import PROJECT_FILE, AudioEntry, ClipEntry, Project
 from ..settings import SettingsError, entries, get, set_value
+from ..voice.transcript import TRANSCRIPT_SUFFIX, Transcript, Word
 from .commands import (
     AddAudio,
     AddClip,
@@ -66,11 +73,14 @@ from .commands import (
     EditClips,
     EditError,
     InsertClips,
+    MoveWords,
     RemoveAudio,
     RemoveClips,
     RemovedClip,
     SetEvent,
     SetSetting,
+    SetTranscript,
+    SetTranscriptText,
     SplitClips,
     UICommand,
     parse,
@@ -135,8 +145,11 @@ class ProjectEditor:
         python = {path for path in paths if path.suffix == ".py"}
         if (project_file in paths and not own_save) or self.project is None:
             self._rebuild(changed=python)
-        elif python:
+            return
+        if python:
             self._prepare_again(python)
+        if any(path.name.endswith(TRANSCRIPT_SUFFIX) for path in paths):
+            self._read_transcripts()
 
     def _rebuild(self, changed: set[Path] | None) -> None:
         """Read manimx.json and build the timeline again; scenes are reused
@@ -336,6 +349,7 @@ class ProjectEditor:
                 def add_audio() -> None:
                     project.audio.insert(position, entry)
                     self.timeline.audio_clips.insert(position, clip)
+                    self._audio_changed()
 
                 self._change(add_audio)
                 return RemoveAudio((position,))
@@ -350,6 +364,7 @@ class ProjectEditor:
                     for index in reversed(unique):
                         del project.audio[index]
                         del self.timeline.audio_clips[index]
+                    self._audio_changed()
 
                 self._change(remove_audio)
                 return Batch(restore, command.label)
@@ -378,6 +393,32 @@ class ProjectEditor:
                 inverse = SetEvent(name, project.events.get(name))
                 self._change(lambda: self._set_event(name, time))
                 return inverse
+            case SetTranscript(file, transcript):
+                inverse = SetTranscript(file, self._transcript(file))
+                self._change(lambda: self._set_transcript(file, transcript))
+                return inverse
+            case SetTranscriptText(file, text):
+                old = self._transcript(file)
+                if old is None:
+                    raise EditError(f"{file} has no transcript yet: transcribe it first")
+                from ..voice.alignment import align
+
+                new = align(text, old.words)
+                self._change(lambda: self._set_transcript(file, new))
+                return SetTranscript(file, old)
+            case MoveWords(file, words):
+                old = self._transcript(file)
+                if old is None:
+                    raise EditError(f"{file} has no transcript")
+                moved = list(old.words)
+                for index, start, end in words:
+                    if not 0 <= index < len(moved):
+                        raise EditError(f"the transcript of {file} has no word {index}")
+                    moved[index] = Word(moved[index].text, start, end)
+                inverse = MoveWords(file, tuple((index, old.words[index].start, old.words[index].end) for index, _, _ in words))
+                new = Transcript(old.text, tuple(moved))
+                self._change(lambda: self._set_transcript(file, new))
+                return inverse
             case SetSetting(path, value):
                 try:
                     old = get(project.settings, path)
@@ -402,6 +443,8 @@ class ProjectEditor:
                 clip.cut(*(entry.cut or (None, None)))
             if "speed" in updates:
                 clip.set_speed(entry.speed)
+            if "cues" in updates:
+                clip.bind_cues(entry.cues)
         self._place_followers()
 
     def _split(self, index: int, time: float) -> UICommand:
@@ -429,6 +472,62 @@ class ProjectEditor:
             clip = self.timeline.audio_clips[edit.index]
             clip.start, clip.track, clip.volume = entry.start, entry.track, entry.volume
             clip.cut_in, clip.cut_out = entry.cut or (None, None)
+        self._audio_changed()
+
+    def _audio_changed(self) -> None:
+        """The audio clips moved or their words changed: so did the events of their words."""
+        self.timeline.audio_changed()
+        self._place_followers()
+
+    # -- transcripts ----------------------------------------------------------------
+
+    def transcribe(self, file: str, text: str | None = None, model: str | None = None) -> None:
+        """Time the words of the sound file ``file`` with Whisper: ``text``,
+        or (None) the words Whisper hears; one edit, undone like others.
+        Runs for seconds, without holding the editor."""
+        from ..voice.alignment import DEFAULT_MODEL, transcribe
+
+        project = self._project()
+        if not any(entry.file == file for entry in project.audio):
+            raise EditError(f"{file} is on no audio track")
+        try:
+            transcript = transcribe(project.sound(file), text, model or DEFAULT_MODEL)
+        except Exception as error:  # no faster-whisper, a model that does not download, ...
+            raise EditError(f"cannot transcribe {file}: {error}") from None
+        self.run(SetTranscript(file, transcript))
+
+    def _transcript(self, file: str) -> Transcript | None:
+        try:
+            return self._project().transcript(file)
+        except Exception as error:  # a broken transcript file
+            raise EditError(describe(error, self.root)) from None
+
+    def _set_transcript(self, file: str, transcript: Transcript | None) -> None:
+        project = self._project()
+        project.save_transcript(file, transcript)
+        for entry, clip in zip(project.audio, self.timeline.audio_clips, strict=True):
+            if entry.file == file:
+                clip.transcript = transcript
+        self._audio_changed()
+
+    def _read_transcripts(self) -> None:
+        """Transcript files changed on disk (not by this editor): read them again."""
+        with self._lock:
+            project = self.project
+            if project is None:
+                return
+            try:
+                transcripts = [project.transcript(entry.file) for entry in project.audio]
+            except Exception as error:
+                self._report(error)
+                return
+
+            def update() -> None:
+                for clip, transcript in zip(self.timeline.audio_clips, transcripts, strict=True):
+                    clip.transcript = transcript
+                self._audio_changed()
+
+            self._change(update)
 
     # -- sound files ------------------------------------------------------------
 
@@ -462,6 +561,7 @@ class ProjectEditor:
                 "cut": None if entry.cut is None else list(entry.cut),
                 "volume": entry.volume,
                 "length": clip.sound.duration,
+                "transcript": None if clip.transcript is None else clip.transcript.to_json(),
             }
             for entry, clip in zip(project.audio, self.timeline.audio_clips, strict=True)
         ]
@@ -644,7 +744,8 @@ def _mtime(path: Path) -> int | None:
 
 
 def _entry_json(entry: ClipEntry) -> dict[str, Any]:
-    return {"scene": entry.scene, "start": entry.start, "layer": entry.layer, "cut": None if entry.cut is None else list(entry.cut), "speed": entry.speed}
+    cut = None if entry.cut is None else list(entry.cut)
+    return {"scene": entry.scene, "start": entry.start, "layer": entry.layer, "cut": cut, "speed": entry.speed, "cues": dict(entry.cues)}
 
 
 def describe(error: BaseException, root: Path) -> str:

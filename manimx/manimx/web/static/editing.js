@@ -9,8 +9,9 @@
 // empty track space selects every clip the rectangle touches, Escape
 // clears it, Delete removes the selected clips. Drag a scene from the
 // sidebar onto a track to add a clip of it there. The clip panel types
-// start, layer, cut and speed. Events: drag a pill on a track's events row
-// to time the event. The settings dialog changes the project's settings.
+// start, layer, cut and speed, and binds the scene's cues to events (a
+// spoken word: voice.square); a cue left empty syncs to the event of its
+// own name. Events: drag a pill on a track's events row to time the event. The settings dialog changes the project's settings.
 // Ctrl+Z undoes any edit (a whole drag at once), Ctrl+Shift+Z or Ctrl+Y
 // redoes it; the server keeps the history (manimx/web/commands.py).
 // S splits the selected clips (or, with none selected, every clip) under
@@ -556,9 +557,41 @@ function drawClipPanel() {
     field("Speed", numberInput(entry.speed, 0.01, null, 0.05, (value) => editClip(index, { speed: value })), "×", "2 plays twice as fast, 0.5 is slow motion"),
   );
   panels.clip.append(actions());
-  for (const event of clip.waits) {
-    panels.clip.append(field(`Waits for ${event}`, button("Fire at the playhead", () => setEvent(event, page.state.time)), "", "the clip goes on at that time"));
+  for (const wait of clip.waits) {
+    panels.clip.append(field(`Waits for ${wait.event}`, button("Fire at the playhead", () => setEvent(wait.event, page.state.time)), "", "the clip goes on at that time"));
   }
+  const cues = [...new Map((clip.cues ?? []).map((cue) => [cue.name, cue])).values()];
+  if (cues.length) panels.clip.append(eventNames());
+  for (const cue of cues) {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.setAttribute("list", "event-names");
+    input.value = entry.cues?.[cue.name] ?? "";
+    input.placeholder = cue.name;
+    input.addEventListener("change", () => {
+      const cues = { ...entry.cues };
+      const event = input.value.trim();
+      if (!event || event === cue.name) delete cues[cue.name];
+      else cues[cue.name] = event;
+      editClip(index, { cues });
+    });
+    const where = cue.time === null ? `${cue.event} never fires: the cue does not bend the clip's time` : `at ${cue.event}, ${cue.time.toFixed(2)} s`;
+    panels.clip.append(field(`Cue ${cue.name}`, input, "", where));
+  }
+}
+
+/** The events a cue can be synced to, for the cue fields to suggest: spoken words first. */
+function eventNames() {
+  const list = document.createElement("datalist");
+  list.id = "event-names";
+  const { said = [], events = [] } = page.state.timeline;
+  for (const { name, time } of [...said, ...events]) {
+    const option = document.createElement("option");
+    option.value = name;
+    if (time !== null) option.label = `${time.toFixed(2)} s`;
+    list.append(option);
+  }
+  return list;
 }
 
 /** Buttons for what S and Ctrl+D do to the selection. */

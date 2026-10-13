@@ -21,9 +21,9 @@ Design decisions:
   benchmark project: 0.3 s), and a change in one module can affect any
   scene that imports it, so the reloader does not try to find out which
   clips changed.
-* **What is watched:** ``manimx.json`` and ``*.py`` files in the project
-  folder, except hidden folders (a ``.venv``), ``__pycache__`` and the
-  output folder.
+* **What is watched:** ``manimx.json``, ``*.py`` files and transcripts
+  (``*.transcript.json``) in the project folder, except hidden folders
+  (a ``.venv``), ``__pycache__`` and the output folder.
 * **With a project editor** (editing.py, as in ``manimx ui``) the
   reloader only says which files changed: the editor prepares again just
   the scenes in them, and ignores its own autosaves of ``manimx.json``.
@@ -40,6 +40,7 @@ from pathlib import Path
 
 from ..drivers.offline import RenderSettings
 from ..project import PROJECT_FILE, Project
+from ..voice.transcript import TRANSCRIPT_SUFFIX
 from .editing import ProjectEditor
 from .server import PreviewServer
 
@@ -78,7 +79,7 @@ class ProjectReloader:
             # Prune instead of filtering afterwards: a .venv holds thousands of files.
             children[:] = [child for child in children if not child.startswith(".") and child not in skipped]
             for name in names:
-                if name.endswith(".py"):
+                if name.endswith((".py", TRANSCRIPT_SUFFIX)):
                     path = Path(folder) / name
                     try:
                         files[path] = path.stat().st_mtime_ns

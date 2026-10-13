@@ -51,6 +51,14 @@ shows, and ``manimx.json`` is saved shortly after (see editing.py):
     POST /api/audio/remove   {"indices": [...]}
     POST /api/audio/edit     {"index", and any of "start", "track", "cut",
                              "volume"}, or {"clips": [...]} of those
+    POST /api/transcript/transcribe  {"file", "text"}: time the words of a
+                             sound file with Whisper ("text" null: the
+                             words Whisper hears); answers when done
+    POST /api/transcript     {"file", "text"}: change the transcript's
+                             text (its words keep their times), or
+                             {"file", "remove": true}
+    POST /api/transcript/words  {"file", "words": [{"index", "start",
+                             "end"}]}: time words by hand
     POST /api/asset?name=    the body is a sound file (dropped or recorded),
                              saved to assets/audio/; answers its "file"
     GET  /api/waveform?index=&from=&to=&n=  an audio clip's peaks
@@ -137,6 +145,8 @@ EDIT_ROUTES = (
     "/api/audio/add",
     "/api/audio/remove",
     "/api/audio/edit",
+    "/api/transcript",
+    "/api/transcript/words",
     "/api/event",
     "/api/setting",
     "/api/undo",
@@ -289,11 +299,14 @@ class PreviewServer:
                     "length": clip.scene.playing_time,
                     "entry": entry,
                     "waits": _waits(clip, known),
+                    "cues": _cues(clip, known),
                     "nodes": clip_nodes(clip),
                 }
                 for clip, entry in zip(clips, entries, strict=True)
             ],
             "audio": self.editor.audio_clips() if self.editor is not None else [],
+            "said": [{"name": name, "time": time} for name, time in sorted(self.timeline.word_events().items(), key=lambda item: item[1])],
+            "subtitles": [{"start": item.start, "end": item.end, "text": item.text} for item in self.timeline.subtitles()],
             "segments": [
                 {"clip": clips.index(clip), "index": index, "start": start, "end": None if end == NEVER else end}
                 for clip, index, start, end in self.timeline.segments()
@@ -427,6 +440,9 @@ class _Handler(BaseHTTPRequestHandler):
         if route in ("/api/render", "/api/render/cancel") and editor is not None:
             self._render(editor, route)
             return
+        if route == "/api/transcript/transcribe" and editor is not None:
+            self._transcribe(editor)
+            return
         if route not in EDIT_ROUTES:
             self._json({"error": f"not found: {self.path}"}, HTTPStatus.NOT_FOUND)
             return
@@ -462,6 +478,19 @@ class _Handler(BaseHTTPRequestHandler):
                 raise _BadRequest(f"a sound file must be between 1 byte and {MAX_ASSET // 2**20} MB")
             self._json({"file": editor.save_asset(name, self.rfile.read(length))})
         except (_BadRequest, EditError) as error:
+            self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+
+    def _transcribe(self, editor: ProjectEditor) -> None:
+        """POST /api/transcript/transcribe {"file", "text"}: Whisper times the words (seconds)."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            file, text = body.get("file") if isinstance(body, dict) else None, body.get("text") if isinstance(body, dict) else None
+            if not isinstance(file, str) or not (text is None or isinstance(text, str)):
+                raise _BadRequest('transcribing takes {"file": "...", "text": "..." or null}')
+            editor.transcribe(file, text or None)
+            self._json({"ok": True, "version": self.preview.version, "history": editor.history()})
+        except (_BadRequest, EditError, json.JSONDecodeError) as error:
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - http.server's signature
@@ -613,6 +642,19 @@ def _waits(clip: Clip, known: dict[str, float]) -> list[dict[str, Any]]:
             waits.append({"event": segment.waits_for, "from": previous_end, "time": known.get(segment.waits_for)})
         previous_end = None if timing is None else timing.end
     return waits
+
+
+def _cues(clip: Clip, known: dict[str, float]) -> list[dict[str, Any]]:
+    """Every cue of ``clip``'s scene inside its cut: its name, the event
+    it syncs to and that event's time (None while it never fires)."""
+    cues = []
+    for segment in clip.scene.segments:
+        compiled = clip._compiled_range(segment)
+        for cue in segment.cues:
+            if compiled is not None and compiled[0] <= segment.offset + cue.time <= compiled[1]:
+                event = clip.event_of(cue.name)
+                cues.append({"name": cue.name, "event": event, "time": known.get(event)})
+    return cues
 
 
 def _number(query: dict[str, list[str]], name: str, kind: type, required: bool = True) -> Any:

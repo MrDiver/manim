@@ -42,8 +42,9 @@ from ..project import ClipEntry
 
 if TYPE_CHECKING:
     from ..animation.timing import Clip
+    from ..voice.transcript import Transcript
 
-CLIP_FIELDS = ("start", "layer", "cut", "speed")
+CLIP_FIELDS = ("start", "layer", "cut", "speed", "cues")
 
 
 class EditError(ValueError):
@@ -228,6 +229,43 @@ class SetEvent(UICommand):
 
 
 @dataclass(frozen=True)
+class SetTranscript(UICommand):
+    """Give the sound file ``file`` this transcript (None: none)."""
+
+    file: str
+    transcript: Transcript | None
+
+    @property
+    def label(self) -> str:
+        return f"{'change' if self.transcript is not None else 'remove'} the transcript of {self.file.rsplit('/', 1)[-1]}"
+
+
+@dataclass(frozen=True)
+class SetTranscriptText(UICommand):
+    """Change the text of ``file``'s transcript: its words keep the times
+    of the words they match (see manimx/voice/alignment.py)."""
+
+    file: str
+    text: str
+
+    @property
+    def label(self) -> str:
+        return f"edit the transcript of {self.file.rsplit('/', 1)[-1]}"
+
+
+@dataclass(frozen=True)
+class MoveWords(UICommand):
+    """Set the times of words of ``file``'s transcript: ``(index, start, end)`` each."""
+
+    file: str
+    words: tuple[tuple[int, float, float], ...]
+
+    @property
+    def label(self) -> str:
+        return f"time {_count(len(self.words), 'a word', 'words')}"
+
+
+@dataclass(frozen=True)
 class SetSetting(UICommand):
     """Set the project setting at ``path``."""
 
@@ -271,6 +309,14 @@ def parse(route: str, body: dict[str, Any]) -> UICommand:
             return EditAudio(tuple(_audio_edit(edit) for edit in edits))
         case "/api/audio/edit", {"index": _}:
             return EditAudio((_audio_edit(body),))
+        case "/api/transcript", {"file": str(file), "text": str(text)}:
+            return SetTranscriptText(file, text)
+        case "/api/transcript", {"file": str(file), "remove": True}:
+            return SetTranscript(file, None)
+        case "/api/transcript/words", {"file": str(file), "words": list(words)}:
+            return MoveWords(file, tuple(_word_time(word) for word in words))
+        case "/api/transcript" | "/api/transcript/words", _:
+            raise EditError(f"{route} does not take {body}")
         case "/api/audio/add" | "/api/audio/remove" | "/api/audio/edit", _:
             raise EditError(f"{route} does not take {body}")
         case "/api/clip" | "/api/clip/add" | "/api/clip/remove" | "/api/clip/split" | "/api/clip/duplicate" | "/api/event" | "/api/setting", _:
@@ -298,6 +344,10 @@ def clip_updates(changes: dict[str, Any]) -> dict[str, Any]:
                 updates[key] = _number(value, "speed")
                 if updates[key] <= 0.0:
                     raise EditError("a speed must be positive")
+            case "cues", dict() if all(isinstance(cue, str) and isinstance(event, str) and event for cue, event in value.items()):
+                updates[key] = dict(value)
+            case "cues", _:
+                raise EditError("cues map cue names to event names")
     return updates
 
 
@@ -338,6 +388,15 @@ def _audio_edit(edit: Any) -> ClipEdit:
         raise EditError("an audio clip edit is an object")
     changes = {key: value for key, value in edit.items() if key != "index"}
     return ClipEdit(_index(edit.get("index")), tuple(audio_updates(changes).items()))
+
+
+def _word_time(word: Any) -> tuple[int, float, float]:
+    """``{"index", "start", "end"}`` of a word, checked."""
+    if not isinstance(word, dict):
+        raise EditError("a word's time is an object")
+    start = _number(word.get("start"), "start", minimum=0.0)
+    end = _number(word.get("end"), "end", minimum=start)
+    return (_index(word.get("index")), start, end)
 
 
 def _add_clip(body: Any) -> AddClip:
