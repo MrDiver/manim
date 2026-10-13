@@ -36,6 +36,8 @@ shows, and ``manimx.json`` is saved shortly after (see editing.py):
                              those for clips moved together
     POST /api/clip/add       {"scene", "start", "layer"}: a new clip
     POST /api/clip/remove    {"indices": [...]}
+    POST /api/clip/split     {"indices": [...], "time"}: each in two there
+    POST /api/clip/duplicate {"indices": [...]}: a copy after each
     POST /api/event          {"name", "time"} (time null: remove it)
     POST /api/setting        {"path": [...], "value"}
     POST /api/undo, /api/redo  undo or redo the last edit
@@ -103,7 +105,17 @@ CHANGES_TIMEOUT = 25.0
 """Seconds a /api/changes request waits before answering anyway."""
 IMMUTABLE = "private, max-age=86400, immutable"
 """Cache-Control of a frame asked for by number at the version it shows."""
-EDIT_ROUTES = ("/api/clip", "/api/clip/add", "/api/clip/remove", "/api/event", "/api/setting", "/api/undo", "/api/redo")
+EDIT_ROUTES = (
+    "/api/clip",
+    "/api/clip/add",
+    "/api/clip/remove",
+    "/api/clip/split",
+    "/api/clip/duplicate",
+    "/api/event",
+    "/api/setting",
+    "/api/undo",
+    "/api/redo",
+)
 FORMATS = {"jpeg": ("JPEG", "image/jpeg"), "png": ("PNG", "image/png"), "webp": ("WEBP", "image/webp")}
 
 
@@ -208,8 +220,10 @@ class PreviewServer:
 
     def timeline_json(self) -> dict[str, Any]:
         """What the page draws: the timeline's length, clips and segments."""
+        # The editor's lock is taken before this one when an edit runs: ask it first, not inside.
+        history = self.editor.history() if self.editor is not None else None
         with self._lock:  # a Timeline resolves lazily: not while a frame renders
-            return self._describe()
+            return self._describe() | {"history": history}
 
     def _describe(self) -> dict[str, Any]:
         config = self.settings.config
@@ -225,7 +239,6 @@ class PreviewServer:
             "version": self.version,
             "error": self.error,
             "editable": self.editor is not None,
-            "history": self.editor.history() if self.editor is not None else None,
             "events": [{"name": name, "time": known.get(name), "fixed": name in fixed} for name in sorted({*waited, *fixed})],
             "duration": self.timeline.duration,
             "fps": self.settings.fps,
