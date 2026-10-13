@@ -329,8 +329,12 @@ The page shows the frame at the playhead with playback controls (Space
 plays, ← and → step frames, Shift+← and Shift+→ one second, Home and End,
 L loops, M mutes the scenes' sounds) above the timeline. Its ruler counts
 frames; drag on it to scrub, Ctrl+wheel or + and − zoom, 0 shows all of
-it. The timeline has a track per layer, higher layers on top; a clip's ▸
-opens its scene's nodes, signals and animations. Saving a scene file
+it. The timeline has a track per layer, higher layers on top; a clip's
+arrow opens its scene's nodes, signals and animations, and its bar shows
+thumbnails of the scene. Splitters between the panels resize them. The
+page keeps the frames it fetched and fetches the ones after the
+playhead ahead (the "Ahead" box, a yellow line marks the frames kept);
+the menu beside it renders the preview at 1/2, 1/4 or 1/8 of the size. Saving a scene file
 updates the preview at the same time, preparing only the scenes in that
 file again; an error (a typo, a failing `construct()`) is shown above the
 frame until the next save fixes it (`--no-reload` turns this off). The
@@ -350,6 +354,14 @@ you drag, and `manimx.json` is saved a moment after the last edit.
 - a scene that calls `wait_for(event)` holds until the event's time: the
   clip's track gets an events row with a pill per event, dragged to time
   it (the showcase's Events scene shows how);
+- S splits the clips under the playhead, Ctrl+D duplicates the selected
+  clips, Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste them at the
+  playhead; drags snap to clip edges, the playhead and events (Alt drags
+  freely); Ctrl+Z undoes any edit, Ctrl+Shift+Z redoes it;
+- drop sound files onto an audio track (below the scenes' tracks) to put
+  them there, or press ● to record a voice-over while the timeline
+  plays; the files are saved to `assets/audio/` and listed under
+  `"audio"` in the timeline of `manimx.json`, and mixed into the video;
 - **Settings** changes everything `manimx settings` changes.
 
 Options on the command line override `manimx.json` for that run. Rendering

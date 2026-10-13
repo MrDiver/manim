@@ -282,10 +282,46 @@ class Clip:
 
 
 @dataclass(eq=False)
+class AudioClip:
+    """A sound placed on the timeline's audio tracks, outside any scene
+    (a voice-over, music, a recording): it plays from ``start`` at its own
+    speed, ``cut_in`` to ``cut_out`` seconds of the sound."""
+
+    sound: Sound
+    start: float = 0.0
+    track: int = 0
+    cut_in: float | None = None
+    cut_out: float | None = None
+    volume: float = 1.0
+    name: str = ""
+
+    @property
+    def length(self) -> float:
+        """Seconds the clip plays."""
+        cut_in = self.cut_in or 0.0
+        cut_out = self.sound.duration if self.cut_out is None else min(self.cut_out, self.sound.duration)
+        return max(0.0, cut_out - cut_in)
+
+    @property
+    def end(self) -> float:
+        return self.start + self.length
+
+    def placed(self) -> tuple[float, float, Sound, float]:
+        """``(global time, skip, sound, volume)``, as :func:`mix` takes it."""
+        sound = self.sound
+        if self.cut_out is not None:
+            sound = Sound(sound.samples[: round(self.cut_out * sound.sample_rate)], sound.sample_rate)
+        return (self.start, self.cut_in or 0.0, sound, self.volume)
+
+
+@dataclass(eq=False)
 class Timeline:
-    """Clips on one global timeline, with their events."""
+    """Clips on one global timeline, with their events, and the audio
+    clips on its audio tracks."""
 
     clips: list[Clip] = field(default_factory=list)
+    audio_clips: list[AudioClip] = field(default_factory=list)
+    """Sounds on the audio tracks; edit the list freely (nothing to resolve)."""
     events: dict[str, float] = field(default_factory=dict)
     """Events with a time set directly (fixed, or fired by a presenter)."""
     live: bool = False
@@ -359,7 +395,7 @@ class Timeline:
     @property
     def duration(self) -> float:
         self._ensure_resolved()
-        ends = [clip.end for clip in self.clips if clip.end != NEVER]
+        ends = [clip.end for clip in self.clips if clip.end != NEVER] + [audio.end for audio in self.audio_clips]
         return max(ends, default=0.0)
 
     def frame_at(self, t: float) -> tuple[ViewState, ...]:
@@ -383,9 +419,10 @@ class Timeline:
         return RGroup(children=[view.root for view in self.frame_at(t)], uid=self.uid)
 
     def audio(self, start: float = 0.0, end: float | None = None, sample_rate: int = DEFAULT_SAMPLE_RATE) -> np.ndarray:
-        """Every clip's sounds mixed on the global timeline, stereo float32
+        """Every clip's sounds and the audio clips mixed on the global timeline, stereo float32
         for ``[start, end)`` (default: the whole timeline)."""
         placed = [entry for clip in self.clips for entry in clip.placed_sounds()]
+        placed += [audio.placed() for audio in self.audio_clips]
         return mix(placed, start, self.duration if end is None else end, sample_rate)
 
     def segments(self) -> Iterable[tuple[Clip, int, float, float]]:

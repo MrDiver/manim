@@ -974,3 +974,33 @@ button.toggle[aria-expanded="true"]::before,
   gap: 6px;
   margin: 8px 0;
 }
+
+/* -- audio tracks (audiotracks.js) ------------------------------------------------ */
+
+.audio-body {
+  background: #24433a;
+}
+
+.waveform {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.controls .record svg {
+  fill: #d04848;
+  stroke: none;
+}
+
+.controls .record[aria-pressed="true"] {
+  background: rgb(208 72 72 / 0.25);
+  animation: recording 1s ease-in-out infinite alternate;
+}
+
+@keyframes recording {
+  to {
+    background: rgb(208 72 72 / 0.55);
+  }
+}

@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import numpy as np
 import pytest
 from manimx.animation import Timeline
 from manimx.cli import main
@@ -345,6 +346,73 @@ def test_copied_clips_are_pasted_as_one_step(root, editor) -> None:
     assert len(editor.timeline.clips) == 3
     with pytest.raises(EditError, match="needs a scene"):
         parse("/api/clip/add", {"clips": [{"start": 1.0}]})
+
+
+def tone(path: Path, seconds: float, rate: int = 8000) -> bytes:
+    """A 440 Hz WAV file's bytes."""
+    import io
+
+    from manimx.animation import write_wav
+
+    buffer = io.BytesIO()
+    write_wav(buffer, 0.5 * np.sin(2 * np.pi * 440 * np.arange(round(seconds * rate)) / rate), rate)
+    return buffer.getvalue()
+
+
+def test_audio_clips_are_uploaded_placed_mixed_and_saved(root, editor) -> None:
+    file = editor.save_asset("my voice!.wav", tone(root, 2.0))
+    assert file == "assets/audio/my-voice.wav"
+    assert editor.save_asset("my voice!.wav", b"") == "assets/audio/my-voice-2.wav"  # never overwritten
+    with pytest.raises(EditError, match="not a sound file"):
+        editor.save_asset("notes.txt", b"hello")
+
+    editor.run(parse("/api/audio/add", {"file": file, "start": 5.0, "track": 1}))
+    editor.run(parse("/api/audio/edit", {"index": 0, "cut": [0.5, 1.5], "volume": 0.5}))
+    clip = editor.timeline.audio_clips[0]
+    assert (clip.start, clip.end, clip.track) == (5.0, 6.0, 1)
+    assert editor.timeline.duration == 6.0  # the audio goes on after the scenes
+    mixed = editor.timeline.audio(0.0, 7.0, 8000)
+    assert not mixed[: 5 * 8000 - 10].any() and not mixed[6 * 8000 + 10 :].any()
+    assert 0.2 < np.abs(mixed[5 * 8000 : 6 * 8000]).max() <= 0.26  # half the tone's loudness
+    assert editor.audio_clips()[0] | {"length": 0} == {
+        "name": "my-voice", "file": file, "start": 5.0, "end": 6.0, "track": 1, "cut": [0.5, 1.5], "volume": 0.5, "length": 0,
+    }
+    peaks = editor.waveform(0, 0.0, 2.0, 4)
+    assert len(peaks) == 4 and all(low < -0.4 and high > 0.4 for low, high in peaks)
+
+    editor.save()
+    project = Project.load(root)
+    assert [(entry.file, entry.start, entry.track, entry.cut, entry.volume) for entry in project.audio] == [(file, 5.0, 1, (0.5, 1.5), 0.5)]
+    assert project.build_timeline().audio_clips[0].end == 6.0
+
+    editor.run(parse("/api/audio/remove", {"indices": [0]}))
+    assert editor.timeline.audio_clips == [] and editor.history()["undo"] == "remove an audio clip"
+    editor.undo()
+    editor.undo()  # the edit
+    assert (editor.timeline.audio_clips[0].cut_out, editor.project.audio[0].volume) == (None, 1.0)
+    with pytest.raises(EditError, match="outside the project"):
+        editor.run(parse("/api/audio/add", {"file": "../elsewhere.wav", "start": 0}))
+    with pytest.raises(EditError, match="audio tracks start at 0"):
+        parse("/api/audio/edit", {"index": 0, "track": -1})
+
+
+def test_the_page_uploads_sound_files(root, renderer) -> None:
+    editor = ProjectEditor(root, lambda project: SETTINGS, save_delay=60.0)
+    server = PreviewServer(Timeline(), SETTINGS, renderer=renderer, editor=editor)
+    editor.load()
+    server.start()
+    try:
+        upload = urllib.request.Request(server.url + "api/asset?name=take.wav", data=tone(root, 1.0), method="POST")
+        with urllib.request.urlopen(upload) as response:
+            file = json.loads(response.read())["file"]
+        assert request(server, "/api/audio/add", {"file": file, "start": 1.0})[0] == 200
+        assert request(server, "/api/timeline")[1]["audio"][0]["end"] == 2.0
+        assert len(request(server, "/api/waveform?index=0&from=0&to=1&n=8")[1]) == 8
+        assert request(server, "/api/waveform?index=3&from=0&to=1&n=8")[0] == 400
+        with urllib.request.urlopen(server.url + "api/audio") as response:
+            assert response.status == 200  # the audio clip makes a sound
+    finally:
+        server.close()
 
 
 def test_commands_are_parsed_from_the_pages_requests() -> None:

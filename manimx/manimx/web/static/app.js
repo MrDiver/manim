@@ -42,6 +42,7 @@
 // during a drag, and keeps its time.
 
 import { clipBar, eventPill, initEditing, timelineLoaded, trackLane } from "./editing.js";
+import { drawAudioTracks, initAudio } from "./audiotracks.js";
 import { FrameCache } from "./frames.js";
 import { initThumbs, thumbnails } from "./thumbs.js";
 
@@ -224,6 +225,7 @@ function drawTimeline() {
       if (state.open.has(key)) for (const node of clip.nodes) addNode(node, key, 1);
     }
   }
+  drawAudioTracks();
 }
 
 function clipKey(clip, index) {
@@ -887,6 +889,7 @@ async function followChanges() {
 
 async function start() {
   initThumbs({ state });
+  initAudio({ state, elements, percent, addRow, play, pause, redraw: drawTimeline, showTime: (time) => show(snap(time)) });
   initEditing({
     state,
     elements,

@@ -18,7 +18,9 @@ them by module and class.
 The timeline lists clips in order. A clip without a ``start`` begins
 when the previous clip ends, so generated scenes simply play one after
 another; an explicit ``start`` (seconds) places a clip anywhere, e.g. in
-parallel with another one on a higher ``layer``.
+parallel with another one on a higher ``layer``. Below the clips, the
+timeline's ``audio`` lists sound files on audio tracks (voice-overs,
+music, recordings made in the preview), mixed into the video's sound.
 """
 
 from __future__ import annotations
@@ -32,8 +34,9 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
+from .animation.audio import Sound
 from .animation.scene import PreparedScene, Scene
-from .animation.timing import NEVER, Timeline
+from .animation.timing import NEVER, AudioClip, Timeline
 from .settings import (
     OutputSettings,
     PerformanceSettings,
@@ -90,6 +93,20 @@ class ClipEntry:
     """How fast the clip plays: 2 is twice as fast, 0.5 slow motion."""
 
 
+@dataclass
+class AudioEntry:
+    """A sound file on the timeline's audio tracks (a voice-over, music, a
+    recording made in the preview)."""
+
+    file: str
+    """Path inside the project, e.g. assets/audio/voice.wav."""
+    start: float = 0.0
+    track: int = 0
+    cut: tuple[float | None, float | None] | None = None
+    """In and out points in the file's seconds."""
+    volume: float = 1.0
+
+
 @dataclass(eq=False)
 class Project:
     root: Path
@@ -99,6 +116,9 @@ class Project:
     timeline: list[ClipEntry] = field(default_factory=list)
     events: dict[str, float] = field(default_factory=dict)
     """Event times set by hand (clicks, transcript words come later)."""
+    audio: list[AudioEntry] = field(default_factory=list)
+    _sounds: dict[Path, tuple[int, Sound]] = field(default_factory=dict, init=False, repr=False)
+    """Sound files read, with their modification time: read again when changed."""
 
     @property
     def output(self) -> OutputSettings:
@@ -136,7 +156,7 @@ class Project:
         if not isinstance(data.get("name"), str):
             raise ProjectError(f'invalid {PROJECT_FILE}: "name" must be a string')
         timeline = data.get("timeline", {})
-        _check_keys(timeline, ["clips", "events"], "timeline")
+        _check_keys(timeline, ["clips", "events", "audio"], "timeline")
         try:
             settings = settings_from_json({key: data[key] for key in SECTIONS if key in data})
         except UnknownSetting as error:
@@ -154,9 +174,13 @@ class Project:
                 _check_keys(entry, ["scene", "start", "name", "layer", "cut", "speed"], f"timeline.clips[{index}]")
                 clips.append(_clip_entry(entry))
             events = {name: float(time) for name, time in timeline.get("events", {}).items()}
+            audio = []
+            for index, entry in enumerate(timeline.get("audio", [])):
+                _check_keys(entry, ["file", "start", "track", "cut", "volume"], f"timeline.audio[{index}]")
+                audio.append(_audio_entry(entry))
         except (KeyError, TypeError, ValueError, AttributeError) as error:
             raise ProjectError(f"invalid {PROJECT_FILE}: {error}") from error
-        return cls(root=root, name=data["name"], settings=settings, scenes=scenes, timeline=clips, events=events)
+        return cls(root=root, name=data["name"], settings=settings, scenes=scenes, timeline=clips, events=events, audio=audio)
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -165,7 +189,11 @@ class Project:
             "name": self.name,
             **settings_to_json(self.settings),
             "scenes": {name: {"module": entry.module, "class": entry.cls} for name, entry in self.scenes.items()},
-            "timeline": {"clips": [_clip_json(entry) for entry in self.timeline], "events": dict(self.events)},
+            "timeline": {
+                "clips": [_clip_json(entry) for entry in self.timeline],
+                "events": dict(self.events),
+                **({"audio": [_audio_json(entry) for entry in self.audio]} if self.audio else {}),
+            },
         }
 
     def save(self) -> None:
@@ -278,7 +306,28 @@ class Project:
             if entry.speed != 1.0:
                 clip.set_speed(entry.speed)
             previous_end, previous_name = clip.end, clip.name
+        for entry in self.audio:
+            timeline.audio_clips.append(self.audio_clip(entry))
         return timeline
+
+    def sound(self, file: str) -> Sound:
+        """The sound file ``file`` (inside the project), read once while it is unchanged."""
+        path = (self.root / file).resolve()
+        if not path.is_relative_to(self.root):
+            raise ProjectError(f"{file} is outside the project")
+        try:
+            mtime = path.stat().st_mtime_ns
+        except OSError as error:
+            raise ProjectError(f"cannot read the sound {file}: {error}") from None
+        known = self._sounds.get(path)
+        if known is None or known[0] != mtime:
+            known = self._sounds[path] = (mtime, Sound.load(path))
+        return known[1]
+
+    def audio_clip(self, entry: AudioEntry) -> AudioClip:
+        """The timeline's audio clip for ``entry``."""
+        cut_in, cut_out = entry.cut or (None, None)
+        return AudioClip(self.sound(entry.file), entry.start, entry.track, cut_in, cut_out, entry.volume, Path(entry.file).stem)
 
     def source(self, scene: str | None = None) -> ProjectSource:
         """What the render driver renders: the timeline, or one scene."""
@@ -459,6 +508,28 @@ def project_schema() -> dict[str, Any]:
                         "description": "Times (seconds) of events scenes wait for with wait_for().",
                         "additionalProperties": {"type": "number"},
                     },
+                    "audio": {
+                        "type": "array",
+                        "description": "Sound files on the audio tracks (voice-overs, music, recordings).",
+                        "items": {
+                            "type": "object",
+                            "required": ["file"],
+                            "additionalProperties": False,
+                            "properties": {
+                                "file": {"type": "string", "description": "Path inside the project, e.g. assets/audio/voice.wav."},
+                                "start": {"type": "number", "description": "Start in seconds."},
+                                "track": {"type": "integer", "description": "Audio track (0 is the first)."},
+                                "cut": {
+                                    "type": "array",
+                                    "items": number_or_null,
+                                    "minItems": 2,
+                                    "maxItems": 2,
+                                    "description": "In and out points in the file's seconds.",
+                                },
+                                "volume": {"type": "number", "minimum": 0, "description": "Loudness factor (default 1)."},
+                            },
+                        },
+                    },
                 },
             },
         },
@@ -482,6 +553,30 @@ def _speed(value: Any) -> float:
     if not speed > 0.0:
         raise ValueError(f"a clip's speed must be positive, not {value!r}")
     return speed
+
+
+def _audio_entry(data: dict[str, Any]) -> AudioEntry:
+    cut = data.get("cut")
+    if not isinstance(data["file"], str):
+        raise ValueError("an audio clip's file must be a path")
+    return AudioEntry(
+        file=data["file"],
+        start=float(data.get("start", 0.0)),
+        track=int(data.get("track", 0)),
+        cut=None if cut is None else (cut[0], cut[1]),
+        volume=float(data.get("volume", 1.0)),
+    )
+
+
+def _audio_json(entry: AudioEntry) -> dict[str, Any]:
+    data: dict[str, Any] = {"file": entry.file, "start": entry.start}
+    if entry.track:
+        data["track"] = entry.track
+    if entry.cut is not None:
+        data["cut"] = list(entry.cut)
+    if entry.volume != 1.0:
+        data["volume"] = entry.volume
+    return data
 
 
 def _clip_json(entry: ClipEntry) -> dict[str, Any]:

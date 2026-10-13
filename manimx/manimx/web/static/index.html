@@ -41,6 +41,9 @@
         <figcaption id="error" hidden></figcaption>
       </figure>
       <div class="controls" role="toolbar" aria-label="Playback">
+        <button id="record" type="button" class="icon record" aria-pressed="false" hidden title="Record a voice-over: plays from the playhead and records the microphone; press again to stop">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/></svg>
+        </button>
         <button id="mute" type="button" class="icon" aria-pressed="false" title="Sound on or off (M)">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="waves" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none"/></svg>
         </button>
@@ -87,6 +90,7 @@
     <aside id="inspector" aria-label="Edit the project" hidden>
       <p id="edit-message" role="status" aria-live="polite">Edits show at once and are saved to manimx.json.</p>
       <div id="clip-editor"></div>
+      <div id="audio-editor"></div>
       <div id="events-editor"></div>
     </aside>
   </div>
@@ -102,7 +106,7 @@
       <div id="overlay"><div id="after-end" title="Past the end: nothing plays here yet"></div><div id="playhead"></div></div>
     </div>
   </section>
-  <p class="hint footer">Drag on the ruler to scrub. Drag a clip to move it (up or down to another track), its handles to cut it, empty track space to select several; Delete removes the selection. Drag an event to time it. S splits at the playhead, Ctrl+D duplicates, Ctrl+C / X / V copy, cut and paste at the playhead; drags snap to edges, the playhead and events (Alt: freely). Ctrl+Z undoes, Ctrl+Shift+Z redoes. Space plays, ← → step frames, Ctrl+wheel zooms.</p>
+  <p class="hint footer">Drag on the ruler to scrub. Drag a clip to move it (up or down to another track), its handles to cut it, empty track space to select several; Delete removes the selection. Drag an event to time it. S splits at the playhead, Ctrl+D duplicates, Ctrl+C / X / V copy, cut and paste at the playhead; drop sound files on an audio track, ● records a voice-over; drags snap to edges, the playhead and events (Alt: freely). Ctrl+Z undoes, Ctrl+Shift+Z redoes. Space plays, ← → step frames, Ctrl+wheel zooms.</p>
 
   <div id="marquee" hidden></div>
   <dialog id="settings" aria-label="Project settings">

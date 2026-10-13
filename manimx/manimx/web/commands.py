@@ -137,6 +137,47 @@ class DuplicateClips(UICommand):
 
 
 @dataclass(frozen=True)
+class AddAudio(UICommand):
+    """Put a sound file of the project on an audio track, at position
+    ``index`` of the audio clip list (None: last)."""
+
+    file: str
+    start: float
+    track: int = 0
+    cut: tuple[float | None, float | None] | None = None
+    volume: float = 1.0
+    index: int | None = None
+
+    @property
+    def label(self) -> str:
+        return f"add {self.file.rsplit('/', 1)[-1]}"
+
+
+@dataclass(frozen=True)
+class RemoveAudio(UICommand):
+    """Take audio clips off their tracks."""
+
+    indices: tuple[int, ...]
+
+    @property
+    def label(self) -> str:
+        return f"remove {_count(len(self.indices), 'an audio clip', 'audio clips')}"
+
+
+@dataclass(frozen=True)
+class EditAudio(UICommand):
+    """Change audio clips' start, track, cut or volume."""
+
+    edits: tuple[ClipEdit, ...]
+
+    @property
+    def label(self) -> str:
+        fields = {key for edit in self.edits for key, _ in edit.updates}
+        verb = "cut" if "cut" in fields else "move" if fields & {"start", "track"} else "change the volume of"
+        return f"{verb} {_count(len(self.edits), 'an audio clip', 'audio clips')}"
+
+
+@dataclass(frozen=True)
 class Batch(UICommand):
     """Several commands as one step: run in order, undone in reverse."""
 
@@ -220,6 +261,18 @@ def parse(route: str, body: dict[str, Any]) -> UICommand:
             return SetEvent(name, None if time is None else _number(time, "time", minimum=0.0))
         case "/api/setting", {"path": list(path)} if path and all(isinstance(part, str) for part in path):
             return SetSetting(tuple(path), body.get("value"))
+        case "/api/audio/add", {"clips": list(clips)}:
+            return Batch(tuple(_add_audio(clip) for clip in clips), f"paste {_count(len(clips), 'an audio clip', 'audio clips')}")
+        case "/api/audio/add", {"file": str()}:
+            return _add_audio(body)
+        case "/api/audio/remove", {"indices": list(indices)}:
+            return RemoveAudio(tuple(_index(index) for index in indices))
+        case "/api/audio/edit", {"clips": list(edits)}:
+            return EditAudio(tuple(_audio_edit(edit) for edit in edits))
+        case "/api/audio/edit", {"index": _}:
+            return EditAudio((_audio_edit(body),))
+        case "/api/audio/add" | "/api/audio/remove" | "/api/audio/edit", _:
+            raise EditError(f"{route} does not take {body}")
         case "/api/clip" | "/api/clip/add" | "/api/clip/remove" | "/api/clip/split" | "/api/clip/duplicate" | "/api/event" | "/api/setting", _:
             raise EditError(f"{route} does not take {body}")
     raise EditError(f"no edit {route}")
@@ -246,6 +299,45 @@ def clip_updates(changes: dict[str, Any]) -> dict[str, Any]:
                 if updates[key] <= 0.0:
                     raise EditError("a speed must be positive")
     return updates
+
+
+AUDIO_FIELDS = ("start", "track", "cut", "volume")
+
+
+def audio_updates(changes: dict[str, Any]) -> dict[str, Any]:
+    """``changes`` to an audio entry, checked."""
+    unknown = set(changes) - set(AUDIO_FIELDS)
+    if unknown:
+        raise EditError(f"audio clips have no {', '.join(sorted(unknown))}")
+    updates: dict[str, Any] = {}
+    for key, value in changes.items():
+        match key:
+            case "start":
+                updates[key] = _number(value, "start", minimum=0.0)
+            case "track":
+                updates[key] = _layer(value)
+                if updates[key] < 0:
+                    raise EditError("audio tracks start at 0")
+            case "cut":
+                updates[key] = _cut(value)
+            case "volume":
+                updates[key] = _number(value, "volume", minimum=0.0)
+    return updates
+
+
+def _add_audio(body: Any) -> AddAudio:
+    """``{"file", "start", "track", "cut", "volume"}`` (all but the file optional)."""
+    if not isinstance(body, dict) or not isinstance(body.get("file"), str):
+        raise EditError("an audio clip needs a file")
+    updates = audio_updates({key: body[key] for key in AUDIO_FIELDS if key in body})
+    return AddAudio(body["file"], updates.get("start", 0.0), updates.get("track", 0), updates.get("cut"), updates.get("volume", 1.0))
+
+
+def _audio_edit(edit: Any) -> ClipEdit:
+    if not isinstance(edit, dict):
+        raise EditError("an audio clip edit is an object")
+    changes = {key: value for key, value in edit.items() if key != "index"}
+    return ClipEdit(_index(edit.get("index")), tuple(audio_updates(changes).items()))
 
 
 def _add_clip(body: Any) -> AddClip:
@@ -296,18 +388,26 @@ def _cut(value: Any) -> tuple[float | None, float | None] | None:
 
 
 def _clips(count: int) -> str:
-    return "a clip" if count == 1 else f"{count} clips"
+    return _count(count, "a clip", "clips")
+
+
+def _count(count: int, one: str, many: str) -> str:
+    return one if count == 1 else f"{count} {many}"
 
 
 __all__ = [
+    "AUDIO_FIELDS",
     "CLIP_FIELDS",
+    "AddAudio",
     "AddClip",
     "Batch",
     "ClipEdit",
     "DuplicateClips",
+    "EditAudio",
     "EditClips",
     "EditError",
     "InsertClips",
+    "RemoveAudio",
     "RemoveClips",
     "RemovedClip",
     "SetEvent",

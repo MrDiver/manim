@@ -60,6 +60,7 @@ from .simulation import Simulation
 from .time_map import MonotoneMap
 from .timing import (
     NEVER,
+    AudioClip,
     Clip,
     InvalidCue,
     Ramp,
@@ -83,6 +84,7 @@ __all__ = [
     "Animation",
     "AnimationBuilder",
     "AnimationGroup",
+    "AudioClip",
     "Camera",
     "CameraView",
     "Change",

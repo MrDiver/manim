@@ -42,25 +42,31 @@ Design decisions:
 from __future__ import annotations
 
 import dataclasses
+import re
 import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 from ..animation import PreparedScene, Timeline
 from ..animation.timing import NEVER
 from ..drivers.offline import RenderSettings
-from ..project import PROJECT_FILE, ClipEntry, Project
+from ..project import PROJECT_FILE, AudioEntry, ClipEntry, Project
 from ..settings import SettingsError, entries, get, set_value
 from .commands import (
+    AddAudio,
     AddClip,
     Batch,
     ClipEdit,
     DuplicateClips,
+    EditAudio,
     EditClips,
     EditError,
     InsertClips,
+    RemoveAudio,
     RemoveClips,
     RemovedClip,
     SetEvent,
@@ -73,6 +79,9 @@ from .commands import (
 if TYPE_CHECKING:
     from .server import PreviewServer
 
+AUDIO_FOLDER = "assets/audio"
+"""Where sound files dropped or recorded in the page are saved."""
+AUDIO_SUFFIXES = {"wav", "mp3", "ogg", "oga", "opus", "flac", "m4a", "aac", "webm"}
 HISTORY_LENGTH = 200
 """Edits kept to undo."""
 
@@ -314,11 +323,48 @@ class ProjectEditor:
                     taken += [(copy.start, copy.start + length) for copy in copies if copy.layer == entry.layer]
                     copies.append(AddClip(entry.scene, _free_start(taken, clip.end, length), entry.layer, entry.cut, entry.speed))
                 return self._apply(Batch(tuple(copies), command.label))
+            case AddAudio(file, start, track, cut, volume, index):
+                position = len(project.audio) if index is None else index
+                if not 0 <= position <= len(project.audio):
+                    raise EditError(f"no place {index!r} for an audio clip")
+                entry = AudioEntry(file, start, track, cut, volume)
+                try:
+                    clip = project.audio_clip(entry)
+                except Exception as error:  # not a sound file, not in the project, ...
+                    raise EditError(describe(error, self.root)) from None
+
+                def add_audio() -> None:
+                    project.audio.insert(position, entry)
+                    self.timeline.audio_clips.insert(position, clip)
+
+                self._change(add_audio)
+                return RemoveAudio((position,))
+            case RemoveAudio(indices):
+                unique = sorted(set(indices))
+                for index in unique:
+                    if not 0 <= index < len(project.audio):
+                        raise EditError(f"there is no audio clip {index!r}")
+                restore = tuple(AddAudio(e.file, e.start, e.track, e.cut, e.volume, i) for i, e in ((i, project.audio[i]) for i in unique))
+
+                def remove_audio() -> None:
+                    for index in reversed(unique):
+                        del project.audio[index]
+                        del self.timeline.audio_clips[index]
+
+                self._change(remove_audio)
+                return Batch(restore, command.label)
+            case EditAudio(edits):
+                for edit in edits:
+                    if not 0 <= edit.index < len(project.audio):
+                        raise EditError(f"there is no audio clip {edit.index!r}")
+                inverse = EditAudio(tuple(ClipEdit(edit.index, tuple((key, getattr(project.audio[edit.index], key)) for key, _ in edit.updates)) for edit in edits))
+                self._change(lambda: self._edit_audio(edits))
+                return inverse
             case Batch(commands, name):
                 inverses: list[UICommand] = []
                 try:
                     for part in commands:
-                        inverses.append(self._apply(part))
+                        inverses.append(self._apply(part))  # noqa: PERF401 - kept one by one to undo a failure
                 except EditError:
                     for inverse in reversed(inverses):  # all or nothing
                         self._apply(inverse)
@@ -375,6 +421,67 @@ class ProjectEditor:
             ),
             "split a clip",
         )
+
+    def _edit_audio(self, edits: tuple[ClipEdit, ...]) -> None:
+        project = self._project()
+        for edit in edits:
+            entry = project.audio[edit.index] = dataclasses.replace(project.audio[edit.index], **dict(edit.updates))
+            clip = self.timeline.audio_clips[edit.index]
+            clip.start, clip.track, clip.volume = entry.start, entry.track, entry.volume
+            clip.cut_in, clip.cut_out = entry.cut or (None, None)
+
+    # -- sound files ------------------------------------------------------------
+
+    def save_asset(self, name: str, data: bytes) -> str:
+        """Save an uploaded sound file (dropped or recorded in the page) to
+        assets/audio/ under a free name; returns its path in the project."""
+        stem, dot, suffix = Path(name).name.rpartition(".")
+        if not dot or suffix.lower() not in AUDIO_SUFFIXES:
+            raise EditError(f"{name} is not a sound file manimx reads ({', '.join(sorted(AUDIO_SUFFIXES))})")
+        stem = re.sub(r"[^\w.-]+", "-", stem).strip("-.") or "sound"
+        folder = self.root / AUDIO_FOLDER
+        folder.mkdir(parents=True, exist_ok=True)
+        path, number = folder / f"{stem}.{suffix.lower()}", 2
+        while path.exists():
+            path, number = folder / f"{stem}-{number}.{suffix.lower()}", number + 1
+        path.write_bytes(data)
+        return path.relative_to(self.root).as_posix()
+
+    def audio_clips(self) -> list[dict[str, Any]]:
+        """Each audio clip as the page draws it."""
+        project = self.project
+        if project is None:
+            return []
+        return [
+            {
+                "name": clip.name,
+                "file": entry.file,
+                "start": clip.start,
+                "end": clip.end,
+                "track": entry.track,
+                "cut": None if entry.cut is None else list(entry.cut),
+                "volume": entry.volume,
+                "length": clip.sound.duration,
+            }
+            for entry, clip in zip(project.audio, self.timeline.audio_clips, strict=True)
+        ]
+
+    def waveform(self, index: int, start: float, end: float, buckets: int) -> list[list[float]]:
+        """Audio clip ``index``'s loudest and quietest sample in each of
+        ``buckets`` slices of the file's seconds ``[start, end)``, for drawing."""
+        clips = self.timeline.audio_clips
+        if not 0 <= index < len(clips):
+            raise EditError(f"there is no audio clip {index!r}")
+        sound = clips[index].sound
+        samples = sound.samples.mean(axis=1)
+        first = max(0, round(start * sound.sample_rate))
+        last = min(len(samples), max(first, round(end * sound.sample_rate)))
+        buckets = max(1, min(int(buckets), 4000))
+        edges = np.linspace(first, last, buckets + 1).astype(int)
+        return [
+            [round(float(samples[a:b].min()), 3), round(float(samples[a:b].max()), 3)] if b > a else [0.0, 0.0]
+            for a, b in zip(edges[:-1], edges[1:], strict=True)
+        ]
 
     def _remove_clips(self, indices: list[int], keep_followers: bool = True) -> list[RemovedClip]:
         """Remove clips, from the back so the indices before stay."""

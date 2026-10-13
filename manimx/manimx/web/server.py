@@ -45,6 +45,15 @@ shows, and ``manimx.json`` is saved shortly after (see editing.py):
     POST /api/clip/duplicate {"indices": [...]}: a copy after each
     POST /api/event          {"name", "time"} (time null: remove it)
     POST /api/setting        {"path": [...], "value"}
+    POST /api/audio/add      {"file", "start", "track", "cut", "volume"}: a
+                             sound file of the project on an audio track
+                             (or {"clips": [...]})
+    POST /api/audio/remove   {"indices": [...]}
+    POST /api/audio/edit     {"index", and any of "start", "track", "cut",
+                             "volume"}, or {"clips": [...]} of those
+    POST /api/asset?name=    the body is a sound file (dropped or recorded),
+                             saved to assets/audio/; answers its "file"
+    GET  /api/waveform?index=&from=&to=&n=  an audio clip's peaks
     POST /api/undo, /api/redo  undo or redo the last edit
 
 Every edit is a command (commands.py) that can be undone; an edit may
@@ -109,6 +118,8 @@ AUDIO_RATE = 24_000
 fine for previewing)."""
 CHANGES_TIMEOUT = 25.0
 """Seconds a /api/changes request waits before answering anyway."""
+MAX_ASSET = 512 * 2**20
+"""The largest sound file the page may upload."""
 IMMUTABLE = "private, max-age=86400, immutable"
 """Cache-Control of a frame asked for by number at the version it shows."""
 EDIT_ROUTES = (
@@ -117,6 +128,9 @@ EDIT_ROUTES = (
     "/api/clip/remove",
     "/api/clip/split",
     "/api/clip/duplicate",
+    "/api/audio/add",
+    "/api/audio/remove",
+    "/api/audio/edit",
     "/api/event",
     "/api/setting",
     "/api/undo",
@@ -268,6 +282,7 @@ class PreviewServer:
                 }
                 for clip, entry in zip(clips, entries, strict=True)
             ],
+            "audio": self.editor.audio_clips() if self.editor is not None else [],
             "segments": [
                 {"clip": clips.index(clip), "index": index, "start": start, "end": None if end == NEVER else end}
                 for clip, index, start, end in self.timeline.segments()
@@ -281,7 +296,7 @@ class PreviewServer:
             if self._audio is not None and self._audio[0] == self.version:
                 return self._audio[1]
             timeline = self.timeline
-            if not any(clip.placed_sounds() for clip in timeline.clips):
+            if not timeline.audio_clips and not any(clip.placed_sounds() for clip in timeline.clips):
                 self._audio = (self.version, None)
                 return None
             samples = timeline.audio(0.0, timeline.duration, AUDIO_RATE)
@@ -373,6 +388,7 @@ class _Handler(BaseHTTPRequestHandler):
             "/api/frame": self._frame,
             "/api/labels": self._labels,
             "/api/thumbnail": self._thumbnail,
+            "/api/waveform": self._waveform,
             "/api/changes": self._changes,
             "/api/settings": self._settings,
             "/api/scenes": self._scenes,
@@ -392,6 +408,9 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - the name http.server calls
         editor = self.preview.editor
         route = urlparse(self.path).path
+        if route == "/api/asset" and editor is not None:
+            self._asset(editor)
+            return
         if route not in EDIT_ROUTES:
             self._json({"error": f"not found: {self.path}"}, HTTPStatus.NOT_FOUND)
             return
@@ -418,6 +437,17 @@ class _Handler(BaseHTTPRequestHandler):
         except (_BadRequest, EditError) as error:
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
 
+    def _asset(self, editor: ProjectEditor) -> None:
+        """POST /api/asset?name=: the body is a sound file to save in the project."""
+        try:
+            name = parse_qs(urlparse(self.path).query).get("name", [""])[0]
+            length = int(self.headers.get("Content-Length") or 0)
+            if not 0 < length <= MAX_ASSET:
+                raise _BadRequest(f"a sound file must be between 1 byte and {MAX_ASSET // 2**20} MB")
+            self._json({"file": editor.save_asset(name, self.rfile.read(length))})
+        except (_BadRequest, EditError) as error:
+            self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - http.server's signature
         pass  # one request per scrub step: too many to print
 
@@ -440,6 +470,17 @@ class _Handler(BaseHTTPRequestHandler):
         same_server = query.get("s", [None])[0] == self.preview.session
         cache = IMMUTABLE if frame is not None and asked == version and same_server else False
         self._send(body, FORMATS[image_format][1], cache=cache, headers={"X-Version": str(version)})
+
+    def _waveform(self, query: dict[str, list[str]]) -> None:
+        editor = self.preview.editor
+        if editor is None:
+            raise _BadRequest("this preview has no audio clips")
+        index, buckets = _number(query, "index", int), _number(query, "n", int)
+        start, end = _number(query, "from", float), _number(query, "to", float)
+        try:
+            self._json(editor.waveform(index, start, end, buckets))
+        except EditError as error:
+            raise _BadRequest(str(error)) from None
 
     def _thumbnail(self, query: dict[str, list[str]]) -> None:
         clip, scene, width = (_number(query, name, int) for name in ("clip", "scene", "w"))

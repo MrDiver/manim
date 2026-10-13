@@ -51,6 +51,13 @@ const panels = {
 
 export function initEditing(shared) {
   page = shared;
+  document.addEventListener("manimx:select", (event) => {
+    if (event.detail !== "clips" && selected.size) {
+      selected.clear();
+      markSelected();
+      drawClipPanel();
+    }
+  });
   panels.settingsButton.addEventListener("click", openSettings);
   panels.settings.addEventListener("close", () => panels.settingsForm.replaceChildren());
   panels.undo.addEventListener("click", () => post("/api/undo", {}));
@@ -164,7 +171,7 @@ export function timelineLoaded() {
 
 // -- sending edits ------------------------------------------------------------
 
-async function post(route, body) {
+export async function post(route, body) {
   try {
     const response = await fetch(route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const answer = await response.json();
@@ -190,7 +197,7 @@ function showHistory(history) {
   }
 }
 
-function say(text, problem = false) {
+export function say(text, problem = false) {
   panels.message.textContent = text;
   panels.message.classList.toggle("problem", problem);
 }
@@ -203,7 +210,7 @@ let gestures = 0;
 
 /** Sends live edits while a drag goes on: one request at a time, then the
  * newest. All carry one gesture id, so one undo takes back the whole drag. */
-function liveSender(route, onSent) {
+export function liveSender(route, onSent) {
   let busy = false;
   let next = null;
   const gesture = `${Date.now()}-${++gestures}`;
@@ -290,7 +297,7 @@ export function trackLane(lane, layer) {
       showMarquee(box);
       selected.clear();
       for (const index of before) selected.add(index);
-      for (const bar of document.querySelectorAll(".clip-body.editable")) {
+      for (const bar of document.querySelectorAll(".clip-body.editable[data-index]")) {
         const bounds = bar.getBoundingClientRect();
         if (bounds.right >= box.left && bounds.left <= box.right && bounds.bottom >= box.top && bounds.top <= box.bottom) selected.add(Number(bar.dataset.index));
       }
@@ -313,7 +320,7 @@ export function trackLane(lane, layer) {
 }
 
 /** The time under `clientX` on the lanes, also past the timeline's end. */
-function timeAtUnclamped(clientX) {
+export function timeAtUnclamped(clientX) {
   const box = page.elements.ruler.getBoundingClientRect();
   return Math.max(0, ((clientX - box.left) / box.width) * page.state.span);
 }
@@ -332,7 +339,7 @@ function showMarquee(box) {
 }
 
 function markSelected() {
-  for (const bar of document.querySelectorAll(".clip-body.editable")) bar.classList.toggle("selected", selected.has(Number(bar.dataset.index)));
+  for (const bar of document.querySelectorAll(".clip-body.editable[data-index]")) bar.classList.toggle("selected", selected.has(Number(bar.dataset.index)));
 }
 
 // -- clip bars ------------------------------------------------------------------
@@ -376,6 +383,7 @@ function startDrag(event, edge, index) {
     selected.clear();
     selected.add(index);
   }
+  document.dispatchEvent(new CustomEvent("manimx:select", { detail: "clips" }));
   markSelected();
   // Listened to on the window, not with pointer capture on the bar: moving
   // the bar into another track's lane takes it out of the document for a
@@ -457,7 +465,7 @@ function startDrag(event, edge, index) {
 
 /** The shift that puts one of `edges` (moved by `delta`) onto the nearest
  * of `targets` within `reach` seconds, and that target; or null. */
-function snapTo(delta, edges, targets, reach) {
+export function snapTo(delta, edges, targets, reach) {
   let best = null;
   for (const at of edges) {
     for (const target of targets) {
@@ -469,7 +477,7 @@ function snapTo(delta, edges, targets, reach) {
 }
 
 /** The line where a drag snapped, or none. */
-function showSnap(time) {
+export function showSnap(time) {
   let line = document.getElementById("snap-line");
   if (!line) {
     line = document.createElement("div");
@@ -481,7 +489,7 @@ function showSnap(time) {
 }
 
 /** `time` on the nearest frame (past the timeline's end too: a clip may be moved there). */
-function onFrame(time) {
+export function onFrame(time) {
   const { fps } = page.state.timeline;
   return Math.round(time * fps) / fps;
 }
@@ -679,7 +687,7 @@ function settingField(item) {
 // -- form parts ------------------------------------------------------------------------
 
 /** A number field that calls `change(value, input)` when a valid number is entered (null when emptied and `empty` names what empty means). */
-function numberInput(value, minimum, maximum, step, change, empty = null) {
+export function numberInput(value, minimum, maximum, step, change, empty = null) {
   const input = document.createElement("input");
   input.type = "number";
   input.step = String(step);
@@ -698,7 +706,7 @@ function numberInput(value, minimum, maximum, step, change, empty = null) {
   return input;
 }
 
-function field(label, controls, unit = "", hint = "") {
+export function field(label, controls, unit = "", hint = "") {
   const row = document.createElement("label");
   row.className = "field";
   const name = document.createElement("span");
@@ -722,7 +730,7 @@ function field(label, controls, unit = "", hint = "") {
   return row;
 }
 
-function button(text, click) {
+export function button(text, click) {
   const element = document.createElement("button");
   element.type = "button";
   element.textContent = text;
@@ -733,7 +741,7 @@ function button(text, click) {
   return element;
 }
 
-function paragraph(text) {
+export function paragraph(text) {
   const element = document.createElement("p");
   element.className = "hint";
   element.textContent = text;
