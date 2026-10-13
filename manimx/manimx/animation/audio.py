@@ -85,8 +85,9 @@ def mix(
     placed: Iterable[tuple[float, float, Sound, float]], start: float, end: float, sample_rate: int = DEFAULT_SAMPLE_RATE
 ) -> np.ndarray:
     """Mix ``(time, skip, sound, volume)`` entries into stereo float32 samples
-    for times ``[start, end)``; ``skip`` seconds of a sound are left out
-    (it was cut). The result is not clipped."""
+    for times ``[start, end)``; the first ``skip`` seconds of a sound are
+    left out (it was cut): its sample at ``skip`` plays at ``time``,
+    nothing of it before. The result is not clipped."""
     count = max(0, round((end - start) * sample_rate))
     output = np.zeros((count, 2), dtype=np.float32)
     converted: dict[Sound, np.ndarray] = {}  # one sound often plays many times
@@ -94,10 +95,11 @@ def mix(
         samples = converted.get(sound)
         if samples is None:
             samples = converted[sound] = sound.as_stereo(sample_rate)
-        first = round((time - start) * sample_rate) - round(skip * sample_rate)
-        lo, hi = max(first, 0), min(first + len(samples), count)
+        begin = round((time - start) * sample_rate)  # where sample `offset` plays
+        offset = round(skip * sample_rate)
+        lo, hi = max(begin, 0), min(begin + len(samples) - offset, count)
         if lo < hi:
-            output[lo:hi] += volume * samples[lo - first : hi - first]
+            output[lo:hi] += volume * samples[offset + lo - begin : offset + hi - begin]
     return output
 
 

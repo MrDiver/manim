@@ -106,6 +106,8 @@ def test_mix_places_skips_and_scales() -> None:
     assert out[0, 0] == pytest.approx(1.0)  # the second entry starts 4 samples in: 0.5 * 2
     assert out[5, 0] == pytest.approx(0.1 + 2 * 1.0)
     assert out[15, 0] == 0.0
+    late = mix([(0.01, 0.004, sound, 1.0)], 0.0, 0.02, RATE)  # cut 4 samples in, from 0.01 s on
+    assert not late[:10].any() and late[10, 0] == pytest.approx(0.5)  # nothing of the cut part before
 
 
 # --- scenes and simulations ------------------------------------------------------
