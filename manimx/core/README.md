@@ -48,7 +48,8 @@ evaluation/   signals at a time ──snapshot──▶  robjects/  ◀──rea
 | `evaluation/evaluator.rs` | `Evaluator`: all signals of a scene in slots, set to their values at a time; `FrameState` | `PreparedScene.evaluate()`, `ScenePlan` (animation/plan.py) |
 | `evaluation/scene_graph.rs` | `SceneGraph`: the scene's nodes and the slots of their fields; the render object tree of a `FrameState` | `Node.render_kind`, `Node.render_fields()`, `Node.snapshot()` |
 | `evaluation/track.rs` | one signal's track and its entries, folded at a time | `SignalTrack`, `Entry`, `Placement` (animation/signals/signal_tracks.py) |
-| `evaluation/contribution.rs` | what one animation does to one signal at a progress | `Animation.contribution()`, animation/signals/contributions.py |
+| `evaluation/contribution.rs` | what one animation does to one signal at a progress, as data | `Animation.planned_contributions()`, animation/signals/contributions.py |
+| `evaluation/callbacks.rs` | animations without a data form, called once per evaluation for all targets | `Animation.contributions()` |
 | `evaluation/rates.rs` | rate functions | animation/signals/rates.py |
 | `evaluation/value.rs` | signal values and the operations of their kinds | animation/signals/kinds.py |
 | `evaluation/paths.rs` | the part of a path drawn so far | animation/signals/paths.py |

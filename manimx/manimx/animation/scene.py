@@ -60,7 +60,7 @@ from .authoring import _active
 from .nodes.camera import Camera
 from .nodes.node import Node
 from .signals.signal import RootSignal, Signal, TimeSignals
-from .signals.signal_tracks import Change, Placement, RateFunction, SignalTrack, linear
+from .signals.signal_tracks import Change, Placement, RateFunction, SignalTrack, linear, refresh
 from .simulation import Simulation
 
 if TYPE_CHECKING:
@@ -479,8 +479,7 @@ class PreparedScene:
     def refresh(self) -> None:
         """Recompute cached start values after placements were edited (the
         plan is made again on next use)."""
-        for track in self.tracks:
-            track.refresh()
+        refresh(self.placements)
         self._plan = None
 
     def playing_time_at(self, t: float) -> float:

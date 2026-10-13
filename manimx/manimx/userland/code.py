@@ -485,16 +485,18 @@ class TypeCode(_PlannedAnimation):
         moves = [Target(axis, Change.ABSOLUTE) for axis in self.cursor.position.axes] if self.cursor is not None else []
         return [*super().targets(), *moves]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
-        if signal.id in self._planned:
-            return super().contribution(signal, alpha, start_value)
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
+        planned = super().contributions(alpha, start_values[: len(self._planned)])
+        if self.cursor is None:
+            return planned
         typed = int(np.searchsorted(self._presses, alpha, side="right"))
         if self.backwards:
             typed = len(self._presses) - typed
-        return float(self._carets[typed][self.cursor.position.axes.index(signal)])
+        return [*planned, *(float(coordinate) for coordinate in self._carets[typed][: len(self.cursor.position.axes)])]
 
-    def planned_contribution(self, signal: RootSignal) -> Contribution | None:
-        return self._planned[signal.id][1] if signal.id in self._planned else None
+    def planned_contributions(self) -> Sequence[Contribution | None]:
+        moves = [None] * len(self.cursor.position.axes) if self.cursor is not None else []
+        return [*super().planned_contributions(), *moves]
 
     def nodes(self) -> Sequence[Node]:
         return (self.code,) if self.cursor is None else (self.code, self.cursor)
@@ -527,8 +529,8 @@ class Blink(Animation):
     def targets(self) -> Sequence[Target]:
         return [Target(self.node.alpha, Change.ABSOLUTE)]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
-        return 1.0 if alpha >= 1.0 or math.floor(alpha * self.times * 2) % 2 == 0 else 0.0
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[float]:
+        return [1.0 if alpha >= 1.0 or math.floor(alpha * self.times * 2) % 2 == 0 else 0.0]
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)

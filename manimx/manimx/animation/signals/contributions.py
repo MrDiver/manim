@@ -1,12 +1,13 @@
 """Contributions as data: what an animation does to a signal, described
 instead of computed.
 
-``Animation.contribution(signal, alpha, start_value)`` defines an
-animation. An animation that can also describe that function as one of
-the values below returns it from :meth:`Animation.planned_contribution`;
-the core (manimx._core, see CORE.md) then evaluates it without calling
-Python. An animation that returns None is called back. Both forms must
-give the same values (tests/test_plan.py checks the built-in ones).
+``Animation.contributions(alpha, start_values)`` defines an animation:
+what it does to each of its targets. An animation that can also describe
+that function for a target as one of the values below returns it from
+:meth:`Animation.planned_contributions`; the core (manimx._core, see
+CORE.md) then evaluates it without calling Python. Targets with None are
+called back, all of an animation's in one call. Both forms must give the
+same values (tests/test_plan.py checks the built-in ones).
 """
 
 from __future__ import annotations

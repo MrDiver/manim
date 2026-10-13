@@ -111,8 +111,6 @@ class Simulation(Animation):
         self.times: np.ndarray = np.zeros(0)
         """Keyframe times (simulated time) once baked."""
         self._keyframes: dict[int, tuple[RootSignal, list[Any]]] = {}
-        self._last_alpha = math.nan
-        self._last_keyframe = (0, 0.0)
         self._baked = False
 
     # -- used inside the step function ---------------------------------------
@@ -147,30 +145,20 @@ class Simulation(Animation):
             raise RuntimeError("a simulation is baked when play() places it")
         return [Target(signal, Change.ABSOLUTE) for signal, _ in self._keyframes.values()]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
-        values = self._keyframes[signal.id][1]
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
         index, fraction = self._keyframe_at(alpha)
-        start, end = values[index], values[index + 1]
-        if start is end:
-            return start  # unchanged between the keyframes (most signals, most of the time)
-        if isinstance(start, np.ndarray) and start.shape != end.shape:
-            return start if fraction < 1.0 else end  # the path changed its point count: no blending
-        return signal.kind.interpolate(start, end, fraction)
+        return [_between(signal, values, index, fraction) for signal, values in self._keyframes.values()]
 
-    def planned_contribution(self, signal: RootSignal) -> Contribution:
-        return Keyframes(self.run_time, [float(t) for t in self.times], self._keyframes[signal.id][1])
+    def planned_contributions(self) -> Sequence[Contribution]:
+        times = [float(t) for t in self.times]
+        return [Keyframes(self.run_time, times, values) for _, values in self._keyframes.values()]
 
     def _keyframe_at(self, alpha: float) -> tuple[int, float]:
-        """The keyframe before progress ``alpha`` and how far past it.
-        Every signal of the simulation asks for the same ``alpha`` in turn,
-        so the last answer is kept."""
-        if alpha != self._last_alpha:
-            t = alpha * self.run_time
-            index = min(max(bisect.bisect_right(self.times, t) - 1, 0), len(self.times) - 2)
-            t0, t1 = self.times[index], self.times[index + 1]
-            self._last_alpha = alpha
-            self._last_keyframe = (index, min(max((t - t0) / (t1 - t0), 0.0), 1.0))
-        return self._last_keyframe
+        """The keyframe before progress ``alpha`` and how far past it."""
+        t = alpha * self.run_time
+        index = min(max(bisect.bisect_right(self.times, t) - 1, 0), len(self.times) - 2)
+        t0, t1 = self.times[index], self.times[index + 1]
+        return index, min(max((t - t0) / (t1 - t0), 0.0), 1.0)
 
     # -- baking ---------------------------------------------------------------
 
@@ -234,6 +222,16 @@ class Simulation(Animation):
         if self.time >= self.max_time:
             raise RuntimeError(f"simulation did not finish within max_time={self.max_time} s")
         return False
+
+
+def _between(signal: RootSignal, values: list[Any], index: int, fraction: float) -> Any:
+    """``signal``'s recorded ``values`` between keyframe ``index`` and the next."""
+    start, end = values[index], values[index + 1]
+    if start is end:
+        return start  # unchanged between the keyframes (most signals, most of the time)
+    if isinstance(start, np.ndarray) and start.shape != end.shape:
+        return start if fraction < 1.0 else end  # the path changed its point count: no blending
+    return signal.kind.interpolate(start, end, fraction)
 
 
 def _watched_signals(nodes: Iterable[Node]) -> dict[int, RootSignal]:

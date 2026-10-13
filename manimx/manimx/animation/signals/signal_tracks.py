@@ -13,7 +13,8 @@ connect them to signals:
 * an :class:`Entry` is a placement's appearance on one signal's track: how
   the animation changes that signal (by an amount, or to a value) and the
   signal's value when the animation starts. One placement has one entry per
-  signal it touches (``shift(UR)`` touches x and y).
+  signal it touches (``shift(UR)`` touches x and y), in the order of the
+  animation's targets.
 
 A :class:`SignalTrack` holds one root signal's base value and its entries. The
 value at a local time ``t`` is a closed-form function of ``t``: the entries
@@ -23,7 +24,7 @@ docs/animation_engine_design.md):
     v = base
     for each entry e whose placement p has p.start <= t, in authoring order:
         a = p.rate(progress of p at t)
-        c = p.animation.contribution(signal, a, V_e)
+        c = p.animation.contributions(a, [V of each entry of p])[index of e]
         relative e:  v = combine(v, c)    # "by": adds up
         absolute e:  v = c                # "to": overrides
 
@@ -32,21 +33,22 @@ value the signal really has when the animation begins. "To" animations such
 as ``move_to`` interpolate from it, so they start exactly where the signal
 is, even while an earlier animation is still running, and override it from
 then on. Animations that know their own start (``FadeIn`` goes from 0)
-simply ignore it. ``V_e`` depends on the placements of earlier entries, so
-it is cached and recomputed by :meth:`SignalTrack.refresh` after a placement
-changes.
+simply ignore it. An animation computes the contributions of all its
+targets in one call, which gets the start values of all of them.
+``V_e`` depends on the placements of earlier entries, so it is cached and
+recomputed by :func:`refresh` after a placement changes.
 
 There is no replay from the start and no hidden state: evaluating a track
 at any time, in any order, gives the same result, provided animations'
 contributions are pure (a documented contract for custom animations).
 
 Tracks do not import the animation classes: they only need an object with
-a ``contribution`` method (:class:`Contributor`).
+a ``contributions`` method (:class:`Contributor`).
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
@@ -56,8 +58,6 @@ from .rates import linear, smooth
 from .signal import RootSignal
 
 RateFunction = Callable[[float], float]
-Contribution = Callable[[float, Any], Any]
-"""``contribution(alpha, start_value)``: a relative change, or an absolute value."""
 
 
 class Change(Enum):
@@ -70,10 +70,11 @@ class Change(Enum):
 class Contributor(Protocol):
     """What a track needs from an animation."""
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
-        """The relative change (or absolute value) of ``signal`` at progress
-        ``alpha``; ``start_value`` is the signal's value when the animation
-        starts."""
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
+        """The relative change (or absolute value) of each target at
+        progress ``alpha``, in the order of the targets; ``start_values``
+        holds each target's value when the animation starts, in the same
+        order."""
         ...
 
 
@@ -87,6 +88,8 @@ class Placement:
     order: int
     """Position in authoring order; decides composition, not the start time."""
     rate: RateFunction = smooth
+    entries: list[Entry] = field(default_factory=list, repr=False)
+    """Its entry on each target's track, in the order of the targets."""
 
     @property
     def end(self) -> float:
@@ -109,6 +112,9 @@ class Entry:
 
     placement: Placement
     mode: Change
+    track: SignalTrack = field(repr=False)
+    index: int
+    """Which of the placement's targets this entry is."""
     start_value: Any = field(default=None, repr=False)
     """The signal's value when the animation starts (V_e, see module docs)."""
 
@@ -135,15 +141,15 @@ class SignalTrack:
         """Add ``placement`` to this track (placements arrive in authoring order)."""
         if self.entries and placement.order <= self.entries[-1].placement.order:
             raise ValueError("placements must be added in authoring order")
-        entry = Entry(placement, mode)
+        entry = Entry(placement, mode, self, len(placement.entries))
+        placement.entries.append(entry)
         entry.start_value = self._fold(placement.start, len(self.entries))
         self.entries.append(entry)
         return entry
 
-    def refresh(self) -> None:
-        """Recompute every entry's start value after placements changed."""
-        for index, entry in enumerate(self.entries):
-            entry.start_value = self._fold(entry.placement.start, index)
+    def start_value_of(self, entry: Entry) -> Any:
+        """The value of this track's signal when ``entry``'s animation starts."""
+        return self._fold(entry.placement.start, self.entries.index(entry))
 
     def value_at(self, t: float) -> Any:
         return self._fold(t, len(self.entries))
@@ -160,7 +166,8 @@ class SignalTrack:
             placement = entry.placement
             if placement.start > t:
                 continue
-            contribution = placement.animation.contribution(self.signal, placement.progress(t), entry.start_value)
+            start_values = [other.start_value for other in placement.entries]
+            contribution = placement.animation.contributions(placement.progress(t), start_values)[entry.index]
             if entry.mode is Change.RELATIVE:
                 value = kind.combine(value, contribution)
             else:
@@ -168,4 +175,14 @@ class SignalTrack:
         return value
 
 
-__all__ = ["Change", "Contributor", "Entry", "Placement", "RateFunction", "SignalTrack", "linear", "smooth"]
+def refresh(placements: Sequence[Placement]) -> None:
+    """Recompute every start value after placements changed, placement by
+    placement in authoring order: an animation's contributions may read
+    the start values of all its targets, so those of earlier placements
+    must be current first."""
+    for placement in sorted(placements, key=lambda placement: placement.order):
+        for entry in placement.entries:
+            entry.start_value = entry.track.start_value_of(entry)
+
+
+__all__ = ["Change", "Contributor", "Entry", "Placement", "RateFunction", "SignalTrack", "linear", "refresh", "smooth"]

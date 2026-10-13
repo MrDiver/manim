@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from manimx.animation import Animation, Camera, Change, RootSignal, Scene, Target
+from manimx.animation import Animation, Camera, Change, Scene, Target
 from manimx.examples.portal_cube import CENTER, portal_cube
 from manimx.renderer import Camera as RenderCamera
 from manimx.userland import TAU, Rotate
@@ -44,12 +44,9 @@ class Orbit(Animation):
         axes = self.camera.position.axes
         return [*(Target(axis, Change.ABSOLUTE) for axis in axes), Target(self.camera.rotation, Change.ABSOLUTE)]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
         eye = self.eye(alpha)
-        for axis, value in zip(self.camera.position.axes, eye):
-            if signal is axis:
-                return float(value)
-        return RenderCamera.look_at(tuple(eye), tuple(self.center)).transform.rotation
+        return [*(float(value) for value in eye), RenderCamera.look_at(tuple(eye), tuple(self.center)).transform.rotation]
 
     def eye(self, alpha: float) -> np.ndarray:
         def at(pair: tuple[float, float]) -> float:

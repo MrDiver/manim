@@ -51,12 +51,12 @@ class Aim(Animation):
     def targets(self) -> Sequence[Target]:
         return [Target(self.head.yoke.rotation, Change.ABSOLUTE), Target(self.head.head.rotation, Change.ABSOLUTE)]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
         pan, tilt = self.head.pan_tilt(self.path(alpha))
-        value = pan if signal is self.head.yoke.rotation else tilt
         if alpha < self.blend:
-            return ROTATION.interpolate(start_value, value, smooth(alpha / self.blend))
-        return value
+            blend = smooth(alpha / self.blend)
+            return [ROTATION.interpolate(start, value, blend) for start, value in zip(start_values, (pan, tilt), strict=True)]
+        return [pan, tilt]
 
 
 @dataclass(eq=False)
@@ -80,8 +80,8 @@ class Flash(_Level):
     run_time: float = 1.0
     rate: Any = staticmethod(linear)
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
-        return self.rest + (self.peak - self.rest) * math.exp(-alpha / self.decay)
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[float]:
+        return [self.rest + (self.peak - self.rest) * math.exp(-alpha / self.decay)]
 
 
 @dataclass(eq=False)
@@ -96,9 +96,9 @@ class Pulse(_Level):
     run_time: float = 1.0
     rate: Any = staticmethod(linear)
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[float]:
         within = (alpha * self.beats) % 1.0
-        return self.rest + (self.peak - self.rest) * math.exp(-within / self.decay)
+        return [self.rest + (self.peak - self.rest) * math.exp(-within / self.decay)]
 
 
 @dataclass(eq=False)
@@ -115,12 +115,12 @@ class Strobe(_Level):
     run_time: float = 1.0
     rate: Any = staticmethod(linear)
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[float]:
         # The frequency grows linearly from f0 to speedup * f0; the phase
         # is its integral, scaled so that `flashes` fit.
         f0 = self.flashes / (1.0 + (self.speedup - 1.0) / 2.0)
         phase = f0 * (alpha + (self.speedup - 1.0) * alpha**2 / 2.0)
-        return self.level if phase % 1.0 < self.duty else self.rest
+        return [self.level if phase % 1.0 < self.duty else self.rest]
 
 
 @dataclass(eq=False)
@@ -138,9 +138,9 @@ class Chase(Animation):
     def targets(self) -> Sequence[Target]:
         return [Target(light.intensity, Change.ABSOLUTE) for light in self.lights]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[float]:
         lead = min(int(alpha * self.steps), self.steps - 1) % len(self.lights)
-        return self.level if self.lights[lead].intensity is signal else self.rest
+        return [self.level if index == lead else self.rest for index in range(len(self.lights))]
 
 
 @dataclass(eq=False)
@@ -156,9 +156,9 @@ class Fade(Animation):
     def targets(self) -> Sequence[Target]:
         return [Target(self.signal, Change.ABSOLUTE)]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
-        start = start_value if self.start is None else self.start
-        return start + (self.end - start) * alpha
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[float]:
+        start = start_values[0] if self.start is None else self.start
+        return [start + (self.end - start) * alpha]
 
 
 @dataclass(eq=False)
@@ -174,8 +174,8 @@ class Recolor(Animation):
     def targets(self) -> Sequence[Target]:
         return [Target(self.light.color, Change.ABSOLUTE)]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
-        return rgb(self.colors[min(int(alpha * len(self.colors)), len(self.colors) - 1)])
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
+        return [rgb(self.colors[min(int(alpha * len(self.colors)), len(self.colors) - 1)])]
 
 
 @dataclass(eq=False)
@@ -192,8 +192,8 @@ class Rainbow(Animation):
     def targets(self) -> Sequence[Target]:
         return [Target(self.light.color, Change.ABSOLUTE)]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
-        return hue(self.offset + self.turns * alpha)
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
+        return [hue(self.offset + self.turns * alpha)]
 
 
 # -- paths -------------------------------------------------------------------------

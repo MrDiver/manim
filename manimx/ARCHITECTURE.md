@@ -251,7 +251,7 @@ classDiagram
         run_time
         rate
         targets() Target[]
-        contribution(signal, alpha, start_value)
+        contributions(alpha, start_values)
     }
     Animation <|-- ChangeSignals
     Animation <|-- FadeIn
@@ -321,8 +321,9 @@ the core classes they derive from. The mixins are left out of the diagram: every
 
 - **An `Animation` references its `Node`s** and never copies them.
   `Animation.targets()` names the `RootSignal`s it changes, each with a
-  `Change` (`RELATIVE` or `ABSOLUTE`). `Animation.contribution()` is a pure
-  function of the progress.
+  `Change` (`RELATIVE` or `ABSOLUTE`). `Animation.contributions()` is a
+  pure function of the progress and the targets' start values: one
+  change or value per target, in one call.
 - **`Scene.play()`** creates one `Placement` per `Animation`, with its start,
   duration, authoring order and rate function.
 - **Every `RootSignal` an `Animation` changes** gets a `SignalTrack` with
@@ -562,9 +563,10 @@ flowchart LR
 - **`ScenePlan`** (animation/plan.py) puts every signal a prepared scene
   can read into slots and gives the core:
   - every `SignalTrack` with its entries. A contribution is data when the
-    animation describes it (`Animation.planned_contribution()` returns a
-    value of contributions.py), else the core calls `contribution()`
-    back. Rates are data for `linear` and `smooth`, else called back;
+    animation describes it (`Animation.planned_contributions()` returns a
+    value of contributions.py for that target), else the core calls the
+    animation's `contributions()` back, once per evaluation for all its
+    targets (core/src/evaluation/callbacks.rs). Rates are data for `linear` and `smooth`, else called back;
   - every `DerivedSignal`: `follow()` offsets (`Offset`) are data, other
     functions are called back with the input values;
   - the `SceneGraph` (`scene_graph()`): every drawn node with its
@@ -744,8 +746,8 @@ flowchart LR
   `DerivedSignal` replaces updaters with pure functions, which keeps
   evaluation deterministic.
 - **An `Animation` references `Node`s; it never copies them.**
-  `contribution()` is a pure function of progress, and `SignalTrack` holds
-  the composition rules.
+  `contributions()` is a pure function of progress, one call for all
+  targets, and `SignalTrack` holds the composition rules (per signal).
 - **Direct changes inside `construct()` become `SetValue` at the cursor,
   and reads (`PositionMixin.get_center()`) see everything recorded so far.** Code
   reads like Manim but never rewrites the past.

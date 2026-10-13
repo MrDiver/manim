@@ -30,8 +30,8 @@ frame:
 
 * a `DerivedSignal` with a Python function (`derive(...)`), unless it is
   one the core knows (`follow()` offsets);
-* an `Animation` whose `contribution()` has no data form (custom
-  animations);
+* an `Animation` whose `contributions()` have no data form (custom
+  animations): called once per evaluation for all its targets;
 * a rate function the core does not know.
 
 The core calls those back with the GIL it already holds, only for the
@@ -70,10 +70,10 @@ profile) and a commit. Only measured gains stay (PERFORMANCE.md).
   `PreparedScene`: a table of signals (slot, `SignalKind`, value), the
   tracks with their entries, the derived signals, and the nodes (class,
   parent, children, which slot feeds which render field).
-* **Contributions as data.** `Animation.contribution()` stays the
-  definition. Built-in animations also describe it as data
-  (`Animation.plan(signal)` returns a `Contribution` value, or `None` for
-  "call me"): to a value, by an amount, a progress ramp `a + b * alpha`,
+* **Contributions as data.** `Animation.contributions()` stays the
+  definition. Built-in animations also describe them as data
+  (`Animation.planned_contributions()` returns a `Contribution` value per
+  target, or `None` for "call me"): to a value, by an amount, a progress ramp `a + b * alpha`,
   a rotation by an angle about an axis, keyframes (`Simulation`), a morph
   between aligned paths, a partial path. Both forms must agree; a test
   evaluates every built-in both ways.
@@ -89,7 +89,7 @@ profile) and a commit. Only measured gains stay (PERFORMANCE.md).
 
 ### 2. Morph and Write
 
-New userland animations, defined in Python (`contribution()`) and as data,
+New userland animations, defined in Python (`contributions()`) and as data,
 so they work on both paths:
 
 * `Morph(source, target)` (Manim's `Transform`/`ReplacementTransform`):

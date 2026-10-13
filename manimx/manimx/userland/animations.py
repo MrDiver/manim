@@ -70,16 +70,13 @@ class FadeIn(Animation):
             targets += [Target(axis, Change.RELATIVE) for axis in self.node.position.axes]
         return targets
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
-        if signal is self.node.alpha:
-            return alpha
-        offset = self.shift[self.node.position.axes.index(signal)]
-        return -offset * (1.0 - alpha)  # arrive at the authored position
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
+        offsets = [-offset * (1.0 - alpha) for offset in self.shift] if self.shift is not None else []
+        return [alpha, *offsets]  # arrive at the authored position
 
-    def planned_contribution(self, signal: RootSignal) -> Contribution:
-        if signal is self.node.alpha:
-            return Ramp(1.0)
-        return Ramp(float(-self.shift[self.node.position.axes.index(signal)]), remaining=True)
+    def planned_contributions(self) -> Sequence[Contribution]:
+        offsets = [Ramp(float(-offset), remaining=True) for offset in self.shift] if self.shift is not None else []
+        return [Ramp(1.0), *offsets]
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
@@ -104,15 +101,13 @@ class FadeOut(Animation):
             targets += [Target(axis, Change.RELATIVE) for axis in self.node.position.axes]
         return targets
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
-        if signal is self.node.alpha:
-            return 1.0 - alpha
-        return self.shift[self.node.position.axes.index(signal)] * alpha
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
+        offsets = [offset * alpha for offset in self.shift] if self.shift is not None else []
+        return [1.0 - alpha, *offsets]
 
-    def planned_contribution(self, signal: RootSignal) -> Contribution:
-        if signal is self.node.alpha:
-            return Ramp(1.0, remaining=True)
-        return Ramp(float(self.shift[self.node.position.axes.index(signal)]))
+    def planned_contributions(self) -> Sequence[Contribution]:
+        offsets = [Ramp(float(offset)) for offset in self.shift] if self.shift is not None else []
+        return [Ramp(1.0, remaining=True), *offsets]
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
@@ -139,12 +134,12 @@ class Rotate(Animation):
     def targets(self) -> Sequence[Target]:
         return [Target(self.node.rotation, Change.RELATIVE)]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> quaternion.quaternion:
-        return quaternion_from_axis_angle(self.axis, self.angle * alpha)
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[quaternion.quaternion]:
+        return [quaternion_from_axis_angle(self.axis, self.angle * alpha)]
 
-    def planned_contribution(self, signal: RootSignal) -> Contribution:
+    def planned_contributions(self) -> Sequence[Contribution]:
         x, y, z = (float(c) for c in self.axis)
-        return Turn((x, y, z), float(self.angle))
+        return [Turn((x, y, z), float(self.angle))]
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
@@ -166,11 +161,11 @@ class Indicate(Animation):
     def targets(self) -> Sequence[Target]:
         return [Target(axis, Change.RELATIVE) for axis in self.node.scale.axes]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
-        return float(self.scale_factor**alpha)
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[float]:
+        return [float(self.scale_factor**alpha)] * len(start_values)
 
-    def planned_contribution(self, signal: RootSignal) -> Contribution:
-        return Power(float(self.scale_factor))
+    def planned_contributions(self) -> Sequence[Contribution]:
+        return [Power(float(self.scale_factor))] * len(self.node.scale.axes)
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
@@ -192,11 +187,11 @@ class GrowFromCenter(Animation):
     def targets(self) -> Sequence[Target]:
         return [Target(axis, Change.ABSOLUTE) for axis in self.node.scale.axes]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
-        return self._target[self.node.scale.axes.index(signal)] * alpha
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
+        return [scale * alpha for scale in self._target]
 
-    def planned_contribution(self, signal: RootSignal) -> Contribution:
-        return Ramp(float(self._target[self.node.scale.axes.index(signal)]))
+    def planned_contributions(self) -> Sequence[Contribution]:
+        return [Ramp(float(scale)) for scale in self._target]
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
@@ -219,15 +214,12 @@ class SpinInFromNothing(GrowFromCenter):
     def targets(self) -> Sequence[Target]:
         return [*super().targets(), Target(self.node.rotation, Change.ABSOLUTE)]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
-        if signal is self.node.rotation:
-            return evaluate(self.planned_contribution(signal), signal.kind, alpha)
-        return super().contribution(signal, alpha, start_value)
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
+        turn = evaluate(Between(self._start_rotation, self._end_rotation), self.node.rotation.kind, alpha)
+        return [*super().contributions(alpha, start_values[:-1]), turn]
 
-    def planned_contribution(self, signal: RootSignal) -> Contribution:
-        if signal is self.node.rotation:
-            return Between(self._start_rotation, self._end_rotation)
-        return super().planned_contribution(signal)
+    def planned_contributions(self) -> Sequence[Contribution]:
+        return [*super().planned_contributions(), Between(self._start_rotation, self._end_rotation)]
 
 
 @dataclass(eq=False)
@@ -244,11 +236,11 @@ class ShrinkToCenter(Animation):
     def targets(self) -> Sequence[Target]:
         return [Target(axis, Change.ABSOLUTE) for axis in self.node.scale.axes]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
-        return start_value * (1.0 - alpha)
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[float]:
+        return [start * (1.0 - alpha) for start in start_values]
 
-    def planned_contribution(self, signal: RootSignal) -> Contribution:
-        return Ramp(None, remaining=True)
+    def planned_contributions(self) -> Sequence[Contribution]:
+        return [Ramp(None, remaining=True)] * len(self.node.scale.axes)
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
@@ -284,11 +276,11 @@ class _PlannedAnimation(Animation):
     def targets(self) -> Sequence[Target]:
         return [Target(signal, Change.ABSOLUTE) for signal, _ in self._planned.values()]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
-        return evaluate(self._planned[signal.id][1], signal.kind, alpha)
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
+        return [evaluate(planned, signal.kind, alpha) for signal, planned in self._planned.values()]
 
-    def planned_contribution(self, signal: RootSignal) -> Contribution:
-        return self._planned[signal.id][1]
+    def planned_contributions(self) -> Sequence[Contribution]:
+        return [planned for _, planned in self._planned.values()]
 
 
 @dataclass(eq=False)
@@ -492,13 +484,13 @@ class Homotopy(Animation):
     def targets(self) -> Sequence[Target]:
         return [*(Target(path.points, Change.ABSOLUTE) for path in self._paths), *(Target(path.alpha, Change.ABSOLUTE) for path in self._hidden)]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
-        if signal.id not in self._start:
-            return 0.0  # an unpacked original, hidden
-        points = self._start[signal.id]
-        full = _resized(points, 3)
-        moved = np.column_stack(self._function(full[:, 0], full[:, 1], full[:, 2], alpha))
-        return moved[:, : points.shape[1]]
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
+        moved = []
+        for path in self._paths:
+            points = self._start[path.points.id]
+            full = _resized(points, 3)
+            moved.append(np.column_stack(self._function(full[:, 0], full[:, 1], full[:, 2], alpha))[:, : points.shape[1]])
+        return [*moved, *(0.0 for _ in self._hidden)]  # the unpacked originals stay hidden
 
     def nodes(self) -> Sequence[Node]:
         return (self.node, *self.unpacked.values())
@@ -746,15 +738,12 @@ class MoveAlongPath(Animation):
         node_world = _world_matrices(self.node)[self.node.uid]
         parent = node_world @ np.linalg.inv(_local_matrix(self.node))
         self._points = _in_space_of(_points(self.path), _world_matrices(self.path)[self.path.uid], parent, 3)
-        self._last: tuple[float, np.ndarray] | None = None
 
     def targets(self) -> Sequence[Target]:
         return [Target(axis, Change.ABSOLUTE) for axis in self.node.position.axes]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
-        if self._last is None or self._last[0] != alpha:  # the three axes ask for the same point
-            self._last = (alpha, point_at(self._points, alpha, self.by_length))
-        return float(self._last[1][self.node.position.axes.index(signal)])
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[float]:
+        return [float(coordinate) for coordinate in point_at(self._points, alpha, self.by_length)]
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)

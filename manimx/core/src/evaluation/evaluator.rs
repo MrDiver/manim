@@ -18,6 +18,7 @@ use std::sync::Arc;
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
+use crate::evaluation::callbacks::Callbacks;
 use crate::evaluation::contribution::{Contribution, Keyframes, Window};
 use crate::evaluation::paths;
 use crate::evaluation::rates::Rate;
@@ -57,6 +58,8 @@ pub struct Evaluator {
     kinds: Arc<Vec<Kind>>,
     slots: Vec<Slot>,
     tracks: Vec<Track>,
+    /// The animations called back in Python.
+    callbacks: Callbacks,
     /// In dependency order: inputs before the signals computed from them.
     derived: Vec<Derived>,
     scene_time: usize,
@@ -94,10 +97,18 @@ impl Evaluator {
             kinds: Arc::new(kinds),
             slots,
             tracks: Vec::new(),
+            callbacks: Callbacks::default(),
             derived: Vec::new(),
             scene_time,
             global_time,
         })
+    }
+
+    /// Add an animation that is called back (`Animation.contributions`)
+    /// with the start value of each of its targets; returns the index its
+    /// track entries name (`("python", index, target)`).
+    fn add_callback(&mut self, animation: Py<PyAny>, start_values: Bound<'_, PyTuple>) -> usize {
+        self.callbacks.add(animation, start_values.unbind())
     }
 
     /// Add the track of signal `slot`. Each entry is `(start, duration,
@@ -113,14 +124,12 @@ impl Evaluator {
         let base = kind.value_from_py(&base)?;
         let mut parsed = Vec::with_capacity(entries.len());
         for entry in entries {
-            let start_value_py = entry.get_item(4)?;
             parsed.push(Entry {
                 start: entry.get_item(0)?.extract()?,
                 duration: entry.get_item(1)?.extract()?,
                 rate: parse_rate(&entry.get_item(2)?.cast_into::<PyTuple>()?)?,
                 relative: entry.get_item(3)?.extract()?,
-                start_value: kind.value_from_py(&start_value_py)?,
-                start_value_py: start_value_py.unbind(),
+                start_value: kind.value_from_py(&entry.get_item(4)?)?,
                 contribution: parse_contribution(
                     kind,
                     &entry.get_item(5)?.cast_into::<PyTuple>()?,
@@ -169,10 +178,11 @@ impl Evaluator {
     ) -> PyResult<()> {
         self.set(py, self.scene_time, Value::Scalar(scene_time))?;
         self.set(py, self.global_time, Value::Scalar(global_time))?;
+        self.callbacks.clear();
         for index in 0..self.tracks.len() {
             let track = &self.tracks[index];
             let slot = track.slot;
-            let value = track.value_at(py, &self.kinds[slot], t)?;
+            let value = track.value_at(py, &self.kinds[slot], t, &mut self.callbacks)?;
             let value = self.kinds[slot].validate(py, value)?;
             self.set(py, slot, value)?;
         }
@@ -335,8 +345,8 @@ fn parse_contribution(kind: &Kind, contribution: &Bound<'_, PyTuple>) -> PyResul
             reverse: item(4)?.extract()?,
         },
         "python" => Contribution::Python {
-            animation: item(1)?.unbind(),
-            signal: item(2)?.unbind(),
+            callback: item(1)?.extract()?,
+            target: item(2)?.extract()?,
         },
         _ => {
             return Err(PyValueError::new_err(format!(

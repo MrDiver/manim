@@ -31,7 +31,6 @@ from ..animation import (
     ClippingGroup,
     Group,
     Node,
-    RootSignal,
     Scene,
     Target,
     derive,
@@ -67,11 +66,10 @@ class PulseOut(Animation):
             Target(axis, Change.RELATIVE) for axis in self.node.scale.axes[:2]
         ]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> float:
-        if signal is self.node.alpha:
-            # Appear quickly, then fade out while expanding.
-            return min(1.0, alpha * 6.0) * (1.0 - alpha)
-        return self.scale**alpha
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[float]:
+        growth = self.scale**alpha
+        # Appear quickly, then fade out while expanding.
+        return [min(1.0, alpha * 6.0) * (1.0 - alpha), growth, growth]
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)

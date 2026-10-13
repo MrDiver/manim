@@ -14,9 +14,10 @@ tables of the core's evaluator (``manimx._core.Evaluator``, see CORE.md):
   order.
 * **tracks:** per animated root signal its base value and its entries.
   An entry's contribution is data when its animation describes it
-  (:meth:`~.animations.Animation.planned_contribution`), else a call back
-  to ``Animation.contribution()``. Rates are data for ``linear`` and
-  ``smooth``, else called back.
+  (:meth:`~.animations.Animation.planned_contributions`), else the core
+  calls the animation back: ``Animation.contributions()`` once per
+  evaluation for all its targets, with their start values. Rates are
+  data for ``linear`` and ``smooth``, else called back.
 * **derived signals:** offsets of :meth:`~.node.PositionMixin.follow` are
   data; every other function is called back with the input values.
 * **scene graph:** every drawn node with its ``render_kind``, the slots of
@@ -66,7 +67,7 @@ from .signals.kinds import (
 from .signals.paths import DrawnPart
 from .signals.rates import linear, smooth
 from .signals.signal import DerivedSignal, Signal
-from .signals.signal_tracks import Change, Entry, RateFunction, SignalTrack
+from .signals.signal_tracks import Change, Entry, RateFunction
 
 _KIND_CODES: dict[type, str] = {
     ScalarKind: "scalar",
@@ -98,8 +99,21 @@ class ScenePlan:
             self.slot(scene.time.scene_time),
             self.slot(scene.time.global_time),
         )
+        # Each placement's contributions: data per target, or the index of
+        # the callback that computes those without a data form.
+        contributions: dict[int, list[tuple]] = {}
+        for placement in scene.placements:
+            planned = placement.animation.planned_contributions()  # type: ignore[attr-defined]
+            callback = None
+            if any(form is None for form in planned):
+                start_values = tuple(entry.start_value for entry in placement.entries)
+                callback = self.evaluator.add_callback(placement.animation, start_values)
+            contributions[placement.order] = [
+                _contribution(form) if form is not None else ("python", callback, index) for index, form in enumerate(planned)
+            ]
         for track in scene.tracks:
-            self.evaluator.add_track(self.slot(track.signal), track.base, [_entry(entry, track) for entry in track.entries])
+            entries = [_entry(entry, contributions[entry.placement.order][entry.index]) for entry in track.entries]
+            self.evaluator.add_track(self.slot(track.signal), track.base, entries)
         for signal in self._signals:
             if isinstance(signal, DerivedSignal):
                 self.evaluator.add_derived(self.slot(signal), [self.slot(i) for i in signal.inputs], _derivation(signal))
@@ -226,10 +240,8 @@ def _kind_code(kind: SignalKind) -> tuple[str, SignalKind]:
     return (_KIND_CODES.get(type(kind), "python"), kind)
 
 
-def _entry(entry: Entry, track: SignalTrack) -> tuple:
+def _entry(entry: Entry, contribution: tuple) -> tuple:
     placement = entry.placement
-    planned = placement.animation.planned_contribution(track.signal)  # type: ignore[attr-defined]
-    contribution = _contribution(planned) if planned is not None else ("python", placement.animation, track.signal)
     return (
         placement.start,
         placement.duration,

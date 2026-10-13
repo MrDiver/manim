@@ -8,10 +8,12 @@
 //! | `scene_graph` | `SceneGraph`: the scene's nodes and their slots; the render object tree of a `FrameState` |
 //! | `track` | one signal's track: its base value and the entries of the animations that change it |
 //! | `contribution` | what one animation does to one signal at a progress |
+//! | `callbacks` | animations called back in Python, once per evaluation |
 //! | `rates` | rate functions (`linear`, `smooth`) |
 //! | `value` | signal values and what each kind of value can do (add, interpolate, compare) |
 //! | `paths` | the part of a path drawn so far (`Create`, `Write`) |
 
+pub mod callbacks;
 pub mod contribution;
 pub mod evaluator;
 pub mod paths;

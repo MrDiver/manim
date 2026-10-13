@@ -4,6 +4,7 @@
 
 use pyo3::prelude::*;
 
+use crate::evaluation::callbacks::Callbacks;
 use crate::evaluation::contribution::Contribution;
 use crate::evaluation::rates::Rate;
 use crate::evaluation::value::{Kind, Value};
@@ -18,8 +19,6 @@ pub struct Entry {
     pub relative: bool,
     /// The signal's value when the animation starts (`Entry.start_value`).
     pub start_value: Value,
-    /// The same value as a Python object, for contributions called back.
-    pub start_value_py: Py<PyAny>,
     pub contribution: Contribution,
 }
 
@@ -51,20 +50,23 @@ pub struct Track {
 impl Track {
     /// `SignalTrack.value_at(t)`: the entries that have started, folded in
     /// authoring order.
-    pub fn value_at(&self, py: Python<'_>, kind: &Kind, t: f64) -> PyResult<Value> {
+    pub fn value_at(
+        &self,
+        py: Python<'_>,
+        kind: &Kind,
+        t: f64,
+        callbacks: &mut Callbacks,
+    ) -> PyResult<Value> {
         let mut value = self.base.clone();
         for entry in &self.entries {
             if entry.start > t {
                 continue;
             }
             let alpha = entry.progress(py, t)?;
-            let contribution = entry.contribution.at(
-                py,
-                kind,
-                alpha,
-                &entry.start_value,
-                &entry.start_value_py,
-            )?;
+            let contribution =
+                entry
+                    .contribution
+                    .at(py, kind, alpha, &entry.start_value, callbacks)?;
             value = if entry.relative {
                 kind.combine(py, &value, &contribution)?
             } else {

@@ -166,11 +166,10 @@ class Wiggle(Animation):
     def targets(self) -> Sequence[Target]:
         return [*(Target(axis, Change.RELATIVE) for axis in self.node.scale.axes), Target(self.node.rotation, Change.RELATIVE)]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
         swell = there_and_back(alpha)
-        if signal is self.node.rotation:
-            return quaternion_from_axis_angle(self.axis, self.rotation_angle * swell * math.sin(self.n_wiggles * math.tau * alpha))
-        return 1.0 + (self.scale_value - 1.0) * swell
+        turn = quaternion_from_axis_angle(self.axis, self.rotation_angle * swell * math.sin(self.n_wiggles * math.tau * alpha))
+        return [*(1.0 + (self.scale_value - 1.0) * swell for _ in self.node.scale.axes), turn]
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
@@ -223,14 +222,16 @@ class ApplyWave(Animation):
     def _signal(kind: str, path: Node, data: Any) -> RootSignal:
         return path.points if kind == "points" else path.position.axes[data[0]]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
-        kind, path, data = self._targets[signal.id]
-        if kind == "points":
-            points, xs = data
-            lift = np.asarray(self._height(xs, alpha))[:, None] * self._lift[: points.shape[1]]
-            return points + lift
-        index, x = data
-        return float(self._height(x, alpha)) * self._lift[index]
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
+        values = []
+        for kind, _, data in self._targets.values():
+            if kind == "points":
+                points, xs = data
+                values.append(points + np.asarray(self._height(xs, alpha))[:, None] * self._lift[: points.shape[1]])
+            else:
+                index, x = data
+                values.append(float(self._height(x, alpha)) * self._lift[index])
+        return values
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)

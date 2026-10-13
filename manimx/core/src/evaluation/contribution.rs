@@ -11,6 +11,7 @@ use glam::{DQuat, DVec3};
 
 use std::sync::Arc;
 
+use crate::evaluation::callbacks::Callbacks;
 use crate::evaluation::paths;
 use crate::evaluation::value::{Kind, Value};
 
@@ -47,11 +48,9 @@ pub enum Contribution {
         window: Window,
         reverse: bool,
     },
-    /// No data form: `animation.contribution(signal, alpha, start)` in Python.
-    Python {
-        animation: Py<PyAny>,
-        signal: Py<PyAny>,
-    },
+    /// No data form: item `target` of what callback `callback` returns
+    /// (`Animation.contributions`, callbacks.rs).
+    Python { callback: usize, target: usize },
 }
 
 /// A stretch of an animation's progress, from `lower` to `upper`.
@@ -85,7 +84,7 @@ impl Contribution {
         kind: &Kind,
         alpha: f64,
         start: &Value,
-        start_py: &Py<PyAny>,
+        callbacks: &mut Callbacks,
     ) -> PyResult<Value> {
         match self {
             Contribution::To(value) => kind.interpolate(py, start, value, alpha),
@@ -123,10 +122,8 @@ impl Contribution {
                     upper,
                 ))))
             }
-            Contribution::Python { animation, signal } => {
-                let result = animation
-                    .bind(py)
-                    .call_method1("contribution", (signal, alpha, start_py))?;
+            Contribution::Python { callback, target } => {
+                let result = callbacks.contribution(py, *callback, *target, alpha)?;
                 kind.value_from_py(&result)
             }
         }

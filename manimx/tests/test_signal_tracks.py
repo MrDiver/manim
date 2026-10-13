@@ -7,20 +7,20 @@ import pytest
 import quaternion
 from manimx.animation import DISCRETE, FACTOR, ROTATION, RootSignal
 from manimx.animation.animations import SignalChange
-from manimx.animation.signals.signal_tracks import Change, Placement, SignalTrack
+from manimx.animation.signals.signal_tracks import Change, Placement, SignalTrack, refresh
 from manimx.userland.rate_functions import linear, there_and_back
 
 REL, ABS = Change.RELATIVE, Change.ABSOLUTE
 
 
 class Formula:
-    """A minimal custom animation: any object with a contribution method."""
+    """A minimal custom animation: any object with a contributions method."""
 
     def __init__(self, function) -> None:
         self.function = function
 
-    def contribution(self, signal, alpha, start_value):
-        return self.function(alpha, start_value)
+    def contributions(self, alpha, start_values):
+        return [self.function(alpha, start_values[0])]
 
 
 def place(track: SignalTrack, order: int, start: float, duration: float, mode: Change, value, rate=linear) -> Placement:
@@ -145,8 +145,8 @@ def test_one_placement_on_several_tracks_moves_together() -> None:
     shift = SignalChange(x.signal, REL, 2.0)
 
     class ShiftBoth:
-        def contribution(self, signal, alpha, start_value):
-            return 2.0 * alpha
+        def contributions(self, alpha, start_values):
+            return [2.0 * alpha, 2.0 * alpha]
 
     placement = Placement(ShiftBoth(), 0, 2, 0, linear)
     x.add(placement, REL)
@@ -156,16 +156,16 @@ def test_one_placement_on_several_tracks_moves_together() -> None:
     placement.start = 4.0  # both channels follow
     assert x.value_at(1.0) == y.value_at(1.0) == 0.0
     assert x.value_at(5.0) == y.value_at(5.0) == 1.0
-    assert shift.contribution(x.signal, 0.5, 0.0) == 1.0
+    assert shift.at(0.5, 0.0) == 1.0
 
 
 def test_refresh_recomputes_start_values_after_a_move() -> None:
     moves = SignalTrack(RootSignal(0.0))
     shift = place(moves, 0, 0, 10, REL, 10.0)
-    place(moves, 1, 4, 2, ABS, 0.0)
+    move = place(moves, 1, 4, 2, ABS, 0.0)
     assert moves.value_at(4.0) == pytest.approx(4.0)
 
     shift.start = 2.0  # the shift now started later: at t = 4 it is at 2
-    moves.refresh()
+    refresh([shift, move])
 
     assert moves.value_at(4.0) == pytest.approx(2.0)

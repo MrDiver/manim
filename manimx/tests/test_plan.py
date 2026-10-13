@@ -107,6 +107,48 @@ def test_projects(project: str) -> None:
         assert_plan_matches(clip.scene, shuffled_times(clip.scene.duration, 25))
 
 
+def test_animations_without_data_are_called_once_per_evaluation() -> None:
+    from dataclasses import dataclass
+
+    from manimx.animation import Animation, Change, Target
+    from manimx.userland import Square
+
+    @dataclass(eq=False)
+    class Swap(Animation):
+        """Moves x to where y started and y to where x started: needs both
+        start values in one call."""
+
+        node: Square
+        calls: list = None
+
+        def targets(self):
+            x, y, _ = self.node.position.axes
+            return [Target(x, Change.ABSOLUTE), Target(y, Change.ABSOLUTE)]
+
+        def contributions(self, alpha, start_values):
+            self.calls.append(alpha)
+            x, y = start_values
+            return [x + (y - x) * alpha, y + (x - y) * alpha]
+
+    calls = []
+
+    class Swapping(Scene):
+        def construct(self):
+            square = Square().move_to((1.0, 3.0, 0.0))
+            self.add(square)
+            self.play(Swap(square, calls), run_time=2.0)
+
+    scene = Swapping().prepare()
+    plan = ScenePlan(scene)
+    calls.clear()
+    plan.evaluate(1.0)
+    assert calls == [pytest.approx(scene.placements[-1].progress(1.0))]  # one call for both targets
+    x, y, _ = scene.roots[0].position.axes
+    plan.evaluate(2.0)
+    assert (plan.value(x), plan.value(y)) == pytest.approx((3.0, 1.0))
+    assert_plan_matches(scene, shuffled_times(scene.duration))
+
+
 def test_versions_change_with_values() -> None:
     scene = EveryAnimation().prepare()
     plan = ScenePlan(scene)

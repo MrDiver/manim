@@ -739,6 +739,25 @@ Per `frame_at`, best of five runs over 800 times:
 | light-show, 10 to 12 s | 0.670 ms | 0.372 ms |
 | benchmark, 0 to 30 s | 0.072 ms | 0.047 ms |
 
+### Z. One call per animation
+
+The core called a Python animation once per target signal
+(`contribution(signal, alpha, start_value)`), so an animation of several
+signals did its shared work once per signal: light-show's `Aim` computed
+the moving head's pan and tilt twice, `MoveAlongPath` and `Simulation`
+kept the last answer to avoid it. Now the contract is
+`contributions(alpha, start_values)`, one value per target, and the core
+calls it once per evaluation (core/src/evaluation/callbacks.rs).
+
+Per `frame_at`, best of five runs over 800 times, pinned to one
+performance core (`taskset -c 2`; unpinned runs sometimes took twice as
+long in either version):
+
+| project | before | after |
+|---|---|---|
+| light-show, 10 to 12 s | 0.375 ms | 0.300 ms |
+| benchmark, 0 to 30 s | 0.045 ms | 0.043 ms |
+
 ## Where the time goes now
 
 Benchmark project with `PortalOrbit`, after steps L to O: 48.6 to about

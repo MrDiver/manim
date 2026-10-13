@@ -3,13 +3,14 @@
 An animation references the node it animates (it never creates a copy
 or a "target node") and is placed on the timeline with a start time and
 a duration. It declares which signals it touches and how
-(:meth:`Animation.targets`), and at evaluation the tracks of those signals
-call :meth:`Animation.contribution` with the rate-mapped progress.
+(:meth:`Animation.targets`), and at evaluation
+:meth:`Animation.contributions` gives what it does to all of them at the
+rate-mapped progress, in one call.
 
-Contract for custom animations: ``targets`` and ``contribution`` must be
-pure. ``contribution`` may read only its arguments and the animation's own
-parameters, never other signals or global state, so that ``state_at(t)``
-gives the same answer for every query order. Built-in animations are
+Contract for custom animations: ``targets`` and ``contributions`` must be
+pure. ``contributions`` may read only its arguments and the animation's
+own parameters, never other signals or global state, so that
+``state_at(t)`` gives the same answer for every query order. Built-in animations are
 dataclasses, so their parameters can be inspected (and shown in an
 editor).
 """
@@ -40,7 +41,7 @@ class Target:
 
 
 class Animation:
-    """Base class: override :meth:`targets` and :meth:`contribution`."""
+    """Base class: override :meth:`targets` and :meth:`contributions`."""
 
     run_time: float = 1.0
     rate: RateFunction = staticmethod(smooth)  # type: ignore[assignment]
@@ -48,17 +49,19 @@ class Animation:
     def targets(self) -> Sequence[Target]:
         raise NotImplementedError
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
         """The change (relative targets) or value (absolute targets) of
-        ``signal`` at progress ``alpha``; ``start_value`` is the signal's
-        value when this animation starts."""
+        each target at progress ``alpha``, in the order of
+        :meth:`targets`; ``start_values`` holds each target's value when
+        this animation starts, in the same order."""
         raise NotImplementedError
 
-    def planned_contribution(self, signal: RootSignal) -> Contribution | None:
-        """:meth:`contribution` for ``signal`` as data (see
-        contributions.py), or None to be called back. Override it together
-        with :meth:`contribution`; both must give the same values."""
-        return None
+    def planned_contributions(self) -> Sequence[Contribution | None]:
+        """:meth:`contributions` as data (see contributions.py), one per
+        target in the order of :meth:`targets`, None for a target that is
+        called back. Override it together with :meth:`contributions`;
+        both must give the same values."""
+        return [None] * len(self.targets())
 
     def nodes(self) -> Sequence[Node]:
         """Nodes that must be in the scene while this animation plays
@@ -156,11 +159,16 @@ class SignalChange:
             return SignalChange(self.signal, Change.ABSOLUTE, kind.combine(kind.validate(self.value), value))
         return SignalChange(self.signal, Change.RELATIVE, kind.combine(self.value, value))
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
+    def at(self, alpha: float, start_value: Any) -> Any:
+        """The change, or value, at progress ``alpha``."""
         kind = self.signal.kind
         if self.mode is Change.RELATIVE:
             return kind.scale(self.value, alpha)
         return kind.interpolate(start_value, kind.validate(self.value), alpha)
+
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
+        """As an animation of its one signal (tracks in tests take one)."""
+        return [self.at(alpha, start_values[0])]
 
     def planned(self) -> Contribution:
         if self.mode is Change.RELATIVE:
@@ -192,11 +200,11 @@ class ChangeSignals(Animation):
     def targets(self) -> Sequence[Target]:
         return [Target(change.signal, change.mode) for change in self.changes.values()]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
-        return self.changes[signal.id].contribution(signal, alpha, start_value)
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
+        return [change.at(alpha, start) for change, start in zip(self.changes.values(), start_values, strict=True)]
 
-    def planned_contribution(self, signal: RootSignal) -> Contribution:
-        return self.changes[signal.id].planned()
+    def planned_contributions(self) -> Sequence[Contribution]:
+        return [change.planned() for change in self.changes.values()]
 
     def nodes(self) -> Sequence[Node]:
         return (self.node,)
@@ -258,8 +266,8 @@ class SetValue(Animation):
     def targets(self) -> Sequence[Target]:
         return [Target(self.change.signal, self.change.mode)]
 
-    def contribution(self, signal: RootSignal, alpha: float, start_value: Any) -> Any:
-        return self.change.contribution(signal, alpha, start_value)
+    def contributions(self, alpha: float, start_values: Sequence[Any]) -> Sequence[Any]:
+        return [self.change.at(alpha, start_values[0])]
 
-    def planned_contribution(self, signal: RootSignal) -> Contribution:
-        return self.change.planned()
+    def planned_contributions(self) -> Sequence[Contribution]:
+        return [self.change.planned()]
