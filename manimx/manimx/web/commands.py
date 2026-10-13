@@ -205,9 +205,10 @@ def parse(route: str, body: dict[str, Any]) -> UICommand:
             return EditClips(tuple(_clip_edit(edit) for edit in edits))
         case "/api/clip", {"index": _}:
             return EditClips((_clip_edit(body),))
-        case "/api/clip/add", {"scene": str(scene)}:
-            start = _number(body.get("start", 0.0), "start", minimum=0.0)
-            return AddClip(scene, start, _layer(body.get("layer", 0)))
+        case "/api/clip/add", {"clips": list(clips)}:
+            return Batch(tuple(_add_clip(clip) for clip in clips), f"paste {_clips(len(clips))}")
+        case "/api/clip/add", {"scene": str()}:
+            return _add_clip(body)
         case "/api/clip/remove", {"indices": list(indices)}:
             return RemoveClips(tuple(_index(index) for index in indices))
         case "/api/clip/split", {"indices": list(indices), "time": time}:
@@ -245,6 +246,15 @@ def clip_updates(changes: dict[str, Any]) -> dict[str, Any]:
                 if updates[key] <= 0.0:
                     raise EditError("a speed must be positive")
     return updates
+
+
+def _add_clip(body: Any) -> AddClip:
+    """``{"scene", "start", "layer", "cut", "speed"}`` (all but the scene optional)."""
+    if not isinstance(body, dict) or not isinstance(body.get("scene"), str):
+        raise EditError("a new clip needs a scene")
+    updates = clip_updates({key: body[key] for key in ("layer", "cut", "speed") if key in body})
+    start = _number(body.get("start", 0.0), "start", minimum=0.0)
+    return AddClip(body["scene"], start, updates.get("layer", 0), updates.get("cut"), updates.get("speed", 1.0))
 
 
 def _clip_edit(edit: Any) -> ClipEdit:

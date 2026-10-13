@@ -14,7 +14,10 @@
 // Ctrl+Z undoes any edit (a whole drag at once), Ctrl+Shift+Z or Ctrl+Y
 // redoes it; the server keeps the history (manimx/web/commands.py).
 // S splits the selected clips (or, with none selected, every clip) under
-// the playhead, Ctrl+D puts a copy after each selected clip.
+// the playhead, Ctrl+D puts a copy after each selected clip. Ctrl+C copies
+// the selected clips (Ctrl+X also removes them), Ctrl+V pastes them at the
+// playhead, on their tracks, as far apart as they were; the clipboard is
+// kept in the browser, so it works across reloads and tabs.
 //
 // Snapping: a dragged clip's start or end, or a dragged cut, snaps to the
 // other clips' starts and ends, the playhead, the events and 0 when it
@@ -65,6 +68,16 @@ export function initEditing(shared) {
       page.redraw();
       drawClipPanel();
     }
+    if ((event.ctrlKey || event.metaKey) && (key === "c" || key === "x") && selected.size) {
+      event.preventDefault();
+      copy(key === "x");
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && key === "v") {
+      event.preventDefault();
+      paste();
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && key === "d") {
       event.preventDefault(); // not the browser's bookmark
       duplicate();
@@ -93,6 +106,41 @@ function split() {
     .map(({ index }) => index);
   if (under.length) post("/api/clip/split", { indices: under, time });
   else say("No clip to split under the playhead.", true);
+}
+
+const CLIPBOARD = "manimx.clipboard";
+
+/** The selected clips to the clipboard: scene, cut, speed, track, and time after the first. */
+function copy(andRemove) {
+  const { clips } = page.state.timeline;
+  const chosen = [...selected].map((index) => clips[index]).filter((clip) => clip.entry);
+  const first = Math.min(...chosen.map((clip) => clip.start));
+  const copied = chosen.map((clip) => ({ scene: clip.entry.scene, offset: clip.start - first, layer: clip.layer, cut: clip.entry.cut, speed: clip.entry.speed }));
+  try {
+    localStorage.setItem(CLIPBOARD, JSON.stringify(copied));
+  } catch {
+    return say("The browser keeps no clipboard here (storage is off).", true);
+  }
+  if (andRemove) {
+    const indices = [...selected];
+    selected.clear();
+    post("/api/clip/remove", { indices });
+  } else {
+    say(`Copied ${copied.length === 1 ? "a clip" : `${copied.length} clips`}.`);
+  }
+}
+
+function paste() {
+  let copied = [];
+  try {
+    copied = JSON.parse(localStorage.getItem(CLIPBOARD) ?? "[]");
+  } catch {
+    copied = [];
+  }
+  if (!copied.length) return say("Nothing copied yet: select clips and press Ctrl+C.", true);
+  const time = page.state.time;
+  say(`Pasting ${copied.length === 1 ? "a clip" : `${copied.length} clips`}…`);
+  post("/api/clip/add", { clips: copied.map(({ offset, ...clip }) => ({ ...clip, start: Math.round((time + offset) * 1e6) / 1e6 })) });
 }
 
 function duplicate() {

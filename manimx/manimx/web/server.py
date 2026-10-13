@@ -38,7 +38,8 @@ shows, and ``manimx.json`` is saved shortly after (see editing.py):
     POST /api/clip           {"index", and any of "start", "layer",
                              "cut", "speed"}, or {"clips": [...]} of
                              those for clips moved together
-    POST /api/clip/add       {"scene", "start", "layer"}: a new clip
+    POST /api/clip/add       {"scene", "start", "layer", "cut", "speed"}: a
+                             new clip, or {"clips": [...]} of those (paste)
     POST /api/clip/remove    {"indices": [...]}
     POST /api/clip/split     {"indices": [...], "time"}: each in two there
     POST /api/clip/duplicate {"indices": [...]}: a copy after each

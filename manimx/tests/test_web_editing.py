@@ -334,6 +334,19 @@ def test_clips_are_split_at_a_time_and_duplicated(root, editor) -> None:
     assert starts(editor) == [0.0, 2.0, 0.0]
 
 
+def test_copied_clips_are_pasted_as_one_step(root, editor) -> None:
+    clips = [{"scene": "Short", "start": 5.0, "layer": 2, "cut": [0.5, None], "speed": 2}, {"scene": "Waiting", "start": 6.0}]
+    editor.run(parse("/api/clip/add", {"clips": clips}))
+    pasted = editor.timeline.clips[3:]
+    assert [(clip.start, clip.layer, clip.cut_in) for clip in pasted] == [(5.0, 2, 0.5), (6.0, 0, None)]
+    assert pasted[0].end == pytest.approx(5.75)  # 1.5 s left of the scene at twice the speed
+    assert editor.history()["undo"] == "paste 2 clips"
+    editor.undo()
+    assert len(editor.timeline.clips) == 3
+    with pytest.raises(EditError, match="needs a scene"):
+        parse("/api/clip/add", {"clips": [{"start": 1.0}]})
+
+
 def test_commands_are_parsed_from_the_pages_requests() -> None:
     assert parse("/api/clip", {"clips": [{"index": 1, "layer": 2}]}) == EditClips((ClipEdit(1, (("layer", 2),)),))
     assert parse("/api/clip/add", {"scene": "Intro"}) == AddClip("Intro", 0.0, 0)
