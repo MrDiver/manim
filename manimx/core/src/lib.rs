@@ -34,6 +34,14 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<evaluation::evaluator::FrameState>()?;
     module.add_class::<evaluation::scene_graph::SceneGraph>()?;
     module.add_class::<python::frame_renderer::FrameRenderer>()?;
+    module.add_function(wrap_pyfunction!(
+        python::frame_renderer::shader_source,
+        module
+    )?)?;
+    module.add_function(wrap_pyfunction!(
+        python::frame_renderer::override_shader,
+        module
+    )?)?;
     python::robjects::register(module)?;
     Ok(())
 }

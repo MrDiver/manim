@@ -11,8 +11,9 @@ this package holds what it is given next to the tree:
   MSAA, lighting and shadow settings; `ViewState`, a tree with the
   camera looking at it;
 - the effect settings (effects.py): motion blur, bloom, tone mapping,
-  custom WGSL;
-- the WGSL shaders (shaders/), which the core loads from here.
+  custom WGSL.
+
+The WGSL shaders are in core/shaders/, compiled into the core.
 
 `CoreFramePipeline` (manimx/drivers/core_pipeline.py) drives the
 renderer; `manimx render`, `manimx still`, the render workers, the web UI
@@ -159,7 +160,7 @@ frame grows with `count`; projects render once per frame unless asked
 
 Depth of field is not an effect in the list but the camera's lens: with a
 `Camera.aperture` above 0, its view is blurred by each pixel's distance from
-`focus_distance` (a thin lens, see shaders/depth_of_field.wgsl).
+`focus_distance` (a thin lens, see core/shaders/depth_of_field.wgsl).
 
 `ShaderEffect` runs your own WGSL on the lit 3D layer (`stage="lit"`,
 linear HDR) or on the final frame (`stage="frame"`):
@@ -437,7 +438,7 @@ patches its object entry. Changing its points does.
 |---|---|
 | `config.py` | `RenderConfig`, `Camera`, `ViewState`, `CameraViewState` |
 | `effects.py` | effect settings |
-| `shaders/` | every WGSL shader |
+| core/shaders/ | every WGSL shader, compiled into the core (core/src/render/shaders.rs) |
 | core/src/render/settings.rs | `ViewSettings`: what the renderer reads from a `RenderConfig`; the camera's Frame record |
 | core/src/render/packing/ | records of a frame (core/README.md maps them) |
 | core/src/render/ | the passes, the composer, the `FrameRenderer` (its `mod.rs` maps them) |

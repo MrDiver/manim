@@ -23,7 +23,6 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable
 from concurrent.futures import Future
-from pathlib import Path
 
 import numpy as np
 
@@ -31,9 +30,6 @@ from .. import _core
 from ..renderer.config import Frame, RenderConfig, ViewState
 from ..renderer.effects import Bloom, Effect, RenderSamples, ShaderEffect, ToneMap
 from .sinks import PixelFormat
-
-SHADER_FOLDER = Path(__file__).resolve().parents[1] / "renderer" / "shaders"
-
 
 class CoreFramePipeline:
     """Renders frames of the core with up to ``in_flight`` of them on the GPU."""
@@ -46,7 +42,6 @@ class CoreFramePipeline:
         self.in_flight = in_flight
         tone_map = next((effect for effect in effects if isinstance(effect, ToneMap)), ToneMap())
         self.renderer = _core.FrameRenderer(
-            str(SHADER_FOLDER),
             config,
             tone_map.operator.value,
             [_effect_tuple(effect) for effect in effects if isinstance(effect, (Bloom, ShaderEffect))],

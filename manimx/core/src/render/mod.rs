@@ -1,7 +1,8 @@
 //! The core's renderer on wgpu: render object trees (robjects/) and their
 //! `ViewSettings` in, frames out. A library of its own: it knows nothing
 //! of signals, scenes, timelines or Python (python/frame_renderer.rs is
-//! its Python class). The WGSL shaders live in manimx/renderer/shaders/.
+//! its Python class). The WGSL shaders live in core/shaders/ and are
+//! compiled into the library (shaders.rs).
 //!
 //! | Module | What it does |
 //! |---|---|
@@ -16,6 +17,7 @@
 //! | `targets` | every texture a frame renders into |
 //! | `fullscreen` | full-screen passes (composite, effects) |
 //! | `context` | the device and shader loading |
+//! | `shaders` | the WGSL shaders, compiled in |
 //! | `buffer` | GPU buffers that grow |
 //! | `color` | sRGB and linear light |
 //! | `profiler` | GPU time per pass |
@@ -37,4 +39,5 @@ pub mod passes;
 pub mod profiler;
 pub mod renderer;
 pub mod settings;
+pub mod shaders;
 pub mod targets;

@@ -1,15 +1,12 @@
-//! The GPU device and shader loading (`#include "file.wgsl"` lines are
-//! expanded, each file at most once per shader).
-//!
-//! The WGSL files are read from a folder given when the device is made
-//! (manimx passes its package's renderer/shaders), so there is one copy
-//! of every shader.
+//! The GPU device and shader loading: the shaders compiled into the
+//! library (shaders.rs), their `#include "file.wgsl"` lines expanded,
+//! each file at most once per shader.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::render::error::{Error, Result};
+use crate::render::shaders;
 
 pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// The planes of NV12 output: luma per pixel, (Cb, Cr) per 2x2 pixels.
@@ -28,7 +25,7 @@ pub const TRANSLUCENT_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R
 pub const EDGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Stencil8;
 /// Linear radiance of lit meshes, before tone mapping.
 pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-/// Color targets of the G-buffer (see shaders/gbuffer.wgsl).
+/// Color targets of the G-buffer (see gbuffer.wgsl).
 pub const GBUFFER_FORMATS: [wgpu::TextureFormat; 4] = [
     wgpu::TextureFormat::Rgba8UnormSrgb, // base color, occlusion
     wgpu::TextureFormat::Rgba16Float,    // world normal, roughness
@@ -89,7 +86,6 @@ pub struct Gpu {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub timestamps: bool,
-    shader_folder: PathBuf,
 }
 
 /// The process's device, made on first use (see `Gpu::shared`).
@@ -99,12 +95,12 @@ impl Gpu {
     /// The device every renderer of this process uses: drivers refuse more
     /// than a few devices at once, and pipelines and textures are cheaper
     /// shared.
-    pub fn shared(shader_folder: PathBuf) -> Result<Arc<Gpu>> {
+    pub fn shared() -> Result<Arc<Gpu>> {
         let mut shared = SHARED.lock().expect("not poisoned");
         if let Some(gpu) = shared.as_ref() {
             return Ok(gpu.clone());
         }
-        let gpu = Arc::new(Gpu::create(shader_folder)?);
+        let gpu = Arc::new(Gpu::create()?);
         *shared = Some(gpu.clone());
         Ok(gpu)
     }
@@ -112,7 +108,7 @@ impl Gpu {
     /// A high-performance device with `indirect-first-instance` (draws
     /// select their instance records with it), and timestamp queries when
     /// the adapter has them.
-    pub fn create(shader_folder: PathBuf) -> Result<Gpu> {
+    pub fn create() -> Result<Gpu> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -145,7 +141,6 @@ impl Gpu {
             device,
             queue,
             timestamps,
-            shader_folder,
         })
     }
 
@@ -190,10 +185,7 @@ impl Gpu {
     /// expanded, each file at most once.
     fn load_wgsl(&self, filename: &str, included: &mut HashSet<String>) -> Result<String> {
         included.insert(filename.to_string());
-        let path = self.shader_folder.join(filename);
-        let code = std::fs::read_to_string(&path)
-            .map_err(|error| Error::Gpu(format!("cannot read {}: {error}", path.display())))?;
-        self.expand_includes(&code, included)
+        self.expand_includes(&shaders::source(filename)?, included)
     }
 
     /// `expand_includes` for WGSL given as a string.

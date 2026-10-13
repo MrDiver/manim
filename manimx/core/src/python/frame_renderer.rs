@@ -3,8 +3,6 @@
 //! It takes what every renderer takes: render object trees and
 //! `RenderConfig`s, and reads the settings it needs from the config.
 
-use std::path::PathBuf;
-
 use numpy::{IntoPyArray, PyArrayMethods};
 use pyo3::exceptions::{PyNotImplementedError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -46,9 +44,8 @@ impl FrameRenderer {
     /// value. Up to `in_flight` frames are on the GPU at once.
     /// `pixel_format` is "rgba" or "nv12" (see `finished`).
     #[new]
-    #[pyo3(signature = (shader_folder, config, tone_map, effects, in_flight, profile=false, pixel_format="rgba"))]
+    #[pyo3(signature = (config, tone_map, effects, in_flight, profile=false, pixel_format="rgba"))]
     fn new(
-        shader_folder: PathBuf,
         config: &Bound<'_, PyAny>,
         tone_map: u32,
         effects: Vec<Bound<'_, PyTuple>>,
@@ -69,7 +66,6 @@ impl FrameRenderer {
         let height: u32 = config.getattr("pixel_height")?.extract()?;
         let background: (f32, f32, f32, f32) = config.getattr("background_rgba")?.extract()?;
         let options = RendererOptions {
-            shader_folder,
             width,
             height,
             samples: config.getattr("msaa_samples")?.extract()?,
@@ -182,6 +178,20 @@ impl FrameRenderer {
         }
         Ok(timings)
     }
+}
+
+/// The code of the renderer's shader file `name` (e.g. "vector.wgsl").
+#[pyfunction]
+pub fn shader_source(name: &str) -> PyResult<String> {
+    Ok(crate::render::shaders::source(name)?)
+}
+
+/// Use `code` for the shader file `name` in renderers made from now on in
+/// this process (to look at how a frame is made; see
+/// scripts/render_internals.py).
+#[pyfunction]
+pub fn override_shader(name: &str, code: &str) -> PyResult<()> {
+    Ok(crate::render::shaders::override_shader(name, code)?)
 }
 
 /// What the renderer reads from a `RenderConfig`.

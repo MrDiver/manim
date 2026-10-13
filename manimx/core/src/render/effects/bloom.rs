@@ -9,7 +9,7 @@
 //! Warfare](https://www.iryoku.com/next-generation-post-processing-in-call-of-duty-advanced-warfare/)
 //! (SIGGRAPH 2014), with a soft threshold ("knee") so the glow fades in
 //! instead of starting at a hard edge. The filters are in
-//! shaders/bloom.wgsl.
+//! core/shaders/bloom.wgsl.
 
 use bytemuck::{Pod, Zeroable};
 

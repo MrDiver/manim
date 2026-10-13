@@ -1,5 +1,5 @@
 //! GPU records, field for field as the WGSL structs in
-//! manimx/renderer/shaders/ declare them. Matrices are column-major f32,
+//! core/shaders/ declare them. Matrices are column-major f32,
 //! as WGSL reads them: `glam::Mat4::to_cols_array()`.
 
 use bytemuck::{Pod, Zeroable};

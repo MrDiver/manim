@@ -62,7 +62,7 @@ evaluation/   signals at a time ──snapshot──▶  robjects/  ◀──rea
 | `render/packing/lights.rs` | light records, the default light | |
 | `render/packing/shadows.rs` | shadow views, scene bounds, which shadow layers changed | |
 | `render/packing/arena.rs` | growable record arrays mirroring GPU buffers | |
-| `render/packing/records.rs` | the GPU record structs (bytemuck), as the WGSL structs declare them | renderer/shaders/ |
+| `render/packing/records.rs` | the GPU record structs (bytemuck), as the WGSL structs declare them | core/shaders/ |
 | `render/geometry/tessellation.rs` | fills triangulated with exact curves | |
 | `render/geometry/strokes.rs` | a path's stroke records (curve links, per-point width and color) | |
 | `render/composer.rs` | sub-frames and views into one frame | |

@@ -16,10 +16,8 @@ from __future__ import annotations
 
 import dataclasses
 import math
-import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -30,7 +28,7 @@ from manimx.animation import (
     Scene,
     SpotLight,
 )
-from manimx.drivers import core_pipeline
+from manimx import _core
 from manimx.drivers.core_pipeline import CoreFramePipeline
 from manimx.renderer import RenderConfig
 from manimx.userland import Box, Circle, Sphere, Star, Torus
@@ -120,7 +118,7 @@ class Frames:
 def main() -> None:
     global OUTPUT
     if len(sys.argv) > 1 and sys.argv[1] == "--edges":
-        return edges(Path(sys.argv[2]), Path(sys.argv[3]))
+        return edges(Path(sys.argv[2]))
     if len(sys.argv) > 1:
         OUTPUT = Path(sys.argv[1]).resolve()
     OUTPUT.mkdir(parents=True, exist_ok=True)
@@ -160,26 +158,20 @@ def main() -> None:
     tiles = to_bytes(np.stack([radius, radius * 0.6, np.full_like(radius, 0.2)], axis=-1))
     save(np.asarray(Image.fromarray(tiles).resize((WIDTH, HEIGHT), Image.Resampling.NEAREST)), "blur_tiles")
 
-    # The lighting pass's edges, from shaders that paint them magenta. The
-    # core loads its shaders once per process: render them in another one.
-    with tempfile.TemporaryDirectory() as folder:
-        shaders = Path(folder) / "shaders"
-        shutil.copytree(core_pipeline.SHADER_FOLDER, shaders)
-        lighting = shaders / "deferred_lighting.wgsl"
-        lighting.write_text(
-            lighting.read_text().replace(
-                "    return shade(pixel, position.xy, textureLoad(depth_samples, pixel, i32(sample)), i32(sample));",
-                "    return vec4<f32>(1.0, 0.0, 1.0, 1.0);",
-            )
-        )
-        subprocess.run([sys.executable, __file__, "--edges", str(shaders), str(OUTPUT)], check=True)
+    # The lighting pass's edges, from a shader that paints them magenta. The
+    # core compiles its shaders once per process: render it in another one.
+    subprocess.run([sys.executable, __file__, "--edges", str(OUTPUT)], check=True)
 
 
-def edges(shaders: Path, output: Path) -> None:
-    """Render the frame with the shaders in ``shaders`` (see main)."""
+def edges(output: Path) -> None:
+    """Render the frame with edge pixels painted magenta (see main)."""
     global OUTPUT
     OUTPUT = output
-    core_pipeline.SHADER_FOLDER = shaders
+    lighting = _core.shader_source("deferred_lighting.wgsl").replace(
+        "    return shade(pixel, position.xy, textureLoad(depth_samples, pixel, i32(sample)), i32(sample));",
+        "    return vec4<f32>(1.0, 0.0, 1.0, 1.0);",
+    )
+    _core.override_shader("deferred_lighting.wgsl", lighting)
     config = RenderConfig(pixel_width=WIDTH, pixel_height=HEIGHT, background_color="#20232b", shadow_method="pcss", time=0.5)
     marked = Frames(config).render()
     # The frame, and a part of it four times enlarged.

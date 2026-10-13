@@ -84,7 +84,7 @@ def _halton(index: int, base: int) -> float:
 
 
 class ToneMapOperator(Enum):
-    """Values match the TONE_MAP_* constants in shaders/color.wgsl."""
+    """Values match the TONE_MAP_* constants in core/shaders/color.wgsl."""
 
     NONE = 0
     """Clamp to [0, 1]."""

@@ -1,7 +1,7 @@
 //! Deferred lighting: G-buffer and lights in, the linear HDR "lit" layer
 //! out: fullscreen triangles shade once per pixel where all MSAA samples
 //! hold one surface, once per sample on edges, which a first triangle
-//! marks in a stencil (shaders/deferred_lighting.wgsl). Lighting edges
+//! marks in a stencil (core/shaders/deferred_lighting.wgsl). Lighting edges
 //! per sample and the rest once is Andrew Lauritzen's,
 //! [Deferred Rendering for Current and Future Rendering Pipelines](https://www.intel.com/content/www/us/en/developer/articles/technical/deferred-rendering-for-current-and-future-rendering-pipelines.html)
 //! (SIGGRAPH 2010).

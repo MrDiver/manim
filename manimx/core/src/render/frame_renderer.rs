@@ -17,7 +17,6 @@
 //! give equal pictures.
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -75,7 +74,6 @@ pub struct SubFrame {
 
 /// What stays the same for every frame of a renderer.
 pub struct RendererOptions {
-    pub shader_folder: PathBuf,
     pub width: u32,
     pub height: u32,
     /// MSAA samples per pixel.
@@ -128,7 +126,7 @@ impl FrameRenderer {
                 "a pipeline needs at least one frame in flight".into(),
             ));
         }
-        let gpu = Gpu::shared(options.shader_folder)?;
+        let gpu = Gpu::shared()?;
         let (width, height) = (options.width, options.height);
         if options.pixel_format == PixelFormat::Nv12 && (width % 2 == 1 || height % 2 == 1) {
             return Err(Error::Invalid(format!(
