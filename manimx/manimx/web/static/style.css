@@ -378,16 +378,27 @@ span.toggle::before {
 }
 
 button.toggle:hover::before {
-  background: var(--line);
   color: var(--text);
 }
 
-button.toggle::before {
-  content: "▸";
+/* The arrow that opens a clip's or a node's rows: a triangle, turned down when open. */
+button.toggle::before,
+.clip-body .expand::before {
+  content: "";
+  background: currentColor;
+  clip-path: polygon(6px 4px, 15px 10px, 6px 16px);
+  transition: transform 0.1s;
 }
 
-button.toggle[aria-expanded="true"]::before {
-  content: "▾";
+.clip-body .expand::before {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+button.toggle[aria-expanded="true"]::before,
+.clip-body .expand[aria-expanded="true"]::before {
+  transform: rotate(90deg);
 }
 
 .name {

@@ -15,7 +15,7 @@
 //
 // Tracks: one per layer, the highest on top, each clip of that layer on it.
 // Under a track, its events: a bar from where a clip starts waiting to the
-// event, and the event's pill. A clip's ▸ opens its scene's nodes; under a
+// event, and the event's pill. A clip's arrow opens its scene's nodes; under a
 // node, the signals animations change; under a signal, those animations.
 // Which clips and nodes are open is kept in localStorage by key (clip,
 // node path), so a reload keeps them.
@@ -208,7 +208,7 @@ function clipBody(clip, index) {
     const expand = document.createElement("button");
     expand.type = "button";
     expand.className = "expand";
-    expand.textContent = state.open.has(key) ? "▾" : "▸";
+    expand.setAttribute("aria-expanded", String(state.open.has(key)));
     expand.title = "Show the scene's nodes and animations";
     expand.addEventListener("pointerdown", (event) => event.stopPropagation());
     expand.addEventListener("click", (event) => {
