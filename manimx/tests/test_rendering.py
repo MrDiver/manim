@@ -126,7 +126,7 @@ def test_effects_render_like_their_reference(update_references: bool) -> None:
     check("EveryNode_effects", EveryNode().prepare().frame_at, [1.2], update_references, effects)
 
 
-@pytest.mark.parametrize("project", ["example-project", "tests/projects/benchmark"])
+@pytest.mark.parametrize("project", ["tests/projects/example-project", "tests/projects/benchmark"])
 def test_projects_render_like_their_references(project: str, update_references: bool) -> None:
     timeline = Project.load(ROOT / project).build_timeline()
     check(Path(project).name, timeline.frame_at, timeline.duration * np.array([0.25, 0.5, 0.75]), update_references)

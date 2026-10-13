@@ -100,7 +100,7 @@ def test_every_built_in_animation() -> None:
     assert_plan_matches(scene, shuffled_times(scene.duration, 120))
 
 
-@pytest.mark.parametrize("project", ["example-project", "tests/projects/benchmark", "light-show"])
+@pytest.mark.parametrize("project", ["tests/projects/example-project", "tests/projects/benchmark", "tests/projects/light-show"])
 def test_projects(project: str) -> None:
     timeline = Project.load(ROOT / project).build_timeline()
     for clip in timeline.clips:

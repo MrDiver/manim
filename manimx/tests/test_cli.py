@@ -277,7 +277,7 @@ def test_projects_with_the_same_package_name_load_in_turns() -> None:
     from manimx.project import Project
 
     root = Path(__file__).resolve().parents[1]
-    first, second = root / "example-project", root / "tests" / "projects" / "benchmark"
+    first, second = root / "tests" / "projects" / "example-project", root / "tests" / "projects" / "benchmark"
     for folder in (first, second, first):  # both name their package "scenes"
         Project.load(folder).build_timeline()
         assert Path(sys.modules["scenes"].__file__).resolve().is_relative_to(folder.resolve())
