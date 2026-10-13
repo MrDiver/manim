@@ -2,6 +2,7 @@
 scenes synced to words (manimx/voice/, timing.py, project.py).
 """
 
+import importlib.util
 import json
 import subprocess
 from pathlib import Path
@@ -181,6 +182,26 @@ def test_videos_carry_the_subtitles_and_an_srt_file(tmp_path) -> None:
         capture_output=True, text=True, check=True,
     )  # fmt: skip
     assert result.stdout.split() == ["video", "subtitle"]
+
+
+def test_the_example_voice_scene_follows_its_recording() -> None:
+    root = Path(__file__).parent / "projects" / "example-project"
+    spec = importlib.util.spec_from_file_location("example_voice", root / "scenes" / "voice.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    Voice = module.Voice
+
+    transcript = Transcript.load(root / "assets" / "audio" / "voice.transcript.json")
+    assert transcript.text.startswith("Everything in this animation is timed by my voice.")
+    prepared = Voice().prepare()
+    assert len(prepared.segments[0].cues) == len(transcript.words) == 46
+    # Spoken 10 % slower and a second later: every word still lands on its cue.
+    slower = Transcript(transcript.text, tuple(Word(word.text, 1.1 * word.start, 1.1 * word.end) for word in transcript.words))
+    sound = Sound.load(root / "assets" / "audio" / "voice.m4a")
+    timeline = Timeline(audio_clips=[AudioClip(sound, start=1.0, name="voice", transcript=slower)])
+    clip = timeline.add(prepared)
+    for word in (transcript.words[10], transcript.words[30]):
+        assert clip.compiled_time(1.0 + 1.1 * word.start) == pytest.approx(word.start, abs=1e-6)
 
 
 def test_transcribe_writes_down_what_whisper_hears(monkeypatch) -> None:

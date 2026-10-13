@@ -214,6 +214,41 @@ When rendering a video, the event's time comes from `manimx.json`:
 Later, the presentation mode (web UI) will fire such events on a presenter's
 click.
 
+### Timed by a voice
+
+A recording's words can be events too. Put the recording on an audio
+track (drop it in `manimx ui`, or list it under `"audio"` in
+`manimx.json`) and time its words with Whisper:
+
+```bash
+uv add 'manimx[voice]'                      # faster-whisper, once
+uv run manimx transcribe assets/audio/voice.m4a --text script.txt
+```
+
+This writes `assets/audio/voice.transcript.json` next to the recording
+(`--text` is what is said; without it, what Whisper hears; a line
+`[middle]` starts a section). Every word is now an event named after the
+file: `voice.square` the first "square", `voice.square.2` the second,
+`voice.middle.square` the first after `[middle]`. A scene puts a `cue`
+where a word should land, and `start`/`stop` run animations from one word
+to another while the scene goes on:
+
+```python
+self.cue("voice.circle")                         # here, "circle" is said
+flight = self.start(MoveAlongPath(dot, path))    # flies while the scene goes on
+self.wait(2)
+self.cue("voice.circle.2")
+self.stop(flight)                                # lands on the second "circle"
+```
+
+The clip's time bends smoothly so every cue lands on its word: record
+again, faster or slower, transcribe again, and the scene follows without
+changes. A clip's `"cues": {"square": "voice.middle.square"}` in
+`manimx.json` (or its panel in `manimx ui`) syncs a cue to another event.
+Renders put the transcript's subtitles into the video and an `.srt` file
+next to it. The example project's Voice scene is reanimate's voice
+example remade this way.
+
 ## 8. The project file
 
 `manimx.json` holds the project's settings in named sections. Your editor
@@ -362,6 +397,11 @@ you drag, and `manimx.json` is saved a moment after the last edit.
   them there, or press ● to record a voice-over while the timeline
   plays; the files are saved to `assets/audio/` and listed under
   `"audio"` in the timeline of `manimx.json`, and mixed into the video;
+- select an audio clip and press **Transcribe** to time its words (type
+  or paste the script first, or let Whisper write it down); its words
+  show as blocks on the waveform, dragged to time them, and the clip's
+  panel syncs a scene's cues to them; **Subtitles** (C) shows the
+  transcript over the frame;
 - **Settings** changes everything `manimx settings` changes.
 
 Options on the command line override `manimx.json` for that run. Rendering

@@ -76,8 +76,6 @@ thought about from scratch again.
   `plot_curve` are placed once, where the axes are when they are made;
   like `Axes.plot`, they could derive their points from the ranges and
   the axes' transform, so zooming a 3D range rescales them.
-- **Whisper transcripts** calling `Clip.bind_cue()`, so animations wait
-  for spoken words.
 - **LaTeX** next to Typst, producing groups of `Shape2D` (so `Write` and
   `Morph` work on it). Typst is enough for now.
 - **Diagnostics** in the style of miette for project and scene errors,

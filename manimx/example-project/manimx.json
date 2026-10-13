@@ -80,6 +80,10 @@
     "Focus": {
       "module": "scenes.focus",
       "class": "Focus"
+    },
+    "Voice": {
+      "module": "scenes.voice",
+      "class": "Voice"
     }
   },
   "timeline": {
@@ -95,8 +99,18 @@
       },
       {
         "scene": "PortalOrbit"
+      },
+      {
+        "scene": "Voice",
+        "start": 42.0
       }
     ],
-    "events": {}
+    "events": {},
+    "audio": [
+      {
+        "file": "assets/audio/voice.m4a",
+        "start": 42.0
+      }
+    ]
   }
 }

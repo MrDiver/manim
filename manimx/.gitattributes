@@ -1,0 +1,9 @@
+# Sound and video files are binary: no line ending conversion.
+*.m4a binary
+*.mp3 binary
+*.ogg binary
+*.opus binary
+*.flac binary
+*.aac binary
+*.webm binary
+*.mp4 binary

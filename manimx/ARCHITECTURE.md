@@ -89,7 +89,8 @@ flowchart LR
 | `manimx.userland` | everything a project could write on top of the core: shapes (`Circle`, `Dot`, `Square`, `Rectangle`, `RegularPolygon`, `Triangle`, `Polyline`, `ParametricCurve3D`, `Box`, `Sphere`, `Torus`, `ParametricSurface`), animations (`FadeIn`, `FadeOut`, `Rotate`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter`, `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`), `rate_functions`, `constants` (`UP`, `PI`, ...), `geometry` (every point and mesh generator, `align_paths()`), `load_gltf()` | animation, robjects |
 | `manimx.renderer` | what a renderer is given next to the tree: `RenderConfig`, `renderer.Camera`, `ViewState`, `CameraViewState`; `RenderSamples`, `Bloom`, `ToneMap`, `ShaderEffect` | robjects |
 | `manimx.drivers` | `render()`, `CoreFramePipeline`, `StillRenderer`, `render_image()`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation, `_core` |
-| `manimx.project` | `Project`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers, settings |
+| `manimx.voice` | `Transcript`, `Word`, `Subtitle`, `srt()`, `transcript_path()`; `align()`, `transcribe()`, `recognize()` (Whisper), `trim_silence()` | animation (`Sound`); faster-whisper only to transcribe |
+| `manimx.project` | `Project`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers, settings, voice |
 | `manimx.settings` | `Settings` and its sections (`OutputSettings`, `EffectsSettings`, `LightingSettings`, `PerformanceSettings`), `setting()` | renderer (config, effects) |
 | `manimx.cli` | the Typer `app` (`manimx` command), `scaffold`, `ui` | project, drivers, web |
 | `manimx.web` | `PreviewServer` (standard library HTTP), `ProjectReloader` (reload on save) and the page (`static/`: HTML, CSS, plain JS modules) | animation, drivers, renderer, project |
@@ -339,7 +340,7 @@ the core classes they derive from. The mixins are left out of the diagram: every
 ```mermaid
 flowchart TD
     subgraph Compile["Scene.prepare() — once"]
-        A["Scene.construct()"] -->|"add, play, wait, wait_for, emit, cue, play_sound"| SC["SceneCompiler<br/>(active through a ContextVar)"]
+        A["Scene.construct()"] -->|"add, play, start, stop, wait, wait_for, emit, cue, play_sound"| SC["SceneCompiler<br/>(active through a ContextVar)"]
         SC --> T["SignalTrack per RootSignal"]
         SC --> SG["Segment: offset, duration, waits_for,<br/>emits (Emit), cues (Cue), sounds (SoundEvent)"]
         SC -->|"play(Simulation)"| BK["Simulation.bake():<br/>run step(dt), record values"]
@@ -354,6 +355,14 @@ flowchart TD
     end
 ```
 
+- **`start` and `stop`:** `Scene.start()` places animations at the cursor
+  without moving it (their `Placement` keeps its place in authoring
+  order), with no end; `Scene.stop()` gives them the time from start to
+  the cursor as their length. Placed between two cues, an animation so
+  runs from one spoken word to another while the scene goes on (reanimate
+  calls the pair sprite and `destroySprite`). Unstopped ones end with
+  their `Segment`; `finish()` computes the start values again with the
+  real lengths. `start(..., run_time=)` is a `play` that does not wait.
 - **`state_at(t)` and `frame_at(t)` go through the core.** The plan
   (`PreparedScene.plan`, made on first use and again after `refresh()`)
   evaluates the tracks in Rust and builds the tree there; the Python
@@ -403,6 +412,7 @@ classDiagram
     direction LR
     class Timeline {
         clips
+        audio_clips: AudioClip[]
         events: dict name to time
         live
         add()
@@ -410,7 +420,14 @@ classDiagram
         frame_at(t)
         state_at(t)
         audio(start, end)
+        word_events()
+        subtitles()
         resolve()
+    }
+    class AudioClip {
+        sound, start, track
+        cut_in, cut_out, volume, name
+        transcript: Transcript
     }
     class Clip {
         scene: PreparedScene
@@ -436,6 +453,7 @@ classDiagram
         play_offset
     }
     Timeline "1" *-- "*" Clip
+    Timeline "1" *-- "*" AudioClip
     Clip --> PreparedScene : backs exactly one
     Clip "1" *-- "*" SegmentTiming : resolved
     PreparedScene "1" *-- "*" Segment
@@ -445,7 +463,8 @@ classDiagram
   one compiled time axis, separated by `SEGMENT_GAP`, which is never shown.
   `Segment.play_offset` counts the time without those gaps.
 - **Event names:** they get their times from `Timeline.events`
-  (`Timeline.fire()`) or from an `Emit` in any `Clip`.
+  (`Timeline.fire()`), from the words of the audio clips' transcripts
+  (`Timeline.word_events()`, see below) or from an `Emit` in any `Clip`.
   `Timeline._resolve()` iterates to a fixed point: a `Segment` starts at the
   time of its `waits_for` event, or when the previous one ends if that is
   later. While editing, resolution is lenient. `Timeline.resolve()` is
@@ -462,8 +481,21 @@ classDiagram
   its own depth, lights and shadows (`Timeline.frame_at()` returns one
   `ViewState` per active clip).
 - **Lazy resolution:** `Clip.cut()`, `Clip.slow_motion()`,
-  `Clip.bind_cue()` and `Clip.set_scale()` mark the `Timeline` dirty, and the
-  next query resolves it once.
+  `Clip.bind_cue()`, `Clip.bind_cues()`, `Clip.set_scale()` and
+  `Timeline.audio_changed()` mark the `Timeline` dirty, and the next query
+  resolves it once.
+- **Voice (`manimx/voice/`):** a sound file's `Transcript`
+  (`voice.transcript.json` next to `voice.m4a`) is the author's text and
+  one `Word` (text, start, end) per word of it. `alignment.transcribe()`
+  times the words with Whisper (faster-whisper, optional) and
+  `alignment.align()` matches the text to the recognized words (difflib),
+  so the author's text wins over what Whisper heard. Each word of an
+  `AudioClip`'s transcript is an event at its global time (`voice.square`,
+  `voice.square.2`, `voice.middle.square` after a `[middle]` line), so a
+  `Cue` named after it lands on the spoken word; a clip's `cues` in
+  `manimx.json` (`Clip.bind_cues()`) bind a cue to another event.
+  `Timeline.subtitles()` gives the transcripts' lines; renders mux them
+  (`FrameFormat.subtitles`, an mp4's `mov_text` track) and write an `.srt`.
 
 ## 6. Cameras and camera views
 
@@ -758,7 +790,8 @@ flowchart LR
 
 - **`wait_for`, `emit` and `cue` take names; times come from the
   `Timeline`.** A `Scene` stays reusable: `Timeline.fire()`, an `Emit` in
-  another `Clip`, or (later) transcripts bind the times.
+  another `Clip`, or the words of a transcript bind the times. A scene
+  synced to a voice with cues follows a new recording without changes.
 - **`MonotoneMap` with PCHIP.** It passes exactly through each `Cue`, never
   runs backwards, and changes speed smoothly.
 - **A `Sound` is never retimed.** `Clip.slow_motion()` moves sound starts
