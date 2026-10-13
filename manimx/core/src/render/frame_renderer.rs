@@ -8,6 +8,10 @@
 //! while the next frames are prepared. Up to `in_flight` frames are on
 //! the GPU at once; finished frames come back in submission order.
 //!
+//! The output is RGBA (sRGB values, straight alpha) or NV12, the Y'CbCr
+//! 4:2:0 planes a video encoder takes (`PixelFormat`): converted on the
+//! GPU, it reads back 1.5 bytes per pixel instead of 4.
+//!
 //! A frame that shows exactly what the frame before showed is not
 //! rendered: equal trees (`RNode::fingerprint`) seen with equal settings
 //! give equal pictures.
@@ -18,7 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::render::composer::{Composer, CompositeTarget};
-use crate::render::context::{Gpu, COLOR_FORMAT, HDR_FORMAT};
+use crate::render::context::{Gpu, CHROMA_FORMAT, COLOR_FORMAT, HDR_FORMAT, LUMA_FORMAT};
 use crate::render::effects::depth_of_field::DepthOfField;
 use crate::render::effects::Effect;
 use crate::render::error::{Error, Result};
@@ -33,6 +37,27 @@ use crate::robjects::RNode;
 
 /// Bytes per row of texture-to-buffer copies must be multiples of this.
 const ROW_ALIGNMENT: u32 = 256;
+
+/// How the frames are read back.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PixelFormat {
+    /// Rows of RGBA bytes: sRGB values, straight alpha.
+    Rgba,
+    /// NV12: rows of BT.709 limited-range luma, one byte per pixel, then
+    /// half as many rows of (Cb, Cr) byte pairs, one pair per 2x2 pixels.
+    /// Width and height must be even.
+    Nv12,
+}
+
+impl PixelFormat {
+    /// Bytes per row and rows of a frame `size` pixels large.
+    pub fn layout(self, size: (u32, u32)) -> (u32, u32) {
+        match self {
+            PixelFormat::Rgba => (4 * size.0, size.1),
+            PixelFormat::Nv12 => (size.0, size.1 + size.1 / 2),
+        }
+    }
+}
 
 /// One scene seen from one camera.
 pub struct View {
@@ -63,6 +88,7 @@ pub struct RendererOptions {
     pub in_flight: usize,
     /// Measure GPU time per pass.
     pub profile: bool,
+    pub pixel_format: PixelFormat,
 }
 
 /// A frame whose copy into `staging` is on its way.
@@ -81,10 +107,12 @@ pub struct FrameRenderer {
     composer: Composer,
     settings: TargetSettings,
     background: [f32; 4],
+    pixel_format: PixelFormat,
+    /// Bytes per row in the staging buffers (aligned for copies).
     row_bytes: u32,
     free: Vec<wgpu::Buffer>,
     pending: VecDeque<InFlight>,
-    /// Frames read back but not yet taken, `(index, RGBA bytes)`.
+    /// Frames read back but not yet taken, `(index, pixels)`.
     ready: VecDeque<(u64, Vec<u8>)>,
     /// The key of the last rendered frame (None: never held).
     last_key: Option<Vec<u64>>,
@@ -99,12 +127,18 @@ impl FrameRenderer {
         }
         let gpu = Gpu::shared(options.shader_folder)?;
         let (width, height) = (options.width, options.height);
-        let row_bytes = (4 * width).div_ceil(ROW_ALIGNMENT) * ROW_ALIGNMENT;
+        if options.pixel_format == PixelFormat::Nv12 && (width % 2 == 1 || height % 2 == 1) {
+            return Err(Error::Invalid(format!(
+                "NV12 needs an even width and height, not {width}x{height}"
+            )));
+        }
+        let (row_length, rows) = options.pixel_format.layout((width, height));
+        let row_bytes = row_length.div_ceil(ROW_ALIGNMENT) * ROW_ALIGNMENT;
         let free = (0..options.in_flight)
             .map(|index| {
                 gpu.device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(&format!("readback {index}")),
-                    size: (row_bytes * height) as u64,
+                    size: (row_bytes * rows) as u64,
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 })
@@ -122,6 +156,7 @@ impl FrameRenderer {
                 shadow_resolution: options.shadow_resolution,
             },
             background: options.background,
+            pixel_format: options.pixel_format,
             row_bytes,
             free,
             pending: VecDeque::new(),
@@ -214,41 +249,53 @@ impl FrameRenderer {
         let frame =
             self.composer
                 .frame_effects(&self.gpu, &mut encoder, &accumulator, &frame_uniform)?;
-        let output = self.composer.textures.get(
-            &device,
-            "output",
-            size,
-            COLOR_FORMAT,
-            1,
-            wgpu::TextureUsages::COPY_SRC,
-        );
-        self.composer.finalize(
-            &self.gpu,
-            &mut encoder,
-            &frame,
-            &output.create_view(&Default::default()),
-            &mut self.renderer.profiler,
-        )?;
         if self.free.is_empty() {
             self.finish_oldest()?;
         }
         let staging = self.free.pop().unwrap();
-        encoder.copy_texture_to_buffer(
-            output.as_image_copy(),
-            wgpu::TexelCopyBufferInfo {
-                buffer: &staging,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(self.row_bytes),
-                    rows_per_image: Some(size.1),
+        let planes = match self.pixel_format {
+            PixelFormat::Rgba => {
+                let output = self.texture("output", size, COLOR_FORMAT);
+                self.composer.finalize(
+                    &self.gpu,
+                    &mut encoder,
+                    &frame,
+                    &output.create_view(&Default::default()),
+                    &mut self.renderer.profiler,
+                )?;
+                vec![output]
+            }
+            PixelFormat::Nv12 => {
+                let luma = self.texture("luma", size, LUMA_FORMAT);
+                let chroma = self.texture("chroma", (size.0 / 2, size.1 / 2), CHROMA_FORMAT);
+                self.composer.finalize_nv12(
+                    &self.gpu,
+                    &mut encoder,
+                    &frame,
+                    &luma.create_view(&Default::default()),
+                    &chroma.create_view(&Default::default()),
+                    &mut self.renderer.profiler,
+                )?;
+                vec![luma, chroma]
+            }
+        };
+        // The planes one after the other, each row `row_bytes` long.
+        let mut offset = 0;
+        for plane in planes {
+            encoder.copy_texture_to_buffer(
+                plane.as_image_copy(),
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &staging,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset,
+                        bytes_per_row: Some(self.row_bytes),
+                        rows_per_image: Some(plane.height()),
+                    },
                 },
-            },
-            wgpu::Extent3d {
-                width: size.0,
-                height: size.1,
-                depth_or_array_layers: 1,
-            },
-        );
+                plane.size(),
+            );
+            offset += (self.row_bytes * plane.height()) as u64;
+        }
         let submission = self.gpu.queue.submit([encoder.finish()]);
         let mapped = Arc::new(AtomicBool::new(false));
         let signal = mapped.clone();
@@ -268,7 +315,7 @@ impl FrameRenderer {
         Ok(false)
     }
 
-    /// Frames finished so far, `(index, RGBA bytes)` in submission order;
+    /// Frames finished so far, `(index, pixels)` in submission order;
     /// with `wait`, waits for every frame on the GPU.
     pub fn finished(&mut self, wait: bool) -> Result<Vec<(u64, Vec<u8>)>> {
         let _ = self.gpu.device.poll(wgpu::PollType::Poll);
@@ -471,6 +518,23 @@ impl FrameRenderer {
         )
     }
 
+    /// A texture of the composer's pool that frames are copied out of.
+    fn texture(
+        &mut self,
+        name: &'static str,
+        size: (u32, u32),
+        format: wgpu::TextureFormat,
+    ) -> wgpu::Texture {
+        self.composer.textures.get(
+            &self.gpu.device,
+            name,
+            size,
+            format,
+            1,
+            wgpu::TextureUsages::COPY_SRC,
+        )
+    }
+
     /// Read the oldest frame on the GPU back into `ready`, without the row
     /// padding (waits for it).
     fn finish_oldest(&mut self) -> Result<()> {
@@ -489,7 +553,9 @@ impl FrameRenderer {
                 .poll(wait)
                 .map_err(|error| Error::Gpu(error.to_string()))?;
         }
-        let (width, height) = (self.settings.width as usize, self.settings.height as usize);
+        let size = (self.settings.width, self.settings.height);
+        let (row_length, rows) = self.pixel_format.layout(size);
+        let (row_length, rows) = (row_length as usize, rows as usize);
         let row_bytes = self.row_bytes as usize;
         let image = {
             let data = frame
@@ -500,12 +566,12 @@ impl FrameRenderer {
             // Zeroed first: the new pages are faulted in by a plain
             // memset, not one by one in the middle of the slow reads from
             // mapped memory (measured: 1.6 against 1.1 ms per 1080p frame).
-            let mut image = vec![0u8; 4 * width * height];
+            let mut image = vec![0u8; row_length * rows];
             for (row, target) in data
                 .chunks_exact(row_bytes)
-                .zip(image.chunks_exact_mut(4 * width))
+                .zip(image.chunks_exact_mut(row_length))
             {
-                target.copy_from_slice(&row[..4 * width]);
+                target.copy_from_slice(&row[..row_length]);
             }
             image
         };

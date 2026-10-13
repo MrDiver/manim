@@ -11,6 +11,7 @@ from .encoders import H264Encoder, choose_encoder
 from .offline import FrameSource, RenderCancelled, RenderSettings, RenderStats, load_source, render
 from .sinks import (
     FrameFormat,
+    PixelFormat,
     FrameList,
     FrameSink,
     ImageSequence,
@@ -22,6 +23,7 @@ from .stills import StillRenderer, render_image
 
 __all__ = [
     "FrameFormat",
+    "PixelFormat",
     "FrameList",
     "CoreFramePipeline",
     "FrameSink",

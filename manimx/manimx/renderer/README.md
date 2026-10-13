@@ -367,7 +367,7 @@ sequenceDiagram
             end
             FR->>GPU: accumulate weight x linear
         end
-        FR->>GPU: frame-stage effects, encode to sRGB, copy for read-back
+        FR->>GPU: frame-stage effects, encode to sRGB (or NV12 for video), copy for read-back
         FR-->>Py: finished frames, in submission order
     end
 ```

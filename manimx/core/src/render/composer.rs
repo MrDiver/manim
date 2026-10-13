@@ -18,7 +18,7 @@
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::render::context::{Gpu, COLOR_FORMAT, HDR_FORMAT};
+use crate::render::context::{Gpu, CHROMA_FORMAT, COLOR_FORMAT, HDR_FORMAT, LUMA_FORMAT};
 use crate::render::effects::bloom::BloomPasses;
 use crate::render::effects::depth_of_field::{BlurTarget, DepthOfField, DepthOfFieldPasses};
 use crate::render::effects::shader_effect::ShaderEffects;
@@ -304,5 +304,41 @@ impl Composer {
             profiler,
             "finalize",
         )
+    }
+
+    /// `fs_luma` and `fs_chroma`: the accumulated linear frame as the two
+    /// NV12 planes, BT.709 luma per pixel into `luma` (R8) and Cb, Cr per
+    /// 2x2 pixels into `chroma` (RG8, half the size).
+    pub fn finalize_nv12(
+        &mut self,
+        gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: &wgpu::Texture,
+        luma: &wgpu::TextureView,
+        chroma: &wgpu::TextureView,
+        profiler: &mut GpuProfiler,
+    ) -> Result<()> {
+        let frame_view = frame.create_view(&Default::default());
+        let resources = [wgpu::BindingResource::TextureView(&frame_view)];
+        let planes = [
+            ("fs_luma", luma, LUMA_FORMAT),
+            ("fs_chroma", chroma, CHROMA_FORMAT),
+        ];
+        for (entry_point, target, format) in planes {
+            self.fullscreen.run(
+                gpu,
+                encoder,
+                "finalize.wgsl",
+                entry_point,
+                target,
+                format,
+                &resources,
+                Blend::Replace,
+                true,
+                profiler,
+                "finalize",
+            )?;
+        }
+        Ok(())
     }
 }

@@ -126,6 +126,59 @@ def test_h264_encoders_are_chosen_from_those_that_work(tmp_path) -> None:
     assert probe.stdout.strip() == "h264"
 
 
+def nv12_to_rgb(frame: np.ndarray) -> np.ndarray:
+    """An NV12 frame back to RGB values (BT.709, limited range)."""
+    height = frame.shape[0] * 2 // 3
+    luma = (frame[:height].astype(float) - 16) / 219
+    pairs = frame[height:].reshape(height // 2, -1, 2).astype(float)
+    blue, red = ((pairs[..., i].repeat(2, 0).repeat(2, 1) - 128) / 224 for i in (0, 1))
+    r, b = luma + 1.5748 * red, luma + 1.8556 * blue
+    g = (luma - 0.2126 * r - 0.0722 * b) / 0.7152
+    return np.clip(np.stack([r, g, b], -1) * 255, 0, 255)
+
+
+class Nv12Frames(FrameList):
+    def pixel_format(self, width, height):
+        return "nv12"
+
+
+def test_nv12_frames_hold_the_rgba_frames_colors() -> None:
+    expected = expected_frames()
+    for workers in (1, 2):
+        sink = Nv12Frames()
+        render(SOURCE, sink, settings(chunk=3), workers=workers)
+        for frame, rgba in zip(sink.frames, expected, strict=True):
+            assert frame.shape == (54, 64) and frame.dtype == np.uint8
+            # Only the 2x2 chroma of 4:2:0 and rounding differ.
+            assert np.abs(nv12_to_rgb(frame) - rgba[..., :3]).mean() < 2
+
+    with pytest.raises(ValueError, match="even width and height"):
+        CoreFramePipeline((), config(63, 36), pixel_format="nv12")
+
+
+def test_h264_videos_are_encoded_from_nv12_frames(tmp_path) -> None:
+    assert VideoFile("a.mp4").pixel_format(64, 36) == "nv12"
+    assert VideoFile("a.mp4", encoder=X264).pixel_format(64, 36) == "nv12"
+    assert VideoFile("a.mp4").pixel_format(63, 36) == "rgba"  # 4:2:0 needs even sizes
+    assert VideoFile("a.mov", codec_args=["-c:v", "prores_ks"]).pixel_format(64, 36) == "rgba"
+    assert Tee((VideoFile("a.mp4"), Nv12Frames())).pixel_format(64, 36) == "nv12"
+    assert Tee((VideoFile("a.mp4"), FrameList())).pixel_format(64, 36) == "rgba"
+
+    path = tmp_path / "clip.mp4"
+    rgba = FrameList()
+    render(SOURCE, Tee((VideoFile(path), rgba)), settings())  # given RGBA, the file still works
+    nv12 = tmp_path / "nv12.mp4"
+    render(SOURCE, VideoFile(nv12), settings())
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "stream=color_space,color_range", "-of", "csv=p=0", str(nv12)], capture_output=True, text=True
+    )
+    assert probe.stdout.strip() == "tv,bt709"
+    decoded = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", str(nv12), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
+    frames = np.frombuffer(decoded, np.uint8).reshape(-1, 36, 64, 3)
+    assert len(frames) == 11
+    assert np.abs(frames.astype(float) - np.stack(rgba.frames)[..., :3]).mean() < 4
+
+
 def test_renders_stop_when_cancelled() -> None:
     frames = FrameList()
     asked = []

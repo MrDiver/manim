@@ -22,7 +22,8 @@ Design decisions:
   size of their own; below the size they were tried at, x264 encodes.
 * **Quality before speed.** Each encoder is set for constant quality
   about like ``-crf 18`` of x264 (visually lossless for manimx's flat
-  colors and sharp edges), with yuv420p, which every player shows.
+  colors and sharp edges), with yuv420p, which every player shows. The
+  frames arrive as NV12, converted on the GPU (sinks.PixelFormat).
 * **The same contract in the browser.** A browser build encodes with
   WebCodecs' ``VideoEncoder`` (the GPU's encoder too) behind the same
   sink contract (``open(format)``, ``write(index, frame)``, ``close()``),

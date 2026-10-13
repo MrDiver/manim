@@ -1,7 +1,8 @@
 """Frame sinks: where rendered frames go.
 
-A sink receives frames as ``(H, W, 4)`` uint8 RGBA arrays through
-:meth:`FrameSink.write`. Drivers call it from one writer thread, separate
+A sink receives frames through :meth:`FrameSink.write`, as ``(H, W, 4)``
+uint8 RGBA arrays, or as NV12 frames when it asks for them
+(:meth:`FrameSink.pixel_format`; see :class:`FrameFormat`). Drivers call it from one writer thread, separate
 from rendering, so a slow encoder or disk never stalls the GPU pipeline
 (until the bounded queue in front of it fills up: backpressure instead of
 unbounded memory).
@@ -21,12 +22,23 @@ import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from PIL import Image
 
 from ..animation.audio import write_wav
 from .encoders import X264, H264Encoder
+
+
+PixelFormat = Literal["rgba", "nv12"]
+"""How a frame's pixels arrive: "rgba", an ``(H, W, 4)`` uint8 array of
+sRGB values with straight alpha; "nv12", an ``(H * 3 // 2, W)`` uint8
+array of the Y'CbCr 4:2:0 planes most video encoders take: ``H`` rows of
+luma, then ``H // 2`` rows of interleaved (Cb, Cr) pairs, one per 2x2
+pixels, in BT.709 limited range and without alpha. The GPU converts to
+NV12, so a third of the bytes are read back and the encoder converts
+nothing."""
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -37,12 +49,19 @@ class FrameFormat:
     audio: np.ndarray | None = None
     """Stereo float32 samples for exactly the rendered frames, or None."""
     sample_rate: int = 48_000
+    pixel_format: PixelFormat = "rgba"
+    """What :meth:`FrameSink.write` gets, as the sink asked for it."""
 
 
 class FrameSink:
     """Base class: override :meth:`write`, optionally :meth:`open` and :meth:`close`."""
 
     ordered: bool = True
+
+    def pixel_format(self, width: int, height: int) -> PixelFormat:
+        """The pixels this sink wants for frames of this size (asked
+        before :meth:`open`; the format it is opened with says what it gets)."""
+        return "rgba"
 
     def open(self, format: FrameFormat) -> None:
         """Called once before the first frame."""
@@ -64,11 +83,18 @@ class FrameList(FrameSink):
         self.frames.append(image.copy())
 
 
+BT709 = ("-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709")
+"""The color tags of NV12 frames (see :data:`PixelFormat`), given to
+ffmpeg for its input and its output."""
+
+
 @dataclass(eq=False)
 class VideoFile(FrameSink):
     """Encodes frames into a video file with ffmpeg (from ``PATH``).
 
     The defaults give H.264 in yuv420p from x264, which plays everywhere;
+    H.264 is encoded from NV12 frames, converted on the GPU (BT.709, tagged
+    so in the file), when the size is even;
     ``encoder`` uses another H.264 encoder, e.g. the GPU's (see
     encoders.py: ``choose_encoder("auto")``). ``codec_args`` replaces the
     codec settings, e.g. ``["-c:v", "prores_ks", "-profile:v", "4444",
@@ -84,12 +110,17 @@ class VideoFile(FrameSink):
     _process: subprocess.Popen | None = field(default=None, init=False, repr=False)
     _audio_directory: tempfile.TemporaryDirectory | None = field(default=None, init=False, repr=False)
 
+    def pixel_format(self, width: int, height: int) -> PixelFormat:
+        h264 = self.encoder is not None or self.codec_args == list(X264.codec_args)
+        return "nv12" if h264 and width % 2 == 0 and height % 2 == 0 else "rgba"
+
     def open(self, format: FrameFormat) -> None:
         encoder = self.encoder if self.encoder is None or self.encoder.fits(format.width, format.height) else X264
         input_args, codec_args = (encoder.input_args, encoder.codec_args) if encoder else ((), self.codec_args)
+        colors = BT709 if format.pixel_format == "nv12" else ()
         command = [
             self.ffmpeg, "-y", "-loglevel", "error", *input_args,
-            "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{format.width}x{format.height}", "-r", str(format.fps),
+            "-f", "rawvideo", "-pix_fmt", format.pixel_format, *colors, "-s", f"{format.width}x{format.height}", "-r", str(format.fps),
             "-i", "-",
         ]  # fmt: skip
         if format.audio is not None:
@@ -99,7 +130,7 @@ class VideoFile(FrameSink):
             audio_path = Path(self._audio_directory.name) / "audio.wav"
             write_wav(audio_path, format.audio, format.sample_rate)
             command += ["-i", str(audio_path), "-map", "0:v", "-map", "1:a", *self.audio_args]
-        command += [*codec_args, str(self.path)]
+        command += [*codec_args, *colors, str(self.path)]
         self._process = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def write(self, index: int, image: np.ndarray) -> None:
@@ -173,6 +204,11 @@ class Tee(FrameSink):
 
     def __post_init__(self) -> None:
         self.ordered = any(sink.ordered for sink in self.sinks)
+
+    def pixel_format(self, width: int, height: int) -> PixelFormat:
+        """What every sink wants, or RGBA when they differ."""
+        wanted = {sink.pixel_format(width, height) for sink in self.sinks}
+        return wanted.pop() if len(wanted) == 1 else "rgba"
 
     def open(self, format: FrameFormat) -> None:
         for sink in self.sinks:

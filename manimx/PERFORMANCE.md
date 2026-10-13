@@ -698,6 +698,28 @@ the slow reads from mapped memory (1.6 ms per 1080p frame). Zeroing the
 `Vec` first (`vec![0; n]`), as `PyBytes::new_with` did before, takes the
 copy back to 1.1 ms.
 
+### X. NV12 for video, converted on the GPU
+
+A video sink used to get RGBA frames (4 bytes per pixel, 8.3 MB per 1080p
+frame), read back from the GPU, piped to ffmpeg and converted there to
+the Y'CbCr 4:2:0 an H.264 encoder takes; for a hardware encoder the
+frame then went back to the GPU. Now the last pass writes the two NV12
+planes on the GPU (finalize.wgsl, BT.709 limited range), so a third of
+the bytes is read back and piped, and ffmpeg converts nothing (VideoFile
+asks for NV12 through `FrameSink.pixel_format`).
+
+Benchmark project, 2014 frames at 1080p without motion blur, one
+process, into an .mp4:
+
+| encoder | before | NV12 |
+|---|---|---|
+| NVENC | 128.3 fps (7.79 ms) | 190.3 fps (5.26 ms) |
+| x264 | 107.2 fps (9.33 ms) | 127.9 fps (7.82 ms) |
+
+The colors also became right: ffmpeg's own conversion used BT.601 and
+left the file untagged, which players show as BT.709 for HD sizes; the
+file is now BT.709 and tagged so.
+
 ## Where the time goes now
 
 Benchmark project with `PortalOrbit`, after steps L to O: 48.6 to about

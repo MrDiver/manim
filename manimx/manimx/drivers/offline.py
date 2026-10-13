@@ -54,7 +54,7 @@ import numpy as np
 
 from ..renderer.config import Frame, RenderConfig
 from ..renderer.effects import Effect
-from .sinks import FrameFormat, FrameSink
+from .sinks import FrameFormat, FrameSink, PixelFormat
 
 Progress = Callable[[int, int], None]
 """``progress(frames written, total frames)``, called from the writer thread."""
@@ -129,14 +129,22 @@ def load_source(spec: Any) -> FrameSource:
     return FrameSource(target.frame_at, target.duration, target.audio)
 
 
-def _format(source: FrameSource, settings: RenderSettings, times: list[float]) -> FrameFormat:
-    """The sink's format, with the audio of exactly the rendered frames."""
+def _format(source: FrameSource, sink: FrameSink, settings: RenderSettings, times: list[float]) -> FrameFormat:
+    """The sink's format: its pixels and the audio of exactly the rendered frames."""
     config = settings.config
+    width, height = config.pixel_width, config.pixel_height
     audio = None
     if settings.audio and source.audio is not None and times:
         samples = source.audio(times[0], times[0] + len(times) / settings.fps, settings.sample_rate)
         audio = samples if np.any(samples) else None  # no sounds: no audio track
-    return FrameFormat(config.pixel_width, config.pixel_height, settings.fps, audio, settings.sample_rate)
+    return FrameFormat(width, height, settings.fps, audio, settings.sample_rate, sink.pixel_format(width, height))
+
+
+def _frame_shape(format: FrameFormat) -> tuple[int, ...]:
+    """The shape of a frame's array (see :data:`~.sinks.PixelFormat`)."""
+    if format.pixel_format == "nv12":
+        return (format.height * 3 // 2, format.width)
+    return (format.height, format.width, 4)
 
 
 class RenderCancelled(Exception):
@@ -243,18 +251,19 @@ def _release(release: Callable[[], None] | None) -> None:
 # --------------------------------------------------------------------------
 
 
-def _pipeline(settings: RenderSettings) -> Any:
+def _pipeline(settings: RenderSettings, pixel_format: PixelFormat) -> Any:
     from .core_pipeline import CoreFramePipeline
 
-    return CoreFramePipeline(settings.effects, settings.config, settings.in_flight)
+    return CoreFramePipeline(settings.effects, settings.config, settings.in_flight, pixel_format=pixel_format)
 
 
 def _render_here(
     source: FrameSource, sink: FrameSink, settings: RenderSettings, progress: Progress | None, cancelled: Callable[[], bool]
 ) -> int:
     times = settings.frame_times(source.duration)
-    pipeline = _pipeline(settings)
-    sink.open(_format(source, settings, times))
+    format = _format(source, sink, settings, times)
+    pipeline = _pipeline(settings, format.pixel_format)
+    sink.open(format)
     try:
         writer = _Writer(sink, len(times), progress, capacity=2 * settings.in_flight + 4)
         for index, t in enumerate(times):
@@ -286,9 +295,9 @@ def _render_in_workers(
         raise TypeError("worker processes need a picklable source, e.g. 'module:attr'") from error
     source = load_source(spec)
     times = settings.frame_times(source.duration)
-    config = settings.config
-    frame_bytes = config.pixel_width * config.pixel_height * 4
-    shape = (config.pixel_height, config.pixel_width, 4)
+    format = _format(source, sink, settings, times)
+    shape = _frame_shape(format)
+    frame_bytes = math.prod(shape)
     slots = settings.in_flight + 2
 
     context = multiprocessing.get_context("spawn")  # GPU devices do not survive fork
@@ -306,14 +315,14 @@ def _render_in_workers(
     processes = [
         context.Process(
             target=_worker_main,
-            args=(worker, spec, settings, memories[worker].name, frame_bytes, tasks, free[worker], done),
+            args=(worker, spec, settings, format.pixel_format, memories[worker].name, frame_bytes, tasks, free[worker], done),
             name=f"render worker {worker}",
             daemon=True,
         )
         for worker in range(workers)
     ]
 
-    sink.open(_format(source, settings, times))
+    sink.open(format)
     writer: _Writer | None = None
     try:
         for process in processes:
@@ -358,6 +367,7 @@ def _worker_main(
     worker: int,
     spec: Any,
     settings: RenderSettings,
+    pixel_format: PixelFormat,
     memory_name: str,
     frame_bytes: int,
     tasks: Any,
@@ -368,7 +378,7 @@ def _worker_main(
     try:
         source = load_source(spec)
         times = settings.frame_times(source.duration)
-        pipeline = _pipeline(settings)
+        pipeline = _pipeline(settings, pixel_format)
 
         def deliver(index: int, image: np.ndarray) -> None:
             slot = free.get()  # waits while all of this worker's slots are queued

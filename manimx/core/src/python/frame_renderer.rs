@@ -13,7 +13,7 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 use crate::python::robjects::{node_of, transform_from_py};
 use crate::render::effects::{Bloom, Effect, ShaderEffect};
 use crate::render::error::Error;
-use crate::render::frame_renderer::{self, RendererOptions, SubFrame, View};
+use crate::render::frame_renderer::{self, PixelFormat, RendererOptions, SubFrame, View};
 use crate::render::settings::{Camera, CameraView, ViewSettings};
 
 impl From<Error> for PyErr {
@@ -33,7 +33,8 @@ type PyView<'py> = (Bound<'py, PyAny>, Bound<'py, PyAny>);
 #[pyclass(module = "manimx._core")]
 pub struct FrameRenderer {
     renderer: frame_renderer::FrameRenderer,
-    size: (usize, usize),
+    /// The shape of the arrays frames come back as.
+    shape: [usize; 3],
 }
 
 #[pymethods]
@@ -43,8 +44,9 @@ impl FrameRenderer {
     /// threshold, knee, intensity, radius, levels)` and `("shader", code,
     /// stage, values)`, in chain order; `tone_map` a `ToneMapOperator`
     /// value. Up to `in_flight` frames are on the GPU at once.
+    /// `pixel_format` is "rgba" or "nv12" (see `finished`).
     #[new]
-    #[pyo3(signature = (shader_folder, config, tone_map, effects, in_flight, profile=false))]
+    #[pyo3(signature = (shader_folder, config, tone_map, effects, in_flight, profile=false, pixel_format="rgba"))]
     fn new(
         shader_folder: PathBuf,
         config: &Bound<'_, PyAny>,
@@ -52,7 +54,17 @@ impl FrameRenderer {
         effects: Vec<Bound<'_, PyTuple>>,
         in_flight: usize,
         profile: bool,
+        pixel_format: &str,
     ) -> PyResult<Self> {
+        let pixel_format = match pixel_format {
+            "rgba" => PixelFormat::Rgba,
+            "nv12" => PixelFormat::Nv12,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown pixel format {other:?}; use \"rgba\" or \"nv12\""
+                )))
+            }
+        };
         let width: u32 = config.getattr("pixel_width")?.extract()?;
         let height: u32 = config.getattr("pixel_height")?.extract()?;
         let background: (f32, f32, f32, f32) = config.getattr("background_rgba")?.extract()?;
@@ -70,10 +82,15 @@ impl FrameRenderer {
                 .collect::<PyResult<Vec<_>>>()?,
             in_flight,
             profile,
+            pixel_format,
+        };
+        let shape = match pixel_format {
+            PixelFormat::Rgba => [height as usize, width as usize, 4],
+            PixelFormat::Nv12 => [(height + height / 2) as usize, width as usize, 1],
         };
         Ok(FrameRenderer {
             renderer: frame_renderer::FrameRenderer::new(options)?,
-            size: (width as usize, height as usize),
+            shape,
         })
     }
 
@@ -102,16 +119,21 @@ impl FrameRenderer {
     }
 
     /// Frames finished so far, `(index, pixels)` in submission order, the
-    /// pixels an `(H, W, 4)` uint8 RGBA array; with `wait`, waits for every
-    /// frame on the GPU.
+    /// pixels an `(H, W, 4)` uint8 RGBA array, or with "nv12" an
+    /// `(H * 3 / 2, W)` uint8 array (the luma rows, then the rows of Cb, Cr
+    /// pairs); with `wait`, waits for every frame on the GPU.
     #[pyo3(signature = (wait=false))]
     fn finished<'py>(&mut self, py: Python<'py>, wait: bool) -> PyResult<Bound<'py, PyList>> {
         let done = PyList::empty(py);
-        let (width, height) = self.size;
+        let [rows, width, channels] = self.shape;
         for (index, image) in self.renderer.finished(wait)? {
             // The array takes the bytes over: no copy.
-            let pixels = image.into_pyarray(py).reshape([height, width, 4])?;
-            done.append((index, pixels))?;
+            let pixels = image.into_pyarray(py);
+            if channels == 1 {
+                done.append((index, pixels.reshape([rows, width])?))?;
+            } else {
+                done.append((index, pixels.reshape(self.shape)?))?;
+            }
         }
         Ok(done)
     }

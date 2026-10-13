@@ -9,6 +9,10 @@ frame in Rust, with up to ``in_flight`` frames on the GPU, so the CPU
 prepares the next frames while the GPU draws the earlier ones. Python
 only asks for the views of each sub-frame and sets their configs.
 
+Frames come back as RGBA, or with ``pixel_format="nv12"`` as the NV12
+planes a video encoder takes, converted on the GPU (a third of the bytes
+to read back; see :class:`~.sinks.FrameFormat`).
+
 A frame that shows exactly what the frame before showed is not rendered
 (the core compares the trees and configs of every view); its future gets
 the previous image.
@@ -26,6 +30,7 @@ import numpy as np
 from .. import _core
 from ..renderer.config import Frame, RenderConfig, ViewState
 from ..renderer.effects import Bloom, Effect, RenderSamples, ShaderEffect, ToneMap
+from .sinks import PixelFormat
 
 SHADER_FOLDER = Path(__file__).resolve().parents[1] / "renderer" / "shaders"
 
@@ -33,7 +38,9 @@ SHADER_FOLDER = Path(__file__).resolve().parents[1] / "renderer" / "shaders"
 class CoreFramePipeline:
     """Renders frames of the core with up to ``in_flight`` of them on the GPU."""
 
-    def __init__(self, effects: tuple[Effect, ...], config: RenderConfig, in_flight: int = 3, profile: bool = False) -> None:
+    def __init__(
+        self, effects: tuple[Effect, ...], config: RenderConfig, in_flight: int = 3, profile: bool = False, pixel_format: PixelFormat = "rgba"
+    ) -> None:
         self.effects = tuple(effects)
         self.config = config
         self.in_flight = in_flight
@@ -45,6 +52,7 @@ class CoreFramePipeline:
             [_effect_tuple(effect) for effect in effects if isinstance(effect, (Bloom, ShaderEffect))],
             in_flight,
             profile,
+            pixel_format,
         )
         self._samples = next((effect for effect in effects if isinstance(effect, RenderSamples)), RenderSamples(1))
         self._futures: dict[int, Future[np.ndarray]] = {}
@@ -54,8 +62,8 @@ class CoreFramePipeline:
         self._last: Future[np.ndarray] | None = None
 
     def submit(self, index: int, time: float, scene: Frame | Callable[[float], Frame]) -> Future[np.ndarray]:
-        """Queue the frame at ``time``; the future gets its ``(H, W, 4)``
-        uint8 RGBA pixels.
+        """Queue the frame at ``time``; the future gets its pixels: an
+        ``(H, W, 4)`` uint8 RGBA array, or an NV12 frame.
         """
         sub_frames = self._sub_frames(scene, time)
         future: Future[np.ndarray] = Future()
