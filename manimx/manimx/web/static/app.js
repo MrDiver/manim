@@ -193,6 +193,14 @@ function layers() {
 }
 
 function drawTimeline() {
+  // Rebuilding the rows empties them for a moment, which scrolls the timeline back: keep its place.
+  const { scrollTop, scrollLeft } = elements.timeline;
+  drawRows();
+  elements.timeline.scrollTop = scrollTop;
+  elements.timeline.scrollLeft = scrollLeft;
+}
+
+function drawRows() {
   const { clips, segments, editable } = state.timeline;
   layoutLanes();
   drawRuler();
