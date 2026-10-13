@@ -114,12 +114,14 @@ thin wrapper over it, driven by `CoreFramePipeline`
 does, and its folder for the stage; nothing is called just "renderer".
 
 **Queues.** Today the stages run one after the other on the caller's
-thread, while up to `in_flight` frames are on the GPU. The stages could
-also run with queues between them (Pack on its own thread a few frames
-ahead, since a `Packet` and the changed arena ranges are uploaded in
-order; read-back on another). The stage timings (`stage_timings()`,
-PERFORMANCE.md) show no need yet: without motion blur the video encoder
-is the limit, with it the evaluation and `submit`.
+thread, while up to `in_flight` frames are on the GPU. Running Pack
+ahead on its own thread would need more than a queue: Draw reads the
+changed record ranges straight from the Packer's arenas, so a `Packet`
+would have to carry a copy of the bytes that changed for the GPU
+buffers to go through the same states. The stage timings
+(`stage_timings()`, PERFORMANCE.md) show no need yet: without motion
+blur the video encoder is the limit, with it the evaluation and
+`submit`.
 
 **Inside Draw: geometry and passes.** Geometry (draw/geometry/) is what
 is drawn: `VectorGeometry` (`RShape2D`, `RCurve3D`) and `MeshGeometry`
