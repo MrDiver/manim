@@ -2,18 +2,19 @@
 // See manimx/web/server.py for the endpoints and editing.js for editing.
 //
 // Frames are asked for by number at the timeline's version and kept
-// (frames.js), so a frame seen once shows at once until an edit. While the
-// playhead rests, the frames after it are fetched too, so pressing play
-// plays smoothly; a yellow line over the tracks marks the frames kept. Scrubbing
+// (frames.js), so a frame seen once shows at once until an edit. Scrubbing
 // asks for one frame at a time: while a request is open, only the newest
 // wanted time is remembered and asked for next, so no outdated frames
-// queue on the server. Playing fetches the frames ahead of the playhead
-// and shows the newest one that is there; a second loop plays from what
-// was kept.
+// queue on the server. Paused or playing, the frames after the playhead
+// are fetched ahead (as many as the "ahead" setting says), like a video
+// player's buffer; a yellow line over the tracks marks the frames kept.
+// The resolution setting renders frames at 1/2, 1/4 or 1/8 of the
+// output's width, faster.
 //
-// Playback runs on the audio's clock when the timeline has sounds
-// (/api/audio, mixed once per version), else on the page's clock; Loop
-// starts over at the end.
+// Playback draws decoded frames onto a canvas on the page's clock and
+// waits ("buffering") when it runs out instead of skipping frames; the
+// timeline's sounds (/api/audio, mixed once per version) follow the
+// clock. Loop starts over at the end.
 //
 // Tracks: one per layer, the highest on top, each clip of that layer on it.
 // Under a track, its events: a bar from where a clip starts waiting to the
@@ -41,7 +42,7 @@ import { FrameCache } from "./frames.js";
 const elements = Object.fromEntries(
   [
     "problem", "title", "time", "frame", "error", "timeline", "ruler", "rows", "playhead", "collapse", "indices",
-    "labels", "playhead-frame", "play", "mute", "loop", "to-start", "to-end", "previous-frame", "next-frame", "after-end", "cached",
+    "labels", "playhead-frame", "play", "mute", "loop", "to-start", "to-end", "previous-frame", "next-frame", "after-end", "cached", "stage", "resolution", "prefetch",
     "zoom-in", "zoom-out", "zoom-fit",
   ].map((id) => [id.replace(/-(\w)/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]),
 );
@@ -57,7 +58,9 @@ const state = {
   wanted: null, // the time to show once it is done
   span: 0, // seconds the lanes show: the duration and room after it
   version: 0, // the newest version of the timeline heard of: frames are kept by it
-  playingFrame: null, // the frame number shown while playing
+  clock: null, // while playing: the playback clock (see play)
+  resolution: loadNumber("manimx.resolution", 2, [1, 2, 4, 8]), // frames are the output's width / this
+  prefetch: loadNumber("manimx.prefetch", 240), // frames fetched ahead of the playhead
   open: loadSet("manimx.open"), // keys of the clips and nodes whose tracks are shown
   indices: loadFlag("manimx.indices"), // index labels over the frame
   zoom: 1, // lanes width / the width beside the labels
@@ -373,6 +376,23 @@ function saveSet(name, set) {
   }
 }
 
+function loadNumber(name, fallback, choices = null) {
+  try {
+    const value = Number(localStorage.getItem(name) ?? fallback);
+    return Number.isFinite(value) && value >= 0 && (!choices || choices.includes(value)) ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveNumber(name, value) {
+  try {
+    localStorage.setItem(name, String(value));
+  } catch {
+    // storage is unavailable: it lasts until a reload
+  }
+}
+
 function loadFlag(name) {
   try {
     return localStorage.getItem(name) === "on";
@@ -391,27 +411,33 @@ function saveFlag(name, on) {
 
 // -- the frame ---------------------------------------------------------------------------
 
+const frames = new FrameCache();
+const REQUESTS = 3; // frame requests open at once while fetching ahead
+const BUFFER_SECONDS = 0.5; // kept ahead before playback goes on after running out
+const DECODE_AHEAD = 8; // frames decoded before playback draws them
+
+/** Show `time`: the playhead, and (paused) the frame there; while playing, the playback loop draws. */
 function show(time, intended = time, reveal = false) {
   state.time = time;
   state.intended = intended;
-  history.replaceState(null, "", `#t=${intended.toFixed(3)}`); // a link keeps the place
+  if (!state.playing) history.replaceState(null, "", `#t=${intended.toFixed(3)}`); // a link keeps the place
   elements.playhead.style.left = `${percent(time)}%`;
   elements.playheadFrame.textContent = frameOf(time);
   elements.time.textContent = `${time.toFixed(2)} s · frame ${frameOf(time)}`;
   if (reveal) revealPlayhead();
-  if (state.playing) {
-    showPlaying(time);
-  } else if (state.loading) {
+  if (state.playing) return;
+  if (state.loading) {
     state.wanted = time;
   } else {
     load(time);
   }
 }
 
-const frames = new FrameCache();
+/** The width frames are rendered at: the output's divided by the chosen resolution. */
+const frameWidth = () => Math.max(16, Math.round(state.timeline.width / state.resolution));
 
-/** The width frames are fetched at: the image's on screen, at most the output's. */
-const frameWidth = () => Math.min(state.timeline.width, Math.round(elements.frame.clientWidth * devicePixelRatio) || state.timeline.width);
+/** The last frame number of the timeline. */
+const lastFrame = () => Math.floor(state.timeline.duration * state.timeline.fps);
 
 /** The server's timeline is at `version` now: frames of older versions are gone. */
 function setVersion(version) {
@@ -419,35 +445,44 @@ function setVersion(version) {
   frames.useVersion(state.version);
 }
 
-// -- fetching ahead while the playhead rests ---------------------------------------
-
-const IDLE_DELAY = 300; // ms the playhead rests before frames are fetched ahead
-const IDLE_REQUESTS = 2;
-let idle = { token: 0, timer: null };
-
-/** Fetch the frames after the playhead (then from the start) once it rests. */
-function fetchAheadSoon() {
-  idle.token++;
-  clearTimeout(idle.timer);
-  idle.timer = setTimeout(fetchAhead, IDLE_DELAY);
+function draw(bitmap) {
+  const canvas = elements.frame;
+  if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+  }
+  canvas.getContext("2d").drawImage(bitmap, 0, 0);
 }
 
+async function load(time) {
+  state.loading = true;
+  state.wanted = null;
+  try {
+    const blob = await frames.fetch(state.version, frameOf(time), frameWidth());
+    const bitmap = await createImageBitmap(blob);
+    if (!state.playing) draw(bitmap);
+    bitmap.close();
+    elements.error.hidden = true;
+    if (!state.playing) await drawLabels(time);
+  } catch (error) {
+    elements.error.textContent = `${time.toFixed(2)} s: ${error.message}`;
+    elements.error.hidden = false;
+  } finally {
+    state.loading = false;
+    if (state.wanted !== null) load(state.wanted);
+    else fetchAhead();
+  }
+}
+
+// -- fetching ahead ---------------------------------------------------------------------------
+
+/** Keep the frames after the playhead coming (`state.prefetch` of them),
+ * playing or not; a frame the playhead waits for while paused goes first. */
 function fetchAhead() {
-  const token = ++idle.token;
-  const { fps, duration } = state.timeline;
-  const version = state.version;
-  const width = frameWidth();
-  const last = Math.floor(duration * fps);
-  const from = Math.min(frameOf(state.time), last);
-  let step = 0;
-  const resting = () => token === idle.token && version === state.version && !state.playing && !state.dragging && !state.loading && !document.hidden;
-  const worker = async () => {
-    while (step <= last && resting() && !frames.full()) {
-      const frame = (from + step++) % (last + 1);
-      if (!frames.has(version, frame, width)) await frames.fetch(version, frame, width).catch(() => {});
-    }
-  };
-  for (let i = 0; i < IDLE_REQUESTS; i++) worker();
+  if (!state.timeline || state.dragging || document.hidden || (!state.playing && state.loading)) return;
+  const last = lastFrame();
+  const from = Math.min(state.playing && state.clock ? state.clock.frame : frameOf(state.time), last);
+  frames.fetchAhead(state.version, from, frameWidth(), { count: state.prefetch, last, loop: state.loop, requests: REQUESTS });
 }
 
 /** The yellow line over the tracks: a bar per run of kept frames. */
@@ -470,56 +505,14 @@ function drawCached() {
   );
 }
 
-let cachedDrawn = true;
+let cachedTimer = null;
 frames.onChange = () => {
-  if (!cachedDrawn) return;
-  cachedDrawn = false;
-  requestAnimationFrame(() => {
-    cachedDrawn = true;
+  fetchAhead(); // a request finished: open the next one
+  cachedTimer ??= setTimeout(() => {
+    cachedTimer = null;
     drawCached();
-  });
+  }, 200);
 };
-
-function display(url) {
-  elements.frame.src = url;
-  frames.show(url);
-}
-
-async function load(time) {
-  state.loading = true;
-  state.wanted = null;
-  try {
-    const url = await frames.fetch(state.version, frameOf(time), frameWidth());
-    await new Promise((resolve) => {
-      elements.frame.onload = resolve;
-      elements.frame.onerror = resolve;
-      display(url);
-    });
-    elements.error.hidden = true;
-    if (!state.playing) await drawLabels(time);
-  } catch (error) {
-    elements.error.textContent = `${time.toFixed(2)} s: ${error.message}`;
-    elements.error.hidden = false;
-  } finally {
-    state.loading = false;
-    if (state.wanted !== null) load(state.wanted);
-    else fetchAheadSoon();
-  }
-}
-
-/** While playing: fetch ahead, show the newest frame there is (up to a second old). */
-function showPlaying(time) {
-  const { fps, duration } = state.timeline;
-  const frame = Math.floor(time * fps);
-  const width = frameWidth();
-  frames.prefetch(state.version, frame, width, { fps, last: Math.floor(duration * fps), loop: state.loop });
-  const found = frames.latest(state.version, frame, Math.max(0, frame - Math.round(fps)), width);
-  if (found && found.frame !== state.playingFrame) {
-    state.playingFrame = found.frame;
-    display(found.url);
-    elements.error.hidden = true;
-  }
-}
 
 // -- index labels -------------------------------------------------------------------------
 
@@ -568,32 +561,67 @@ async function audioElement() {
   return element;
 }
 
+/** Play from the playhead, on the page's clock, one frame per frame time.
+ *
+ * Like a video player: when the frame at the playhead is not there yet,
+ * the clock (and the sound) stops, "buffering", until BUFFER_SECONDS of
+ * frames are kept ahead, instead of skipping frames. The sound follows
+ * the clock, set again when it drifts off by more than 0.15 s. The clock
+ * starts in the middle of a frame, so frame borders fall between screen
+ * refreshes and each frame is drawn for the same number of them.
+ */
 async function play() {
   if (state.playing) return;
   if (state.time >= state.timeline.duration - 1e-9) show(0);
   state.playing = true;
-  state.playingFrame = null;
   document.body.classList.add("playing");
   const audio = state.muted ? null : await audioElement();
-  let origin = performance.now() - state.time * 1000;
-  if (audio) {
-    audio.currentTime = state.time;
-    audio.play().catch(() => {});
-  }
-  const step = () => {
-    if (!state.playing) return;
-    let time = audio && !audio.paused ? audio.currentTime : (performance.now() - origin) / 1000;
-    if (time >= state.timeline.duration) {
+  if (!state.playing) return; // paused while the sound loaded
+  const clock = { position: (frameOf(state.time) + 0.5) / state.timeline.fps, last: null, frame: frameOf(state.time), shown: null, buffering: false };
+  state.clock = clock;
+  const setBuffering = (buffering) => {
+    clock.buffering = buffering;
+    elements.stage.classList.toggle("buffering", buffering);
+    if (!audio) return;
+    if (buffering) {
+      audio.pause();
+    } else {
+      audio.currentTime = clock.position;
+      audio.play().catch(() => {});
+    }
+  };
+  setBuffering(false);
+  const step = (now) => {
+    if (state.clock !== clock) return;
+    const { fps, duration } = state.timeline;
+    const last = lastFrame();
+    const width = frameWidth();
+    const version = state.version;
+    if (!clock.buffering && clock.last !== null) clock.position += Math.min(0.1, (now - clock.last) / 1000);
+    clock.last = now;
+    if (clock.position > duration) {
       if (!state.loop) {
-        show(state.timeline.duration);
         pause();
+        show(duration);
         return;
       }
-      time = 0;
-      origin = performance.now();
+      clock.position = 0.5 / fps;
       if (audio) audio.currentTime = 0;
     }
-    show(time, time, true);
+    clock.frame = Math.min(last, Math.floor(clock.position * fps));
+    if (audio && !clock.buffering && Math.abs(audio.currentTime - clock.position) > 0.15) audio.currentTime = clock.position;
+    const kept = frames.keptAhead(version, clock.frame, width, last, Math.round(BUFFER_SECONDS * fps));
+    if (clock.buffering && kept >= Math.min(Math.round(BUFFER_SECONDS * fps), last - clock.frame + 1)) setBuffering(false);
+    else if (!clock.buffering && kept === 0) setBuffering(true);
+    fetchAhead();
+    for (let ahead = 1; ahead <= DECODE_AHEAD && clock.frame + ahead <= last; ahead++) frames.bitmap(version, clock.frame + ahead, width);
+    const bitmap = frames.bitmap(version, clock.frame, width);
+    if (bitmap && clock.shown !== clock.frame) {
+      draw(bitmap);
+      clock.shown = clock.frame;
+      elements.error.hidden = true;
+    }
+    show(clock.frame / fps, clock.frame / fps, true);
     requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
@@ -601,7 +629,9 @@ async function play() {
 
 function pause() {
   state.playing = false;
+  state.clock = null;
   document.body.classList.remove("playing");
+  elements.stage.classList.remove("buffering");
   state.audio?.element?.pause();
   show(snap(state.time));
 }
@@ -613,6 +643,15 @@ function setMuted(muted) {
   elements.mute.setAttribute("aria-pressed", String(muted));
   saveFlag("manimx.muted", muted);
   if (muted) state.audio?.element?.pause();
+}
+
+/** The preview's resolution: the output's width divided by `divisor`. */
+function setResolution(divisor) {
+  state.resolution = divisor;
+  elements.resolution.value = String(divisor);
+  saveNumber("manimx.resolution", divisor);
+  drawCached();
+  if (!state.playing) show(state.time, state.intended);
 }
 
 /** Move the playhead (pausing playback). */
@@ -663,6 +702,15 @@ function listen() {
     state.loop = !state.loop;
     elements.loop.setAttribute("aria-pressed", String(state.loop));
   });
+  elements.resolution.addEventListener("change", () => setResolution(Number(elements.resolution.value)));
+  elements.prefetch.addEventListener("change", () => {
+    const count = Math.round(Number(elements.prefetch.value));
+    state.prefetch = Number.isFinite(count) && count >= 0 ? count : state.prefetch;
+    elements.prefetch.value = state.prefetch;
+    saveNumber("manimx.prefetch", state.prefetch);
+    fetchAhead();
+  });
+  document.addEventListener("visibilitychange", fetchAhead);
   elements.toStart.addEventListener("click", () => seek(0));
   elements.toEnd.addEventListener("click", () => seek(state.timeline.duration));
   elements.previousFrame.addEventListener("click", () => seek(state.time - 1 / state.timeline.fps));
@@ -710,8 +758,7 @@ async function loadTimeline() {
   const { title, width, height, error } = state.timeline;
   document.title = `${title} · manimx preview`;
   elements.title.textContent = title;
-  elements.frame.width = width;
-  elements.frame.height = height;
+  elements.frame.style.aspectRatio = `${width} / ${height}`;
   elements.problem.textContent = error ?? "";
   elements.problem.hidden = !error;
   drawTimeline();
@@ -750,6 +797,8 @@ async function start() {
     setVersion,
   });
   elements.indices.setAttribute("aria-pressed", String(state.indices));
+  elements.resolution.value = String(state.resolution);
+  elements.prefetch.value = state.prefetch;
   elements.mute.setAttribute("aria-pressed", String(state.muted));
   await loadTimeline();
   listen();

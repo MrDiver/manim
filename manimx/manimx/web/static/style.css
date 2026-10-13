@@ -267,6 +267,43 @@ h1 {
   display: inline;
 }
 
+.preview-settings {
+  position: absolute;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.preview-settings select,
+.preview-settings input {
+  font: 12px var(--mono);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 4px;
+}
+
+.preview-settings input {
+  width: 64px;
+}
+
+/* Playback ran out of frames and waits for more. */
+#stage.buffering::after {
+  content: "Buffering…";
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.6);
+  color: #e5c23a;
+  font: 12px var(--mono);
+}
+
 .zoom {
   position: absolute;
   right: 0;
