@@ -11,6 +11,12 @@
   <header class="bar">
     <h1 id="title">manimx</h1>
     <div class="tools">
+      <button id="undo" type="button" class="icon" hidden disabled title="Nothing to undo">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" fill="none"/></svg>
+      </button>
+      <button id="redo" type="button" class="icon" hidden disabled title="Nothing to redo">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3" fill="none"/></svg>
+      </button>
       <button id="settings-button" type="button" hidden title="The project's settings (saved to manimx.json)">Settings</button>
       <button id="indices" type="button" aria-pressed="false" title="Show the index of every path in its group (for MorphMatching pairs)">Indices</button>
       <output id="time" aria-live="off">0.00 s</output>
@@ -76,7 +82,7 @@
     <div id="rows" role="tree" aria-label="Tracks, clips, events, nodes and animations"></div>
     <div id="overlay"><div id="playhead"><span id="playhead-frame">0</span></div></div>
   </section>
-  <p class="hint footer">Drag on the ruler to scrub. Drag a clip to move it (up or down to another track), its handles to cut it, empty track space to select several; Delete removes the selection. Drag an event to time it. Space plays, ← → step frames, Ctrl+wheel zooms.</p>
+  <p class="hint footer">Drag on the ruler to scrub. Drag a clip to move it (up or down to another track), its handles to cut it, empty track space to select several; Delete removes the selection. Drag an event to time it. Ctrl+Z undoes, Ctrl+Shift+Z redoes. Space plays, ← → step frames, Ctrl+wheel zooms.</p>
 
   <div id="marquee" hidden></div>
   <dialog id="settings" aria-label="Project settings">

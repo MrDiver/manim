@@ -38,6 +38,11 @@ shows, and ``manimx.json`` is saved shortly after (see editing.py):
 The timeline can be replaced while serving (:meth:`PreviewServer.replace`,
 used by reload.py when a scene file is saved); every replacement or
 failed rebuild (:meth:`PreviewServer.report`) bumps the version, and the
+    POST /api/undo, /api/redo  undo or redo the last edit
+
+Every edit is a command (commands.py) that can be undone; an edit may
+carry a "gesture" id, and the steps of one drag (the same id) are undone
+as one. Each answer gives the "history": what undo and redo would do.
 page fetches the timeline again.
 
 Design decisions:
@@ -81,7 +86,8 @@ from ..animation.timing import NEVER, Clip, Timeline
 from ..drivers.offline import RenderSettings
 from ..drivers.stills import StillRenderer
 from ..renderer import RenderSamples
-from .editing import EditError, ProjectEditor
+from .commands import EditError, parse
+from .editing import ProjectEditor
 from .labels import index_labels
 from .tracks import clip_nodes
 
@@ -95,6 +101,7 @@ FORMATS = {"jpeg": ("JPEG", "image/jpeg"), "png": ("PNG", "image/png"), "webp": 
 
 
 class PreviewServer:
+EDIT_ROUTES = ("/api/clip", "/api/clip/add", "/api/clip/remove", "/api/event", "/api/setting", "/api/undo", "/api/redo")
     """Serves ``timeline`` to the preview page (see the module docs)."""
 
     def __init__(
@@ -216,6 +223,7 @@ class PreviewServer:
             "duration": self.timeline.duration,
             "fps": self.settings.fps,
             "width": config.pixel_width,
+            "history": self.editor.history() if self.editor is not None else None,
             "height": config.pixel_height,
             "clips": [
                 {
@@ -320,21 +328,14 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - the name http.server calls
         editor = self.preview.editor
-        routes: dict[str, Callable[[ProjectEditor, dict[str, Any]], None]] = {
-            "/api/clip": lambda editor, body: editor.edit_clips(_field(body, "clips", list) if "clips" in body else [body]),
-            "/api/clip/add": lambda editor, body: editor.add_clip(_field(body, "scene", str), body.get("start", 0.0), body.get("layer", 0)),
-            "/api/clip/remove": lambda editor, body: editor.remove_clips(_field(body, "indices", list)),
-            "/api/event": lambda editor, body: editor.set_event(_field(body, "name", str), body.get("time")),
-            "/api/setting": lambda editor, body: editor.set_setting(_field(body, "path", list), body.get("value")),
-        }
-        route = routes.get(urlparse(self.path).path)
+        route = urlparse(self.path).path
+        if route not in EDIT_ROUTES:
+            self._json({"error": f"not found: {self.path}"}, HTTPStatus.NOT_FOUND)
+            return
+        if editor is None:
+            self._json({"error": "this preview cannot edit its project"}, HTTPStatus.FORBIDDEN)
+            return
         try:
-            if route is None:
-                self._json({"error": f"not found: {self.path}"}, HTTPStatus.NOT_FOUND)
-                return
-            if editor is None:
-                self._json({"error": "this preview cannot edit its project"}, HTTPStatus.FORBIDDEN)
-                return
             length = int(self.headers.get("Content-Length") or 0)
             try:
                 body = json.loads(self.rfile.read(length) or b"{}")
@@ -342,8 +343,15 @@ class _Handler(BaseHTTPRequestHandler):
                 raise _BadRequest(f"the body is not JSON: {error}") from None
             if not isinstance(body, dict):
                 raise _BadRequest("the body must be a JSON object")
-            route(editor, body)
-            self._json({"ok": True, "version": self.preview.version})
+            match route:
+                case "/api/undo":
+                    editor.undo()
+                case "/api/redo":
+                    editor.redo()
+                case _:
+                    gesture = body.pop("gesture", None)
+                    editor.run(parse(route, body), gesture if isinstance(gesture, str) else None)
+            self._json({"ok": True, "version": self.preview.version, "history": editor.history()})
         except (_BadRequest, EditError) as error:
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
 
@@ -433,13 +441,6 @@ def _waits(clip: Clip, known: dict[str, float]) -> list[dict[str, Any]]:
             waits.append({"event": segment.waits_for, "from": previous_end, "time": known.get(segment.waits_for)})
         previous_end = None if timing is None else timing.end
     return waits
-
-
-def _field(body: dict[str, Any], name: str, kind: type) -> Any:
-    value = body.get(name)
-    if isinstance(value, bool) or not isinstance(value, kind):
-        raise _BadRequest(f"{name!r} must be a {kind.__name__}")
-    return value
 
 
 def _number(query: dict[str, list[str]], name: str, kind: type, required: bool = True) -> Any:

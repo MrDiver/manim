@@ -16,7 +16,9 @@ from manimx.drivers import StillRenderer
 from manimx.drivers.offline import RenderSettings
 from manimx.examples.navigation import config
 from manimx.project import Project
+from manimx.animation.timing import NEVER
 from manimx.web import EditError, PreviewServer, ProjectEditor, ProjectReloader
+from manimx.web.commands import AddClip, ClipEdit, EditClips, parse
 
 SETTINGS = RenderSettings(config(64, 36), fps=10)
 
@@ -219,7 +221,7 @@ def test_the_page_edits_through_the_server(root, renderer) -> None:
         assert status == 200
         assert any(item["path"] == ["output", "fps"] and item["value"] == 30 for item in settings_list)
         assert request(server, "/api/clip", {"index": 1, "layer": "top"})[0] == 400
-        assert request(server, "/api/clip", {"clips": "all"})[1] == {"error": "'clips' must be a list"}
+        assert request(server, "/api/clip", {"clips": "all"})[1] == {"error": "/api/clip does not take {'clips': 'all'}"}
         assert request(server, "/api/event", raw=b"{oops")[0] == 400
         assert request(server, "/api/event", [1, 2])[1] == {"error": "the body must be a JSON object"}
         assert request(server, "/api/nothing", {})[0] == 404
@@ -259,6 +261,67 @@ def test_clips_are_added_from_scenes_and_removed(root, editor) -> None:
         editor.remove_clips([4])
 
 
+def test_every_edit_is_undone_and_redone(root, editor) -> None:
+    clips, fps = list(editor.timeline.clips), editor.project.settings.output.fps
+    assert editor.history() == {"undo": None, "redo": None}
+    editor.edit_clip(0, {"start": 1.0, "cut": [0.5, None]})
+    editor.set_event("go", 2.0)
+    editor.set_setting(["output", "fps"], 30)
+    editor.remove_clips([0, 2])
+    index = editor.add_clip("Waiting", 4.0, layer=2)
+    assert editor.history() == {"undo": "add Waiting", "redo": None}
+
+    for _ in range(5):
+        editor.undo()
+    assert editor.timeline.clips == clips  # the very same clips, back in their places
+    assert starts(editor) == [0.0, 2.0, 0.0]
+    assert [entry.start for entry in editor.project.timeline] == [None, None, 0.0]  # following again
+    assert (editor.project.events, editor.project.settings.output.fps, editor.timeline.clips[0].cut_in) == ({}, fps, None)
+    assert editor.history() == {"undo": None, "redo": "cut a clip"}
+    editor.undo()  # nothing left: nothing happens
+
+    for _ in range(5):
+        editor.redo()
+    assert [clip.name for clip in editor.timeline.clips] == ["Short-2", "Waiting"]
+    assert starts(editor) == [2.5, 4.0]
+    assert editor.project.events == {"go": 2.0}
+    assert editor.timeline.clips[index].layer == 2
+    editor.edit_clip(0, {"layer": 3})
+    assert editor.history()["redo"] is None  # a new edit drops what was undone
+
+
+def test_the_steps_of_a_drag_are_undone_as_one(root, editor) -> None:
+    for step in (0.5, 1.0, 1.5):
+        editor.run(parse("/api/clip", {"index": 2, "start": step}), gesture="drag-1")
+    editor.run(parse("/api/clip", {"index": 2, "start": 3.0}), gesture="drag-2")
+    editor.undo()
+    assert editor.timeline.clips[2].start == 1.5
+    editor.undo()
+    assert editor.timeline.clips[2].start == 0.0
+
+
+def test_a_removed_clip_comes_back_with_its_scene_as_saved_now(root, editor) -> None:
+    editor.remove_clips([0])
+    write(root / "scenes" / "short.py", short_scene(3))
+    editor.files_changed({root / "scenes" / "short.py"})
+    editor.undo()
+    assert [clip.end for clip in editor.timeline.clips] == [3.0, 6.0, NEVER]
+
+
+def test_commands_are_parsed_from_the_pages_requests() -> None:
+    assert parse("/api/clip", {"clips": [{"index": 1, "layer": 2}]}) == EditClips((ClipEdit(1, (("layer", 2),)),))
+    assert parse("/api/clip/add", {"scene": "Intro"}) == AddClip("Intro", 0.0, 0)
+    assert parse("/api/event", {"name": "go", "time": None}).label == "remove go"
+    for route, body, message in [
+        ("/api/clip/remove", {"indices": [-1]}, "no clip -1"),
+        ("/api/event", {"name": ""}, "does not take"),
+        ("/api/setting", {"path": [1]}, "does not take"),
+        ("/api/clips", {}, "no edit"),
+    ]:
+        with pytest.raises(EditError, match=message):
+            parse(route, body)
+
+
 def test_the_page_adds_removes_and_plays(root, renderer) -> None:
     editor = ProjectEditor(root, lambda project: SETTINGS, save_delay=60.0)
     server = PreviewServer(Timeline(), SETTINGS, renderer=renderer, editor=editor)
@@ -269,8 +332,16 @@ def test_the_page_adds_removes_and_plays(root, renderer) -> None:
         assert status == 200
         assert [scene["name"] for scene in scenes] == ["Short", "Waiting"]
         assert request(server, "/api/clip/add", {"scene": "Short", "start": 4.0, "layer": 3})[0] == 200
-        assert request(server, "/api/clip/remove", {"indices": [0]})[0] == 200
+        status, answer = request(server, "/api/clip/remove", {"indices": [0]})
+        assert answer["history"] == {"undo": "remove a clip", "redo": None}
         assert [clip.layer for clip in editor.timeline.clips] == [0, 1, 3]
+        assert request(server, "/api/undo", {})[1]["history"]["redo"] == "remove a clip"
+        assert request(server, "/api/clip", {"index": 0, "start": 1.0, "gesture": "g"})[0] == 200
+        assert request(server, "/api/clip", {"index": 0, "start": 2.0, "gesture": "g"})[0] == 200
+        assert request(server, "/api/undo", {})[0] == 200
+        assert editor.timeline.clips[0].start == 0.0
+        assert request(server, "/api/redo", {})[0] == 200
+        assert request(server, "/api/clip/remove", {"indices": [0]})[0] == 200
         waits = request(server, "/api/timeline")[1]["clips"][1]["waits"]
         assert waits == [{"event": "go", "from": 1.0, "time": None}]
 

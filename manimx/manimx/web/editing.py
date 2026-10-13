@@ -33,14 +33,18 @@ Design decisions:
 * **Clips that follow the previous one** (no ``start`` in the file) are
   placed again after every edit, so moving or cutting a clip carries the
   clips that follow it along.
+* **Every edit can be undone.** Edits are commands (commands.py), run by
+  :meth:`ProjectEditor.run`, which keeps each one's inverse; the history
+  is cleared when someone else's ``manimx.json`` is read, since its clips
+  may be others.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import math
 import threading
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -49,15 +53,34 @@ from ..animation.timing import NEVER
 from ..drivers.offline import RenderSettings
 from ..project import PROJECT_FILE, ClipEntry, Project
 from ..settings import SettingsError, entries, get, set_value
+from .commands import (
+    AddClip,
+    ClipEdit,
+    EditClips,
+    EditError,
+    InsertClips,
+    RemoveClips,
+    RemovedClip,
+    SetEvent,
+    SetSetting,
+    UICommand,
+    parse,
+)
 
 if TYPE_CHECKING:
     from .server import PreviewServer
 
-CLIP_FIELDS = ("start", "layer", "cut", "speed")
+HISTORY_LENGTH = 200
+"""Edits kept to undo."""
 
 
-class EditError(ValueError):
-    """An edit that does not fit the project (the page shows the message)."""
+@dataclass(frozen=True)
+class _Step:
+    command: UICommand
+    """What undoes (or, on the redo stack, redoes) the step."""
+    label: str
+    """What the step did (the label of the command the user gave)."""
+    gesture: str | None = None
 
 
 class ProjectEditor:
@@ -77,6 +100,10 @@ class ProjectEditor:
         self._unsaved = False
         self.saved_mtime: int | None = None
         """manimx.json's modification time after the last autosave."""
+        self._undo: list[_Step] = []
+        self._redo: list[_Step] = []
+        self._scene_versions: dict[str, int] = {}
+        """How often each scene was prepared again for a changed file."""
 
     def attach(self, server: PreviewServer) -> None:
         """Called by the server this editor edits for."""
@@ -122,6 +149,8 @@ class ProjectEditor:
                 self._report(error)
                 return
             self.project, self.timeline = project, timeline
+            self._undo.clear()  # the clips may be others now: the steps would not fit
+            self._redo.clear()
             if self.server is not None:
                 self.server.replace(timeline, settings)
 
@@ -146,6 +175,9 @@ class ProjectEditor:
                 for index, scene in fresh.items():
                     self.timeline.clips[index].replace_scene(scene)
                 self._place_followers()
+
+            for scene in {project.timeline[index].scene for index in fresh} | ({*project.scenes} if every else set()):
+                self._scene_versions[scene] = self._scene_versions.get(scene, 0) + 1
 
             self._change(swap)
 
@@ -187,81 +219,189 @@ class ProjectEditor:
 
     # -- editing ------------------------------------------------------------
 
+    def run(self, command: UICommand, gesture: str | None = None) -> None:
+        """Apply ``command`` live and keep its undo. Commands with the same
+        ``gesture`` (the steps of one drag) are undone as one."""
+        with self._lock:
+            inverse = self._apply(command)
+            last = self._undo[-1] if self._undo else None
+            if gesture is None or last is None or last.gesture != gesture:
+                self._undo.append(_Step(inverse, command.label, gesture))
+                del self._undo[:-HISTORY_LENGTH]
+            self._redo.clear()
+        self._schedule_save()
+
+    def undo(self) -> None:
+        """Undo the last edit (or nothing)."""
+        self._step(self._undo, self._redo)
+
+    def redo(self) -> None:
+        """Redo the last undone edit (or nothing)."""
+        self._step(self._redo, self._undo)
+
+    def history(self) -> dict[str, str | None]:
+        """What undo and redo would do now, or None."""
+        with self._lock:
+            return {"undo": self._undo[-1].label if self._undo else None, "redo": self._redo[-1].label if self._redo else None}
+
+    def _step(self, source: list[_Step], target: list[_Step]) -> None:
+        with self._lock:
+            if not source:
+                return
+            step = source[-1]
+            inverse = self._apply(step.command)
+            source.pop()
+            target.append(_Step(inverse, step.label))
+        self._schedule_save()
+
+    def _apply(self, command: UICommand) -> UICommand:
+        """Apply ``command``; returns the command that undoes it."""
+        project = self._project()
+        match command:
+            case EditClips(edits):
+                for edit in edits:
+                    self._check_index(edit.index)
+                inverse = EditClips(tuple(ClipEdit(edit.index, tuple((key, getattr(project.timeline[edit.index], key)) for key, _ in edit.updates)) for edit in edits))
+                self._change(lambda: self._edit_clips(edits))
+                return inverse
+            case AddClip(scene, start, layer):
+                if scene not in project.scenes:
+                    raise EditError(f"the project has no scene named {scene!r}")
+                prepared = self._prepare(scene)
+                names = {clip.name for clip in self.timeline.clips}
+                name, number = scene, 2
+                while name in names:
+                    name, number = f"{scene}-{number}", number + 1
+
+                def add() -> None:
+                    project.timeline.append(ClipEntry(scene, start=start, layer=layer))
+                    self.timeline.add(prepared, start=start, name=name, layer=layer)
+                    self._place_followers()
+
+                self._change(add)
+                return RemoveClips((len(project.timeline) - 1,))
+            case RemoveClips(indices):
+                for index in indices:
+                    self._check_index(index)
+                removed: list[RemovedClip] = []
+                self._change(lambda: removed.extend(self._remove_clips(sorted(set(indices), reverse=True))))
+                return InsertClips(tuple(reversed(removed)))
+            case InsertClips(clips):
+                fresh = {item.index: self._prepare(item.entry.scene) for item in clips if item.scene_version != self._scene_versions.get(item.entry.scene, 0)}
+                self._change(lambda: self._insert_clips(clips, fresh))
+                return RemoveClips(tuple(item.index for item in clips))
+            case SetEvent(name, time):
+                inverse = SetEvent(name, project.events.get(name))
+                self._change(lambda: self._set_event(name, time))
+                return inverse
+            case SetSetting(path, value):
+                try:
+                    old = get(project.settings, path)
+                    set_value(project.settings, path, value)
+                except (SettingsError, StopIteration, AttributeError) as error:
+                    raise EditError(str(error) or f"no setting {'.'.join(path)}") from None
+                settings = self.render_settings(project)
+                if self.server is not None:
+                    self.server.replace(self.timeline, settings)
+                return SetSetting(path, old)
+        raise EditError(f"cannot apply {command!r}")
+
+    def _edit_clips(self, edits: tuple[ClipEdit, ...]) -> None:
+        project = self._project()
+        for edit in edits:
+            updates = dict(edit.updates)
+            entry = project.timeline[edit.index] = dataclasses.replace(project.timeline[edit.index], **updates)
+            clip = self.timeline.clips[edit.index]
+            if "layer" in updates:
+                clip.set_layer(entry.layer)
+            if "cut" in updates:
+                clip.cut(*(entry.cut or (None, None)))
+            if "speed" in updates:
+                clip.set_speed(entry.speed)
+        self._place_followers()
+
+    def _remove_clips(self, indices: list[int]) -> list[RemovedClip]:
+        """Remove clips, from the back so the indices before stay."""
+        project = self._project()
+        removed = []
+        for index in indices:
+            follower = None
+            if index + 1 < len(project.timeline) and project.timeline[index + 1].start is None:
+                # The next clip followed this one: it keeps its place.
+                follower = project.timeline[index + 1]
+                project.timeline[index + 1] = dataclasses.replace(follower, start=self.timeline.clips[index + 1].start)
+            entry, clip = project.timeline.pop(index), self.timeline.clips[index]
+            self.timeline.remove(clip)
+            removed.append(RemovedClip(index, entry, clip, follower, self._scene_versions.get(entry.scene, 0)))
+        self._place_followers()
+        return removed
+
+    def _insert_clips(self, clips: tuple[RemovedClip, ...], fresh: dict[int, PreparedScene]) -> None:
+        project = self._project()
+        for item in clips:  # in index order: each lands where it was
+            if item.index in fresh:
+                item.clip.replace_scene(fresh[item.index])
+            project.timeline.insert(item.index, item.entry)
+            self.timeline.insert(item.index, item.clip)
+            if item.follower is not None:
+                project.timeline[item.index + 1] = item.follower
+        self._place_followers()
+
+    def _set_event(self, name: str, time: float | None) -> None:
+        project = self._project()
+        if time is None:
+            project.events.pop(name, None)
+            self.timeline.unfire(name)
+        else:
+            project.events[name] = time
+            self.timeline.fire(name, time)
+        self._place_followers()
+
+    def _prepare(self, scene: str) -> PreparedScene:
+        try:
+            return self._project().prepare(scene)
+        except Exception as error:
+            raise EditError(describe(error, self.root)) from None
+
+    def _check_index(self, index: int) -> None:
+        if not 0 <= index < len(self._project().timeline):
+            raise EditError(f"there is no clip {index!r}")
+
+    # The calls the tests and scripts use; the page sends commands (see commands.py).
+
     def edit_clip(self, index: int, changes: dict[str, Any]) -> None:
         """Change clip ``index``'s ``start`` (seconds, or None to follow
         the previous clip), ``layer``, ``cut`` (``[in, out]``, either None,
         or None for no cut) and ``speed``, live."""
-        self.edit_clips([{"index": index, **changes}])
+        self.run(parse("/api/clip", {"index": index, **changes}))
 
     def edit_clips(self, edits: list[dict[str, Any]]) -> None:
-        """Several clip edits as one (a group of clips dragged together):
-        ``{"index": i, ...changes}`` each, checked before any applies."""
-        project = self._project()
-        checked = []
-        for edit in edits:
-            index = edit.get("index")
-            if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(project.timeline):
-                raise EditError(f"there is no clip {index!r}")
-            checked.append((index, _clip_updates({key: value for key, value in edit.items() if key != "index"})))
-
-        def apply() -> None:
-            for index, updates in checked:
-                entry = project.timeline[index] = dataclasses.replace(project.timeline[index], **updates)
-                clip = self.timeline.clips[index]
-                if "layer" in updates:
-                    clip.set_layer(entry.layer)
-                if "cut" in updates:
-                    clip.cut(*(entry.cut or (None, None)))
-                if "speed" in updates:
-                    clip.set_speed(entry.speed)
-            self._place_followers()
-
-        self._change(apply)
+        """Several clip edits as one: ``{"index": i, ...changes}`` each,
+        checked before any applies."""
+        self.run(parse("/api/clip", {"clips": edits}))
 
     def add_clip(self, scene: str, start: float, layer: int = 0) -> int:
         """Put a new clip of ``scene`` on the timeline at ``start`` on
         ``layer`` (prepared now); returns its index."""
-        project = self._project()
-        if scene not in project.scenes:
-            raise EditError(f"the project has no scene named {scene!r}")
-        updates = _clip_updates({"start": start, "layer": layer})
-        with self._lock:
-            try:
-                prepared = project.prepare(scene)
-            except Exception as error:
-                raise EditError(describe(error, self.root)) from None
-            names = {clip.name for clip in self.timeline.clips}
-            name, number = scene, 2
-            while name in names:
-                name, number = f"{scene}-{number}", number + 1
-
-            def apply() -> None:
-                project.timeline.append(ClipEntry(scene, start=updates["start"], layer=updates["layer"]))
-                self.timeline.add(prepared, start=updates["start"], name=name, layer=updates["layer"])
-                self._place_followers()
-
-            self._change(apply)
-            return len(project.timeline) - 1
+        self.run(parse("/api/clip/add", {"scene": scene, "start": start, "layer": layer}))
+        return len(self._project().timeline) - 1
 
     def remove_clips(self, indices: list[int]) -> None:
-        """Take the clips ``indices`` off the timeline."""
-        project = self._project()
-        unique = sorted(set(indices), reverse=True)
-        for index in unique:
-            if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(project.timeline):
-                raise EditError(f"there is no clip {index!r}")
+        """Take the clips ``indices`` off the timeline (a clip that followed
+        a removed one keeps its place)."""
+        self.run(parse("/api/clip/remove", {"indices": indices}))
 
-        def apply() -> None:
-            for index in unique:  # from the back: the indices before stay
-                if index + 1 < len(project.timeline) and project.timeline[index + 1].start is None:
-                    # The next clip followed this one: it keeps its place.
-                    following = project.timeline[index + 1]
-                    project.timeline[index + 1] = dataclasses.replace(following, start=self.timeline.clips[index + 1].start)
-                del project.timeline[index]
-                self.timeline.remove(self.timeline.clips[index])
-            self._place_followers()
+    def set_event(self, name: str, time: float | None) -> None:
+        """Set ``name``'s time (the clips waiting for it go on then), or
+        with None remove it, live."""
+        if not isinstance(name, str) or not name:
+            raise EditError("an event needs a name")
+        self.run(parse("/api/event", {"name": name, "time": time}))
 
-        self._change(apply)
+    def set_setting(self, path: list[str] | tuple[str, ...], value: Any) -> None:
+        """Set the setting at ``path``, checked like ``manimx.json``; the
+        preview renders with it from the next frame."""
+        self.run(parse("/api/setting", {"path": list(path), "value": value}))
 
     def scenes(self) -> list[dict[str, Any]]:
         """The project's scenes: name, module and class, and how many clips show each."""
@@ -271,46 +411,12 @@ class ProjectEditor:
             used[entry.scene] = used.get(entry.scene, 0) + 1
         return [{"name": name, "module": entry.module, "class": entry.cls, "clips": used.get(name, 0)} for name, entry in project.scenes.items()]
 
-    def set_event(self, name: str, time: float | None) -> None:
-        """Set ``name``'s time (the clips waiting for it go on then), or
-        with None remove it, live."""
-        if not isinstance(name, str) or not name:
-            raise EditError("an event needs a name")
-        project = self._project()
-        value = None if time is None else _number(time, "time", minimum=0.0)
-
-        def apply() -> None:
-            if value is None:
-                project.events.pop(name, None)
-                self.timeline.unfire(name)
-            else:
-                project.events[name] = value
-                self.timeline.fire(name, value)
-            self._place_followers()
-
-        self._change(apply)
-
-    def set_setting(self, path: list[str] | tuple[str, ...], value: Any) -> None:
-        """Set the setting at ``path``, checked like ``manimx.json``; the
-        preview renders with it from the next frame."""
-        project = self._project()
-        with self._lock:
-            try:
-                set_value(project.settings, tuple(path), value)
-            except (SettingsError, StopIteration, AttributeError) as error:
-                raise EditError(str(error) or f"no setting {'.'.join(path)}") from None
-            settings = self.render_settings(project)
-            if self.server is not None:
-                self.server.replace(self.timeline, settings)
-        self._schedule_save()
-
     def _change(self, apply: Callable[[], None]) -> None:
         with self._lock:
             if self.server is not None:
                 self.server.change(apply)
             else:
                 apply()
-        self._schedule_save()
 
     def _place_followers(self) -> None:
         """Start every clip without its own start where the previous one
@@ -366,48 +472,6 @@ def _mtime(path: Path) -> int | None:
 
 def _entry_json(entry: ClipEntry) -> dict[str, Any]:
     return {"scene": entry.scene, "start": entry.start, "layer": entry.layer, "cut": None if entry.cut is None else list(entry.cut), "speed": entry.speed}
-
-
-def _clip_updates(changes: dict[str, Any]) -> dict[str, Any]:
-    """``changes`` to a clip entry, checked."""
-    unknown = set(changes) - set(CLIP_FIELDS)
-    if unknown:
-        raise EditError(f"clips have no {', '.join(sorted(unknown))}")
-    updates: dict[str, Any] = {}
-    if "start" in changes:
-        updates["start"] = None if changes["start"] is None else _number(changes["start"], "start", minimum=0.0)
-    if "layer" in changes:
-        layer = changes["layer"]
-        if isinstance(layer, bool) or not isinstance(layer, int):
-            raise EditError("a layer is a whole number")
-        updates["layer"] = layer
-    if "cut" in changes:
-        updates["cut"] = _cut(changes["cut"])
-    if "speed" in changes:
-        speed = _number(changes["speed"], "speed")
-        if speed <= 0.0:
-            raise EditError("a speed must be positive")
-        updates["speed"] = speed
-    return updates
-
-
-def _number(value: Any, name: str, minimum: float | None = None) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-        raise EditError(f"{name} must be a number")
-    if minimum is not None and value < minimum:
-        raise EditError(f"{name} must be at least {minimum:g}")
-    return float(value)
-
-
-def _cut(value: Any) -> tuple[float | None, float | None] | None:
-    if value is None:
-        return None
-    if not isinstance(value, (list, tuple)) or len(value) != 2:
-        raise EditError("a cut is [in, out]")
-    cut_in, cut_out = (None if point is None else _number(point, "a cut point", minimum=0.0) for point in value)
-    if cut_in is not None and cut_out is not None and cut_out <= cut_in:
-        raise EditError("a cut's out point must come after its in point")
-    return None if cut_in is None and cut_out is None else (cut_in, cut_out)
 
 
 def describe(error: BaseException, root: Path) -> str:

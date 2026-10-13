@@ -11,6 +11,8 @@
 // sidebar onto a track to add a clip of it there. The clip panel types
 // start, layer, cut and speed. Events: drag a pill on a track's events row
 // to time the event. The settings dialog changes the project's settings.
+// Ctrl+Z undoes any edit (a whole drag at once), Ctrl+Shift+Z or Ctrl+Y
+// redoes it; the server keeps the history (manimx/web/commands.py).
 //
 // While dragging, the page sends the edit at every step (one request at a
 // time, then the newest) and asks for the frame at the playhead, or at the
@@ -30,6 +32,8 @@ const panels = {
   events: document.getElementById("events-editor"),
   message: document.getElementById("edit-message"),
   settingsButton: document.getElementById("settings-button"),
+  undo: document.getElementById("undo"),
+  redo: document.getElementById("redo"),
   settings: document.getElementById("settings"),
   settingsForm: document.getElementById("settings-form"),
   marquee: document.getElementById("marquee"),
@@ -39,8 +43,16 @@ export function initEditing(shared) {
   page = shared;
   panels.settingsButton.addEventListener("click", openSettings);
   panels.settings.addEventListener("close", () => panels.settingsForm.replaceChildren());
+  panels.undo.addEventListener("click", () => post("/api/undo", {}));
+  panels.redo.addEventListener("click", () => post("/api/redo", {}));
   document.addEventListener("keydown", (event) => {
     if (event.target.closest("input, select, textarea, dialog") || !page.state.timeline?.editable) return;
+    const key = event.key.toLowerCase();
+    if ((event.ctrlKey || event.metaKey) && (key === "z" || key === "y")) {
+      event.preventDefault();
+      post(key === "y" || event.shiftKey ? "/api/redo" : "/api/undo", {});
+      return;
+    }
     if (event.key === "Escape" && selected.size) {
       selected.clear();
       page.redraw();
@@ -61,7 +73,9 @@ export function timelineLoaded() {
   panels.inspector.hidden = !editable;
   panels.sidebar.hidden = !editable;
   panels.settingsButton.hidden = !editable;
+  panels.undo.hidden = panels.redo.hidden = !editable;
   if (!editable) return;
+  showHistory(page.state.timeline.history);
   for (const index of [...selected]) if (!clips[index]) selected.delete(index);
   drawClipPanel();
   drawEventsPanel();
@@ -75,11 +89,23 @@ async function post(route, body) {
     const response = await fetch(route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const answer = await response.json();
     if (!response.ok) throw new Error(answer.error);
+    showHistory(answer.history);
     say("Live; saved to manimx.json a moment after the last edit.");
     return true;
   } catch (error) {
     say(error.message, true);
     return false;
+  }
+}
+
+/** The undo and redo buttons: what each would do, or disabled. */
+function showHistory(history) {
+  for (const [button, action, keys] of [
+    [panels.undo, history?.undo, "Ctrl+Z"],
+    [panels.redo, history?.redo, "Ctrl+Shift+Z"],
+  ]) {
+    button.disabled = !action;
+    button.title = action ? `${button === panels.undo ? "Undo" : "Redo"} ${action} (${keys})` : `Nothing to ${button === panels.undo ? "undo" : "redo"}`;
   }
 }
 
@@ -92,17 +118,21 @@ const editClips = (clips) => post("/api/clip", { clips });
 const editClip = (index, changes) => editClips([{ index, ...changes }]);
 const setEvent = (name, time) => post("/api/event", { name, time });
 
-/** Sends live edits while a drag goes on: one request at a time, then the newest. */
+let gestures = 0;
+
+/** Sends live edits while a drag goes on: one request at a time, then the
+ * newest. All carry one gesture id, so one undo takes back the whole drag. */
 function liveSender(route, onSent) {
   let busy = false;
   let next = null;
+  const gesture = `${Date.now()}-${++gestures}`;
   const send = async (body) => {
     if (busy) {
       next = body;
       return;
     }
     busy = true;
-    await post(route, body);
+    await post(route, { ...body, gesture });
     onSent();
     busy = false;
     if (next !== null) {

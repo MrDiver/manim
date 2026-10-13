@@ -321,6 +321,14 @@ class Timeline:
         clip.timeline = None
         self._dirty = True
 
+    def insert(self, index: int, clip: Clip) -> None:
+        """Put a removed ``clip`` back at position ``index`` (an undo)."""
+        if clip.timeline is not None or any(other.scene is clip.scene for other in self.clips):
+            raise ValueError("this clip, or its prepared scene, is on a timeline already")
+        clip.timeline = self
+        self.clips.insert(index, clip)
+        self._dirty = True
+
     def fire(self, event: str, time: float) -> None:
         """Set the time of ``event`` (a presenter's click, or a fixed time)."""
         self.events[event] = time
