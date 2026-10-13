@@ -37,7 +37,7 @@ from typing import Any
 from .. import _core
 from ..renderer.config import ViewState
 from ..robjects import RGroup, RNode
-from .nodes.camera_view import camera_views, view_cameras
+from .nodes.camera_view import camera_view_nodes, camera_views, view_cameras
 from .nodes.node import Node, Offset
 from .scene import PreparedScene
 from .signals.contributions import (
@@ -105,6 +105,7 @@ class ScenePlan:
                 self.evaluator.add_derived(self.slot(signal), [self.slot(i) for i in signal.inputs], _derivation(signal))
         self.graph = scene_graph(scene.roots, self.slot, lambda root: self.slot(root.present))
         """The core's scene graph."""
+        self._camera_views = camera_view_nodes(scene.roots)
 
     @property
     def signals(self) -> list[Signal]:
@@ -143,7 +144,7 @@ class ScenePlan:
         root = self.state_at(t, global_time, uid)
         evaluator = self.evaluator
         value = lambda signal: evaluator.value(self.slot(signal))  # noqa: E731
-        return ViewState(root, self.scene.camera.render_camera(value), camera_views(self.scene.roots, value))
+        return ViewState(root, self.scene.camera.render_camera(value), camera_views(self._camera_views, value))
 
     def _add_signal(self, signal: Signal) -> None:
         if signal.id in self._slots:

@@ -61,7 +61,7 @@ from .._core import (
     new_uid,
 )
 from .style import CapStyle, JointType
-from .transform import Quaternion, Transform, quaternion_from_axis_angle
+from .transform import Quaternion, Transform, quaternion_from_axis_angle, quaternion_from_rotation_matrix
 
 __all__ = [
     "CapStyle",
@@ -88,4 +88,5 @@ __all__ = [
     "Transform",
     "new_uid",
     "quaternion_from_axis_angle",
+    "quaternion_from_rotation_matrix",
 ]

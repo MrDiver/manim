@@ -12,6 +12,7 @@ from manimx.robjects import (
     Stroke,
     Transform,
     quaternion_from_axis_angle,
+    quaternion_from_rotation_matrix,
 )
 from manimx.robjects.style import to_rgb_array
 from manimx.userland.geometry import (
@@ -104,6 +105,24 @@ def test_transform_rejects_bad_input() -> None:
         Transform(rotation=Quaternion(0.0, 0.0, 0.0, 0.0))
     with pytest.raises(ValueError, match="non-zero 3D vector"):
         quaternion_from_axis_angle((0.0, 0.0, 0.0), 1.0)
+
+
+def test_rotation_helpers_match_numpy_quaternion() -> None:
+    import quaternion
+
+    generator = np.random.default_rng(3)
+    for _ in range(200):
+        axis, angle = generator.normal(size=3), generator.uniform(-7, 7)
+        expected = quaternion.from_rotation_vector(axis / np.linalg.norm(axis) * angle)
+        assert np.allclose(quaternion.as_float_array(quaternion_from_axis_angle(axis, angle)), quaternion.as_float_array(expected))
+        matrix = quaternion.as_rotation_matrix(expected)
+        found = quaternion.as_float_array(quaternion_from_rotation_matrix(matrix))
+        wanted = quaternion.as_float_array(expected)
+        assert np.allclose(found, wanted) or np.allclose(found, -wanted)  # q and -q are one rotation
+    for turn in (np.diag([1.0, -1.0, -1.0]), np.diag([-1.0, 1.0, -1.0]), np.diag([-1.0, -1.0, 1.0]), np.eye(3)):
+        assert np.allclose(quaternion.as_rotation_matrix(quaternion_from_rotation_matrix(turn)), turn)
+    with pytest.raises(ValueError, match="non-zero 3D vector"):
+        quaternion_from_axis_angle((1.0, 2.0), 1.0)
 
 
 def test_transform_scaled_broadcasts_scalar() -> None:

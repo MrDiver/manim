@@ -720,6 +720,25 @@ The colors also became right: ffmpeg's own conversion used BT.601 and
 left the file untagged, which players show as BT.709 for HD sizes; the
 file is now BT.709 and tagged so.
 
+### Y. frame_at without numpy for three numbers
+
+A py-spy profile of `frame_at` in light-show (seconds 10 to 12, with
+native frames) put about 80% of its time in Python called back from the
+core, much of it in two manimx helpers that used numpy for three
+numbers: `quaternion_from_axis_angle` (2.9 µs a call, now 0.16 µs with
+`math`; 76 calls per `frame_at`, from the moving heads' `Aim`) and
+`Camera.look_at`, whose `quaternion.from_rotation_matrix` ran an eigen
+decomposition (now Shepperd's method, `quaternion_from_rotation_matrix`).
+`camera_views()` also walked the whole node tree every frame to find the
+`CameraView` nodes; a plan now finds them once.
+
+Per `frame_at`, best of five runs over 800 times:
+
+| project | before | after |
+|---|---|---|
+| light-show, 10 to 12 s | 0.670 ms | 0.372 ms |
+| benchmark, 0 to 30 s | 0.072 ms | 0.047 ms |
+
 ## Where the time goes now
 
 Benchmark project with `PortalOrbit`, after steps L to O: 48.6 to about

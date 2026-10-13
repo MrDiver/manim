@@ -9,10 +9,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
-import quaternion
 
 from ..robjects import RNode
-from ..robjects.transform import Transform
+from ..robjects.transform import Transform, quaternion_from_rotation_matrix
 from ..utils.color import BLACK, WHITE, ManimColor, ParsableManimColor, linear_rgb
 
 DEFAULT_FRAME_HEIGHT = 8.0
@@ -65,7 +64,7 @@ class Camera:
         right /= np.linalg.norm(right)
         screen_up = np.cross(right, forward)
         # The camera looks along its local -z, so local +z points backwards.
-        rotation = quaternion.from_rotation_matrix(np.column_stack([right, screen_up, -forward]))
+        rotation = quaternion_from_rotation_matrix(np.column_stack([right, screen_up, -forward]))
         return cls(transform=Transform(position=eye, rotation=rotation), **options)  # type: ignore[arg-type]
 
     @property

@@ -30,12 +30,46 @@ def _normalized(rotation: Quaternion) -> Quaternion:
 
 
 def quaternion_from_axis_angle(axis: object, angle: float) -> Quaternion:
-    """Unit quaternion rotating ``angle`` radians around ``axis``."""
-    vector = np.asarray(axis, dtype=np.float64)
-    length = np.linalg.norm(vector)
-    if vector.shape != (3,) or length == 0.0:
+    """Unit quaternion rotating ``angle`` radians around ``axis``.
+
+    Plain float arithmetic, not numpy: animations call this every frame
+    with three numbers, where numpy's per-call overhead is most of the
+    time (2.9 against 0.16 µs).
+    """
+    try:
+        x, y, z = (float(component) for component in axis)  # type: ignore[attr-defined]
+    except (TypeError, ValueError):
+        raise ValueError("rotation axis must be a non-zero 3D vector") from None
+    length = math.sqrt(x * x + y * y + z * z)
+    if length == 0.0:
         raise ValueError("rotation axis must be a non-zero 3D vector")
-    return quaternion.from_rotation_vector(vector / length * angle)
+    scale = math.sin(angle / 2) / length
+    return quaternion.quaternion(math.cos(angle / 2), x * scale, y * scale, z * scale)
+
+
+def quaternion_from_rotation_matrix(matrix: np.ndarray) -> Quaternion:
+    """The unit quaternion of an orthonormal 3x3 rotation matrix.
+
+    Shepperd's method: build the quaternion from its largest component, so
+    no division is by a small number (S. W. Shepperd, "Quaternion from
+    rotation matrix", Journal of Guidance and Control 1(3), 1978,
+    https://doi.org/10.2514/3.55767b). numpy-quaternion's
+    ``from_rotation_matrix`` also accepts matrices that are not
+    orthonormal, through an eigen decomposition, about 30 times slower.
+    """
+    (m00, m01, m02), (m10, m11, m12), (m20, m21, m22) = (tuple(map(float, row)) for row in matrix)
+    trace = m00 + m11 + m22
+    if trace >= max(m00, m11, m22):
+        w = math.sqrt(1.0 + trace) / 2
+        return quaternion.quaternion(w, (m21 - m12) / (4 * w), (m02 - m20) / (4 * w), (m10 - m01) / (4 * w))
+    if m00 >= m11 and m00 >= m22:
+        x = math.sqrt(1.0 + m00 - m11 - m22) / 2
+        return quaternion.quaternion((m21 - m12) / (4 * x), x, (m01 + m10) / (4 * x), (m02 + m20) / (4 * x))
+    if m11 >= m22:
+        y = math.sqrt(1.0 - m00 + m11 - m22) / 2
+        return quaternion.quaternion((m02 - m20) / (4 * y), (m01 + m10) / (4 * y), y, (m12 + m21) / (4 * y))
+    z = math.sqrt(1.0 - m00 - m11 + m22) / 2
+    return quaternion.quaternion((m10 - m01) / (4 * z), (m02 + m20) / (4 * z), (m12 + m21) / (4 * z), z)
 
 
 @dataclass(frozen=True, slots=True)

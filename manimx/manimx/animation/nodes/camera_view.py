@@ -58,15 +58,27 @@ def current_value(signal: Signal) -> Any:
     return signal.value
 
 
-def camera_views(roots: Iterable[Node], value: Callable[[Signal], Any]) -> tuple[CameraViewState, ...]:
-    """The views of every :class:`CameraView` under the present ``roots``
-    that is not faded out (signal values read by ``value``)."""
+CameraViewNodes = tuple[tuple[Node, tuple["CameraView", ...]], ...]
+"""Each root with the :class:`CameraView` nodes under it."""
+
+
+def camera_view_nodes(roots: Iterable[Node]) -> CameraViewNodes:
+    """Each of ``roots`` with the :class:`CameraView` nodes under it. A
+    prepared scene's tree does not change, so a plan finds them once
+    instead of walking the tree every frame."""
+    return tuple((root, tuple(node for node in root.family() if isinstance(node, CameraView))) for root in roots)
+
+
+def camera_views(nodes: CameraViewNodes, value: Callable[[Signal], Any]) -> tuple[CameraViewState, ...]:
+    """The views of every :class:`CameraView` in ``nodes``
+    (:func:`camera_view_nodes`) under a present root that is not faded
+    out (signal values read by ``value``)."""
     views: dict[int, CameraViewState] = {}
-    for root in roots:
-        if not value(root.present):
+    for root, cameras in nodes:
+        if not cameras or not value(root.present):
             continue
-        for node in root.family():
-            if isinstance(node, CameraView) and node.uid not in views and value(node.alpha) > 0.0:
+        for node in cameras:
+            if node.uid not in views and value(node.alpha) > 0.0:
                 views[node.uid] = node.view_state(value)
     return tuple(views.values())
 
@@ -88,4 +100,4 @@ def _rectangle(width: float, height: float) -> np.ndarray:
     return np.stack([starts, (2 * starts + ends) / 3, (starts + 2 * ends) / 3, ends], axis=1).reshape(-1, 2)
 
 
-__all__ = ["CameraView", "camera_views", "current_value", "view_cameras"]
+__all__ = ["CameraView", "CameraViewNodes", "camera_view_nodes", "camera_views", "current_value", "view_cameras"]
