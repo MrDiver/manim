@@ -680,6 +680,15 @@ button.toggle[aria-expanded="true"]::before,
   background: #e5c23a;
 }
 
+/* Where a drag snapped. */
+#snap-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed #e5c23a;
+}
+
 #playhead {
   position: absolute;
   top: 0;
@@ -855,4 +864,11 @@ button.toggle[aria-expanded="true"]::before,
     max-height: none;
     min-height: 0;
   }
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
 }

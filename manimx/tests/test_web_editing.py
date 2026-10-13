@@ -308,6 +308,32 @@ def test_a_removed_clip_comes_back_with_its_scene_as_saved_now(root, editor) -> 
     assert [clip.end for clip in editor.timeline.clips] == [3.0, 6.0, NEVER]
 
 
+def test_clips_are_split_at_a_time_and_duplicated(root, editor) -> None:
+    with pytest.raises(EditError, match="not inside Short-2"):  # 1.5 s is in clip 0 only
+        editor.run(parse("/api/clip/split", {"indices": [1, 0], "time": 1.5}))
+    assert len(editor.timeline.clips) == 3 and editor.history()["undo"] is None
+    editor.run(parse("/api/clip/split", {"indices": [0], "time": 0.5}))
+    entries = editor.project.timeline
+    assert [(entry.scene, entry.start, entry.cut) for entry in entries[:3]] == [
+        ("Short", None, (None, 0.5)),
+        ("Short", 0.5, (0.5, None)),
+        ("Short", None, None),  # still follows: the second half ends where the clip ended
+    ]
+    assert [(clip.start, clip.end) for clip in editor.timeline.clips[:3]] == [(0.0, 0.5), (0.5, 2.0), (2.0, 4.0)]
+    assert editor.history()["undo"] == "split a clip"
+
+    editor.run(parse("/api/clip/duplicate", {"indices": [0]}))  # after the clips on its track
+    copy = editor.timeline.clips[-1]
+    assert (copy.start, copy.end, editor.project.timeline[-1].cut) == (4.0, 4.5, (None, 0.5))
+    with pytest.raises(EditError, match="never fires"):
+        editor.run(parse("/api/clip/duplicate", {"indices": [3]}))  # Waiting holds for "go"
+
+    editor.undo()
+    editor.undo()
+    assert [(entry.start, entry.cut) for entry in editor.project.timeline] == [(None, None), (None, None), (0.0, None)]
+    assert starts(editor) == [0.0, 2.0, 0.0]
+
+
 def test_commands_are_parsed_from_the_pages_requests() -> None:
     assert parse("/api/clip", {"clips": [{"index": 1, "layer": 2}]}) == EditClips((ClipEdit(1, (("layer", 2),)),))
     assert parse("/api/clip/add", {"scene": "Intro"}) == AddClip("Intro", 0.0, 0)

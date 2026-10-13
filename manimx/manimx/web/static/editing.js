@@ -13,6 +13,12 @@
 // to time the event. The settings dialog changes the project's settings.
 // Ctrl+Z undoes any edit (a whole drag at once), Ctrl+Shift+Z or Ctrl+Y
 // redoes it; the server keeps the history (manimx/web/commands.py).
+// S splits the selected clips (or, with none selected, every clip) under
+// the playhead, Ctrl+D puts a copy after each selected clip.
+//
+// Snapping: a dragged clip's start or end, or a dragged cut, snaps to the
+// other clips' starts and ends, the playhead, the events and 0 when it
+// comes within SNAP_PIXELS of one; a line shows where. Alt drags freely.
 //
 // While dragging, the page sends the edit at every step (one request at a
 // time, then the newest) and asks for the frame at the playhead, or at the
@@ -23,6 +29,7 @@
 let page = null; // what app.js shares: state, elements and its helpers
 const selected = new Set(); // indices of the selected clips
 const SCENE_TYPE = "application/x-manimx-scene";
+const SNAP_PIXELS = 8;
 
 const panels = {
   inspector: document.getElementById("inspector"),
@@ -58,6 +65,16 @@ export function initEditing(shared) {
       page.redraw();
       drawClipPanel();
     }
+    if ((event.ctrlKey || event.metaKey) && key === "d") {
+      event.preventDefault(); // not the browser's bookmark
+      duplicate();
+      return;
+    }
+    if (key === "s" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      split();
+      return;
+    }
     if ((event.key === "Delete" || event.key === "Backspace") && selected.size) {
       event.preventDefault();
       const indices = [...selected];
@@ -65,6 +82,21 @@ export function initEditing(shared) {
       post("/api/clip/remove", { indices });
     }
   });
+}
+
+/** The clips under the playhead (of the selection, if there is one) split there. */
+function split() {
+  const time = page.state.time;
+  const under = page.state.timeline.clips
+    .map((clip, index) => ({ clip, index }))
+    .filter(({ clip, index }) => clip.entry && clip.start < time && time < (clip.end ?? Infinity) && (!selected.size || selected.has(index)))
+    .map(({ index }) => index);
+  if (under.length) post("/api/clip/split", { indices: under, time });
+  else say("No clip to split under the playhead.", true);
+}
+
+function duplicate() {
+  if (selected.size) post("/api/clip/duplicate", { indices: [...selected] });
 }
 
 /** Called by app.js whenever the timeline was (re)loaded. */
@@ -309,6 +341,15 @@ function startDrag(event, edge, index) {
   const secondsPerPixel = page.state.span / page.elements.ruler.getBoundingClientRect().width;
   const clip = clips[index];
   const grab = { x: event.clientX, delta: 0, layers: 0, moved: false };
+  // What the drag can snap: the dragged edges, onto the edges of every clip that stays.
+  const dragEdges =
+    edge === "move" ? moving.flatMap((i) => [clips[i].start, clips[i].end].filter((time) => time !== null)) : [edge === "in" ? clip.start : clip.end];
+  const targets = [
+    0,
+    page.state.time,
+    ...page.state.timeline.events.map((event) => event.time).filter((time) => time !== null),
+    ...clips.flatMap((other, i) => (edge === "move" ? moving.includes(i) : i === index) ? [] : [other.start, other.end].filter((time) => time !== null)),
+  ];
   const send = liveSender("/api/clip", () => {
     if (edge === "move") page.refreshFrame();
     else page.showTime(edge === "in" ? clip.start + grab.delta : clip.end + grab.delta);
@@ -321,8 +362,11 @@ function startDrag(event, edge, index) {
     // The dragged end lands on a frame.
     const from = edge === "out" ? clip.end : clip.start;
     let delta = onFrame(from + raw) - from;
-    if (edge === "move") delta = Math.max(delta, -Math.min(...moving.map((i) => clips[i].start)));
-    else delta = clamped(clip, edge, delta);
+    const keep = (value) => (edge === "move" ? Math.max(value, -Math.min(...moving.map((i) => clips[i].start))) : clamped(clip, edge, value));
+    delta = keep(delta);
+    const snap = move.altKey ? null : snapTo(delta, dragEdges, targets, SNAP_PIXELS * secondsPerPixel);
+    if (snap) delta = keep(delta + snap.shift);
+    showSnap(snap ? snap.target : null);
     let layers = grab.layers;
     if (edge === "move") {
       const over = layerAt(move.clientX, move.clientY);
@@ -353,6 +397,7 @@ function startDrag(event, edge, index) {
   const onUp = async () => {
     removeEventListener("pointermove", onMove);
     removeEventListener("pointerup", onUp);
+    showSnap(null);
     await send.idle();
     page.state.dragging = false;
     drawClipPanel();
@@ -360,6 +405,31 @@ function startDrag(event, edge, index) {
   };
   addEventListener("pointermove", onMove);
   addEventListener("pointerup", onUp);
+}
+
+/** The shift that puts one of `edges` (moved by `delta`) onto the nearest
+ * of `targets` within `reach` seconds, and that target; or null. */
+function snapTo(delta, edges, targets, reach) {
+  let best = null;
+  for (const at of edges) {
+    for (const target of targets) {
+      const shift = target - (at + delta);
+      if (Math.abs(shift) <= reach && (!best || Math.abs(shift) < Math.abs(best.shift))) best = { shift, target };
+    }
+  }
+  return best;
+}
+
+/** The line where a drag snapped, or none. */
+function showSnap(time) {
+  let line = document.getElementById("snap-line");
+  if (!line) {
+    line = document.createElement("div");
+    line.id = "snap-line";
+    document.getElementById("overlay").append(line);
+  }
+  line.hidden = time === null;
+  if (time !== null) line.style.left = `${page.percent(time)}%`;
 }
 
 /** `time` on the nearest frame (past the timeline's end too: a clip may be moved there). */
@@ -413,7 +483,7 @@ function drawClipPanel() {
   }
   if (selected.size > 1) {
     heading.textContent = `${selected.size} clips`;
-    panels.clip.append(paragraph([...selected].map((i) => clips[i].name).join(", ")), paragraph("Drag one of them to move them all. Escape clears the selection."));
+    panels.clip.append(paragraph([...selected].map((i) => clips[i].name).join(", ")), paragraph("Drag one of them to move them all. Escape clears the selection."), actions());
     return;
   }
   const index = [...selected][0];
@@ -429,9 +499,18 @@ function drawClipPanel() {
     field("Cut out", numberInput(entry.cut?.[1] ?? null, 0, clip.length, 0.01, (value) => editClip(index, { cut: [entry.cut?.[0] ?? null, value] }), "end"), "s"),
     field("Speed", numberInput(entry.speed, 0.01, null, 0.05, (value) => editClip(index, { speed: value })), "×", "2 plays twice as fast, 0.5 is slow motion"),
   );
+  panels.clip.append(actions());
   for (const event of clip.waits) {
     panels.clip.append(field(`Waits for ${event}`, button("Fire at the playhead", () => setEvent(event, page.state.time)), "", "the clip goes on at that time"));
   }
+}
+
+/** Buttons for what S and Ctrl+D do to the selection. */
+function actions() {
+  const row = document.createElement("div");
+  row.className = "actions";
+  row.append(button("Split at the playhead (S)", split), button("Duplicate (Ctrl+D)", duplicate));
+  return row;
 }
 
 // -- events: pills on the tracks' events rows and the events panel ----------------------

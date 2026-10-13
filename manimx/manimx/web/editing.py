@@ -55,7 +55,9 @@ from ..project import PROJECT_FILE, ClipEntry, Project
 from ..settings import SettingsError, entries, get, set_value
 from .commands import (
     AddClip,
+    Batch,
     ClipEdit,
+    DuplicateClips,
     EditClips,
     EditError,
     InsertClips,
@@ -63,6 +65,7 @@ from .commands import (
     RemovedClip,
     SetEvent,
     SetSetting,
+    SplitClips,
     UICommand,
     parse,
 )
@@ -264,9 +267,12 @@ class ProjectEditor:
                 inverse = EditClips(tuple(ClipEdit(edit.index, tuple((key, getattr(project.timeline[edit.index], key)) for key, _ in edit.updates)) for edit in edits))
                 self._change(lambda: self._edit_clips(edits))
                 return inverse
-            case AddClip(scene, start, layer):
+            case AddClip(scene, start, layer, cut, speed, index):
                 if scene not in project.scenes:
                     raise EditError(f"the project has no scene named {scene!r}")
+                position = len(project.timeline) if index is None else index
+                if not 0 <= position <= len(project.timeline):
+                    raise EditError(f"no place {index!r} for a clip")
                 prepared = self._prepare(scene)
                 names = {clip.name for clip in self.timeline.clips}
                 name, number = scene, 2
@@ -274,18 +280,50 @@ class ProjectEditor:
                     name, number = f"{scene}-{number}", number + 1
 
                 def add() -> None:
-                    project.timeline.append(ClipEntry(scene, start=start, layer=layer))
-                    self.timeline.add(prepared, start=start, name=name, layer=layer)
+                    project.timeline.insert(position, ClipEntry(scene, start=start, layer=layer, cut=cut, speed=speed))
+                    clip = self.timeline.add(prepared, start=start, name=name, layer=layer)
+                    self.timeline.remove(clip)
+                    self.timeline.insert(position, clip)
+                    if cut is not None:
+                        clip.cut(*cut)
+                    if speed != 1.0:
+                        clip.set_speed(speed)
                     self._place_followers()
 
                 self._change(add)
-                return RemoveClips((len(project.timeline) - 1,))
-            case RemoveClips(indices):
+                return RemoveClips((position,), keep_followers=False)
+            case RemoveClips(indices, keep_followers):
                 for index in indices:
                     self._check_index(index)
                 removed: list[RemovedClip] = []
-                self._change(lambda: removed.extend(self._remove_clips(sorted(set(indices), reverse=True))))
+                self._change(lambda: removed.extend(self._remove_clips(sorted(set(indices), reverse=True), keep_followers)))
                 return InsertClips(tuple(reversed(removed)))
+            case SplitClips(indices, time):
+                # From the last clip: a new clip goes in right after each, moving only those after it.
+                return self._apply(Batch(tuple(self._split(index, time) for index in sorted(set(indices), reverse=True)), command.label))
+            case DuplicateClips(indices):
+                # Each copy goes after its clip, in the first gap on its track long enough for it.
+                copies: list[AddClip] = []
+                for index in indices:
+                    self._check_index(index)
+                    entry, clip = project.timeline[index], self.timeline.clips[index]
+                    if clip.end == NEVER:
+                        raise EditError(f"{clip.name} waits for an event that never fires: it has no end to put a copy after")
+                    length = clip.end - clip.start
+                    taken = [(other.start, other.end) for other in self.timeline.clips if other.layer == entry.layer]
+                    taken += [(copy.start, copy.start + length) for copy in copies if copy.layer == entry.layer]
+                    copies.append(AddClip(entry.scene, _free_start(taken, clip.end, length), entry.layer, entry.cut, entry.speed))
+                return self._apply(Batch(tuple(copies), command.label))
+            case Batch(commands, name):
+                inverses: list[UICommand] = []
+                try:
+                    for part in commands:
+                        inverses.append(self._apply(part))
+                except EditError:
+                    for inverse in reversed(inverses):  # all or nothing
+                        self._apply(inverse)
+                    raise
+                return Batch(tuple(reversed(inverses)), name)
             case InsertClips(clips):
                 fresh = {item.index: self._prepare(item.entry.scene) for item in clips if item.scene_version != self._scene_versions.get(item.entry.scene, 0)}
                 self._change(lambda: self._insert_clips(clips, fresh))
@@ -320,13 +358,31 @@ class ProjectEditor:
                 clip.set_speed(entry.speed)
         self._place_followers()
 
-    def _remove_clips(self, indices: list[int]) -> list[RemovedClip]:
+    def _split(self, index: int, time: float) -> UICommand:
+        """The commands that split clip ``index`` at global ``time``."""
+        self._check_index(index)
+        entry, clip = self._project().timeline[index], self.timeline.clips[index]
+        compiled = clip.compiled_time(time)
+        cut_in, cut_out = entry.cut or (None, None)
+        playing = None if compiled is None else clip.scene.playing_time_at(compiled)
+        first, last = cut_in or 0.0, clip.scene.playing_time if cut_out is None else cut_out
+        if playing is None or not first + 1e-6 < playing < last - 1e-6:
+            raise EditError(f"the playhead is not inside {clip.name}")
+        return Batch(
+            (
+                EditClips((ClipEdit(index, (("cut", (cut_in, playing)),)),)),
+                AddClip(entry.scene, time, entry.layer, (playing, cut_out), entry.speed, index + 1),
+            ),
+            "split a clip",
+        )
+
+    def _remove_clips(self, indices: list[int], keep_followers: bool = True) -> list[RemovedClip]:
         """Remove clips, from the back so the indices before stay."""
         project = self._project()
         removed = []
         for index in indices:
             follower = None
-            if index + 1 < len(project.timeline) and project.timeline[index + 1].start is None:
+            if keep_followers and index + 1 < len(project.timeline) and project.timeline[index + 1].start is None:
                 # The next clip followed this one: it keeps its place.
                 follower = project.timeline[index + 1]
                 project.timeline[index + 1] = dataclasses.replace(follower, start=self.timeline.clips[index + 1].start)
@@ -456,6 +512,16 @@ class ProjectEditor:
             self._unsaved = False
             self.project.save()
             self.saved_mtime = _mtime(self.root / PROJECT_FILE)
+
+
+def _free_start(taken: list[tuple[float, float]], after: float, length: float) -> float:
+    """The first time from ``after`` on where ``length`` seconds overlap none of ``taken``."""
+    start = after
+    while True:
+        blocking = [end for begin, end in taken if begin < start + length - 1e-9 and end > start + 1e-9]
+        if not blocking:
+            return start
+        start = max(blocking)
 
 
 def _module_files(project: Project) -> dict[str, Path | None]:

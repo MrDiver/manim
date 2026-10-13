@@ -82,11 +82,15 @@ class EditClips(UICommand):
 
 @dataclass(frozen=True)
 class AddClip(UICommand):
-    """Put a new clip of ``scene`` on the timeline (it is prepared then)."""
+    """Put a new clip of ``scene`` on the timeline (it is prepared then),
+    at position ``index`` of the clip list (None: last)."""
 
     scene: str
     start: float
     layer: int = 0
+    cut: tuple[float | None, float | None] | None = None
+    speed: float = 1.0
+    index: int | None = None
 
     @property
     def label(self) -> str:
@@ -95,13 +99,53 @@ class AddClip(UICommand):
 
 @dataclass(frozen=True)
 class RemoveClips(UICommand):
-    """Take clips off the timeline."""
+    """Take clips off the timeline. A clip that followed a removed one keeps
+    its place, unless ``keep_followers`` is off (undoing an added clip: the
+    next clip follows the one before again)."""
+
+    indices: tuple[int, ...]
+    keep_followers: bool = True
+
+    @property
+    def label(self) -> str:
+        return f"remove {_clips(len(self.indices))}"
+
+
+@dataclass(frozen=True)
+class SplitClips(UICommand):
+    """Split each clip at global ``time`` in two: the clip is cut to end
+    there, and a new clip of its scene starts there, cut to go on from the
+    same point, with its layer and speed."""
+
+    indices: tuple[int, ...]
+    time: float
+
+    @property
+    def label(self) -> str:
+        return f"split {_clips(len(self.indices))}"
+
+
+@dataclass(frozen=True)
+class DuplicateClips(UICommand):
+    """A copy of each clip (its cut, layer and speed), right after it."""
 
     indices: tuple[int, ...]
 
     @property
     def label(self) -> str:
-        return f"remove {_clips(len(self.indices))}"
+        return f"duplicate {_clips(len(self.indices))}"
+
+
+@dataclass(frozen=True)
+class Batch(UICommand):
+    """Several commands as one step: run in order, undone in reverse."""
+
+    commands: tuple[UICommand, ...]
+    name: str
+
+    @property
+    def label(self) -> str:
+        return self.name
 
 
 @dataclass(frozen=True)
@@ -166,12 +210,16 @@ def parse(route: str, body: dict[str, Any]) -> UICommand:
             return AddClip(scene, start, _layer(body.get("layer", 0)))
         case "/api/clip/remove", {"indices": list(indices)}:
             return RemoveClips(tuple(_index(index) for index in indices))
+        case "/api/clip/split", {"indices": list(indices), "time": time}:
+            return SplitClips(tuple(_index(index) for index in indices), _number(time, "time", minimum=0.0))
+        case "/api/clip/duplicate", {"indices": list(indices)}:
+            return DuplicateClips(tuple(_index(index) for index in indices))
         case "/api/event", {"name": str(name)} if name:
             time = body.get("time")
             return SetEvent(name, None if time is None else _number(time, "time", minimum=0.0))
         case "/api/setting", {"path": list(path)} if path and all(isinstance(part, str) for part in path):
             return SetSetting(tuple(path), body.get("value"))
-        case "/api/clip" | "/api/clip/add" | "/api/clip/remove" | "/api/event" | "/api/setting", _:
+        case "/api/clip" | "/api/clip/add" | "/api/clip/remove" | "/api/clip/split" | "/api/clip/duplicate" | "/api/event" | "/api/setting", _:
             raise EditError(f"{route} does not take {body}")
     raise EditError(f"no edit {route}")
 
@@ -244,7 +292,9 @@ def _clips(count: int) -> str:
 __all__ = [
     "CLIP_FIELDS",
     "AddClip",
+    "Batch",
     "ClipEdit",
+    "DuplicateClips",
     "EditClips",
     "EditError",
     "InsertClips",
@@ -252,6 +302,7 @@ __all__ = [
     "RemovedClip",
     "SetEvent",
     "SetSetting",
+    "SplitClips",
     "UICommand",
     "clip_updates",
     "parse",
