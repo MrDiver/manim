@@ -29,8 +29,8 @@ use std::sync::Arc;
 
 use glam::{DMat3, DMat4, DQuat, DVec3};
 
-use crate::render::pack::color::linear_rgb;
 use crate::render::pack::arena::Arena;
+use crate::render::pack::color::linear_rgb;
 use crate::render::pack::flatten::{FlatScene, ShadowList};
 use crate::render::pack::records::{self, DrawIndexed, Material, MeshObject, MeshVertex};
 use crate::robjects::{self, Instances, Kind, Mesh, SurfaceShader, Texture};

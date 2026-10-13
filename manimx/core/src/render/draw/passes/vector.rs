@@ -11,15 +11,15 @@
 
 use std::collections::HashMap;
 
+use crate::render::draw::passes::camera_views::CameraViewTexture;
+use crate::render::draw::passes::images::ImageTexture;
+use crate::render::error::Result;
 use crate::render::gpu::buffer::{GrowableBuffer, Records};
 use crate::render::gpu::device::{
     shadow_depth_stencil, Gpu, ShadowStencil, COLOR_FORMAT, DEPTH_FORMAT,
 };
-use crate::render::error::Result;
 use crate::render::pack::flatten::ShadowList;
 use crate::render::pack::records::Frame;
-use crate::render::draw::passes::camera_views::CameraViewTexture;
-use crate::render::draw::passes::images::ImageTexture;
 
 /// Bytes of one indirect draw (`DrawIndirectArgs`).
 const DRAW_SIZE: u64 = 16;

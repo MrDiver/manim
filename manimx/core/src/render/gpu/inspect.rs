@@ -8,8 +8,8 @@
 //! multisampled one, `layer` of an array) unchanged, and the image is
 //! copied out. Turning values into colors is left to the caller.
 
-use crate::render::gpu::device::Gpu;
 use crate::render::error::{Error, Result};
+use crate::render::gpu::device::Gpu;
 
 /// How a texture is read in WGSL.
 #[derive(Clone, Copy)]

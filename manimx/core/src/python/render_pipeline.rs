@@ -11,7 +11,8 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 use crate::python::robjects::{node_of, transform_from_py};
 use crate::render::composite::effects::{Bloom, Effect, ShaderEffect};
 use crate::render::error::Error;
-use crate::render::pipeline::{self, PixelFormat, PipelineOptions, SubFrame, View};
+use crate::render::output::PixelFormat;
+use crate::render::pipeline::{self, PipelineOptions, SubFrame, View};
 use crate::render::settings::{Camera, CameraView, ViewSettings};
 
 impl From<Error> for PyErr {

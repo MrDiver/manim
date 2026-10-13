@@ -13,8 +13,8 @@
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::render::gpu::device::{Gpu, HDR_FORMAT};
 use crate::render::error::Result;
+use crate::render::gpu::device::{Gpu, HDR_FORMAT};
 use crate::render::gpu::fullscreen::{Blend, Fullscreen, TexturePool, UniformSlots};
 use crate::render::gpu::profiler::GpuProfiler;
 

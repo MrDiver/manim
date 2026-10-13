@@ -9,9 +9,6 @@ use crate::render::error::{Error, Result};
 use crate::render::gpu::shaders;
 
 pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-/// The planes of NV12 output: luma per pixel, (Cb, Cr) per 2x2 pixels.
-pub const LUMA_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
-pub const CHROMA_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg8Unorm;
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Shadow maps: depth, and a stencil for the masks of clipped casters.
 pub const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32FloatStencil8;

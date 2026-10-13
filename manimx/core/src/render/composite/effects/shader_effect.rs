@@ -9,8 +9,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::render::gpu::device::{Gpu, HDR_FORMAT};
 use crate::render::error::Result;
+use crate::render::gpu::device::{Gpu, HDR_FORMAT};
 use crate::render::gpu::fullscreen::{TexturePool, UniformSlots};
 
 /// The settings of `ShaderEffect` (manimx/renderer/effects.py).

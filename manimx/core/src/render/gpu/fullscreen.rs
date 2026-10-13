@@ -8,8 +8,8 @@
 
 use std::collections::HashMap;
 
-use crate::render::gpu::device::Gpu;
 use crate::render::error::Result;
+use crate::render::gpu::device::Gpu;
 use crate::render::gpu::profiler::GpuProfiler;
 
 const UNIFORM_STRIDE: u64 = 256; // minimum uniform buffer offset alignment

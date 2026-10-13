@@ -7,6 +7,7 @@ pub mod composite;
 pub mod draw;
 pub mod error;
 pub mod gpu;
+pub mod output;
 pub mod pack;
 pub mod pipeline;
 pub mod settings;

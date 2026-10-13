@@ -23,14 +23,16 @@
 //! References only grow within a layer, so values left by earlier clip
 //! scopes never match.
 
+use crate::render::draw::passes::mesh::MeshPass;
+use crate::render::draw::passes::vector::VectorPass;
 use crate::render::gpu::buffer::GrowableBuffer;
-use crate::render::gpu::device::{Gpu, SHADOW_FORMAT, TRANSLUCENT_DEPTH_FORMAT, TRANSMITTANCE_FORMAT};
+use crate::render::gpu::device::{
+    Gpu, SHADOW_FORMAT, TRANSLUCENT_DEPTH_FORMAT, TRANSMITTANCE_FORMAT,
+};
+use crate::render::gpu::profiler::GpuProfiler;
 use crate::render::pack::flatten::NO_CLIP;
 use crate::render::pack::records::{Frame, ShadowView};
 use crate::render::pack::shadows::ShadowViews;
-use crate::render::draw::passes::mesh::MeshPass;
-use crate::render::draw::passes::vector::VectorPass;
-use crate::render::gpu::profiler::GpuProfiler;
 
 /// Frames of the shadow views share one uniform buffer; bind group offsets
 /// must be multiples of 256 bytes.

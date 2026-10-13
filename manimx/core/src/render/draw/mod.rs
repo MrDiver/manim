@@ -18,18 +18,18 @@
 pub mod passes;
 pub mod targets;
 
-use crate::render::gpu::buffer::Records;
-use crate::render::gpu::device::Gpu;
-use crate::render::error::Result;
-use crate::render::gpu::inspect::TextureKind;
-use crate::render::pack::packer::{Packer, Packet};
-use crate::render::pack::records::Frame;
 use crate::render::draw::passes::lighting::LightingPass;
 use crate::render::draw::passes::mesh::{MeshData, MeshPass};
 use crate::render::draw::passes::shadow::ShadowPass;
 use crate::render::draw::passes::vector::{VectorData, VectorPass};
-use crate::render::gpu::profiler::GpuProfiler;
 use crate::render::draw::targets::RenderTargets;
+use crate::render::error::Result;
+use crate::render::gpu::buffer::Records;
+use crate::render::gpu::device::Gpu;
+use crate::render::gpu::inspect::TextureKind;
+use crate::render::gpu::profiler::GpuProfiler;
+use crate::render::pack::packer::{Packer, Packet};
+use crate::render::pack::records::Frame;
 
 /// What the renderer needs from the `RenderConfig`.
 #[derive(Clone, Copy, PartialEq)]
@@ -46,7 +46,6 @@ pub struct Drawer {
     mesh_pass: MeshPass,
     lighting_pass: LightingPass,
     shadow_pass: ShadowPass,
-    pub profiler: GpuProfiler,
     targets: Option<RenderTargets>,
     /// Increases whenever the targets are made again (bind groups refer to them).
     targets_generation: u64,
@@ -117,7 +116,7 @@ impl Drawer {
         self.shadow_pass.layer_count()
     }
 
-    pub fn new(gpu: &Gpu, profile: bool) -> Result<Drawer> {
+    pub fn new(gpu: &Gpu) -> Result<Drawer> {
         Ok(Drawer {
             frame_uniform: gpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("frame"),
@@ -129,7 +128,6 @@ impl Drawer {
             mesh_pass: MeshPass::new(gpu)?,
             lighting_pass: LightingPass::new(gpu),
             shadow_pass: ShadowPass::new(gpu),
-            profiler: GpuProfiler::new(&gpu.device, profile && gpu.timestamps),
             targets: None,
             targets_generation: 0,
             empty_3d: None,
@@ -143,7 +141,7 @@ impl Drawer {
 
     /// Render `packet` (with the records of `packer`'s arenas) and the
     /// camera's `frame` into the layers; the passes are recorded into
-    /// `encoder`, which the caller submits.
+    /// `encoder`, which the caller submits; `profiler` times the passes.
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
@@ -153,6 +151,7 @@ impl Drawer {
         frame: &Frame,
         settings: TargetSettings,
         encoder: &mut wgpu::CommandEncoder,
+        profiler: &mut GpuProfiler,
     ) -> Result<&RenderTargets> {
         self.ensure_targets(gpu, settings, packet.scope_parents.len() as u32);
         let generation = self.targets_generation;
@@ -258,7 +257,7 @@ impl Drawer {
                 encoder,
                 &mut self.mesh_pass,
                 &mut self.vector_pass,
-                &mut self.profiler,
+                profiler,
                 &targets.mask_layers_view,
                 mesh_depth,
                 &packet.scope_parents,
@@ -271,7 +270,7 @@ impl Drawer {
                     label: Some("mask"),
                     color_attachments: &[Some(targets.mask_attachment())],
                     depth_stencil_attachment: None,
-                    timestamp_writes: self.profiler.pass_timing("masks"),
+                    timestamp_writes: profiler.pass_timing("masks"),
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
@@ -288,7 +287,7 @@ impl Drawer {
                     label: Some("geometry"),
                     color_attachments: &attachments,
                     depth_stencil_attachment: Some(targets.depth_attachment()),
-                    timestamp_writes: self.profiler.pass_timing("geometry"),
+                    timestamp_writes: profiler.pass_timing("geometry"),
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
@@ -301,7 +300,7 @@ impl Drawer {
                     label: Some("lighting"),
                     color_attachments: &[Some(targets.lit_attachment(translucent))],
                     depth_stencil_attachment: targets.edge_attachment(),
-                    timestamp_writes: self.profiler.pass_timing("lighting"),
+                    timestamp_writes: profiler.pass_timing("lighting"),
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
@@ -317,7 +316,7 @@ impl Drawer {
                 label: Some("vectors"),
                 color_attachments: &[Some(targets.vector_attachment())],
                 depth_stencil_attachment: Some(targets.vector_depth_attachment()),
-                timestamp_writes: self.profiler.pass_timing("vectors"),
+                timestamp_writes: profiler.pass_timing("vectors"),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -330,7 +329,7 @@ impl Drawer {
                 label: Some("translucent"),
                 color_attachments: &[Some(targets.lit_over_attachment())],
                 depth_stencil_attachment: Some(targets.depth_test_attachment()),
-                timestamp_writes: self.profiler.pass_timing("translucent"),
+                timestamp_writes: profiler.pass_timing("translucent"),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });

@@ -25,11 +25,13 @@
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::render::gpu::device::{Gpu, HDR_FORMAT};
 use crate::render::error::Result;
-use crate::render::gpu::fullscreen::{Blend, Fullscreen, FullscreenPass, TexturePool, UniformSlots};
-use crate::render::pack::records::Frame;
+use crate::render::gpu::device::{Gpu, HDR_FORMAT};
+use crate::render::gpu::fullscreen::{
+    Blend, Fullscreen, FullscreenPass, TexturePool, UniformSlots,
+};
 use crate::render::gpu::profiler::GpuProfiler;
+use crate::render::pack::records::Frame;
 
 /// `DepthOfFieldParams` (lens.wgsl).
 #[repr(C)]

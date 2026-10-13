@@ -42,11 +42,11 @@ use std::sync::Arc;
 
 use glam::{DMat4, DVec2, DVec3};
 
-use crate::render::pack::shapes::strokes::{stroke_records, StrokeStyle};
-use crate::render::pack::shapes::tessellation::tessellate_fill;
 use crate::render::pack::arena::Arena;
 use crate::render::pack::flatten::{DrawItem, FlatScene, ShadowList, NO_CLIP};
 use crate::render::pack::records::{self, DrawIndirect, Instance, Object, StrokeCurve};
+use crate::render::pack::shapes::strokes::{stroke_records, StrokeStyle};
+use crate::render::pack::shapes::tessellation::tessellate_fill;
 use crate::robjects::{Fill, Kind, Path, Points, Texture};
 
 /// Where one path's records live, and what they were built from (`_Slot`).

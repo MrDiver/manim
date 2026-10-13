@@ -20,12 +20,14 @@ pub mod effects;
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::render::gpu::device::{Gpu, CHROMA_FORMAT, COLOR_FORMAT, HDR_FORMAT, LUMA_FORMAT};
 use crate::render::composite::effects::bloom::BloomPasses;
-use crate::render::composite::effects::depth_of_field::{BlurTarget, DepthOfField, DepthOfFieldPasses};
+use crate::render::composite::effects::depth_of_field::{
+    BlurTarget, DepthOfField, DepthOfFieldPasses,
+};
 use crate::render::composite::effects::shader_effect::ShaderEffects;
 use crate::render::composite::effects::Effect;
 use crate::render::error::Result;
+use crate::render::gpu::device::{Gpu, HDR_FORMAT};
 use crate::render::gpu::fullscreen::{Blend, Fullscreen, TexturePool, UniformSlots};
 use crate::render::gpu::profiler::GpuProfiler;
 
@@ -280,67 +282,5 @@ impl Compositor {
             profiler,
             "composite",
         )
-    }
-
-    /// `fs_finalize`: the accumulated linear frame encoded to sRGB, straight alpha.
-    pub fn finalize(
-        &mut self,
-        gpu: &Gpu,
-        encoder: &mut wgpu::CommandEncoder,
-        frame: &wgpu::Texture,
-        output: &wgpu::TextureView,
-        profiler: &mut GpuProfiler,
-    ) -> Result<()> {
-        let frame_view = frame.create_view(&Default::default());
-        let resources = [wgpu::BindingResource::TextureView(&frame_view)];
-        self.fullscreen.run(
-            gpu,
-            encoder,
-            "finalize.wgsl",
-            "fs_finalize",
-            output,
-            COLOR_FORMAT,
-            &resources,
-            Blend::Replace,
-            true,
-            profiler,
-            "finalize",
-        )
-    }
-
-    /// `fs_luma` and `fs_chroma`: the accumulated linear frame as the two
-    /// NV12 planes, BT.709 luma per pixel into `luma` (R8) and Cb, Cr per
-    /// 2x2 pixels into `chroma` (RG8, half the size).
-    pub fn finalize_nv12(
-        &mut self,
-        gpu: &Gpu,
-        encoder: &mut wgpu::CommandEncoder,
-        frame: &wgpu::Texture,
-        luma: &wgpu::TextureView,
-        chroma: &wgpu::TextureView,
-        profiler: &mut GpuProfiler,
-    ) -> Result<()> {
-        let frame_view = frame.create_view(&Default::default());
-        let resources = [wgpu::BindingResource::TextureView(&frame_view)];
-        let planes = [
-            ("fs_luma", luma, LUMA_FORMAT),
-            ("fs_chroma", chroma, CHROMA_FORMAT),
-        ];
-        for (entry_point, target, format) in planes {
-            self.fullscreen.run(
-                gpu,
-                encoder,
-                "finalize.wgsl",
-                entry_point,
-                target,
-                format,
-                &resources,
-                Blend::Replace,
-                true,
-                profiler,
-                "finalize",
-            )?;
-        }
-        Ok(())
     }
 }

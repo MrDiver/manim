@@ -12,10 +12,10 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
+use crate::render::draw::passes::shadow::ShadowPass;
+use crate::render::error::Result;
 use crate::render::gpu::buffer::GrowableBuffer;
 use crate::render::gpu::device::{Gpu, EDGE_FORMAT, HDR_FORMAT};
-use crate::render::error::Result;
-use crate::render::draw::passes::shadow::ShadowPass;
 
 /// The stencil value of a pixel on an edge.
 const EDGE: u32 = 1;
