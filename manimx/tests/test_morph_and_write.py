@@ -70,12 +70,14 @@ def test_partial_path_keeps_whole_curves_and_cuts_the_ends() -> None:
     assert len(middle) == 4
 
 
-def test_aligned_paths_have_equal_shapes_and_start_close() -> None:
+def test_aligned_paths_have_equal_shapes_and_keep_or_match_starts() -> None:
     circle, square = arc_points(), rectangle_points()
     a, b = align_paths(circle, square)
     assert a.shape == b.shape == (len(circle), 2)
-    # Both closed: the square starts where the circle does (on the right),
-    # not at its first corner, so the morph does not turn.
+    np.testing.assert_allclose(b[0], square[0], atol=1e-12)  # as in Manim: it keeps its start
+    # With closest_starts, both closed: the square starts where the circle
+    # does (on the right), not at its first corner, so the morph does not turn.
+    a, b = align_paths(circle, square, closest_starts=True)
     np.testing.assert_allclose(b[0], [2.0, 0.0], atol=1e-12)
     np.testing.assert_allclose(b[-1], b[0], atol=1e-12)
     # Open paths keep their ends.

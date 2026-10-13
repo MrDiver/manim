@@ -562,14 +562,16 @@ def insert_curves(points: np.ndarray, count: int) -> np.ndarray:
     return np.concatenate(pieces)
 
 
-def align_paths(first: np.ndarray, second: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def align_paths(first: np.ndarray, second: np.ndarray, closest_starts: bool = False) -> tuple[np.ndarray, np.ndarray]:
     """Both paths with the same number of subpaths and of curves in each,
     so they interpolate point by point (Manim's ``align_points``). A path
     with fewer subpaths gets empty ones (four times its last point); in
-    each pair of subpaths the shorter one gets more curves. Where both
-    subpaths are closed, the second starts at the curve that keeps the
-    pair closest (a circle into a square does not turn on the way). An
-    empty path becomes a point at the other's center.
+    each pair of subpaths the shorter one gets more curves. Subpaths keep
+    their starts, as in Manim; with ``closest_starts``, where both subpaths
+    are closed, the second starts at the curve that keeps the pair closest
+    (a circle into a square does not turn on the way, but glyphs morph
+    otherwise than in Manim). An empty path becomes a point at the other's
+    center.
     """
     first, second = _not_empty(first, second), _not_empty(second, first)
     parts_1, parts_2 = subpaths(first), subpaths(second)
@@ -579,7 +581,7 @@ def align_paths(first: np.ndarray, second: np.ndarray) -> tuple[np.ndarray, np.n
         part_2 = parts_2[index] if index < len(parts_2) else np.repeat(parts_2[-1][-1:], POINTS_PER_CURVE, axis=0)
         difference = (len(part_2) - len(part_1)) // POINTS_PER_CURVE
         part_1, part_2 = insert_curves(part_1, difference), insert_curves(part_2, -difference)
-        if _closed(part_1) and _closed(part_2):
+        if closest_starts and _closed(part_1) and _closed(part_2):
             part_2 = _closest_start(part_2, part_1)
         aligned_1.append(part_1)
         aligned_2.append(part_2)

@@ -543,6 +543,10 @@ class Morph(_PlannedAnimation, Generic[MorphTarget]):
     target: MorphTarget
     run_time: float = 1.0
     rate: RateFunction = smooth
+    closest_starts: bool = False
+    """Start each closed outline of the target where it is closest to its
+    source's, so a circle into a square does not turn on the way. Off, as
+    in Manim, outlines keep their own starts (glyphs morph like Manim's)."""
 
     def __post_init__(self) -> None:
         self._plan()
@@ -599,7 +603,7 @@ class Morph(_PlannedAnimation, Generic[MorphTarget]):
         else:
             here = _resized(_points(start), dimension)
             there = _resized(_points(end), dimension)
-        first, last = align_paths(here, there)
+        first, last = align_paths(here, there, self.closest_starts)
         shape: Shape2D | Curve3D = Shape2D(first, f"{start.name}-morph") if flat else Curve3D(first, f"{start.name}-morph")
         self._between(shape.points, first, last)
         for name in _STYLE_SIGNALS:
