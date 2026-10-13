@@ -202,7 +202,7 @@ def test_the_page_edits_through_the_server(root, renderer) -> None:
         assert timeline["editable"]
         short, _, waiting = timeline["clips"]
         assert short["entry"]["scene"] == "Short"
-        assert waiting["waits"] == ["go"]
+        assert [wait["event"] for wait in waiting["waits"]] == ["go"]
         assert timeline["events"] == [{"name": "go", "time": None, "fixed": False}]
 
         version = server.version
@@ -236,3 +236,76 @@ def test_a_preview_without_an_editor_is_read_only(renderer) -> None:
         assert request(server, "/api/timeline")[1]["editable"] is False
     finally:
         server.close()
+
+
+def test_clips_are_added_from_scenes_and_removed(root, editor) -> None:
+    assert [scene["name"] for scene in editor.scenes()] == ["Short", "Waiting"]
+    assert editor.scenes()[0]["clips"] == 2
+
+    index = editor.add_clip("Waiting", 5.0, layer=2)
+    clip = editor.timeline.clips[index]
+    assert (clip.name, clip.start, clip.layer) == ("Waiting-2", 5.0, 2)
+    assert editor.project.timeline[index].scene == "Waiting"
+    with pytest.raises(EditError, match="no scene"):
+        editor.add_clip("Nothing", 0.0)
+
+    editor.edit_clip(0, {"start": 1.0})
+    editor.remove_clips([0])  # the clip after it followed it: it keeps its place
+    assert [clip.start for clip in editor.timeline.clips] == [3.0, 0.0, 5.0]
+    assert editor.project.timeline[0].start == 3.0
+    editor.remove_clips([0, 2])
+    assert [clip.name for clip in editor.timeline.clips] == ["Waiting"]
+    with pytest.raises(EditError, match="no clip"):
+        editor.remove_clips([4])
+
+
+def test_the_page_adds_removes_and_plays(root, renderer) -> None:
+    editor = ProjectEditor(root, lambda project: SETTINGS, save_delay=60.0)
+    server = PreviewServer(Timeline(), SETTINGS, renderer=renderer, editor=editor)
+    editor.load()
+    server.start()
+    try:
+        status, scenes = request(server, "/api/scenes")
+        assert status == 200
+        assert [scene["name"] for scene in scenes] == ["Short", "Waiting"]
+        assert request(server, "/api/clip/add", {"scene": "Short", "start": 4.0, "layer": 3})[0] == 200
+        assert request(server, "/api/clip/remove", {"indices": [0]})[0] == 200
+        assert [clip.layer for clip in editor.timeline.clips] == [0, 1, 3]
+        waits = request(server, "/api/timeline")[1]["clips"][1]["waits"]
+        assert waits == [{"event": "go", "from": 1.0, "time": None}]
+
+        with urllib.request.urlopen(server.url + "api/audio") as response:
+            assert response.status == 204  # these scenes make no sound
+    finally:
+        server.close()
+
+    plain = PreviewServer(Timeline(), SETTINGS, renderer=renderer)
+    assert plain.audio() is None
+    plain.start()
+    try:
+        assert request(plain, "/api/scenes")[0] == 404
+    finally:
+        plain.close()
+
+
+def test_the_page_gets_the_timelines_sound_as_wav(renderer) -> None:
+    import io
+    import wave
+
+    import numpy as np
+    from manimx.animation import Scene
+
+    class Beep(Scene):
+        def construct(self):
+            self.play_wave(np.full(2400, 0.5, np.float32), 24_000)
+            self.wait(1.0)
+
+    timeline = Timeline()
+    timeline.add(Beep().prepare(), start=0.5)
+    server = PreviewServer(timeline, SETTINGS, renderer=renderer)
+    sound = server.audio()
+    assert server.audio() is sound  # mixed once per version
+    with wave.open(io.BytesIO(sound)) as file:
+        assert (file.getnchannels(), file.getframerate()) == (2, 24_000)
+        assert file.getnframes() == pytest.approx(1.5 * 24_000, abs=2)
+    server.close()

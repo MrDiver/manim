@@ -15,6 +15,8 @@ request, answered by the standard library's HTTP server:
                              with &format=png, WebP with &format=webp)
     GET /api/labels?t=       the index of every path in its group at time
                              t, with its name and place (see labels.py)
+    GET /api/audio           the timeline's sounds mixed, as WAV (204
+                             without sounds), for playback in the page
     GET /api/changes?since=  waits until the timeline's version passes
                              `since` (or 25 s), then answers the version
                              and the last build error
@@ -24,9 +26,12 @@ edits the project live: an edit changes the timeline the next frame
 shows, and ``manimx.json`` is saved shortly after (see editing.py):
 
     GET  /api/settings       every setting, its value and limits
+    GET  /api/scenes         the project's scenes (for the sidebar)
     POST /api/clip           {"index", and any of "start", "layer",
                              "cut", "speed"}, or {"clips": [...]} of
                              those for clips moved together
+    POST /api/clip/add       {"scene", "start", "layer"}: a new clip
+    POST /api/clip/remove    {"indices": [...]}
     POST /api/event          {"name", "time"} (time null: remove it)
     POST /api/setting        {"path": [...], "value"}
 
@@ -71,7 +76,8 @@ from urllib.parse import parse_qs, urlparse
 
 from PIL import Image
 
-from ..animation.timing import NEVER, Timeline
+from ..animation import write_wav
+from ..animation.timing import NEVER, Clip, Timeline
 from ..drivers.offline import RenderSettings
 from ..drivers.stills import StillRenderer
 from ..renderer import RenderSamples
@@ -80,6 +86,9 @@ from .labels import index_labels
 from .tracks import clip_nodes
 
 MIN_WIDTH = 16
+AUDIO_RATE = 24_000
+"""Sample rate of the page's playback audio (half of a render's: smaller,
+fine for previewing)."""
 CHANGES_TIMEOUT = 25.0
 """Seconds a /api/changes request waits before answering anyway."""
 FORMATS = {"jpeg": ("JPEG", "image/jpeg"), "png": ("PNG", "image/png"), "webp": ("WEBP", "image/webp")}
@@ -112,6 +121,8 @@ class PreviewServer:
         self.error: str | None = None
         """The last failed rebuild, until the next successful one."""
         self._closing = False
+        self._audio: tuple[int, bytes | None] | None = None
+        """The last mixed audio and the version it is of."""
         self._use(timeline, settings)
         self._httpd = ThreadingHTTPServer((host, port), partial(_Handler, preview=self))
         self._httpd.daemon_threads = True
@@ -214,11 +225,7 @@ class PreviewServer:
                     "layer": clip.layer,
                     "length": clip.scene.playing_time,
                     "entry": entry,
-                    "waits": [
-                        segment.waits_for
-                        for segment, timing in zip(clip.scene.segments, clip.timings, strict=True)
-                        if segment.waits_for and timing is None and clip._compiled_range(segment) is not None
-                    ],
+                    "waits": _waits(clip, known),
                     "nodes": clip_nodes(clip),
                 }
                 for clip, entry in zip(clips, entries, strict=True)
@@ -228,6 +235,22 @@ class PreviewServer:
                 for clip, index, start, end in self.timeline.segments()
             ],
         }
+
+    def audio(self) -> bytes | None:
+        """The timeline's sounds as WAV (mixed once per version), or None
+        without sounds."""
+        with self._lock:
+            if self._audio is not None and self._audio[0] == self.version:
+                return self._audio[1]
+            timeline = self.timeline
+            if not any(clip.placed_sounds() for clip in timeline.clips):
+                self._audio = (self.version, None)
+                return None
+            samples = timeline.audio(0.0, timeline.duration, AUDIO_RATE)
+            buffer = io.BytesIO()
+            write_wav(buffer, samples, AUDIO_RATE)
+            self._audio = (self.version, buffer.getvalue())
+            return self._audio[1]
 
     def labels(self, time: float) -> list[dict[str, Any]]:
         """The index labels of the frame at ``time`` (see labels.py)."""
@@ -281,6 +304,8 @@ class _Handler(BaseHTTPRequestHandler):
             "/api/labels": self._labels,
             "/api/changes": self._changes,
             "/api/settings": self._settings,
+            "/api/scenes": self._scenes,
+            "/api/audio": self._audio,
         }
         route = routes.get(url.path)
         try:
@@ -297,6 +322,8 @@ class _Handler(BaseHTTPRequestHandler):
         editor = self.preview.editor
         routes: dict[str, Callable[[ProjectEditor, dict[str, Any]], None]] = {
             "/api/clip": lambda editor, body: editor.edit_clips(_field(body, "clips", list) if "clips" in body else [body]),
+            "/api/clip/add": lambda editor, body: editor.add_clip(_field(body, "scene", str), body.get("start", 0.0), body.get("layer", 0)),
+            "/api/clip/remove": lambda editor, body: editor.remove_clips(_field(body, "indices", list)),
             "/api/event": lambda editor, body: editor.set_event(_field(body, "name", str), body.get("time")),
             "/api/setting": lambda editor, body: editor.set_setting(_field(body, "path", list), body.get("value")),
         }
@@ -345,6 +372,21 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._json(self.preview.editor.settings())
 
+    def _scenes(self, query: dict[str, list[str]]) -> None:
+        if self.preview.editor is None:
+            self._json({"error": "this preview has no project"}, HTTPStatus.NOT_FOUND)
+            return
+        self._json(self.preview.editor.scenes())
+
+    def _audio(self, query: dict[str, list[str]]) -> None:
+        sound = self.preview.audio()
+        if sound is None:
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self._send(sound, "audio/wav", cache=False)
+
     def _changes(self, query: dict[str, list[str]]) -> None:
         version, error = self.preview.wait_for_change(_number(query, "since", int))
         self._json({"version": version, "error": error})
@@ -376,6 +418,21 @@ class _Handler(BaseHTTPRequestHandler):
 
 class _BadRequest(ValueError):
     pass
+
+
+def _waits(clip: Clip, known: dict[str, float]) -> list[dict[str, Any]]:
+    """Every wait of ``clip`` inside its cut: the event, where the clip
+    starts waiting (the end of the segment before, None if that is not
+    placed) and the event's time (None while it never fires)."""
+    waits = []
+    previous_end: float | None = None
+    for segment, timing in zip(clip.scene.segments, clip.timings, strict=True):
+        if clip._compiled_range(segment) is None:
+            continue
+        if segment.waits_for:
+            waits.append({"event": segment.waits_for, "from": previous_end, "time": known.get(segment.waits_for)})
+        previous_end = None if timing is None else timing.end
+    return waits
 
 
 def _field(body: dict[str, Any], name: str, kind: type) -> Any:

@@ -1,29 +1,23 @@
-:root {
-  --background: #f6f5f2;
-  --surface: #ffffff;
-  --text: #1d1d1f;
-  --muted: #6b6b70;
-  --line: #d9d7d2;
-  --clip: #e3e8f4;
-  --segment: #5b7bd5;
-  --animation: rgb(91 123 213 / 0.18);
-  --playhead: #d9480f;
-  --stage: #0b1020;
-  color-scheme: light dark;
-}
+/* The preview page, dark like an editor (after Motion Canvas's editor). */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #121316;
-    --surface: #1b1c20;
-    --text: #ececef;
-    --muted: #9a9aa2;
-    --line: #2d2e34;
-    --clip: #262a36;
-    --segment: #7d9cf0;
-    --animation: rgb(125 156 240 / 0.22);
-    --playhead: #ff8a4c;
-  }
+:root {
+  --background: #141414;
+  --panel: #1d1d1d;
+  --surface: #262626;
+  --raised: #333333;
+  --text: #e6e6e6;
+  --muted: #8c8c8c;
+  --line: #2c2c2c;
+  --accent: #2c9bf0;
+  --accent-soft: rgb(44 155 240 / 0.22);
+  --clip: #4a4a4a;
+  --clip-text: #d0d0d0;
+  --event-bar: #234866;
+  --animation: rgb(44 155 240 / 0.16);
+  --stage: #0b1020;
+  --problem: #ff7a59;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
 }
 
 * {
@@ -34,39 +28,147 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--text);
-  font: 14px/1.4 system-ui, sans-serif;
+  font: 13px/1.4 system-ui, sans-serif;
 }
 
-header {
+button {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--raised);
+}
+
+button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button:focus-visible,
+#timeline:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* -- header and workspace ---------------------------------------------------- */
+
+.bar {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 8px 16px;
+  background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
 
 h1 {
   margin: 0;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
 }
 
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 #time {
-  font-variant-numeric: tabular-nums;
+  min-width: 150px;
+  text-align: right;
+  font: 12px var(--mono);
   color: var(--muted);
 }
 
-main {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 16px;
+.workspace {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 12px 16px 0;
+}
+
+#sidebar,
+#inspector {
+  width: 230px;
+  max-height: calc(100vh - 360px);
+  min-height: 200px;
+  overflow-y: auto;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+#inspector {
+  width: 300px;
+}
+
+#sidebar[hidden],
+#inspector[hidden] {
+  display: none;
+}
+
+#scene-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#scene-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 0 0 4px;
+  padding: 6px 8px;
+  background: var(--clip);
+  border-radius: 6px;
+  cursor: grab;
+}
+
+#scene-list li:hover {
+  outline: 1px solid var(--accent);
+}
+
+#scene-list .count {
+  font: 11px var(--mono);
+  color: var(--muted);
+}
+
+/* -- the viewer and the playback controls -------------------------------------- */
+
+.viewer {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 #stage {
   position: relative;
-  margin: 0 0 16px;
+  margin: 0;
   background: var(--stage);
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
 }
 
@@ -74,6 +176,8 @@ main {
   display: block;
   width: 100%;
   height: auto;
+  max-height: calc(100vh - 380px);
+  object-fit: contain;
 }
 
 #error {
@@ -82,35 +186,94 @@ main {
   padding: 8px 12px;
   background: rgb(160 20 20 / 0.85);
   color: #fff;
-  font-family: ui-monospace, monospace;
+  font-family: var(--mono);
   white-space: pre-wrap;
 }
 
 #problem {
-  margin: 0 0 16px;
+  margin: 0;
   padding: 10px 12px;
-  border-left: 4px solid #d9480f;
-  background: var(--surface);
-  font: 12px/1.5 ui-monospace, monospace;
+  border-left: 4px solid var(--problem);
+  background: var(--panel);
+  font: 12px/1.5 var(--mono);
   white-space: pre-wrap;
 }
 
+.controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  position: relative;
+}
+
+.controls .icon {
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--muted);
+}
+
+.controls .icon:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.controls .icon[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.icon svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#mute[aria-pressed="true"] .waves {
+  display: none;
+}
+
+.play .pause-shape,
+.playing .play .play-shape {
+  display: none;
+}
+
+.playing .play .pause-shape {
+  display: inline;
+}
+
+.zoom {
+  position: absolute;
+  right: 0;
+  display: flex;
+  gap: 4px;
+}
+
+.zoom button {
+  min-width: 30px;
+  padding: 2px 6px;
+}
+
+/* -- the timeline ------------------------------------------------------------ */
+
 #timeline {
-  --label: 220px;
+  --label: 170px;
   --lanes: calc(100% - var(--label) - 12px); /* set in pixels by app.js, times the zoom */
   position: relative;
+  margin: 12px 16px 0;
   overflow-x: auto;
-  background: var(--surface);
+  background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 0 0 8px;
   user-select: none;
   touch-action: none;
-}
-
-#timeline:focus-visible {
-  outline: 2px solid var(--segment);
-  outline-offset: 2px;
 }
 
 .row {
@@ -125,39 +288,47 @@ main {
   position: sticky;
   left: 0;
   z-index: 3;
-  background: var(--surface);
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
   padding: 0 8px;
+  background: var(--panel);
   border-right: 1px solid var(--line);
   font-size: 12px;
 }
 
 .lane {
   position: relative;
-  cursor: ew-resize;
 }
 
 .ruler-row {
-  height: 24px;
+  height: 28px;
   border-bottom: 1px solid var(--line);
-  margin-bottom: 4px;
+}
+
+#ruler {
+  height: 100%;
+  cursor: ew-resize;
+  background: #181818;
+}
+
+.tick {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  padding-left: 4px;
+  border-left: 1px solid var(--line);
+  font: 11px/28px var(--mono);
+  color: var(--muted);
 }
 
 #collapse,
 .toggle {
-  font: inherit;
-  color: inherit;
+  padding: 0;
   background: none;
   border: 0;
-  padding: 0;
-}
-
-#collapse {
   color: var(--muted);
-  cursor: pointer;
 }
 
 #collapse:hover {
@@ -169,10 +340,7 @@ main {
   align-items: center;
   min-width: 0;
   text-align: left;
-}
-
-button.toggle {
-  cursor: pointer;
+  color: inherit;
 }
 
 button.toggle::before,
@@ -192,12 +360,6 @@ button.toggle[aria-expanded="true"]::before {
   content: "▾";
 }
 
-button.toggle:focus-visible {
-  outline: 2px solid var(--segment);
-  outline-offset: 1px;
-  border-radius: 3px;
-}
-
 .name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -211,24 +373,31 @@ button.toggle:focus-visible {
   font-size: 11px;
 }
 
-#ruler {
-  height: 100%;
+/* Tracks: one per layer, the highest on top; the clips of that layer on it. */
+.row.track {
+  height: 40px;
+  margin-top: 6px;
 }
 
-.tick {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  border-left: 1px solid var(--line);
-  padding-left: 3px;
-  font-size: 11px;
-  line-height: 24px;
-  color: var(--muted);
+.row.track .label {
+  font-weight: 600;
 }
 
-.row.clip {
+.row.track.new-track {
   height: 30px;
-  margin: 4px 0 2px;
+}
+
+.row.track.new-track .lane {
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+}
+
+.row.track.drop .lane {
+  background: var(--accent-soft);
+}
+
+.row.events {
+  height: 28px;
 }
 
 .row.node,
@@ -238,24 +407,124 @@ button.toggle:focus-visible {
 
 .row.signal .label {
   color: var(--muted);
-  font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font: 11px var(--mono);
 }
 
 .clip-body {
   position: absolute;
-  top: 0;
-  height: 100%;
+  top: 2px;
+  bottom: 2px;
+  min-width: 4px;
+  overflow: hidden;
+  padding: 0 12px;
   background: var(--clip);
-  border-radius: 4px;
+  color: var(--clip-text);
+  border-radius: 6px;
+  font: 12px/36px var(--mono);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  z-index: 1;
+}
+
+.clip-body.editable {
+  cursor: grab;
+}
+
+.clip-body:hover {
+  outline: 1px solid var(--muted);
+}
+
+.clip-body.selected {
+  outline: 2px solid var(--accent);
+}
+
+.clip-body .expand {
+  margin-right: 6px;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--muted);
 }
 
 .segment {
   position: absolute;
-  bottom: 0;
-  height: 4px;
-  background: var(--segment);
+  bottom: 2px;
+  height: 3px;
+  z-index: 2;
+  background: var(--accent);
   border-radius: 2px;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.clip-body .handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.clip-body .handle.in {
+  left: 0;
+}
+
+.clip-body .handle.out {
+  right: 0;
+}
+
+.clip-body:hover .handle,
+.clip-body.selected .handle {
+  opacity: 0.55;
+}
+
+.clip-body .handle:hover {
+  opacity: 1;
+}
+
+/* Events: under each track, a bar from where a clip starts waiting to the
+   event, and the event's pill, which is dragged to time it. */
+.wait {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  background: var(--event-bar);
+  border-radius: 12px;
+}
+
+.wait.never {
+  background: repeating-linear-gradient(90deg, var(--event-bar) 0 6px, transparent 6px 10px);
+}
+
+.pill {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  z-index: 2;
+  padding: 0 10px;
+  transform: translateX(-100%);
+  background: var(--accent);
+  color: #08131d;
+  border: 2px solid #f2f2f2;
+  border-radius: 12px;
+  font: 600 12px/18px var(--mono);
+  white-space: nowrap;
+  cursor: grab;
+}
+
+.pill.never {
+  transform: none;
+  background: var(--surface);
+  color: var(--text);
+  border-style: dashed;
+}
+
+.pill.emitted {
+  background: var(--raised);
+  color: var(--text);
 }
 
 .animation {
@@ -266,7 +535,7 @@ button.toggle:focus-visible {
   overflow: hidden;
   padding: 0 4px;
   background: var(--animation);
-  border: 1px solid var(--segment);
+  border: 1px solid var(--accent);
   border-radius: 3px;
   font-size: 10px;
   line-height: 12px;
@@ -290,17 +559,8 @@ button.toggle:focus-visible {
   bottom: 0;
   left: var(--label);
   width: var(--lanes);
-  z-index: 2;
+  z-index: 4;
   pointer-events: none;
-}
-
-.zoom {
-  display: flex;
-  gap: 4px;
-}
-
-.zoom button {
-  min-width: 28px;
 }
 
 #playhead {
@@ -309,25 +569,34 @@ button.toggle:focus-visible {
   bottom: 0;
   width: 2px;
   margin-left: -1px;
-  background: var(--playhead);
+  background: var(--accent);
 }
 
-.hint {
-  color: var(--muted);
-  font-size: 12px;
+#playhead-frame {
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1px 6px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  font: 600 11px/18px var(--mono);
 }
 
-.tools {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
+.footer {
+  margin: 8px 16px 16px;
 }
 
-#indices[aria-pressed="true"] {
-  background: var(--segment);
-  border-color: var(--segment);
-  color: var(--surface);
+#marquee {
+  position: absolute;
+  z-index: 10;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  pointer-events: none;
 }
+
+/* -- index labels over the frame ---------------------------------------------- */
 
 #labels {
   position: absolute;
@@ -341,92 +610,42 @@ button.toggle:focus-visible {
   padding: 0 3px;
   border-radius: 3px;
   outline: 1px solid rgb(0 0 0 / 0.5);
-  font: 600 10px/1.4 ui-monospace, monospace;
+  font: 600 10px/1.4 var(--mono);
   pointer-events: auto;
 }
 
-/* -- editing (editing.js) ---------------------------------------------------- */
-
-.clip-body.editable {
-  cursor: grab;
-  z-index: 1;
-}
-
-.clip-body.editable:hover {
-  outline: 1px solid var(--segment);
-}
-
-.clip-body.selected {
-  outline: 2px solid var(--segment);
-}
-
-.ruler-row .lane {
-  overflow: visible;
-}
-
-.event {
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  z-index: 2;
-  padding: 0 5px;
-  border-left: 2px solid var(--playhead);
-  background: color-mix(in srgb, var(--playhead) 14%, var(--surface));
-  border-radius: 0 3px 3px 0;
-  font-size: 10px;
-  line-height: 20px;
-  white-space: nowrap;
-}
-
-.event.fixed {
-  cursor: ew-resize;
-}
-
-#editor {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-top: 16px;
-}
-
-#editor > div,
-#settings form {
-  padding: 12px 14px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-}
+/* -- the inspector and the settings dialog ---------------------------------------- */
 
 #edit-message {
-  grid-column: 1 / -1;
-  margin: 0;
+  margin: 0 0 12px;
   color: var(--muted);
   font-size: 12px;
 }
 
 #edit-message.problem {
-  color: var(--playhead);
+  color: var(--problem);
 }
 
-#editor h2,
-#settings h2,
-#settings h3 {
-  margin: 0 0 8px;
-  font-size: 14px;
-  font-weight: 600;
+/* In the narrow inspector, a field's name sits above its controls. */
+#inspector .field {
+  grid-template-columns: 1fr;
 }
 
-#settings h3 {
-  margin-top: 12px;
-  color: var(--muted);
-  font-size: 12px;
+#inspector .field small {
+  grid-column: 1;
+}
+
+#inspector > div + div {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
 .field {
   display: grid;
-  grid-template-columns: 130px 1fr;
+  grid-template-columns: 90px 1fr;
   align-items: center;
-  gap: 2px 10px;
+  gap: 2px 8px;
   margin: 6px 0;
 }
 
@@ -438,6 +657,7 @@ button.toggle:focus-visible {
 
 .field-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
@@ -451,8 +671,13 @@ button.toggle:focus-visible {
 .field input[type="number"],
 .field input[type="text"],
 .field select {
-  width: 120px;
-  font: inherit;
+  width: 96px;
+  padding: 3px 6px;
+  font: 12px var(--mono);
+  color: var(--text);
+  background: var(--background);
+  border: 1px solid var(--line);
+  border-radius: 4px;
 }
 
 .unit {
@@ -470,67 +695,47 @@ button.toggle:focus-visible {
 }
 
 #settings::backdrop {
-  background: rgb(0 0 0 / 0.4);
-}
-
-#settings header {
-  position: sticky;
-  top: -12px;
-  padding: 4px 0 8px;
-  border: 0;
-  background: var(--surface);
-}
-
-@media (max-width: 720px) {
-  #editor {
-    grid-template-columns: 1fr;
-  }
-}
-
-.segment {
-  z-index: 2;
-  pointer-events: none;
+  background: rgb(0 0 0 / 0.55);
 }
 
 #settings form {
   max-height: calc(100vh - 64px);
   overflow-y: auto;
+  padding: 12px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
 }
 
-.clip-body .handle {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 8px;
-  cursor: col-resize;
-  background: color-mix(in srgb, var(--segment) 35%, transparent);
-  opacity: 0;
-  transition: opacity 0.1s;
+#settings header {
+  position: sticky;
+  top: -12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0 8px;
+  background: var(--panel);
 }
 
-.clip-body .handle.in {
-  left: 0;
-  border-radius: 4px 0 0 4px;
+#settings h3 {
+  margin: 12px 0 4px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
-.clip-body .handle.out {
-  right: 0;
-  border-radius: 0 4px 4px 0;
+#settings .field {
+  grid-template-columns: 150px 1fr;
 }
 
-.clip-body:hover .handle,
-.clip-body.selected .handle {
-  opacity: 1;
-}
+@media (max-width: 1100px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
-.clip-body .handle:hover {
-  background: var(--segment);
-}
-
-#marquee {
-  position: absolute;
-  z-index: 10;
-  border: 1px solid var(--segment);
-  background: color-mix(in srgb, var(--segment) 15%, transparent);
-  pointer-events: none;
+  #sidebar,
+  #inspector {
+    width: auto;
+    max-height: none;
+    min-height: 0;
+  }
 }

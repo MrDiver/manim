@@ -19,6 +19,7 @@ import wave
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 import numpy as np
 
@@ -100,13 +101,14 @@ def mix(
     return output
 
 
-def write_wav(path: str | Path, samples: np.ndarray, sample_rate: int = DEFAULT_SAMPLE_RATE) -> None:
-    """Write samples as 16-bit PCM WAV (clipped to [-1, 1])."""
+def write_wav(path: str | Path | BinaryIO, samples: np.ndarray, sample_rate: int = DEFAULT_SAMPLE_RATE) -> None:
+    """Write samples as 16-bit PCM WAV (clipped to [-1, 1]) to a file path
+    or an open binary file."""
     samples = np.asarray(samples, dtype=np.float32)
     if samples.ndim == 1:
         samples = samples[:, None]
     pcm = (np.clip(samples, -1.0, 1.0) * 32767).round().astype("<i2")
-    with wave.open(str(path), "wb") as file:
+    with wave.open(path if hasattr(path, "write") else str(path), "wb") as file:
         file.setnchannels(samples.shape[1])
         file.setsampwidth(2)
         file.setframerate(sample_rate)

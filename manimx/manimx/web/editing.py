@@ -218,6 +218,59 @@ class ProjectEditor:
 
         self._change(apply)
 
+    def add_clip(self, scene: str, start: float, layer: int = 0) -> int:
+        """Put a new clip of ``scene`` on the timeline at ``start`` on
+        ``layer`` (prepared now); returns its index."""
+        project = self._project()
+        if scene not in project.scenes:
+            raise EditError(f"the project has no scene named {scene!r}")
+        updates = _clip_updates({"start": start, "layer": layer})
+        with self._lock:
+            try:
+                prepared = project.prepare(scene)
+            except Exception as error:
+                raise EditError(describe(error, self.root)) from None
+            names = {clip.name for clip in self.timeline.clips}
+            name, number = scene, 2
+            while name in names:
+                name, number = f"{scene}-{number}", number + 1
+
+            def apply() -> None:
+                project.timeline.append(ClipEntry(scene, start=updates["start"], layer=updates["layer"]))
+                self.timeline.add(prepared, start=updates["start"], name=name, layer=updates["layer"])
+                self._place_followers()
+
+            self._change(apply)
+            return len(project.timeline) - 1
+
+    def remove_clips(self, indices: list[int]) -> None:
+        """Take the clips ``indices`` off the timeline."""
+        project = self._project()
+        unique = sorted(set(indices), reverse=True)
+        for index in unique:
+            if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(project.timeline):
+                raise EditError(f"there is no clip {index!r}")
+
+        def apply() -> None:
+            for index in unique:  # from the back: the indices before stay
+                if index + 1 < len(project.timeline) and project.timeline[index + 1].start is None:
+                    # The next clip followed this one: it keeps its place.
+                    following = project.timeline[index + 1]
+                    project.timeline[index + 1] = dataclasses.replace(following, start=self.timeline.clips[index + 1].start)
+                del project.timeline[index]
+                self.timeline.remove(self.timeline.clips[index])
+            self._place_followers()
+
+        self._change(apply)
+
+    def scenes(self) -> list[dict[str, Any]]:
+        """The project's scenes: name, module and class, and how many clips show each."""
+        project = self._project()
+        used: dict[str, int] = {}
+        for entry in project.timeline:
+            used[entry.scene] = used.get(entry.scene, 0) + 1
+        return [{"name": name, "module": entry.module, "class": entry.cls, "clips": used.get(name, 0)} for name, entry in project.scenes.items()]
+
     def set_event(self, name: str, time: float | None) -> None:
         """Set ``name``'s time (the clips waiting for it go on then), or
         with None remove it, live."""

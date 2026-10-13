@@ -325,27 +325,31 @@ uv run manimx ui                        # opens the preview page; Ctrl+C stops i
 uv run manimx ui --port 8000 --no-open  # a fixed address, without opening a browser
 ```
 
-Drag on the timeline to scrub; ← and → step one frame, Shift+← and
-Shift+→ one second, Home and End jump to the ends. Saving a scene or
-`manimx.json` rebuilds the preview at the same time; an error (a typo, a
-failing `construct()`) is shown above the frame until the next save fixes
-it (`--no-reload` turns this off). The page's address
-keeps the time (`#t=2.5`), so a link opens at the same place. Frames are
-rendered once each (no motion blur or render samples), at the size of the
-page. Ctrl+wheel, + and − zoom the timeline; 0 shows all of it.
+The page shows the frame at the playhead with playback controls (Space
+plays, ← and → step frames, Shift+← and Shift+→ one second, Home and End,
+L loops, M mutes the scenes' sounds) above the timeline. Its ruler counts
+frames; drag on it to scrub, Ctrl+wheel or + and − zoom, 0 shows all of
+it. The timeline has a track per layer, higher layers on top; a clip's ▸
+opens its scene's nodes, signals and animations. Saving a scene file
+updates the preview at the same time, preparing only the scenes in that
+file again; an error (a typo, a failing `construct()`) is shown above the
+frame until the next save fixes it (`--no-reload` turns this off). The
+page's address keeps the time (`#t=2.5`). Frames are rendered once each
+(no motion blur or render samples), at the size of the page.
 
 The page also edits the project, live: the frame shows every edit while
-you drag, and `manimx.json` is saved a moment after the last edit
-(saving a scene file prepares only the scenes in that file again):
+you drag, and `manimx.json` is saved a moment after the last edit.
 
-- drag a clip to move it, the handles at its ends to cut its start or
-  end; drag on empty space in the clip rows to select several clips (or
-  Shift/Ctrl click) and move them together; click a clip to type its
-  start, layer, cut and `speed` (2 plays twice as fast, 0.5 is slow
-  motion);
-- a clip that waits for an event (`wait_for`) holds until the event has a
-  time: set one at the playhead in the clip or events panel, or drag an
-  event's marker on the ruler;
+- drag a clip to move it, up or down onto another track to change its
+  layer; drag the handles at its ends to cut its start or end; drag on
+  empty track space to select several clips (or Shift/Ctrl click) and
+  move them together; Delete removes the selected clips;
+- drag a scene from the sidebar onto a track to add a clip of it there;
+- click a clip to type its start, layer, cut and `speed` (2 plays twice
+  as fast, 0.5 is slow motion);
+- a scene that calls `wait_for(event)` holds until the event's time: the
+  clip's track gets an events row with a pill per event, dragged to time
+  it (the showcase's Events scene shows how);
 - **Settings** changes everything `manimx settings` changes.
 
 Options on the command line override `manimx.json` for that run. Rendering

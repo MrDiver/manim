@@ -315,6 +315,12 @@ class Timeline:
         self._dirty = True
         return clip
 
+    def remove(self, clip: Clip) -> None:
+        """Take ``clip`` off the timeline."""
+        self.clips.remove(clip)
+        clip.timeline = None
+        self._dirty = True
+
     def fire(self, event: str, time: float) -> None:
         """Set the time of ``event`` (a presenter's click, or a fixed time)."""
         self.events[event] = time

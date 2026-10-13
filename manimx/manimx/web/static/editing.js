@@ -2,26 +2,30 @@
 // every edit changes the server's timeline at once and the frame at the
 // playhead shows it; the server saves manimx.json a moment later.
 //
-// Clips: drag a clip to move it (all selected clips move together), drag
-// the handle at either end to cut its start or end (back out again up to
-// the scene's length). Click selects, Shift or Ctrl click adds to the
-// selection, dragging on empty space in the clip rows selects every clip
-// the rectangle touches, Escape clears it. The clip panel types start,
-// layer, cut and speed. Events: drag their markers on the ruler, or set
-// them at the playhead in the events panel. The settings dialog changes
-// the project's settings.
+// Clips: drag a clip to move it, up or down onto another track to change
+// its layer (all selected clips move together), drag the handle at either
+// end to cut its start or end (and back out up to the scene's length).
+// Click selects, Shift or Ctrl click adds to the selection, dragging on
+// empty track space selects every clip the rectangle touches, Escape
+// clears it, Delete removes the selected clips. Drag a scene from the
+// sidebar onto a track to add a clip of it there. The clip panel types
+// start, layer, cut and speed. Events: drag a pill on a track's events row
+// to time the event. The settings dialog changes the project's settings.
 //
 // While dragging, the page sends the edit at every step (one request at a
 // time, then the newest) and asks for the frame at the playhead, or at the
-// cut while cutting, so the output shows where things land. app.js does
-// not redraw the timeline during a drag (state.dragging); it fetches the
-// edited timeline once the drag ends.
+// cut while cutting, or at the event while timing one, so the output shows
+// where things land. app.js does not redraw the timeline during a drag
+// (state.dragging); it fetches the edited timeline once the drag ends.
 
 let page = null; // what app.js shares: state, elements and its helpers
 const selected = new Set(); // indices of the selected clips
+const SCENE_TYPE = "application/x-manimx-scene";
 
 const panels = {
-  editor: document.getElementById("editor"),
+  inspector: document.getElementById("inspector"),
+  sidebar: document.getElementById("sidebar"),
+  scenes: document.getElementById("scene-list"),
   clip: document.getElementById("clip-editor"),
   events: document.getElementById("events-editor"),
   message: document.getElementById("edit-message"),
@@ -36,10 +40,17 @@ export function initEditing(shared) {
   panels.settingsButton.addEventListener("click", openSettings);
   panels.settings.addEventListener("close", () => panels.settingsForm.replaceChildren());
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && selected.size && !event.target.closest("input, select, textarea")) {
+    if (event.target.closest("input, select, textarea, dialog") || !page.state.timeline?.editable) return;
+    if (event.key === "Escape" && selected.size) {
       selected.clear();
       page.redraw();
       drawClipPanel();
+    }
+    if ((event.key === "Delete" || event.key === "Backspace") && selected.size) {
+      event.preventDefault();
+      const indices = [...selected];
+      selected.clear();
+      post("/api/clip/remove", { indices });
     }
   });
 }
@@ -47,12 +58,14 @@ export function initEditing(shared) {
 /** Called by app.js whenever the timeline was (re)loaded. */
 export function timelineLoaded() {
   const { editable, clips } = page.state.timeline;
-  panels.editor.hidden = !editable;
+  panels.inspector.hidden = !editable;
+  panels.sidebar.hidden = !editable;
   panels.settingsButton.hidden = !editable;
   if (!editable) return;
   for (const index of [...selected]) if (!clips[index]) selected.delete(index);
   drawClipPanel();
   drawEventsPanel();
+  drawScenes();
 }
 
 // -- sending edits ------------------------------------------------------------
@@ -104,6 +117,113 @@ function liveSender(route, onSent) {
   return send;
 }
 
+// -- the scenes sidebar ----------------------------------------------------------
+
+async function drawScenes() {
+  const response = await fetch("/api/scenes");
+  if (!response.ok) return;
+  panels.scenes.replaceChildren();
+  for (const scene of await response.json()) {
+    const item = document.createElement("li");
+    item.draggable = true;
+    item.title = `${scene.module}.${scene.class}: drag onto a track`;
+    const name = document.createElement("span");
+    name.textContent = scene.name;
+    const count = document.createElement("span");
+    count.className = "count";
+    count.textContent = scene.clips ? `×${scene.clips}` : "";
+    count.title = `${scene.clips} clip${scene.clips === 1 ? "" : "s"} on the timeline`;
+    item.append(name, count);
+    item.addEventListener("dragstart", (event) => {
+      event.dataTransfer.setData(SCENE_TYPE, scene.name);
+      event.dataTransfer.effectAllowed = "copy";
+    });
+    panels.scenes.append(item);
+  }
+}
+
+// -- tracks: dropping scenes, selecting with a rectangle ------------------------------------
+
+/** A track's lane (app.js calls this for every track, `layer` its layer). */
+export function trackLane(lane, layer) {
+  if (!page.state.timeline.editable) return;
+  lane.dataset.layer = layer;
+  const row = lane.parentElement;
+  lane.addEventListener("dragover", (event) => {
+    if (!event.dataTransfer.types.includes(SCENE_TYPE)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    row.classList.add("drop");
+  });
+  lane.addEventListener("dragleave", () => row.classList.remove("drop"));
+  lane.addEventListener("drop", async (event) => {
+    row.classList.remove("drop");
+    const scene = event.dataTransfer.getData(SCENE_TYPE);
+    if (!scene) return;
+    event.preventDefault();
+    const start = onFrame(timeAtUnclamped(event.clientX));
+    say(`Preparing ${scene}…`);
+    if (await post("/api/clip/add", { scene, start, layer })) page.showTime(start);
+  });
+  lane.addEventListener("pointerdown", (event) => {
+    if (event.target !== lane && !event.target.classList.contains("segment")) return;
+    event.stopPropagation();
+    lane.setPointerCapture(event.pointerId);
+    const additive = event.shiftKey || event.ctrlKey || event.metaKey;
+    const before = new Set(additive ? selected : []);
+    const origin = { x: event.clientX, y: event.clientY };
+    let dragged = false;
+    const onMove = (move) => {
+      dragged ||= Math.abs(move.clientX - origin.x) + Math.abs(move.clientY - origin.y) > 3;
+      const box = rectangle(origin, { x: move.clientX, y: move.clientY });
+      showMarquee(box);
+      selected.clear();
+      for (const index of before) selected.add(index);
+      for (const bar of document.querySelectorAll(".clip-body.editable")) {
+        const bounds = bar.getBoundingClientRect();
+        if (bounds.right >= box.left && bounds.left <= box.right && bounds.bottom >= box.top && bounds.top <= box.bottom) selected.add(Number(bar.dataset.index));
+      }
+      markSelected();
+    };
+    const onUp = (up) => {
+      lane.removeEventListener("pointermove", onMove);
+      lane.removeEventListener("pointerup", onUp);
+      panels.marquee.hidden = true;
+      if (!dragged) {
+        if (!additive) selected.clear(); // a click on empty space: and it moves the playhead there
+        page.showTime(timeAtUnclamped(up.clientX));
+      }
+      page.redraw();
+      drawClipPanel();
+    };
+    lane.addEventListener("pointermove", onMove);
+    lane.addEventListener("pointerup", onUp);
+  });
+}
+
+/** The time under `clientX` on the lanes, also past the timeline's end. */
+function timeAtUnclamped(clientX) {
+  const box = page.elements.ruler.getBoundingClientRect();
+  return Math.max(0, ((clientX - box.left) / box.width) * page.state.timeline.duration);
+}
+
+function rectangle(a, b) {
+  return { left: Math.min(a.x, b.x), right: Math.max(a.x, b.x), top: Math.min(a.y, b.y), bottom: Math.max(a.y, b.y) };
+}
+
+function showMarquee(box) {
+  const marquee = panels.marquee;
+  marquee.hidden = false;
+  marquee.style.left = `${box.left + scrollX}px`;
+  marquee.style.top = `${box.top + scrollY}px`;
+  marquee.style.width = `${box.right - box.left}px`;
+  marquee.style.height = `${box.bottom - box.top}px`;
+}
+
+function markSelected() {
+  for (const bar of document.querySelectorAll(".clip-body.editable")) bar.classList.toggle("selected", selected.has(Number(bar.dataset.index)));
+}
+
 // -- clip bars ------------------------------------------------------------------
 
 /** Make a clip's bar editable (app.js calls this for every clip bar). */
@@ -123,53 +243,11 @@ export function clipBar(body, clip, index) {
   body.addEventListener("pointerdown", (event) => startDrag(event, "move", index));
 }
 
-/** Dragging empty space in a clip row selects the clips in the rectangle. */
-export function clipLane(lane) {
-  if (!page.state.timeline.editable) return;
-  lane.addEventListener("pointerdown", (event) => {
-    if (event.target !== lane && !event.target.classList.contains("segment")) return;
-    event.stopPropagation(); // no scrubbing here
-    lane.setPointerCapture(event.pointerId);
-    const additive = event.shiftKey || event.ctrlKey || event.metaKey;
-    const before = new Set(additive ? selected : []);
-    const origin = { x: event.clientX, y: event.clientY };
-    let dragged = false;
-    const onMove = (move) => {
-      dragged ||= Math.abs(move.clientX - origin.x) + Math.abs(move.clientY - origin.y) > 3;
-      const box = rectangle(origin, { x: move.clientX, y: move.clientY });
-      showMarquee(box);
-      selected.clear();
-      for (const index of before) selected.add(index);
-      for (const bar of document.querySelectorAll(".clip-body.editable")) {
-        const bounds = bar.getBoundingClientRect();
-        if (bounds.right >= box.left && bounds.left <= box.right && bounds.bottom >= box.top && bounds.top <= box.bottom) selected.add(Number(bar.dataset.index));
-      }
-      for (const bar of document.querySelectorAll(".clip-body.editable")) bar.classList.toggle("selected", selected.has(Number(bar.dataset.index)));
-    };
-    const onUp = () => {
-      lane.removeEventListener("pointermove", onMove);
-      lane.removeEventListener("pointerup", onUp);
-      panels.marquee.hidden = true;
-      if (!additive && !dragged) selected.clear(); // a click on empty space
-      page.redraw();
-      drawClipPanel();
-    };
-    lane.addEventListener("pointermove", onMove);
-    lane.addEventListener("pointerup", onUp);
-  });
-}
-
-function rectangle(a, b) {
-  return { left: Math.min(a.x, b.x), right: Math.max(a.x, b.x), top: Math.min(a.y, b.y), bottom: Math.max(a.y, b.y) };
-}
-
-function showMarquee(box) {
-  const marquee = panels.marquee;
-  marquee.hidden = false;
-  marquee.style.left = `${box.left + scrollX}px`;
-  marquee.style.top = `${box.top + scrollY}px`;
-  marquee.style.width = `${box.right - box.left}px`;
-  marquee.style.height = `${box.bottom - box.top}px`;
+/** The layer of the track under the vertical position `clientY`, or null. */
+function layerAt(clientX, clientY) {
+  const lane = document.elementFromPoint(clientX, clientY)?.closest(".row.track .lane, .row.track");
+  const layer = (lane?.matches(".lane") ? lane : lane?.querySelector(".lane"))?.dataset.layer;
+  return layer === undefined ? null : Number(layer);
 }
 
 /** Drag `edge` ("move", "in" or "out") of clip `index` (and, moving, of every selected clip). */
@@ -179,7 +257,7 @@ function startDrag(event, edge, index) {
   if (additive) {
     if (selected.has(index)) selected.delete(index);
     else selected.add(index);
-    page.redraw();
+    markSelected();
     drawClipPanel();
     return;
   }
@@ -187,6 +265,7 @@ function startDrag(event, edge, index) {
     selected.clear();
     selected.add(index);
   }
+  markSelected();
   const target = event.currentTarget;
   target.setPointerCapture(event.pointerId);
   const { clips } = page.state.timeline;
@@ -194,11 +273,10 @@ function startDrag(event, edge, index) {
   const bars = new Map(moving.map((i) => [i, document.querySelector(`.clip-body[data-index="${i}"]`)]));
   const start = new Map(moving.map((i) => [i, { left: parseFloat(bars.get(i).style.left), width: parseFloat(bars.get(i).style.width) }]));
   // The segment bars under a moved clip move with it.
-  const segments = edge === "move" ? [...bars.values()].flatMap((bar) => [...bar.parentElement.querySelectorAll(".segment")].map((segment) => [segment, parseFloat(segment.style.left)])) : [];
-  for (const bar of document.querySelectorAll(".clip-body.editable")) bar.classList.toggle("selected", selected.has(Number(bar.dataset.index)));
+  const segments = edge === "move" ? moving.flatMap((i) => [...document.querySelectorAll(`.segment[data-clip="${i}"]`)].map((segment) => [segment, parseFloat(segment.style.left)])) : [];
   const secondsPerPixel = page.state.timeline.duration / page.elements.ruler.getBoundingClientRect().width;
   const clip = clips[index];
-  const grab = { x: event.clientX, delta: 0, moved: false };
+  const grab = { x: event.clientX, delta: 0, layers: 0, moved: false };
   const send = liveSender("/api/clip", () => {
     if (edge === "move") page.refreshFrame();
     else page.showTime(edge === "in" ? clip.start + grab.delta : clip.end + grab.delta);
@@ -206,15 +284,21 @@ function startDrag(event, edge, index) {
   page.state.dragging = true;
   const onMove = (move) => {
     const raw = (move.clientX - grab.x) * secondsPerPixel;
-    grab.moved ||= Math.abs(move.clientX - grab.x) > 2;
+    grab.moved ||= Math.abs(move.clientX - grab.x) > 2 || Math.abs(move.clientY - event.clientY) > 8;
     if (!grab.moved) return;
     // The dragged end lands on a frame.
     const from = edge === "out" ? clip.end : clip.start;
     let delta = onFrame(from + raw) - from;
     if (edge === "move") delta = Math.max(delta, -Math.min(...moving.map((i) => clips[i].start)));
     else delta = clamped(clip, edge, delta);
-    if (delta === grab.delta) return;
+    let layers = grab.layers;
+    if (edge === "move") {
+      const over = layerAt(move.clientX, move.clientY);
+      if (over !== null) layers = Math.max(over - clip.layer, -Math.min(...moving.map((i) => clips[i].layer)));
+    }
+    if (delta === grab.delta && layers === grab.layers) return;
     grab.delta = delta;
+    grab.layers = layers;
     const shift = page.percent(delta);
     for (const i of moving) {
       const bar = bars.get(i);
@@ -222,9 +306,17 @@ function startDrag(event, edge, index) {
       if (edge === "move" || edge === "in") bar.style.left = `${left + shift}%`;
       if (edge === "in") bar.style.width = `${width - shift}%`;
       if (edge === "out") bar.style.width = `${width + shift}%`;
+      const lane = document.querySelector(`.lane[data-layer="${clips[i].layer + layers}"]`);
+      if (lane && bar.parentElement !== lane) lane.append(bar);
     }
     for (const [segment, left] of segments) segment.style.left = `${left + shift}%`;
-    send({ clips: moving.map((i) => ({ index: i, ...dragChanges(clips[i], edge, delta) })) });
+    send({
+      clips: moving.map((i) => ({
+        index: i,
+        ...dragChanges(clips[i], edge, delta),
+        ...(edge === "move" ? { layer: clips[i].layer + layers } : {}),
+      })),
+    });
   };
   const onUp = async () => {
     target.removeEventListener("pointermove", onMove);
@@ -310,45 +402,36 @@ function drawClipPanel() {
   }
 }
 
-// -- events: markers on the ruler and the events panel ----------------------------------
+// -- events: pills on the tracks' events rows and the events panel ----------------------
 
-/** Draw a marker per event with a time on the ruler (app.js calls this). */
-export function eventMarkers(ruler) {
-  const { editable, events } = page.state.timeline;
-  for (const event of events ?? []) {
-    if (event.time === null) continue;
-    const marker = document.createElement("div");
-    marker.className = `event${event.fixed ? " fixed" : ""}`;
-    marker.style.left = `${page.percent(event.time)}%`;
-    marker.title = `${event.name} at ${event.time.toFixed(2)} s${event.fixed ? (editable ? " (drag to move)" : "") : " (emitted by a scene)"}`;
-    marker.textContent = event.name;
-    if (editable && event.fixed) dragMarker(marker, event);
-    ruler.append(marker);
-  }
-}
-
-function dragMarker(marker, event) {
-  marker.addEventListener("pointerdown", (down) => {
+/** Make an event's pill draggable (app.js calls this for every wait shown). */
+export function eventPill(pill, wait, bar) {
+  if (!page.state.timeline.editable) return;
+  pill.addEventListener("pointerdown", (down) => {
     down.stopPropagation();
-    marker.setPointerCapture(down.pointerId);
-    let time = event.time;
-    const send = liveSender("/api/event", () => page.refreshFrame());
+    pill.setPointerCapture(down.pointerId);
+    const from = wait.from ?? wait.clip.start;
+    let time = wait.time;
+    const send = liveSender("/api/event", () => page.showTime(time));
     page.state.dragging = true;
+    pill.classList.remove("never");
+    bar.classList.remove("never");
     const onMove = (move) => {
-      const at = page.timeAt(move.clientX);
+      const at = onFrame(timeAtUnclamped(move.clientX));
       if (at === time) return;
       time = at;
-      marker.style.left = `${page.percent(time)}%`;
-      send({ name: event.name, time });
+      pill.style.left = `${page.percent(time)}%`;
+      bar.style.width = `${page.percent(Math.max(0, time - from))}%`;
+      send({ name: wait.event, time });
     };
     const onUp = async () => {
-      marker.removeEventListener("pointermove", onMove);
-      marker.removeEventListener("pointerup", onUp);
+      pill.removeEventListener("pointermove", onMove);
+      pill.removeEventListener("pointerup", onUp);
       await send.idle();
       page.state.dragging = false;
     };
-    marker.addEventListener("pointermove", onMove);
-    marker.addEventListener("pointerup", onUp);
+    pill.addEventListener("pointermove", onMove);
+    pill.addEventListener("pointerup", onUp);
   });
 }
 

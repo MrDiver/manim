@@ -8,41 +8,76 @@
   <script type="module" src="app.js"></script>
 </head>
 <body>
-  <header>
+  <header class="bar">
     <h1 id="title">manimx</h1>
     <div class="tools">
-      <div class="zoom" role="group" aria-label="Timeline zoom">
-        <button id="zoom-out" type="button" title="Zoom the timeline out (-)">−</button>
-        <button id="zoom-fit" type="button" title="Show the whole timeline (0)">Fit</button>
-        <button id="zoom-in" type="button" title="Zoom the timeline in (+)">+</button>
-      </div>
-      <button id="settings-button" type="button" hidden title="Change the project's settings (saved to manimx.json)">Settings</button>
+      <button id="settings-button" type="button" hidden title="The project's settings (saved to manimx.json)">Settings</button>
       <button id="indices" type="button" aria-pressed="false" title="Show the index of every path in its group (for MorphMatching pairs)">Indices</button>
       <output id="time" aria-live="off">0.00 s</output>
     </div>
   </header>
-  <main>
-    <pre id="problem" role="alert" hidden></pre>
-    <figure id="stage">
-      <img id="frame" alt="The frame at the current time">
-      <div id="labels" aria-hidden="true"></div>
-      <figcaption id="error" hidden></figcaption>
-    </figure>
-    <section id="timeline" aria-label="Timeline" tabindex="0">
-      <div class="row ruler-row">
-        <div class="label"><button id="collapse" type="button" title="Collapse every track">Collapse all</button></div>
-        <div class="lane" id="ruler"></div>
+
+  <div class="workspace">
+    <aside id="sidebar" aria-label="Scenes" hidden>
+      <h2>Scenes</h2>
+      <ul id="scene-list"></ul>
+      <p class="hint">Drag a scene onto a track to add a clip.</p>
+    </aside>
+
+    <section class="viewer">
+      <pre id="problem" role="alert" hidden></pre>
+      <figure id="stage">
+        <img id="frame" alt="The frame at the current time">
+        <div id="labels" aria-hidden="true"></div>
+        <figcaption id="error" hidden></figcaption>
+      </figure>
+      <div class="controls" role="toolbar" aria-label="Playback">
+        <button id="mute" type="button" class="icon" aria-pressed="false" title="Sound on or off (M)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="waves" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none"/></svg>
+        </button>
+        <button id="to-start" type="button" class="icon" title="To the start (Home)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14M19 5l-10 7 10 7z"/></svg>
+        </button>
+        <button id="previous-frame" type="button" class="icon" title="One frame back (←)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5l-10 7 10 7z"/></svg>
+        </button>
+        <button id="play" type="button" class="icon play" title="Play or pause (Space)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path class="play-shape" d="M7 4l13 8-13 8z"/><path class="pause-shape" d="M7 4h4v16H7zM14 4h4v16h-4z"/></svg>
+        </button>
+        <button id="next-frame" type="button" class="icon" title="One frame on (→)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l10 7-10 7z"/></svg>
+        </button>
+        <button id="to-end" type="button" class="icon" title="To the end (End)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 5v14M5 5l10 7-10 7z"/></svg>
+        </button>
+        <button id="loop" type="button" class="icon" aria-pressed="true" title="Loop (L)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 11V9a3 3 0 0 1 3-3h10l-3-3M19 13v2a3 3 0 0 1-3 3H6l3 3" fill="none"/></svg>
+        </button>
+        <span class="zoom" role="group" aria-label="Timeline zoom">
+          <button id="zoom-out" type="button" title="Zoom the timeline out (-)">−</button>
+          <button id="zoom-fit" type="button" title="Show the whole timeline (0)">Fit</button>
+          <button id="zoom-in" type="button" title="Zoom the timeline in (+)">+</button>
+        </span>
       </div>
-      <div id="rows" role="tree" aria-label="Clips, nodes, signals and animations"></div>
-      <div id="overlay"><div id="playhead"></div></div>
     </section>
-    <section id="editor" aria-label="Edit the project" hidden>
-      <p id="edit-message" role="status" aria-live="polite">Edits are saved to manimx.json.</p>
+
+    <aside id="inspector" aria-label="Edit the project" hidden>
+      <p id="edit-message" role="status" aria-live="polite">Edits show at once and are saved to manimx.json.</p>
       <div id="clip-editor"></div>
       <div id="events-editor"></div>
-    </section>
-    <p class="hint">Drag on the ruler or the tracks to scrub. Drag a clip to move it, its handles to cut it, empty space in the clip rows to select several. ← → one frame, Shift+← → one second, Home and End. Ctrl+wheel or + and − zoom, 0 fits. Click a name to open its tracks.</p>
-  </main>
+    </aside>
+  </div>
+
+  <section id="timeline" aria-label="Timeline" tabindex="0">
+    <div class="row ruler-row">
+      <div class="label"><button id="collapse" type="button" title="Close every clip's tracks">Collapse all</button></div>
+      <div class="lane" id="ruler"></div>
+    </div>
+    <div id="rows" role="tree" aria-label="Tracks, clips, events, nodes and animations"></div>
+    <div id="overlay"><div id="playhead"><span id="playhead-frame">0</span></div></div>
+  </section>
+  <p class="hint footer">Drag on the ruler to scrub. Drag a clip to move it (up or down to another track), its handles to cut it, empty track space to select several; Delete removes the selection. Drag an event to time it. Space plays, ← → step frames, Ctrl+wheel zooms.</p>
+
   <div id="marquee" hidden></div>
   <dialog id="settings" aria-label="Project settings">
     <form method="dialog">

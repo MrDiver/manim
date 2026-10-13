@@ -1,48 +1,40 @@
-// The preview page: draws the timeline and shows the frame at the
-// playhead. See manimx/web/server.py for the endpoints.
+// The preview page: the frame at the playhead, playback, and the timeline.
+// See manimx/web/server.py for the endpoints and editing.js for editing.
 //
 // Frames are asked for one at a time. While a request is open, only the
 // newest wanted time is remembered; when the frame arrives, that time is
-// asked for next. So scrubbing never queues outdated frames on the server.
+// asked for next. So scrubbing and playback never queue outdated frames on
+// the server; playback shows as many frames as the server renders.
 //
-// Tracks: under each clip, its scene's nodes as a tree; under a node, the
-// signals animations change; under a signal, those animations. A closed
-// node's lane shows every animation in its subtree. Which rows are open is
-// kept in localStorage by key (clip, node path, signal name), so a reload
-// on save keeps them.
+// Playback runs on the audio's clock when the timeline has sounds
+// (/api/audio, mixed once per version), else on the page's clock; Loop
+// starts over at the end.
 //
-// Indices: with the toggle on, the page asks /api/labels for every frame
-// it shows and draws each path's index in its group over the image (the
-// name and group on hover). The toggle is kept in localStorage.
-//
-// Reload on save: /api/changes answers when the server rebuilt the
-// timeline (or failed to); the page then fetches the timeline again and
-// shows the same time, or the build error above the frame.
+// Tracks: one per layer, the highest on top, each clip of that layer on it.
+// Under a track, its events: a bar from where a clip starts waiting to the
+// event, and the event's pill. A clip's ▸ opens its scene's nodes; under a
+// node, the signals animations change; under a signal, those animations.
+// Which clips and nodes are open is kept in localStorage by key (clip,
+// node path), so a reload keeps them.
 //
 // Zoom: the lanes are `zoom` times as wide as the space beside the labels
-// (the CSS variable --lanes, in pixels) and the timeline scrolls sideways
-// under its sticky labels. Ctrl+wheel zooms around the pointer, the keys
-// and buttons around the playhead; a moved playhead is scrolled into view.
+// (the CSS variable --lanes) and the timeline scrolls sideways under its
+// sticky labels. Ctrl+wheel zooms around the pointer, the keys and buttons
+// around the playhead; a moved playhead is scrolled into view.
+//
+// Reload on save: /api/changes answers when the timeline changed (an edit,
+// or a scene file saved); the page then fetches the timeline again, except
+// during a drag, and keeps its time.
 
-import { clipBar, clipLane, eventMarkers, initEditing, timelineLoaded } from "./editing.js";
+import { clipBar, eventPill, initEditing, timelineLoaded, trackLane } from "./editing.js";
 
-const elements = {
-  problem: document.getElementById("problem"),
-  title: document.getElementById("title"),
-  time: document.getElementById("time"),
-  frame: document.getElementById("frame"),
-  error: document.getElementById("error"),
-  timeline: document.getElementById("timeline"),
-  ruler: document.getElementById("ruler"),
-  rows: document.getElementById("rows"),
-  playhead: document.getElementById("playhead"),
-  collapse: document.getElementById("collapse"),
-  indices: document.getElementById("indices"),
-  labels: document.getElementById("labels"),
-  zoomIn: document.getElementById("zoom-in"),
-  zoomOut: document.getElementById("zoom-out"),
-  zoomFit: document.getElementById("zoom-fit"),
-};
+const elements = Object.fromEntries(
+  [
+    "problem", "title", "time", "frame", "error", "timeline", "ruler", "rows", "playhead", "collapse", "indices",
+    "labels", "playhead-frame", "play", "mute", "loop", "to-start", "to-end", "previous-frame", "next-frame",
+    "zoom-in", "zoom-out", "zoom-fit",
+  ].map((id) => [id.replace(/-(\w)/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]),
+);
 
 /** Smallest width of one frame when zoomed in all the way, in pixels. */
 const MAX_FRAME_WIDTH = 32;
@@ -54,11 +46,18 @@ const state = {
   loading: false, // a frame request is open
   wanted: null, // the time to show once it is done
   shownUrl: null,
-  open: loadOpen(), // keys of the rows whose tracks are shown
-  indices: loadIndices(), // index labels over the frame
+  open: loadSet("manimx.open"), // keys of the clips and nodes whose tracks are shown
+  indices: loadFlag("manimx.indices"), // index labels over the frame
   zoom: 1, // lanes width / the width beside the labels
   dragging: false, // an edit is being dragged: the timeline is not redrawn meanwhile
+  scrubbing: false,
+  playing: false,
+  loop: true,
+  muted: loadFlag("manimx.muted"),
+  audio: null, // { version, element } of the timeline's sounds
 };
+
+// -- time and position ------------------------------------------------------------
 
 /** Horizontal position of a time, as a percentage of the timeline. */
 function percent(time) {
@@ -78,9 +77,13 @@ function snap(time) {
   return Math.min(duration, Math.max(0, Math.round(time * fps) / fps));
 }
 
+const frameOf = (time) => Math.round(time * state.timeline.fps);
+
+// -- zoom -------------------------------------------------------------------------------
+
 /** Pixels beside the labels: the lanes' width at zoom 1. */
 function fitWidth() {
-  const label = parseFloat(getComputedStyle(elements.timeline).getPropertyValue("--label")) || 220;
+  const label = parseFloat(getComputedStyle(elements.timeline).getPropertyValue("--label")) || 170;
   return Math.max(100, elements.timeline.clientWidth - label - 12);
 }
 
@@ -97,9 +100,8 @@ function zoomTo(zoom, clientX) {
   layoutLanes();
   drawRuler();
   const label = elements.ruler.offsetLeft;
-  const lanes = elements.ruler.offsetWidth;
   const offset = clientX - elements.timeline.getBoundingClientRect().left;
-  elements.timeline.scrollLeft = label + fraction * lanes - offset;
+  elements.timeline.scrollLeft = label + fraction * elements.ruler.offsetWidth - offset;
 }
 
 /** Zoom by `factor` around the playhead. */
@@ -121,50 +123,123 @@ function revealPlayhead() {
   if (x < left || x > right) timeline.scrollLeft = x - label - (timeline.clientWidth - label) / 2;
 }
 
+// -- drawing the timeline ------------------------------------------------------------------
+
+/** Ticks in frames, about one per 80 pixels. */
 function drawRuler() {
-  const { duration } = state.timeline;
+  const { duration, fps } = state.timeline;
   elements.ruler.replaceChildren();
-  const step = niceStep(duration / state.zoom);
-  for (let t = 0; t <= duration + 1e-9; t += step) {
+  const frames = Math.max(1, Math.round(duration * fps));
+  const step = niceStep((frames * 80) / (fitWidth() * state.zoom));
+  for (let frame = 0; frame <= frames; frame += step) {
     const tick = document.createElement("span");
     tick.className = "tick";
-    tick.style.left = `${percent(t)}%`;
-    tick.textContent = `${Number(t.toFixed(3))} s`;
+    tick.style.left = `${percent(frame / fps)}%`;
+    tick.textContent = frame;
     elements.ruler.append(tick);
   }
-  eventMarkers(elements.ruler);
+}
+
+/** The smallest of 1, 2, 5, 10, 20, 50, ... frames that is at least `raw`. */
+function niceStep(raw) {
+  const power = 10 ** Math.floor(Math.log10(Math.max(raw, 1)));
+  return [1, 2, 5, 10].map((m) => m * power).find((step) => step >= raw);
+}
+
+/** The layers that have tracks: every clip's, highest first, and one free one above. */
+function layers() {
+  const used = [...new Set(state.timeline.clips.map((clip) => clip.layer))].sort((a, b) => b - a);
+  return { used, free: used.length ? used[0] + 1 : 0 };
 }
 
 function drawTimeline() {
-  const { duration, clips, segments } = state.timeline;
+  const { clips, segments, editable } = state.timeline;
   layoutLanes();
   drawRuler();
   elements.rows.replaceChildren();
-  const order = clips.map((clip, index) => index).sort((a, b) => clips[a].layer - clips[b].layer || a - b);
-  for (const index of order) {
-    const clip = clips[index];
-    const key = `clip:${index}:${clip.name}`;
-    const { row, lane } = addRow(key, 0, clip.name, "clip", clip.nodes.length > 0);
-    const body = document.createElement("div");
-    body.className = "clip-body";
-    const end = clip.end ?? duration; // a clip that waits for an event runs on
-    body.style.left = `${percent(clip.start)}%`;
-    body.style.width = `${percent(end - clip.start)}%`;
-    body.title = `${clip.name}: ${clip.start.toFixed(2)} – ${clip.end === null ? "waits" : `${end.toFixed(2)} s`}`;
-    lane.append(body);
-    clipBar(body, clip, index);
-    clipLane(lane);
-    for (const segment of segments.filter((segment) => segment.clip === index)) {
-      const bar = document.createElement("div");
-      bar.className = "segment";
-      bar.style.left = `${percent(segment.start)}%`;
-      bar.style.width = `${Math.max(0.2, percent((segment.end ?? duration) - segment.start))}%`;
-      lane.append(bar);
+  const { used, free } = layers();
+  if (editable) {
+    const { row, lane } = addRow(`track:${free}`, 0, "New track", "track new-track", false);
+    row.title = "Drop a scene here to put it on a new track";
+    trackLane(lane, free);
+  }
+  for (const layer of used) {
+    const { lane } = addRow(`track:${layer}`, 0, `Track ${layer}`, "track", false);
+    trackLane(lane, layer);
+    const onTrack = clips.map((clip, index) => ({ clip, index })).filter(({ clip }) => clip.layer === layer);
+    for (const { clip, index } of onTrack) {
+      lane.append(clipBody(clip, index));
+      for (const segment of segments.filter((segment) => segment.clip === index)) {
+        const bar = document.createElement("div");
+        bar.className = "segment";
+        bar.dataset.clip = index;
+        bar.style.left = `${percent(segment.start)}%`;
+        bar.style.width = `${Math.max(0.2, percent((segment.end ?? state.timeline.duration) - segment.start))}%`;
+        lane.append(bar);
+      }
     }
-    if (state.open.has(key)) {
-      for (const node of clip.nodes) addNode(node, key, 1);
+    drawEvents(onTrack);
+    for (const { clip, index } of onTrack) {
+      const key = clipKey(clip, index);
+      if (state.open.has(key)) for (const node of clip.nodes) addNode(node, key, 1);
     }
-    row.dataset.clip = index;
+  }
+}
+
+function clipKey(clip, index) {
+  return `clip:${index}:${clip.name}`;
+}
+
+function clipBody(clip, index) {
+  const { duration } = state.timeline;
+  const body = document.createElement("div");
+  body.className = "clip-body";
+  const end = clip.end ?? duration; // a clip that waits for an event runs on
+  body.style.left = `${percent(clip.start)}%`;
+  body.style.width = `${percent(end - clip.start)}%`;
+  body.title = `${clip.name}: frames ${frameOf(clip.start)} – ${clip.end === null ? "waits" : frameOf(end)}`;
+  if (clip.nodes.length) {
+    const key = clipKey(clip, index);
+    const expand = document.createElement("button");
+    expand.type = "button";
+    expand.className = "expand";
+    expand.textContent = state.open.has(key) ? "▾" : "▸";
+    expand.title = "Show the scene's nodes and animations";
+    expand.addEventListener("pointerdown", (event) => event.stopPropagation());
+    expand.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggle(key);
+    });
+    body.append(expand);
+  }
+  body.append(clip.name);
+  clipBar(body, clip, index);
+  return body;
+}
+
+/** The events row under a track: per wait, a bar and a pill (none: no row). */
+function drawEvents(onTrack) {
+  const waits = onTrack.flatMap(({ clip, index }) => clip.waits.map((wait) => ({ ...wait, clip, index })));
+  if (!waits.length) return;
+  const { lane } = addRow(`events:${onTrack[0].clip.layer}`, 1, "events", "events", false);
+  const fixed = new Set(state.timeline.events.filter((event) => event.fixed).map((event) => event.name));
+  for (const wait of waits) {
+    const from = wait.from ?? wait.clip.start;
+    const never = wait.time === null;
+    const bar = document.createElement("div");
+    bar.className = `wait${never ? " never" : ""}`;
+    bar.style.left = `${percent(from)}%`;
+    bar.style.width = `${percent(never ? Math.max(0, state.timeline.duration - from) : Math.max(0, wait.time - from))}%`;
+    lane.append(bar);
+    const pill = document.createElement("div");
+    pill.className = `pill${never ? " never" : fixed.has(wait.event) ? "" : " emitted"}`;
+    pill.style.left = `${percent(never ? from : wait.time)}%`;
+    pill.textContent = wait.event;
+    pill.title = never
+      ? `${wait.clip.name} waits for ${wait.event}, which never fires: drag to time it`
+      : `${wait.event} at frame ${frameOf(wait.time)}${fixed.has(wait.event) ? "" : " (emitted by a scene)"}: drag to time it`;
+    lane.append(pill);
+    eventPill(pill, wait, bar);
   }
 }
 
@@ -200,13 +275,13 @@ function addBars(lane, animations, named = false) {
     bar.className = instant ? "instant" : "animation";
     bar.style.left = `${percent(animation.start)}%`;
     if (!instant) bar.style.width = `${percent(animation.end - animation.start)}%`;
-    bar.title = `${animation.name}: ${animation.start.toFixed(2)}${instant ? "" : ` – ${animation.end.toFixed(2)}`} s`;
+    bar.title = `${animation.name}: frame ${frameOf(animation.start)}${instant ? "" : ` – ${frameOf(animation.end)}`}`;
     if (named && !instant) bar.textContent = animation.name;
     lane.append(bar);
   }
 }
 
-/** A row: a label (a toggle when it has tracks below) and a lane. */
+/** A row: a label (a toggle when it has rows below) and a lane. */
 function addRow(key, depth, name, kind, expandable, type = null) {
   const row = document.createElement("div");
   row.className = `row ${kind}`;
@@ -215,26 +290,21 @@ function addRow(key, depth, name, kind, expandable, type = null) {
   const label = document.createElement("div");
   label.className = "label";
   label.style.paddingLeft = `${8 + 14 * depth}px`;
-  const toggle = document.createElement(expandable ? "button" : "span");
-  toggle.className = "toggle";
+  const toggleElement = document.createElement(expandable ? "button" : "span");
+  toggleElement.className = "toggle";
   if (expandable) {
     const open = state.open.has(key);
-    toggle.type = "button";
-    toggle.setAttribute("aria-expanded", open);
+    toggleElement.type = "button";
+    toggleElement.setAttribute("aria-expanded", open);
     row.setAttribute("aria-expanded", open);
-    toggle.addEventListener("click", () => {
-      if (state.open.has(key)) state.open.delete(key);
-      else state.open.add(key);
-      saveOpen();
-      drawTimeline();
-    });
+    toggleElement.addEventListener("click", () => toggle(key));
   }
   const text = document.createElement("span");
   text.className = "name";
   text.textContent = name;
   text.title = type ? `${name} (${type})` : name;
-  toggle.append(text);
-  label.append(toggle);
+  toggleElement.append(text);
+  label.append(toggleElement);
   if (type) {
     const badge = document.createElement("span");
     badge.className = "type";
@@ -248,37 +318,57 @@ function addRow(key, depth, name, kind, expandable, type = null) {
   return { row, lane };
 }
 
-/** Open tracks are remembered per page (a reload keeps them). */
-function loadOpen() {
+function toggle(key) {
+  if (state.open.has(key)) state.open.delete(key);
+  else state.open.add(key);
+  saveSet("manimx.open", state.open);
+  drawTimeline();
+}
+
+// -- remembered preferences ---------------------------------------------------------------
+
+function loadSet(name) {
   try {
-    return new Set(JSON.parse(localStorage.getItem("manimx.open") ?? "[]"));
+    return new Set(JSON.parse(localStorage.getItem(name) ?? "[]"));
   } catch {
     return new Set();
   }
 }
 
-function saveOpen() {
+function saveSet(name, set) {
   try {
-    localStorage.setItem("manimx.open", JSON.stringify([...state.open]));
+    localStorage.setItem(name, JSON.stringify([...set]));
   } catch {
-    // storage is unavailable: the tracks stay open for this page only
+    // storage is unavailable: it lasts for this page only
   }
 }
 
-/** A tick spacing that gives roughly ten labels. */
-function niceStep(duration) {
-  const raw = Math.max(duration, 1e-3) / 10;
-  const power = 10 ** Math.floor(Math.log10(raw));
-  return [1, 2, 5, 10].map((m) => m * power).find((step) => step >= raw);
+function loadFlag(name) {
+  try {
+    return localStorage.getItem(name) === "on";
+  } catch {
+    return false;
+  }
 }
+
+function saveFlag(name, on) {
+  try {
+    localStorage.setItem(name, on ? "on" : "off");
+  } catch {
+    // storage is unavailable: it lasts until a reload
+  }
+}
+
+// -- the frame ---------------------------------------------------------------------------
 
 function show(time, intended = time, reveal = false) {
   state.time = time;
   state.intended = intended;
   history.replaceState(null, "", `#t=${intended.toFixed(3)}`); // a link keeps the place
   elements.playhead.style.left = `${percent(time)}%`;
+  elements.playheadFrame.textContent = frameOf(time);
+  elements.time.textContent = `${time.toFixed(2)} s · frame ${frameOf(time)}`;
   if (reveal) revealPlayhead();
-  elements.time.textContent = `${time.toFixed(2)} s · frame ${Math.round(time * state.timeline.fps)}`;
   if (state.loading) {
     state.wanted = time;
   } else {
@@ -305,7 +395,7 @@ async function load(time) {
     if (state.shownUrl) URL.revokeObjectURL(state.shownUrl);
     state.shownUrl = url;
     elements.error.hidden = true;
-    await drawLabels(time);
+    if (!state.playing) await drawLabels(time);
   } catch (error) {
     elements.error.textContent = `${time.toFixed(2)} s: ${error.message}`;
     elements.error.hidden = false;
@@ -315,23 +405,7 @@ async function load(time) {
   }
 }
 
-function loadIndices() {
-  try {
-    return localStorage.getItem("manimx.indices") === "on";
-  } catch {
-    return false;
-  }
-}
-
-function showIndices(on) {
-  state.indices = on;
-  elements.indices.setAttribute("aria-pressed", String(on));
-  try {
-    localStorage.setItem("manimx.indices", on ? "on" : "off");
-  } catch {
-    // no storage: the toggle only lasts until a reload
-  }
-}
+// -- index labels -------------------------------------------------------------------------
 
 /** Relative luminance of a #rrggbb color, 0 (black) to 1 (white). */
 function luminance(hex) {
@@ -357,20 +431,102 @@ async function drawLabels(time) {
   }
 }
 
+// -- playback ------------------------------------------------------------------------------
+
+/** The timeline's sounds as an audio element (fetched once per version), or null. */
+async function audioElement() {
+  const version = state.timeline.version;
+  if (state.audio?.version === version) return state.audio.element;
+  let element = null;
+  try {
+    const response = await fetch("/api/audio");
+    if (response.status === 200) {
+      element = new Audio(URL.createObjectURL(await response.blob()));
+      element.preload = "auto";
+    }
+  } catch {
+    element = null; // play without sound
+  }
+  if (state.audio?.element) state.audio.element.pause();
+  state.audio = { version, element };
+  return element;
+}
+
+async function play() {
+  if (state.playing) return;
+  if (state.time >= state.timeline.duration - 1e-9) show(0);
+  state.playing = true;
+  document.body.classList.add("playing");
+  const audio = state.muted ? null : await audioElement();
+  let origin = performance.now() - state.time * 1000;
+  if (audio) {
+    audio.currentTime = state.time;
+    audio.play().catch(() => {});
+  }
+  const step = () => {
+    if (!state.playing) return;
+    let time = audio && !audio.paused ? audio.currentTime : (performance.now() - origin) / 1000;
+    if (time >= state.timeline.duration) {
+      if (!state.loop) {
+        show(state.timeline.duration);
+        pause();
+        return;
+      }
+      time = 0;
+      origin = performance.now();
+      if (audio) audio.currentTime = 0;
+    }
+    show(time, time, true);
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+function pause() {
+  state.playing = false;
+  document.body.classList.remove("playing");
+  state.audio?.element?.pause();
+  show(snap(state.time));
+}
+
+const togglePlay = () => (state.playing ? pause() : play());
+
+function setMuted(muted) {
+  state.muted = muted;
+  elements.mute.setAttribute("aria-pressed", String(muted));
+  saveFlag("manimx.muted", muted);
+  if (muted) state.audio?.element?.pause();
+}
+
+/** Move the playhead (pausing playback). */
+function seek(time) {
+  if (state.playing) pause();
+  show(snap(time), snap(time), true);
+}
+
+// -- input -------------------------------------------------------------------------------------
+
 function listen() {
   elements.indices.addEventListener("click", () => {
-    showIndices(!state.indices);
+    state.indices = !state.indices;
+    elements.indices.setAttribute("aria-pressed", String(state.indices));
+    saveFlag("manimx.indices", state.indices);
     drawLabels(state.time);
   });
   const timeline = elements.timeline;
+  // Scrubbing: on the ruler, and on node and signal rows.
   timeline.addEventListener("pointerdown", (event) => {
-    if (!event.target.closest(".lane")) return; // the labels toggle tracks
+    if (!event.target.closest("#ruler, .row.node .lane, .row.signal .lane")) return;
     timeline.setPointerCapture(event.pointerId);
     timeline.focus();
-    show(timeAt(event.clientX));
+    state.scrubbing = true;
+    seek(timeAt(event.clientX));
   });
   timeline.addEventListener("pointermove", (event) => {
-    if (timeline.hasPointerCapture(event.pointerId)) show(timeAt(event.clientX));
+    if (state.scrubbing && timeline.hasPointerCapture(event.pointerId)) show(timeAt(event.clientX));
+  });
+  timeline.addEventListener("pointerup", () => {
+    state.scrubbing = false;
   });
   timeline.addEventListener(
     "wheel",
@@ -384,39 +540,45 @@ function listen() {
   elements.zoomIn.addEventListener("click", () => zoomBy(1.5));
   elements.zoomOut.addEventListener("click", () => zoomBy(1 / 1.5));
   elements.zoomFit.addEventListener("click", () => zoomTo(1, 0));
+  elements.play.addEventListener("click", togglePlay);
+  elements.mute.addEventListener("click", () => setMuted(!state.muted));
+  elements.loop.addEventListener("click", () => {
+    state.loop = !state.loop;
+    elements.loop.setAttribute("aria-pressed", String(state.loop));
+  });
+  elements.toStart.addEventListener("click", () => seek(0));
+  elements.toEnd.addEventListener("click", () => seek(state.timeline.duration));
+  elements.previousFrame.addEventListener("click", () => seek(state.time - 1 / state.timeline.fps));
+  elements.nextFrame.addEventListener("click", () => seek(state.time + 1 / state.timeline.fps));
   new ResizeObserver(() => {
     layoutLanes();
     drawRuler();
   }).observe(timeline);
   elements.collapse.addEventListener("click", () => {
     state.open.clear();
-    saveOpen();
+    saveSet("manimx.open", state.open);
     drawTimeline();
   });
   document.addEventListener("keydown", (event) => {
+    if (event.target.closest("input, select, textarea, dialog")) return; // typing, not moving
     const { fps, duration } = state.timeline;
-    const steps = {
-      ArrowLeft: -(event.shiftKey ? 1 : 1 / fps),
-      ArrowRight: event.shiftKey ? 1 : 1 / fps,
+    const keys = {
+      " ": togglePlay,
+      m: () => setMuted(!state.muted),
+      l: () => elements.loop.click(),
+      "+": () => zoomBy(1.5),
+      "=": () => zoomBy(1.5),
+      "-": () => zoomBy(1 / 1.5),
+      0: () => zoomTo(1, 0),
+      ArrowLeft: () => seek(state.time - (event.shiftKey ? 1 : 1 / fps)),
+      ArrowRight: () => seek(state.time + (event.shiftKey ? 1 : 1 / fps)),
+      Home: () => seek(0),
+      End: () => seek(duration),
     };
-    if (event.target.closest("input, select, textarea")) return; // typing, not moving
-    const zooms = { "+": 1.5, "=": 1.5, "-": 1 / 1.5 };
-    if (event.key in zooms) {
+    const action = keys[event.key];
+    if (action && !event.ctrlKey && !event.metaKey && !event.altKey) {
       event.preventDefault();
-      zoomBy(zooms[event.key]);
-      return;
-    }
-    if (event.key === "0") {
-      zoomTo(1, 0);
-      return;
-    }
-    let time = null;
-    if (event.key in steps) time = snap(state.time + steps[event.key]);
-    else if (event.key === "Home") time = 0;
-    else if (event.key === "End") time = duration;
-    if (time !== null) {
-      event.preventDefault();
-      show(time, time, true);
+      action();
     }
   });
 }
@@ -435,7 +597,7 @@ async function loadTimeline() {
   timelineLoaded();
 }
 
-/** Wait for the server's rebuilds, forever; show each one at the same time. */
+/** Wait for the server's changes, forever; show each one at the same time. */
 async function followChanges() {
   for (;;) {
     try {
@@ -444,7 +606,7 @@ async function followChanges() {
       if (version !== state.timeline.version) {
         while (state.dragging) await new Promise((resolve) => setTimeout(resolve, 50));
         await loadTimeline();
-        show(snap(state.intended), state.intended);
+        if (!state.playing) show(snap(state.intended), state.intended);
       }
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 2000)); // the server is gone or restarting
@@ -459,11 +621,13 @@ async function start() {
     percent,
     snap,
     timeAt,
+    frameOf,
     redraw: drawTimeline,
     refreshFrame: () => show(state.time, state.intended),
     showTime: (time) => show(snap(time)),
   });
-  showIndices(state.indices);
+  elements.indices.setAttribute("aria-pressed", String(state.indices));
+  elements.mute.setAttribute("aria-pressed", String(state.muted));
   await loadTimeline();
   listen();
   const linked = Number(new URLSearchParams(location.hash.slice(1)).get("t"));
