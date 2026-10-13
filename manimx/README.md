@@ -68,9 +68,11 @@ every Rust folder's `mod.rs` starts with a table of its modules.
 1. [GETTING_STARTED.md](GETTING_STARTED.md): using manimx.
 2. [ARCHITECTURE.md](ARCHITECTURE.md): how the whole system fits
    together, which class owns what, and why.
-3. [manimx/renderer/README.md](manimx/renderer/README.md): how a frame
-   is drawn, pass by pass, with pictures.
-4. [core/README.md](core/README.md) and [CORE.md](CORE.md): the Rust core.
+3. [core/README.md](core/README.md) and [CORE.md](CORE.md): the Rust
+   core, and the renderer: its stages and how a frame is drawn, pass by
+   pass, with pictures.
+4. [manimx/renderer/README.md](manimx/renderer/README.md): what the
+   renderer draws and how to use it.
 5. [REFERENCES.md](REFERENCES.md): every algorithm and where it comes from.
 6. [PERFORMANCE.md](PERFORMANCE.md): how fast it is and how it got there.
 7. [FUTURE_IDEAS.md](FUTURE_IDEAS.md): what is planned, and what was

@@ -9,9 +9,8 @@ the Python code. Where two classes share a name, the module comes first
 `animation.Group`.
 
 More detail: the native core (Rust) in [CORE.md](CORE.md) and
-[core/README.md](core/README.md), the renderer's internals (passes,
-shaders, buffers) in
-[manimx/renderer/README.md](manimx/renderer/README.md), the animation
+[core/README.md](core/README.md), which also holds the renderer's
+internals (stages, passes, shaders, buffers), the animation
 engine's design rationale in `docs/animation_engine_design.md` (repository
 root), performance work in [PERFORMANCE.md](PERFORMANCE.md), usage in
 [GETTING_STARTED.md](GETTING_STARTED.md).
@@ -536,13 +535,13 @@ nodes take as arguments.
 
 The renderer is part of the core (`core/src/render/`), a library of its
 own: it reads render object trees and the settings of a `RenderConfig`
-(`ViewSettings`) and nothing else, no slots, no Python. How a frame is
-drawn, pass by pass, with pictures, what it keeps between frames and why
-it is built this way is in
-[manimx/renderer/README.md](manimx/renderer/README.md). The Python
-package `manimx.renderer` holds what a renderer is given next to the
-tree: `RenderConfig`, `ViewState` and the effect settings. The WGSL
-shaders are in core/shaders/, compiled into the core.
+(`ViewSettings`) and nothing else, no slots, no Python. Its stages, how
+a frame is drawn pass by pass with pictures, what it keeps between
+frames and why it is built this way are in
+[core/README.md](core/README.md#the-renderer); how to use it and what it
+draws in [manimx/renderer/README.md](manimx/renderer/README.md). The
+Python package `manimx.renderer` holds what a renderer is given next to
+the tree: `RenderConfig`, `ViewState` and the effect settings.
 
 ## 9. The core: `manimx._core`
 
@@ -778,7 +777,7 @@ flowchart LR
   objects, so a key built from an address can match an object it was
   never made from.
 
-**Renderer** (manimx/renderer/README.md has the details)
+**Renderer** (core/README.md has the details)
 
 - **One renderer, in the core.** The Python renderer was the reference
   while the core was ported, and every change to rendering had to be
@@ -876,7 +875,7 @@ flowchart LR
 
 Translucent meshes (`PbrMaterial.opacity` or alpha below 1) are lit in
 a forward pass after the deferred lighting and cast tinted shadows
-(manimx/renderer/README.md).
+(core/README.md, design decisions).
 
 **Next, in the agreed order:** porting Manim's remaining classes
 (batches d, e, f), the rendering ideas, the web UI, then editing scenes

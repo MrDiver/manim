@@ -3,7 +3,7 @@ images a frame of it goes through on the way.
 
     uv run python scripts/render_internals.py [output folder]
 
-The default output folder is manimx/renderer/images/. The scene is
+The default output folder is core/images/. The scene is
 rendered once, and the renderer's textures are read back after the frame
 (``RenderPipeline.inspect``, core/src/render/gpu/inspect.rs): the shadow maps,
 the clip masks, the G-buffer, the lit and vector layers and the depth of
@@ -34,7 +34,7 @@ from manimx.renderer import RenderConfig
 from manimx.userland import Box, Circle, Sphere, Star, Torus
 from PIL import Image
 
-OUTPUT = Path(__file__).resolve().parents[1] / "manimx" / "renderer" / "images"
+OUTPUT = Path(__file__).resolve().parents[1] / "core" / "images"
 WIDTH, HEIGHT = 800, 450
 
 
