@@ -12,7 +12,20 @@
 
 ``construct()`` never renders and never sleeps. Each ``play`` places
 animations on the scene's local timeline at the current cursor and moves
-the cursor; ``wait`` only moves the cursor. The result is a
+the cursor; ``wait`` only moves the cursor. ``start`` begins animations
+at the cursor without moving it, and ``stop`` ends them wherever the
+cursor is then, so they run while the scene goes on:
+
+    hops = self.start(MoveAlongPath(dot, path))   # from here ...
+    self.play(Write(title))                       # ... meanwhile ...
+    self.cue("voice.circle")
+    self.stop(hops)                               # ... to here
+
+With cues at both ends, a started animation lasts exactly from one
+spoken word to another, however the voice is paced. A started
+animation that is not stopped ends with its segment (at the next
+``wait_for``, or the end of the scene). ``start(..., run_time=0.5)``
+runs a short effect alongside: it ends by itself after its run time. The result is a
 :class:`PreparedScene`: tracks of placed animations per signal, plus the
 nodes in the order they were added (later ones are drawn on top, as in
 Manim).
@@ -38,6 +51,7 @@ global timeline only changes the mapping to compiled time.
 from __future__ import annotations
 
 import bisect
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -108,6 +122,21 @@ class Segment:
         return self.offset + self.duration
 
 
+@dataclass(eq=False)
+class Running:
+    """Animations begun with :meth:`Scene.start`, until :meth:`Scene.stop`."""
+
+    placements: list[tuple[Placement, float, float]]
+    """Each animation's placement, and its start and length in the group
+    (fractions of the run time, which ``stop`` decides)."""
+    begin: float
+    """The cursor when they started."""
+    segment: int
+    """The segment they started in (they end with it at the latest)."""
+    animations: list[Animation] = field(default_factory=list)
+    stopped: bool = False
+
+
 class Scene:
     """Subclass and override :meth:`construct`, then call :meth:`prepare`."""
 
@@ -175,6 +204,24 @@ class Scene:
         """
         self._authoring().play([a if isinstance(a, AnimationGroup) else as_animation(a) for a in animations], run_time, rate, lag_ratio)
 
+    def start(
+        self,
+        *animations: Animation | AnimationBuilder | AnimationGroup,
+        run_time: float | None = None,
+        rate: RateFunction | None = None,
+    ) -> Running:
+        """Begin animations at the current time without waiting for them:
+        they run until :meth:`stop` (from start to stop is their run time)
+        while the scene goes on; with ``run_time``, they end by themselves
+        after it, like a ``play`` that does not wait. ``rate`` overrides
+        their own rates."""
+        return self._authoring().start([a if isinstance(a, AnimationGroup) else as_animation(a) for a in animations], run_time, rate)
+
+    def stop(self, *running: Running) -> None:
+        """End animations begun with :meth:`start` at the current time
+        (none given: every one still running)."""
+        self._authoring().stop(running)
+
     def wait(self, duration: float = 1.0) -> None:
         """Let ``duration`` seconds pass."""
         self._authoring().wait(duration)
@@ -241,6 +288,11 @@ class SceneCompiler:
         self.segment_emits: list[Emit] = []
         self.segment_cues: list[Cue] = []
         self.segment_sounds: list[SoundEvent] = []
+        self.running: list[Running] = []
+        """Animations begun with ``start`` and not stopped yet."""
+        self.started = False
+        """Whether any animation was started: their placements' start
+        values are computed again at the end, with their real lengths."""
 
     # -- used by authoring.py -------------------------------------------------
 
@@ -311,6 +363,55 @@ class SceneCompiler:
             end = max(end, begin + duration)
         self.cursor = end
 
+    def start(self, animations: Sequence[Animation | AnimationGroup], run_time: float | None, rate: RateFunction | None) -> Running:
+        """Place ``animations`` at the cursor now (their place in authoring
+        order), with no end yet: :meth:`stop` gives them their length.
+        With ``run_time``: a ``play`` that leaves the cursor where it is."""
+        if not animations:
+            raise ValueError("start() needs at least one animation")
+        begin = self.cursor
+        if run_time is not None:
+            self.play(animations, run_time, rate, 0.0)
+            self.cursor = begin
+            return Running([], begin, len(self.segments), stopped=True)
+        running = Running([], begin, len(self.segments))
+        for animation in animations:
+            members = animation.schedule(1.0) if isinstance(animation, AnimationGroup) else [(animation, 0.0, 1.0)]
+            for member, offset, length in members:
+                if isinstance(member, Simulation):
+                    raise TypeError("a Simulation cannot be started; play it")
+                self.add([m for m in member.nodes() if not self._is_inside_present(m)])
+                # No end until it stops (stop sets start and length again).
+                placement = self.place(member, begin, math.inf, rate or member.rate)
+                running.placements.append((placement, offset, length))
+                running.animations.append(member)
+        self.cursor = begin
+        self.running.append(running)
+        self.started = True
+        return running
+
+    def stop(self, running: Sequence[Running]) -> None:
+        for item in running or list(self.running):
+            if item.segment != len(self.segments):
+                raise ValueError("these animations ended with their segment (at a wait_for) already")
+            if item.stopped:
+                raise ValueError("these animations were stopped already")
+            self._end(item, self.cursor)
+
+    def _end(self, running: Running, at: float) -> None:
+        """Give ``running``'s animations their length: from their start to ``at``."""
+        running.stopped = True
+        self.running.remove(running)
+        duration = at - running.begin
+        cursor = self.cursor
+        for (placement, offset, length), animation in zip(running.placements, running.animations, strict=True):
+            placement.start = running.begin + offset * duration
+            placement.duration = length * duration
+            for sound, volume, when in animation.audio():
+                self.play_sound(sound, volume, at=placement.start + when * placement.duration)
+            self._remove_after(animation, placement.end)
+        self.cursor = cursor
+
     def _place_one(self, animation: Animation, begin: float, duration: float, rate: RateFunction) -> None:
         # Nodes appear when their own animation begins: a lagged FadeIn
         # must not show its node before its fade starts.
@@ -359,6 +460,8 @@ class SceneCompiler:
         self.segment_sounds.append(SoundEvent(sound, time - self.segment_start, volume))
 
     def _close_segment(self) -> None:
+        for running in list(self.running):
+            self._end(running, self.cursor)  # started and never stopped: they end with the segment
         # A segment lasts until its cursor and until its last animation ends.
         end = max([self.cursor, *(p.end for p in self.placements if p.start >= self.segment_start)])
         play_offset = sum(segment.duration for segment in self.segments)
@@ -389,6 +492,8 @@ class SceneCompiler:
 
     def finish(self, time: TimeSignals, camera: Camera) -> PreparedScene:
         self._close_segment()
+        if self.started:
+            refresh(self.placements)  # start values seen while started animations had no end yet
         duration = self.segments[-1].end
         return PreparedScene(
             duration, list(self.tracks.values()), list(self.roots), time, camera, list(self.placements), list(self.segments)

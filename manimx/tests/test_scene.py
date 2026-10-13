@@ -433,3 +433,60 @@ def test_an_animate_chain_describes_one_end_state() -> None:
     assert looking == pytest.approx((-1.0, 0.0, 0.0), abs=1e-9)  # from the new position
     assert scene.square.position.value == pytest.approx((2.0, 1.0, 0.0))
     assert scene.square.scale.value == pytest.approx((2.0, 2.0, 2.0))
+
+
+def test_started_animations_run_until_they_are_stopped() -> None:
+    class Started(Scene):
+        def construct(self) -> None:
+            self.dot = Dot()
+            self.square = Square()
+            self.add(self.dot)
+            moving = self.start(self.dot.animate.shift(RIGHT * 4), rate=linear)
+            self.wait(1)
+            self.play(FadeIn(self.square), run_time=1)  # meanwhile
+            self.start(Rotate(self.square, TAU), run_time=0.5, rate=linear)  # a short one alongside
+            self.wait(2)
+            self.stop(moving)
+            with pytest.raises(ValueError, match="stopped already"):
+                self.stop(moving)
+            self.dot_after_stop = self.dot.get_center()[0]
+            self.wait(1)
+
+    scene = Started()
+    prepared = scene.prepare()
+    assert prepared.duration == 5.0
+    assert scene.dot_after_stop == pytest.approx(4.0)  # reads see it done once it is stopped
+    for t, x in [(0.0, 0.0), (1.0, 1.0), (2.0, 2.0), (4.0, 4.0), (5.0, 4.0)]:
+        prepared.evaluate(t)
+        assert scene.dot.position.value[0] == pytest.approx(x)
+    prepared.evaluate(2.25)
+    assert quaternion.as_rotation_vector(scene.square.rotation.value)[2] == pytest.approx(TAU / 2)
+
+
+def test_started_animations_end_with_their_segment() -> None:
+    class Unstopped(Scene):
+        def construct(self) -> None:
+            self.dot = Dot()
+            self.add(self.dot)
+            self.running = self.start(self.dot.animate.shift(RIGHT * 2), rate=linear)
+            self.wait(2)
+            self.wait_for("go")
+            self.wait(1)
+
+    scene = Unstopped()
+    prepared = scene.prepare()
+    prepared.evaluate(1.0)
+    assert scene.dot.position.value[0] == pytest.approx(1.0)
+    assert scene.running.stopped
+    prepared.evaluate(prepared.duration)
+    assert scene.dot.position.value[0] == pytest.approx(2.0)
+
+    class Late(Scene):
+        def construct(self) -> None:
+            dot = Dot()
+            running = self.start(FadeIn(dot))
+            self.wait_for("go")
+            self.stop(running)
+
+    with pytest.raises(ValueError, match="ended with their segment"):
+        Late().prepare()
