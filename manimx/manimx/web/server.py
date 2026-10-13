@@ -269,11 +269,11 @@ class PreviewServer:
     def labels(self, time: float) -> list[dict[str, Any]]:
         """The index labels of the frame at ``time`` (see labels.py)."""
         with self._lock:
-            time = min(max(float(time), 0.0), self.timeline.duration)
+            time = max(float(time), 0.0)  # past the end: the background, nothing plays there
             return index_labels(self.timeline, time, self.settings.config.aspect_ratio)
 
     def frame(self, time: float, width: int | None = None, image_format: str = "jpeg") -> bytes:
-        """The frame at ``time`` (clamped to the timeline), ``width`` pixels
+        """The frame at ``time`` (0 or later; past the end, the background), ``width`` pixels
         wide (default and at most the output width), encoded.
         """
         return self.versioned_frame(time, width, image_format)[0]
@@ -292,7 +292,7 @@ class PreviewServer:
             height = max(1, round(width * full_height / full_width))
             version = self.version
             time = frame / self.settings.fps if frame is not None else time
-            time = min(max(float(time), 0.0), self.timeline.duration)
+            time = max(float(time), 0.0)  # past the end: the background, nothing plays there
             frame_config = dataclasses.replace(config, pixel_width=width, pixel_height=height, time=time)
             pixels = self._renderer.render(self._frame_at, frame_config, self._effects)
         pil_format, _ = FORMATS[image_format]

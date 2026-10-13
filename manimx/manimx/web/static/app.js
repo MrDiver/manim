@@ -2,7 +2,9 @@
 // See manimx/web/server.py for the endpoints and editing.js for editing.
 //
 // Frames are asked for by number at the timeline's version and kept
-// (frames.js), so a frame seen once shows at once until an edit. Scrubbing
+// (frames.js), so a frame seen once shows at once until an edit. While the
+// playhead rests, the frames after it are fetched too, so pressing play
+// plays smoothly; a yellow line over the tracks marks the frames kept. Scrubbing
 // asks for one frame at a time: while a request is open, only the newest
 // wanted time is remembered and asked for next, so no outdated frames
 // queue on the server. Playing fetches the frames ahead of the playhead
@@ -20,9 +22,13 @@
 // Which clips and nodes are open is kept in localStorage by key (clip,
 // node path), so a reload keeps them.
 //
-// Zoom: the lanes are `zoom` times as wide as the space beside the labels
-// (the CSS variable --lanes) and the timeline scrolls sideways under its
-// sticky labels. Ctrl+wheel zooms around the pointer, the keys and buttons
+// Zoom: at zoom 1 the timeline's duration fills the space beside the
+// labels; the lanes (the CSS variable --lanes) are `zoom` times that, and
+// the timeline scrolls sideways under its sticky labels. Like in Blender,
+// the lanes go on past the end (`state.span` seconds, grown whenever the
+// view is scrolled to its right end), shaded there, so clips can be moved
+// and dropped later than anything plays now; past the end shows the
+// background. Ctrl+wheel zooms around the pointer, the keys and buttons
 // around the playhead; a moved playhead is scrolled into view.
 //
 // Reload on save: /api/changes answers when the timeline changed (an edit,
@@ -35,7 +41,7 @@ import { FrameCache } from "./frames.js";
 const elements = Object.fromEntries(
   [
     "problem", "title", "time", "frame", "error", "timeline", "ruler", "rows", "playhead", "collapse", "indices",
-    "labels", "playhead-frame", "play", "mute", "loop", "to-start", "to-end", "previous-frame", "next-frame",
+    "labels", "playhead-frame", "play", "mute", "loop", "to-start", "to-end", "previous-frame", "next-frame", "after-end", "cached",
     "zoom-in", "zoom-out", "zoom-fit",
   ].map((id) => [id.replace(/-(\w)/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]),
 );
@@ -49,6 +55,7 @@ const state = {
   intended: 0, // asked for by the user; shown again after a rebuild that makes it fit
   loading: false, // a frame request is open
   wanted: null, // the time to show once it is done
+  span: 0, // seconds the lanes show: the duration and room after it
   version: 0, // the newest version of the timeline heard of: frames are kept by it
   playingFrame: null, // the frame number shown while playing
   open: loadSet("manimx.open"), // keys of the clips and nodes whose tracks are shown
@@ -64,22 +71,28 @@ const state = {
 
 // -- time and position ------------------------------------------------------------
 
-/** Horizontal position of a time, as a percentage of the timeline. */
+/** Horizontal position of a time, as a percentage of the lanes. */
 function percent(time) {
-  const duration = state.timeline.duration || 1;
-  return (100 * time) / duration;
+  return (100 * time) / (state.span || 1);
+}
+
+/** The span of the lanes for the timeline loaded: at least the duration and some room after it. */
+function fitSpan() {
+  const { duration } = state.timeline;
+  state.span = Math.max(state.span, duration + Math.max(5, 0.25 * duration), ...state.timeline.clips.map((clip) => clip.end ?? clip.start));
 }
 
 /** The time under a horizontal pixel position on the lanes, snapped to frames. */
 function timeAt(clientX) {
   const box = elements.ruler.getBoundingClientRect();
   const fraction = Math.min(1, Math.max(0, (clientX - box.left) / box.width));
-  return snap(fraction * state.timeline.duration);
+  return snap(fraction * state.span);
 }
 
+/** `time` on a frame, within the lanes (past the timeline's end too). */
 function snap(time) {
-  const { fps, duration } = state.timeline;
-  return Math.min(duration, Math.max(0, Math.round(time * fps) / fps));
+  const { fps } = state.timeline;
+  return Math.min(Math.floor(state.span * fps) / fps, Math.max(0, Math.round(time * fps) / fps));
 }
 
 const frameOf = (time) => Math.round(time * state.timeline.fps);
@@ -94,7 +107,7 @@ function fitWidth() {
 
 function maxZoom() {
   const { duration, fps } = state.timeline;
-  return Math.max(1, (duration * fps * MAX_FRAME_WIDTH) / fitWidth());
+  return Math.max(1, (Math.max(duration, 1) * fps * MAX_FRAME_WIDTH) / fitWidth());
 }
 
 /** Zoom to `zoom`, keeping the time under the horizontal position `clientX` there. */
@@ -104,6 +117,7 @@ function zoomTo(zoom, clientX) {
   state.zoom = Math.min(maxZoom(), Math.max(1, zoom));
   layoutLanes();
   drawRuler();
+  drawCached();
   const label = elements.ruler.offsetLeft;
   const offset = clientX - elements.timeline.getBoundingClientRect().left;
   elements.timeline.scrollLeft = label + fraction * elements.ruler.offsetWidth - offset;
@@ -115,7 +129,18 @@ function zoomBy(factor) {
 }
 
 function layoutLanes() {
-  elements.timeline.style.setProperty("--lanes", `${fitWidth() * state.zoom}px`);
+  const { duration } = state.timeline;
+  const secondsWide = duration > 0 ? duration : state.span;
+  elements.timeline.style.setProperty("--lanes", `${(fitWidth() * state.zoom * state.span) / secondsWide}px`);
+  elements.afterEnd.style.left = `${percent(duration)}%`;
+}
+
+/** Scrolled to the lanes' right end: make room for more. */
+function growAtEnd() {
+  const timeline = elements.timeline;
+  if (timeline.scrollLeft + timeline.clientWidth < timeline.scrollWidth - 40) return;
+  state.span *= 1.25;
+  drawTimeline(); // every bar's place is a share of the span
 }
 
 /** Scroll the playhead into view if it left the lanes' visible part. */
@@ -132,10 +157,10 @@ function revealPlayhead() {
 
 /** Ticks in frames, about one per 80 pixels. */
 function drawRuler() {
-  const { duration, fps } = state.timeline;
+  const { fps } = state.timeline;
   elements.ruler.replaceChildren();
-  const frames = Math.max(1, Math.round(duration * fps));
-  const step = niceStep((frames * 80) / (fitWidth() * state.zoom));
+  const frames = Math.max(1, Math.round(state.span * fps));
+  const step = niceStep((frames * 80) / elements.ruler.offsetWidth || 1);
   for (let frame = 0; frame <= frames; frame += step) {
     const tick = document.createElement("span");
     tick.className = "tick";
@@ -161,6 +186,7 @@ function drawTimeline() {
   const { clips, segments, editable } = state.timeline;
   layoutLanes();
   drawRuler();
+  drawCached();
   elements.rows.replaceChildren();
   const { used, free } = layers();
   if (editable) {
@@ -179,7 +205,7 @@ function drawTimeline() {
         bar.className = "segment";
         bar.dataset.clip = index;
         bar.style.left = `${percent(segment.start)}%`;
-        bar.style.width = `${Math.max(0.2, percent((segment.end ?? state.timeline.duration) - segment.start))}%`;
+        bar.style.width = `${Math.max(0.2, percent((segment.end ?? state.span) - segment.start))}%`;
         lane.append(bar);
       }
     }
@@ -196,10 +222,9 @@ function clipKey(clip, index) {
 }
 
 function clipBody(clip, index) {
-  const { duration } = state.timeline;
   const body = document.createElement("div");
   body.className = "clip-body";
-  const end = clip.end ?? duration; // a clip that waits for an event runs on
+  const end = clip.end ?? state.span; // a clip that waits for an event runs on
   body.style.left = `${percent(clip.start)}%`;
   body.style.width = `${percent(end - clip.start)}%`;
   body.title = `${clip.name}: frames ${frameOf(clip.start)} – ${clip.end === null ? "waits" : frameOf(end)}`;
@@ -234,7 +259,7 @@ function drawEvents(onTrack) {
     const bar = document.createElement("div");
     bar.className = `wait${never ? " never" : ""}`;
     bar.style.left = `${percent(from)}%`;
-    bar.style.width = `${percent(never ? Math.max(0, state.timeline.duration - from) : Math.max(0, wait.time - from))}%`;
+    bar.style.width = `${percent(never ? Math.max(0, state.span - from) : Math.max(0, wait.time - from))}%`;
     lane.append(bar);
     const pill = document.createElement("div");
     pill.className = `pill${never ? " never" : fixed.has(wait.event) ? "" : " emitted"}`;
@@ -394,6 +419,67 @@ function setVersion(version) {
   frames.useVersion(state.version);
 }
 
+// -- fetching ahead while the playhead rests ---------------------------------------
+
+const IDLE_DELAY = 300; // ms the playhead rests before frames are fetched ahead
+const IDLE_REQUESTS = 2;
+let idle = { token: 0, timer: null };
+
+/** Fetch the frames after the playhead (then from the start) once it rests. */
+function fetchAheadSoon() {
+  idle.token++;
+  clearTimeout(idle.timer);
+  idle.timer = setTimeout(fetchAhead, IDLE_DELAY);
+}
+
+function fetchAhead() {
+  const token = ++idle.token;
+  const { fps, duration } = state.timeline;
+  const version = state.version;
+  const width = frameWidth();
+  const last = Math.floor(duration * fps);
+  const from = Math.min(frameOf(state.time), last);
+  let step = 0;
+  const resting = () => token === idle.token && version === state.version && !state.playing && !state.dragging && !state.loading && !document.hidden;
+  const worker = async () => {
+    while (step <= last && resting() && !frames.full()) {
+      const frame = (from + step++) % (last + 1);
+      if (!frames.has(version, frame, width)) await frames.fetch(version, frame, width).catch(() => {});
+    }
+  };
+  for (let i = 0; i < IDLE_REQUESTS; i++) worker();
+}
+
+/** The yellow line over the tracks: a bar per run of kept frames. */
+function drawCached() {
+  if (!state.timeline) return;
+  const { fps } = state.timeline;
+  const runs = [];
+  for (const frame of frames.keptFrames(state.version, frameWidth())) {
+    const run = runs[runs.length - 1];
+    if (run && frame === run[1] + 1) run[1] = frame;
+    else runs.push([frame, frame]);
+  }
+  elements.cached.replaceChildren(
+    ...runs.map(([first, last]) => {
+      const bar = document.createElement("div");
+      bar.style.left = `${percent(first / fps)}%`;
+      bar.style.width = `${percent((last + 1 - first) / fps)}%`;
+      return bar;
+    }),
+  );
+}
+
+let cachedDrawn = true;
+frames.onChange = () => {
+  if (!cachedDrawn) return;
+  cachedDrawn = false;
+  requestAnimationFrame(() => {
+    cachedDrawn = true;
+    drawCached();
+  });
+};
+
 function display(url) {
   elements.frame.src = url;
   frames.show(url);
@@ -417,6 +503,7 @@ async function load(time) {
   } finally {
     state.loading = false;
     if (state.wanted !== null) load(state.wanted);
+    else fetchAheadSoon();
   }
 }
 
@@ -583,7 +670,9 @@ function listen() {
   new ResizeObserver(() => {
     layoutLanes();
     drawRuler();
+    drawCached();
   }).observe(timeline);
+  timeline.addEventListener("scroll", growAtEnd, { passive: true });
   elements.collapse.addEventListener("click", () => {
     state.open.clear();
     saveSet("manimx.open", state.open);
@@ -616,6 +705,7 @@ function listen() {
 async function loadTimeline() {
   const response = await fetch("/api/timeline");
   state.timeline = await response.json();
+  fitSpan();
   setVersion(state.timeline.version);
   const { title, width, height, error } = state.timeline;
   document.title = `${title} · manimx preview`;

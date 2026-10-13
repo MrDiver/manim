@@ -618,6 +618,31 @@ button.toggle[aria-expanded="true"]::before,
   pointer-events: none;
 }
 
+/* Past the timeline's end: shaded, like the frames outside Blender's range. */
+#after-end {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  border-left: 1px solid var(--muted);
+  background: repeating-linear-gradient(135deg, rgb(0 0 0 / 0.45) 0 6px, rgb(0 0 0 / 0.3) 6px 12px);
+}
+
+/* The frames kept (frames.js), a yellow line along the ruler's bottom edge. */
+#cached {
+  position: absolute;
+  top: 25px;
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+
+#cached > div {
+  position: absolute;
+  height: 100%;
+  background: #e5c23a;
+}
+
 #playhead {
   position: absolute;
   top: 0;

@@ -16,7 +16,9 @@
 // the playhead. It asks for the frame the playhead will be at when the
 // answer comes (now plus the measured time a frame takes), so playback
 // shows what the server can render on time, and every frame of a second
-// loop comes from here.
+// loop comes from here. While the playhead rests, the page fetches the
+// frames after it (and then from the start), until the budget is nearly
+// full: kept frames are never dropped for frames fetched ahead.
 
 const PREFETCH_REQUESTS = 3;
 const PREFETCH_SECONDS = 2;
@@ -31,6 +33,7 @@ export class FrameCache {
     this.bytes = 0;
     this.pinned = null; // the URL shown: never revoked while shown
     this.latency = 0.1; // seconds a frame takes, smoothed
+    this.onChange = () => {}; // called when frames are kept or dropped
   }
 
   static key(version, frame, width) {
@@ -60,6 +63,22 @@ export class FrameCache {
     for (const [key, entry] of this.kept) {
       if (entry.version !== version) this.drop(key, entry);
     }
+    this.onChange();
+  }
+
+  /** Whether the kept frames take most of the budget: fetching ahead would drop older ones. */
+  full() {
+    return this.bytes > 0.9 * this.budget;
+  }
+
+  /** The numbers of the kept frames of `version` at `width`, in order. */
+  keptFrames(version, width) {
+    const numbers = [];
+    for (const key of this.kept.keys()) {
+      const [keyVersion, frame, keyWidth] = key.split("/").map(Number);
+      if (keyVersion === version && keyWidth === width) numbers.push(frame);
+    }
+    return numbers.sort((a, b) => a - b);
   }
 
   /** The URL of the frame, fetched if it is not kept (shared with a request already open). */
@@ -89,6 +108,7 @@ export class FrameCache {
       this.urls.add(url);
       this.bytes += blob.size;
       this.trim();
+      this.onChange();
     }
     return url;
   }

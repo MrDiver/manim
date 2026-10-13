@@ -86,8 +86,11 @@ def test_frames_are_rendered_at_the_asked_width_with_one_render(server, timeline
     assert status == 200 and kind == "image/png" and image.shape == (36, 64, 4)
     expected = render_image(timeline, 1.5, config(64, 36))
     np.testing.assert_array_equal(image, expected)
-    status, kind, body = get(server, "/api/frame?t=999")  # clamped to the end; full width; JPEG
-    assert status == 200 and kind == "image/jpeg" and Image.open(io.BytesIO(body)).size == (128, 72)
+    status, kind, body = get(server, "/api/frame?t=999&format=png")  # past the end: the background; full width
+    image = np.asarray(Image.open(io.BytesIO(body)))
+    assert status == 200 and image.shape == (72, 128, 4)
+    assert np.allclose(image.reshape(-1, 4), np.array(config(64, 36).background_rgba) * 255, atol=1)
+    assert get(server, "/api/frame?t=1")[1] == "image/jpeg"
 
 
 def test_a_frame_by_number_at_its_version_is_kept_by_the_browser(server, timeline) -> None:

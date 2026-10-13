@@ -235,7 +235,7 @@ export function trackLane(lane, layer) {
 /** The time under `clientX` on the lanes, also past the timeline's end. */
 function timeAtUnclamped(clientX) {
   const box = page.elements.ruler.getBoundingClientRect();
-  return Math.max(0, ((clientX - box.left) / box.width) * page.state.timeline.duration);
+  return Math.max(0, ((clientX - box.left) / box.width) * page.state.span);
 }
 
 function rectangle(a, b) {
@@ -306,7 +306,7 @@ function startDrag(event, edge, index) {
   const start = new Map(moving.map((i) => [i, { left: parseFloat(bars.get(i).style.left), width: parseFloat(bars.get(i).style.width) }]));
   // The segment bars under a moved clip move with it.
   const segments = edge === "move" ? moving.flatMap((i) => [...document.querySelectorAll(`.segment[data-clip="${i}"]`)].map((segment) => [segment, parseFloat(segment.style.left)])) : [];
-  const secondsPerPixel = page.state.timeline.duration / page.elements.ruler.getBoundingClientRect().width;
+  const secondsPerPixel = page.state.span / page.elements.ruler.getBoundingClientRect().width;
   const clip = clips[index];
   const grab = { x: event.clientX, delta: 0, layers: 0, moved: false };
   const send = liveSender("/api/clip", () => {
