@@ -157,7 +157,10 @@ mod tests {
             242, 17,
         ];
         let levels = mip_levels(&Texture::new(5, 3, pixels));
-        assert_eq!(levels[1], (2, 1, vec![135, 78, 126, 170, 154, 204, 129, 81]));
+        assert_eq!(
+            levels[1],
+            (2, 1, vec![135, 78, 126, 170, 154, 204, 129, 81])
+        );
         assert_eq!(levels[2], (1, 1, vec![141, 119, 127, 126]));
     }
 

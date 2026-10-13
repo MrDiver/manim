@@ -23,8 +23,7 @@ use glam::DVec2;
 use lyon_tessellation::geom::point;
 use lyon_tessellation::path::Path;
 use lyon_tessellation::{
-    BuffersBuilder, FillOptions, FillRule, FillTessellator, FillVertex as LyonVertex,
-    VertexBuffers,
+    BuffersBuilder, FillOptions, FillRule, FillTessellator, FillVertex as LyonVertex, VertexBuffers,
 };
 
 /// Flattening tolerance, as a fraction of the path's size (width or height,
@@ -75,7 +74,8 @@ pub fn tessellate_fill(points: &[DVec2]) -> Vec<FillVertex> {
         builder.end(true);
     }
     let path = builder.build();
-    let options = FillOptions::tolerance((size * TOLERANCE) as f32).with_fill_rule(FillRule::NonZero);
+    let options =
+        FillOptions::tolerance((size * TOLERANCE) as f32).with_fill_rule(FillRule::NonZero);
     let last_curve = curves.len() - 1;
     let mut buffers: VertexBuffers<FillVertex, u32> = VertexBuffers::new();
     let result = FillTessellator::new().tessellate_path(
@@ -86,7 +86,10 @@ pub fn tessellate_fill(points: &[DVec2]) -> Vec<FillVertex> {
             let along = vertex.interpolated_attributes()[0].max(0.0);
             let curve = (along.floor() as usize).min(last_curve);
             FillVertex {
-                position: [(position.x as f64 + low.x) as f32, (position.y as f64 + low.y) as f32],
+                position: [
+                    (position.x as f64 + low.x) as f32,
+                    (position.y as f64 + low.y) as f32,
+                ],
                 curve: curve as u32,
                 t: (along - curve as f32).clamp(0.0, 1.0),
             }
@@ -95,7 +98,11 @@ pub fn tessellate_fill(points: &[DVec2]) -> Vec<FillVertex> {
     if result.is_err() {
         return Vec::new(); // a path lyon cannot fill (NaN points): drawn without a fill
     }
-    buffers.indices.iter().map(|&index| buffers.vertices[index as usize]).collect()
+    buffers
+        .indices
+        .iter()
+        .map(|&index| buffers.vertices[index as usize])
+        .collect()
 }
 
 /// `[start, stop)` curve ranges of the continuous subpaths.
@@ -167,7 +174,12 @@ mod tests {
     #[test]
     fn a_subpath_crossing_itself_fills_both_loops() {
         // A bow tie: two triangles of opposite winding, each filled.
-        let corners = [DVec2::new(0.0, 0.0), DVec2::new(2.0, 2.0), DVec2::new(2.0, 0.0), DVec2::new(0.0, 2.0)];
+        let corners = [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(2.0, 2.0),
+            DVec2::new(2.0, 0.0),
+            DVec2::new(0.0, 2.0),
+        ];
         let mut points = Vec::new();
         for index in 0..4 {
             let (a, b) = (corners[index], corners[(index + 1) % 4]);
@@ -182,15 +194,27 @@ mod tests {
         let k = 0.552_284_749_8;
         let quarter = |a: DVec2, b: DVec2| [a, a + k * b, b + k * a, b];
         let (x, y) = (DVec2::X, DVec2::Y);
-        let points: Vec<DVec2> = [quarter(x, y), quarter(y, -x), quarter(-x, -y), quarter(-y, x)].concat();
+        let points: Vec<DVec2> = [
+            quarter(x, y),
+            quarter(y, -x),
+            quarter(-x, -y),
+            quarter(-y, x),
+        ]
+        .concat();
         let vertices = tessellate_fill(&points);
         assert!((area(&vertices) - std::f64::consts::PI).abs() < 2e-3);
         for vertex in &vertices {
             let (curve, t) = (vertex.curve as usize, vertex.t);
             assert!(curve < 4 && (0.0..=1.0).contains(&t));
         }
-        let left = vertices.iter().find(|v| (v.position[0] + 1.0).abs() < 1e-6).unwrap();
-        assert!(left.curve == 1 && (left.t - 1.0).abs() < 1e-4 || left.curve == 2 && left.t.abs() < 1e-4);
+        let left = vertices
+            .iter()
+            .find(|v| (v.position[0] + 1.0).abs() < 1e-6)
+            .unwrap();
+        assert!(
+            left.curve == 1 && (left.t - 1.0).abs() < 1e-4
+                || left.curve == 2 && left.t.abs() < 1e-4
+        );
     }
 
     #[test]
@@ -212,7 +236,11 @@ mod tests {
         for _ in 0..word(0) {
             let count = word(at);
             at += 4;
-            paths.push((0..count).map(|i| DVec2::new(float(at + 16 * i), float(at + 16 * i + 8))).collect::<Vec<_>>());
+            paths.push(
+                (0..count)
+                    .map(|i| DVec2::new(float(at + 16 * i), float(at + 16 * i + 8)))
+                    .collect::<Vec<_>>(),
+            );
             at += 16 * count;
         }
         let total = 1_000_000;
