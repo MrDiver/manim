@@ -77,6 +77,117 @@ Math is [glam](https://docs.rs/glam) (`DMat4`, `DQuat`, `DVec3` in f64,
 converted to f32 only when a record is written); records are `#[repr(C)]`
 structs written with [bytemuck](https://docs.rs/bytemuck).
 
+## The renderer: target architecture
+
+Agreed on 2026-10-13; the code moves there step by step. Until then the
+module table above describes what exists.
+
+### A pipeline of stages
+
+A frame passes through named stages, each with one input and one output
+and the state it keeps between frames. Evaluating the scene is not one
+of them: that is the scene side (`evaluation/`, and Python for user
+code). The renderer starts at a finished render object tree.
+
+```text
+drivers.render():  Evaluate ─▶ [ RenderPipeline: Pack ─▶ Draw ─▶ Composite ─▶ Output ]
+                   evaluation/   render/ (no Python, no signals)
+```
+
+| Stage | Struct | In | Out | Keeps between frames | Runs on |
+|---|---|---|---|---|---|
+| Evaluate | `Evaluator`, `SceneGraph` (evaluation/) | a time | `FrameScene`: per sub-frame its weight and views, each a tree and its `ViewConfig` | the slots | the caller (Python worker processes) |
+| Pack | `Packer` | `FrameScene` | `Packet`: draw lists and the record ranges that changed | path and mesh caches, the arenas the GPU buffers mirror | CPU |
+| Draw | `Drawer` | `Packet` | `Layers`: lit (HDR), vector, depths | GPU buffers, pipelines, render targets | GPU |
+| Composite | `Compositor` | `Layers` of every view and sub-frame | `Image`: the accumulated frame after its effects | effect textures | GPU |
+| Output | `Output` (a trait) | `Image` | the frame where it goes | staging buffers, an encoder | GPU, then CPU |
+
+`RenderPipeline` owns the stages and passes frames between them:
+`submit(index, frame)`, then `receive()`. The Python class is a thin
+wrapper over it.
+
+Names follow the stages: a struct is named for what its stage does, and
+its module for the struct (`pack/`, `draw/`, `composite/`, `output/`).
+There is no struct called just "renderer".
+
+### Queues and concurrency
+
+Each stage is a plain struct with one method from its input to its
+output, so the same stages run two ways:
+
+* **in sequence:** `RenderPipeline` calls Pack, Draw, Composite and
+  Output one after the other on one thread (frames still overlap on the
+  GPU, as `in_flight` does now). This is the reference, and what the
+  browser runs (WASM threads need cross-origin isolation).
+* **queued:** Pack on its own thread, bounded queues between it and the
+  GPU stages, Output's read-back and encoding on another thread. Pack
+  works ahead on frames N+1, N+2 while the GPU draws frame N.
+
+Pack may run ahead although it keeps arenas: a `Packet` carries the
+record ranges that changed, and Draw uploads them in packet order before
+its passes, so the GPU buffers go through the same states as in
+sequence. Draw and Composite share the GPU queue and stay in order.
+
+Which way is faster is measured, not assumed (PERFORMANCE.md).
+
+### Inside Draw: geometry and passes
+
+Two kinds of things, kept apart:
+
+* **Geometry** (`draw/geometry/`): one module per kind of drawn object,
+  holding its GPU buffers, pipelines and bind groups, and a
+  `draw(pass, role)` that draws it in a role (color, mask, shadow,
+  G-buffer). `VectorGeometry` draws `RShape2D` and `RCurve3D`,
+  `MeshGeometry` draws `RShape3D` and `RParticles`.
+* **Passes** (`draw/passes/`): one per step, in the order they run:
+  `MaskPass`, `ShadowPass`, `GeometryPass`, `LightingPass`,
+  `VectorPass`, `TranslucentPass`. A pass decides the target and which
+  geometry it draws in which role, and nothing else. Shadows are only
+  in `ShadowPass`; camera view pictures are an input of `VectorPass`.
+
+The shape math of packing (fills, strokes) is CPU work and belongs to
+`pack/shapes/`.
+
+### Output
+
+Output finishes the frame for where it goes, so read-back and encoding
+are one stage:
+
+| `Output` | What it does | Where |
+|---|---|---|
+| `FramesOutput` | RGBA or NV12 read back to the caller | Python sinks, preview, tests |
+| `PipeOutput` | NV12 read back and piped to ffmpeg | desktop video |
+| `WebCodecsOutput` | a `VideoFrame` from the canvas texture, no read-back | browser |
+
+Encoding on the GPU without read-back on the desktop (Vulkan Video,
+NVENC through CUDA) would be another `Output`; it is not planned.
+
+### Settings and shaders
+
+* The settings are defined in Rust and exposed to Python as classes:
+  `OutputConfig` (for the whole pipeline: size, MSAA, background, tone
+  map, effects, shadow resolution, pixel format) and `ViewConfig` (per
+  view: camera, camera views, lights and shadow settings, time, jitter),
+  with `Camera`, `Bloom`, `ShaderEffect` and `ToneMap`. They replace
+  `RenderConfig`, `RendererOptions`, `ViewSettings` and the converters in
+  python/frame_renderer.rs.
+* The WGSL shaders live in `core/shaders/` and are compiled into the
+  library with `include_str!`; `#include` lines are expanded from that
+  table, with no folder to read at run time (there is none in the
+  browser).
+
+### From today's names
+
+| Today | Target |
+|---|---|
+| `FrameRenderer` (render/frame_renderer.rs) | `RenderPipeline` |
+| `Packer` (render/packing/) | `Packer` (pack/) |
+| `Renderer` (render/renderer.rs) and render/passes/ | `Drawer` (draw/), its geometry and passes |
+| `Composer` (render/composer.rs), render/effects/ | `Compositor` (composite/) |
+| read-back in `FrameRenderer`, drivers/sinks.py | `Output` (output/) |
+| `RenderConfig`, `RendererOptions`, `ViewSettings` | `OutputConfig`, `ViewConfig` |
+| manimx/renderer/shaders/ | core/shaders/ |
+
 ## Rules
 
 * The renderer reads render object trees and `ViewSettings`, nothing
