@@ -297,8 +297,9 @@ function startDrag(event, edge, index) {
     selected.add(index);
   }
   markSelected();
-  const target = event.currentTarget;
-  target.setPointerCapture(event.pointerId);
+  // Listened to on the window, not with pointer capture on the bar: moving
+  // the bar into another track's lane takes it out of the document for a
+  // moment, which ends its pointer capture.
   const { clips } = page.state.timeline;
   const moving = edge === "move" ? [...selected] : [index];
   const bars = new Map(moving.map((i) => [i, document.querySelector(`.clip-body[data-index="${i}"]`)]));
@@ -350,15 +351,15 @@ function startDrag(event, edge, index) {
     });
   };
   const onUp = async () => {
-    target.removeEventListener("pointermove", onMove);
-    target.removeEventListener("pointerup", onUp);
+    removeEventListener("pointermove", onMove);
+    removeEventListener("pointerup", onUp);
     await send.idle();
     page.state.dragging = false;
     drawClipPanel();
     if (!grab.moved) page.redraw();
   };
-  target.addEventListener("pointermove", onMove);
-  target.addEventListener("pointerup", onUp);
+  addEventListener("pointermove", onMove);
+  addEventListener("pointerup", onUp);
 }
 
 /** `time` on the nearest frame (past the timeline's end too: a clip may be moved there). */
