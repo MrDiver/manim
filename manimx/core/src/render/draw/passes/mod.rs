@@ -1,10 +1,10 @@
-//! The passes of one view (draw/mod.rs runs them in order), and the
-//! textures and images their materials and fills sample.
+//! The passes of one view, in the order the drawer runs them: mask,
+//! shadow, gbuffer, lighting, vector, translucent. A pass chooses its
+//! target and which geometry (geometry/) it draws in which role.
 
-pub mod camera_views;
-pub mod images;
+pub mod gbuffer;
 pub mod lighting;
-pub mod mesh;
+pub mod mask;
 pub mod shadow;
-pub mod textures;
+pub mod translucent;
 pub mod vector;

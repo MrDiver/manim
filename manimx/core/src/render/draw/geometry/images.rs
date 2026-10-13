@@ -17,7 +17,7 @@
 
 use wgpu::util::DeviceExt;
 
-use crate::render::draw::passes::textures::{mip_levels, premultiply, shrink};
+use crate::render::draw::geometry::textures::{mip_levels, premultiply, shrink};
 use crate::robjects::Texture;
 
 /// The largest layer width and height.

@@ -23,8 +23,8 @@
 //! References only grow within a layer, so values left by earlier clip
 //! scopes never match.
 
-use crate::render::draw::passes::mesh::MeshPass;
-use crate::render::draw::passes::vector::VectorPass;
+use crate::render::draw::geometry::meshes::MeshGeometry;
+use crate::render::draw::geometry::vectors::VectorGeometry;
 use crate::render::gpu::buffer::GrowableBuffer;
 use crate::render::gpu::device::{
     Gpu, SHADOW_FORMAT, TRANSLUCENT_DEPTH_FORMAT, TRANSMITTANCE_FORMAT,
@@ -135,8 +135,8 @@ impl ShadowPass {
         &mut self,
         gpu: &Gpu,
         encoder: &mut wgpu::CommandEncoder,
-        meshes: &mut MeshPass,
-        vectors: &mut VectorPass,
+        meshes: &mut MeshGeometry,
+        vectors: &mut VectorGeometry,
         profiler: &mut GpuProfiler,
         mask_layers: &wgpu::TextureView,
         mesh_depth: &wgpu::TextureView,

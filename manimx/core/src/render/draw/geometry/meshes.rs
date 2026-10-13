@@ -1,6 +1,6 @@
-//! GPU side of the mesh passes: buffers, material textures, pipelines,
-//! draws of opaque meshes into the G-buffer and of translucent ones,
-//! lit, over the lit layer (mesh.wgsl's fs_forward).
+//! `MeshGeometry`: the GPU side of meshes: buffers, material textures,
+//! pipelines, and their draws into the G-buffer, of translucent ones lit
+//! over the lit layer (mesh.wgsl's fs_forward), and into shadow maps.
 //!
 //! Draws are grouped by the material's texture set and surface shader: one
 //! bind group and one `multi_draw_indexed_indirect` per group, and one
@@ -12,8 +12,8 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
-use crate::render::draw::passes::textures::mip_levels;
-use crate::render::draw::passes::vector::shadow_runs;
+use crate::render::draw::geometry::textures::mip_levels;
+use crate::render::draw::geometry::vectors::shadow_runs;
 use crate::render::error::Result;
 use crate::render::gpu::buffer::{GrowableBuffer, Records};
 use crate::render::gpu::device::{
@@ -49,7 +49,7 @@ pub struct MeshData<'a> {
     pub shadow_draws: &'a [ShadowList<DrawIndexed>],
 }
 
-pub struct MeshPass {
+pub struct MeshGeometry {
     objects: GrowableBuffer,
     vertices: GrowableBuffer,
     materials: GrowableBuffer,
@@ -86,8 +86,8 @@ pub struct MeshPass {
     shadow_groups: HashMap<u64, wgpu::BindGroup>,
 }
 
-impl MeshPass {
-    pub fn new(gpu: &Gpu) -> Result<MeshPass> {
+impl MeshGeometry {
+    pub fn new(gpu: &Gpu) -> Result<MeshGeometry> {
         let device = &gpu.device;
         let storage = wgpu::BufferUsages::STORAGE;
         let (scene_layout, material_layout) = create_layouts(device);
@@ -105,7 +105,7 @@ impl MeshPass {
             .zip(SLOT_IS_SRGB)
             .map(|(rgba, srgb)| upload_texture(gpu, &[(1, 1, rgba.to_vec())], srgb))
             .collect();
-        Ok(MeshPass {
+        Ok(MeshGeometry {
             objects: GrowableBuffer::new(device, "mesh objects", storage),
             vertices: GrowableBuffer::new(device, "mesh vertices", storage),
             materials: GrowableBuffer::new(device, "materials", storage),
@@ -300,7 +300,7 @@ impl MeshPass {
         }
     }
 
-    pub fn draw(&mut self, gpu: &Gpu, pass: &mut wgpu::RenderPass, sample_count: u32) {
+    pub fn draw_gbuffer(&mut self, gpu: &Gpu, pass: &mut wgpu::RenderPass, sample_count: u32) {
         if self.draw_groups.is_empty() {
             return;
         }

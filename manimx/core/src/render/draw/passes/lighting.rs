@@ -13,9 +13,11 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use crate::render::draw::passes::shadow::ShadowPass;
+use crate::render::draw::targets::RenderTargets;
 use crate::render::error::Result;
 use crate::render::gpu::buffer::GrowableBuffer;
 use crate::render::gpu::device::{Gpu, EDGE_FORMAT, HDR_FORMAT};
+use crate::render::gpu::profiler::GpuProfiler;
 
 /// The stencil value of a pixel on an edge.
 const EDGE: u32 = 1;
@@ -162,9 +164,35 @@ impl LightingPass {
         Ok(())
     }
 
+    /// The lighting pass: the G-buffer lit into the lit layer (cleared,
+    /// or kept when translucent meshes are blended over it later). Without
+    /// meshes it only clears the layer.
+    pub fn draw(
+        &mut self,
+        gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        targets: &RenderTargets,
+        has_meshes: bool,
+        translucent: bool,
+        profiler: &mut GpuProfiler,
+    ) -> Result<()> {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("lighting"),
+            color_attachments: &[Some(targets.lit_attachment(translucent))],
+            depth_stencil_attachment: targets.edge_attachment(),
+            timestamp_writes: profiler.pass_timing("lighting"),
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        if has_meshes {
+            self.shade(gpu, &mut pass)?;
+        }
+        Ok(())
+    }
+
     /// Light into `pass`, whose stencil (with MSAA) is the edge stencil
     /// (`RenderTargets::edge_attachment`), cleared.
-    pub fn draw(&mut self, gpu: &Gpu, pass: &mut wgpu::RenderPass) -> Result<()> {
+    fn shade(&mut self, gpu: &Gpu, pass: &mut wgpu::RenderPass) -> Result<()> {
         let sample_count = self.sample_count;
         pass.set_bind_group(0, self.bind_group.as_ref(), &[]);
         pass.set_stencil_reference(EDGE);

@@ -1,27 +1,18 @@
-//! The renderer: a packet in, the lit and vector layers out:
-//!
-//! ```text
-//! mask passes    one per clip scope (parents first), copied into its layer
-//! shadow passes  one per changed shadow view
-//! geometry pass  meshes into the multisampled G-buffer
-//! lighting pass  every G-buffer sample x every light -> lit layer
-//! vector pass    shapes and curves -> vector layer, depth-tested
-//!                against the opaque meshes
-//! translucent    translucent meshes, lit and blended over the lit layer
-//!                back to front, depth-tested against the G-buffer's
-//!                depth and writing their own into it
-//! ```
-//!
-//! It decides nothing about the scene: what to draw and what changed is in
-//! the packet and the packer's arenas.
+//! Draw: a view's packet in, the lit and vector layers out (`Drawer`).
+//! The passes (passes/) run in order: mask, shadow, gbuffer, lighting,
+//! vector, translucent; each draws the geometry (geometry/) it needs.
+//! Draw decides nothing about the scene: what to draw and what changed is
+//! in the packet and the packer's arenas.
 
+pub mod geometry;
 pub mod passes;
 pub mod targets;
 
+use crate::render::draw::geometry::meshes::{MeshData, MeshGeometry};
+use crate::render::draw::geometry::vectors::{VectorData, VectorGeometry};
 use crate::render::draw::passes::lighting::LightingPass;
-use crate::render::draw::passes::mesh::{MeshData, MeshPass};
 use crate::render::draw::passes::shadow::ShadowPass;
-use crate::render::draw::passes::vector::{VectorData, VectorPass};
+use crate::render::draw::passes::{gbuffer, mask, translucent, vector};
 use crate::render::draw::targets::RenderTargets;
 use crate::render::error::Result;
 use crate::render::gpu::buffer::Records;
@@ -31,7 +22,7 @@ use crate::render::gpu::profiler::GpuProfiler;
 use crate::render::pack::packer::{Packer, Packet};
 use crate::render::pack::records::Frame;
 
-/// What the renderer needs from the `RenderConfig`.
+/// The size and sampling of the targets a view is drawn into.
 #[derive(Clone, Copy, PartialEq)]
 pub struct TargetSettings {
     pub width: u32,
@@ -42,8 +33,8 @@ pub struct TargetSettings {
 
 pub struct Drawer {
     frame_uniform: wgpu::Buffer,
-    vector_pass: VectorPass,
-    mesh_pass: MeshPass,
+    vectors: VectorGeometry,
+    meshes: MeshGeometry,
     lighting_pass: LightingPass,
     shadow_pass: ShadowPass,
     targets: Option<RenderTargets>,
@@ -57,14 +48,12 @@ pub struct Drawer {
 impl Drawer {
     /// Make the camera view texture hold `count` pictures of `size` pixels.
     pub fn ensure_camera_views(&mut self, gpu: &Gpu, count: usize, size: (u32, u32)) {
-        self.vector_pass
-            .camera_views
-            .ensure(&gpu.device, count, size);
+        self.vectors.camera_views.ensure(&gpu.device, count, size);
     }
 
     /// Layer `layer` of the camera view texture, to render a picture into.
     pub fn camera_view_layer(&self, layer: usize) -> wgpu::TextureView {
-        self.vector_pass.camera_views.layer(layer).clone()
+        self.vectors.camera_views.layer(layer).clone()
     }
 
     /// A texture of the last render to look at (`inspect.rs`): its view,
@@ -124,8 +113,8 @@ impl Drawer {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
-            vector_pass: VectorPass::new(gpu),
-            mesh_pass: MeshPass::new(gpu)?,
+            vectors: VectorGeometry::new(gpu),
+            meshes: MeshGeometry::new(gpu)?,
             lighting_pass: LightingPass::new(gpu),
             shadow_pass: ShadowPass::new(gpu),
             targets: None,
@@ -194,7 +183,7 @@ impl Drawer {
             images: &packet.draws.images,
         };
         let mesh_depth = &targets.depth_view;
-        self.vector_pass.prepare(
+        self.vectors.prepare(
             gpu,
             &data,
             &self.frame_uniform,
@@ -226,7 +215,7 @@ impl Drawer {
                 translucent_shadow_draws: &meshes.output.translucent_shadow_draws,
                 shadow_draws: &meshes.output.shadow_draws,
             };
-            self.mesh_pass.prepare(
+            self.meshes.prepare(
                 gpu,
                 &data,
                 &self.frame_uniform,
@@ -237,8 +226,8 @@ impl Drawer {
                 self.shadow_pass
                     .prepare(gpu, &meshes.shadows, settings.shadow_resolution);
             if shadows_changed {
-                self.mesh_pass.forget_shadow_groups();
-                self.vector_pass.forget_shadow_groups();
+                self.meshes.forget_shadow_groups();
+                self.vectors.forget_shadow_groups();
             }
             self.lighting_pass.prepare(
                 gpu,
@@ -255,8 +244,8 @@ impl Drawer {
             self.shadow_pass.draw(
                 gpu,
                 encoder,
-                &mut self.mesh_pass,
-                &mut self.vector_pass,
+                &mut self.meshes,
+                &mut self.vectors,
                 profiler,
                 &targets.mask_layers_view,
                 mesh_depth,
@@ -264,84 +253,32 @@ impl Drawer {
             );
         }
 
-        for scope in 0..packet.scope_parents.len() {
-            {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("mask"),
-                    color_attachments: &[Some(targets.mask_attachment())],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: profiler.pass_timing("masks"),
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                self.vector_pass.draw_mask(gpu, &mut pass, samples, scope);
-            }
-            targets.copy_mask_to_layer(encoder, scope as u32);
-        }
-
-        let translucent = has_meshes && self.mesh_pass.has_translucent();
+        mask::draw(
+            gpu,
+            encoder,
+            targets,
+            &mut self.vectors,
+            packet.scope_parents.len(),
+            profiler,
+        );
+        let translucent = has_meshes && self.meshes.has_translucent();
         if has_meshes || clear_3d {
-            {
-                let attachments = targets.gbuffer_attachments();
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("geometry"),
-                    color_attachments: &attachments,
-                    depth_stencil_attachment: Some(targets.depth_attachment()),
-                    timestamp_writes: profiler.pass_timing("geometry"),
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                if has_meshes {
-                    self.mesh_pass.draw(gpu, &mut pass, samples);
-                }
-            }
-            {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("lighting"),
-                    color_attachments: &[Some(targets.lit_attachment(translucent))],
-                    depth_stencil_attachment: targets.edge_attachment(),
-                    timestamp_writes: profiler.pass_timing("lighting"),
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                if has_meshes {
-                    self.lighting_pass.draw(gpu, &mut pass)?;
-                }
-            }
+            let meshes = has_meshes.then_some(&mut self.meshes);
+            gbuffer::draw(gpu, encoder, targets, meshes, profiler);
+            self.lighting_pass
+                .draw(gpu, encoder, targets, has_meshes, translucent, profiler)?;
         }
         self.empty_3d = if has_meshes { None } else { Some(generation) };
-
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("vectors"),
-                color_attachments: &[Some(targets.vector_attachment())],
-                depth_stencil_attachment: Some(targets.vector_depth_attachment()),
-                timestamp_writes: profiler.pass_timing("vectors"),
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            self.vector_pass.draw_frame(gpu, &mut pass, samples);
-        }
-        // After the vector pass: translucent meshes write depth, and 2D
-        // shapes test against the opaque meshes only.
+        vector::draw(gpu, encoder, targets, &mut self.vectors, profiler);
         if translucent {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("translucent"),
-                color_attachments: &[Some(targets.lit_over_attachment())],
-                depth_stencil_attachment: Some(targets.depth_test_attachment()),
-                timestamp_writes: profiler.pass_timing("translucent"),
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            if let Some(lighting) = &self.lighting_pass.forward_group {
-                self.mesh_pass.draw_translucent(
-                    gpu,
-                    &mut pass,
-                    samples,
-                    &self.lighting_pass.forward_layout,
-                    lighting,
-                );
-            }
+            translucent::draw(
+                gpu,
+                encoder,
+                targets,
+                &mut self.meshes,
+                &self.lighting_pass,
+                profiler,
+            );
         }
         Ok(targets)
     }
