@@ -28,7 +28,12 @@ import numpy as np
 from PIL import Image
 
 from ..animation.audio import write_wav
+from ..voice.transcript import Subtitle, srt
 from .encoders import X264, H264Encoder
+
+SUBTITLE_CODECS = {".mp4": "mov_text", ".m4v": "mov_text", ".mov": "mov_text", ".mkv": "srt", ".webm": "webvtt"}
+"""The subtitle track ffmpeg writes into a video file, by its suffix
+(other containers get only the ``.srt`` file next to them)."""
 
 
 PixelFormat = Literal["rgba", "nv12"]
@@ -51,6 +56,8 @@ class FrameFormat:
     sample_rate: int = 48_000
     pixel_format: PixelFormat = "rgba"
     """What :meth:`FrameSink.write` gets, as the sink asked for it."""
+    subtitles: tuple[Subtitle, ...] = ()
+    """What is said when, in seconds from the first rendered frame."""
 
 
 class FrameSink:
@@ -99,6 +106,10 @@ class VideoFile(FrameSink):
     encoders.py: ``choose_encoder("auto")``). ``codec_args`` replaces the
     codec settings, e.g. ``["-c:v", "prores_ks", "-profile:v", "4444",
     "-pix_fmt", "yuva444p10le"]`` for a .mov with alpha.
+
+    The audio and the subtitles go into the same file (an .mp4 gets a
+    ``mov_text`` subtitle track, see :data:`SUBTITLE_CODECS`); the
+    subtitles are also written next to it as an ``.srt`` file.
     """
 
     path: str | Path
@@ -108,7 +119,8 @@ class VideoFile(FrameSink):
     audio_args: list[str] = field(default_factory=lambda: ["-c:a", "aac", "-b:a", "192k"])
     ffmpeg: str = "ffmpeg"
     _process: subprocess.Popen | None = field(default=None, init=False, repr=False)
-    _audio_directory: tempfile.TemporaryDirectory | None = field(default=None, init=False, repr=False)
+    _inputs: tempfile.TemporaryDirectory | None = field(default=None, init=False, repr=False)
+    """The audio and subtitle files ffmpeg reads besides the frames."""
 
     def pixel_format(self, width: int, height: int) -> PixelFormat:
         h264 = self.encoder is not None or self.codec_args == list(X264.codec_args)
@@ -123,14 +135,30 @@ class VideoFile(FrameSink):
             "-f", "rawvideo", "-pix_fmt", format.pixel_format, *colors, "-s", f"{format.width}x{format.height}", "-r", str(format.fps),
             "-i", "-",
         ]  # fmt: skip
+        inputs = 1
+        maps = ["-map", "0:v"]
+        if format.audio is not None or format.subtitles:
+            self._inputs = tempfile.TemporaryDirectory(prefix="manimx-inputs-")
         if format.audio is not None:
             # The mix is known before the first frame, so ffmpeg muxes it
             # in the same pass; a temporary WAV keeps stdin for video.
-            self._audio_directory = tempfile.TemporaryDirectory(prefix="manimx-audio-")
-            audio_path = Path(self._audio_directory.name) / "audio.wav"
+            audio_path = Path(self._inputs.name) / "audio.wav"
             write_wav(audio_path, format.audio, format.sample_rate)
-            command += ["-i", str(audio_path), "-map", "0:v", "-map", "1:a", *self.audio_args]
-        command += [*codec_args, *colors, str(self.path)]
+            command += ["-i", str(audio_path)]
+            maps += ["-map", f"{inputs}:a", *self.audio_args]
+            inputs += 1
+        codec = SUBTITLE_CODECS.get(Path(self.path).suffix.lower())
+        if format.subtitles:
+            # Next to the video (to upload with it) and, where the
+            # container has subtitle tracks, in it (players switch it on).
+            subtitles = srt(format.subtitles)
+            Path(self.path).with_suffix(".srt").write_text(subtitles, encoding="utf-8")
+            if codec is not None:
+                subtitle_path = Path(self._inputs.name) / "subtitles.srt"
+                subtitle_path.write_text(subtitles, encoding="utf-8")
+                command += ["-i", str(subtitle_path)]
+                maps += ["-map", f"{inputs}:s", "-c:s", codec]
+        command += [*maps, *codec_args, *colors, str(self.path)]
         self._process = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def write(self, index: int, image: np.ndarray) -> None:
@@ -145,9 +173,9 @@ class VideoFile(FrameSink):
         errors = self._process.stderr.read().decode(errors="replace")
         code = self._process.wait()
         self._process = None
-        if self._audio_directory is not None:
-            self._audio_directory.cleanup()
-            self._audio_directory = None
+        if self._inputs is not None:
+            self._inputs.cleanup()
+            self._inputs = None
         if code != 0:
             raise RuntimeError(f"ffmpeg failed with exit code {code}: {errors.strip()}")
 
@@ -244,11 +272,15 @@ class ImageSequence(FrameSink):
 
     audio_name: str = "audio.wav"
     """Written next to the frames when the source has sounds."""
+    subtitles_name: str = "subtitles.srt"
+    """Written next to the frames when the source has subtitles."""
 
     def open(self, format: FrameFormat) -> None:
         Path(self.directory).mkdir(parents=True, exist_ok=True)
         if format.audio is not None:
             write_wav(Path(self.directory) / self.audio_name, format.audio, format.sample_rate)
+        if format.subtitles:
+            (Path(self.directory) / self.subtitles_name).write_text(srt(format.subtitles), encoding="utf-8")
         self._pool = ThreadPoolExecutor(self.threads, thread_name_prefix="png")
 
     def write(self, index: int, image: np.ndarray) -> None:

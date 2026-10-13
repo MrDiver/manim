@@ -397,6 +397,44 @@ def still(
         _open(target)
 
 
+@app.command()
+def transcribe(
+    sound: Annotated[Path, typer.Argument(help="A sound file of the project, e.g. assets/audio/voice.m4a.")],
+    text: Annotated[
+        Path | None, typer.Option("--text", "-t", help="What is said, as a text file ([name] lines start sections); default: what Whisper hears.", show_default=False)
+    ] = None,
+    model: Annotated[str | None, typer.Option(help="Whisper model: base, small (default), medium, large-v3, ...", show_default=False)] = None,
+    language: Annotated[str | None, typer.Option(help="The language spoken, e.g. en or de (default: Whisper finds it).", show_default=False)] = None,
+) -> None:
+    """Time the words of a recording with Whisper, so scenes sync to them.
+
+    Writes the transcript next to the sound (voice.m4a: voice.transcript.json).
+    Every word is then an event: voice.square, voice.square.2 (said again),
+    voice.middle.square (after a [middle] line).
+    """
+    from ..animation.audio import Sound
+    from ..voice.alignment import DEFAULT_MODEL
+    from ..voice.alignment import transcribe as transcribe_sound
+    from ..voice.transcript import transcript_path
+
+    project = Project.find()
+    path = sound.resolve()
+    if not path.is_file():
+        raise ProjectError(f"no sound file {sound}")
+    written = text.read_text(encoding="utf-8") if text is not None else None
+    with ui.console.status("Transcribing with Whisper… (the first time, it downloads its model)", spinner="dots"):
+        transcript = transcribe_sound(Sound.load(path), written, model or DEFAULT_MODEL, language)
+    target = transcript_path(path)
+    transcript.save(target)
+    name = path.stem
+    words = transcript.tokens
+    ui.success(f"[bold]{_shown(target)}[/]  [dim]{len(words)} words[/]")
+    if words:
+        ui.console.print(f"Events: [bold]{name}.{words[0].key}[/] … [bold]{name}.{words[-1].key}[/]  (scenes: self.cue(...) or self.wait_for(...))")
+    if not any(entry.file == path.relative_to(project.root).as_posix() for entry in project.audio if path.is_relative_to(project.root)):
+        ui.console.print("[dim]The sound is on no audio track yet: drop it on one in manimx ui, or add it to timeline.audio.[/]")
+
+
 # --------------------------------------------------------------------------
 # ui
 # --------------------------------------------------------------------------

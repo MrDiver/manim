@@ -54,6 +54,7 @@ import numpy as np
 
 from ..renderer.config import Frame, RenderConfig
 from ..renderer.effects import Effect
+from ..voice.transcript import Subtitle
 from .sinks import FrameFormat, FrameSink, PixelFormat
 
 Progress = Callable[[int, int], None]
@@ -70,6 +71,8 @@ class FrameSource:
     duration: float
     audio: Callable[[float, float, int], np.ndarray] | None = None
     """``audio(start, end, sample_rate)``: stereo float32 samples, if any."""
+    subtitles: Callable[[], list[Subtitle]] | None = None
+    """``subtitles()``: what is said when (a timeline's transcripts), if anything."""
 
 
 @dataclass(frozen=True)
@@ -126,18 +129,27 @@ def load_source(spec: Any) -> FrameSource:
         return target
     if not isinstance(target, (PreparedScene, Timeline)):
         raise TypeError(f"cannot render {target!r}: give a Scene, a prepared scene or a timeline")
-    return FrameSource(target.frame_at, target.duration, target.audio)
+    return FrameSource(target.frame_at, target.duration, target.audio, getattr(target, "subtitles", None))
 
 
 def _format(source: FrameSource, sink: FrameSink, settings: RenderSettings, times: list[float]) -> FrameFormat:
-    """The sink's format: its pixels and the audio of exactly the rendered frames."""
+    """The sink's format: its pixels, and the audio and subtitles of exactly the rendered frames."""
     config = settings.config
     width, height = config.pixel_width, config.pixel_height
     audio = None
-    if settings.audio and source.audio is not None and times:
-        samples = source.audio(times[0], times[0] + len(times) / settings.fps, settings.sample_rate)
-        audio = samples if np.any(samples) else None  # no sounds: no audio track
-    return FrameFormat(width, height, settings.fps, audio, settings.sample_rate, sink.pixel_format(width, height))
+    subtitles: tuple[Subtitle, ...] = ()
+    if times:
+        start, end = times[0], times[0] + len(times) / settings.fps
+        if settings.audio and source.audio is not None:
+            samples = source.audio(start, end, settings.sample_rate)
+            audio = samples if np.any(samples) else None  # no sounds: no audio track
+        if source.subtitles is not None:
+            subtitles = tuple(
+                Subtitle(max(item.start, start) - start, min(item.end, end) - start, item.text)
+                for item in source.subtitles()
+                if item.end > start and item.start < end
+            )
+    return FrameFormat(width, height, settings.fps, audio, settings.sample_rate, sink.pixel_format(width, height), subtitles)
 
 
 def _frame_shape(format: FrameFormat) -> tuple[int, ...]:

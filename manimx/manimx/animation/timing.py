@@ -18,9 +18,11 @@ in between:
   it are skipped and their emits do not fire.
 
 Events come from :meth:`Timeline.fire` (a fixed time, an editor, a
-presenter's click) or from scenes' ``emit`` calls, whose global time
-depends on their own segment's time map. Everything is resolved together
-by iterating to a fixed point.
+presenter's click), from the words of the transcripts of the audio clips
+(``voice.square``: when "square" is said, see manimx/voice/transcript.py)
+or from scenes' ``emit`` calls, whose global time depends on their own
+segment's time map. Everything is resolved together by iterating to a
+fixed point.
 
 Editing (adding clips, firing events, changing a clip) resolves
 leniently, so clips can be added in any order. :meth:`Timeline.resolve` is
@@ -35,6 +37,7 @@ from __future__ import annotations
 import bisect
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -43,6 +46,9 @@ from ..robjects import RGroup, new_uid
 from .audio import DEFAULT_SAMPLE_RATE, Sound, mix
 from .scene import PreparedScene, Segment
 from .time_map import MonotoneMap
+
+if TYPE_CHECKING:
+    from ..voice.transcript import Subtitle, Transcript
 
 NEVER = float("inf")
 """Start time of a segment whose event has not fired (yet)."""
@@ -150,6 +156,11 @@ class Clip:
         self.cue_events[cue] = event
         return self._changed()
 
+    def bind_cues(self, cues: dict[str, str]) -> Clip:
+        """Sync each cue to its event; every other cue to the event of its own name."""
+        self.cue_events = dict(cues)
+        return self._changed()
+
     def move(self, start: float) -> Clip:
         """Start the clip at global time ``start``."""
         self.start = float(start)
@@ -223,6 +234,8 @@ class Clip:
         Inside a segment, the segment's time map applies; between segments
         the clip holds at the end of the previous one.
         """
+        if self.timeline is not None:
+            self.timeline._ensure_resolved()  # before reading the timings
         included = [timing for timing in self.timings if timing is not None]
         if not included or t < included[0].start or t > self.end:
             return None
@@ -294,6 +307,8 @@ class AudioClip:
     cut_out: float | None = None
     volume: float = 1.0
     name: str = ""
+    transcript: Transcript | None = None
+    """What is said in the sound: its words are events (``{name}.{word}``)."""
 
     @property
     def length(self) -> float:
@@ -305,6 +320,35 @@ class AudioClip:
     @property
     def end(self) -> float:
         return self.start + self.length
+
+    def global_time(self, seconds: float) -> float | None:
+        """The global time of second ``seconds`` of the sound, None if cut away."""
+        cut_in = self.cut_in or 0.0
+        if not cut_in <= seconds <= cut_in + self.length:
+            return None
+        return self.start + seconds - cut_in
+
+    def events(self) -> dict[str, float]:
+        """The global times of its transcript's words that it plays."""
+        if self.transcript is None:
+            return {}
+        placed = ((event, self.global_time(seconds)) for event, seconds in self.transcript.events(self.name).items())
+        return {event: time for event, time in placed if time is not None}
+
+    def subtitles(self) -> list[Subtitle]:
+        """Its transcript's subtitles that it plays, in global time (a
+        subtitle partly cut away keeps the part that plays)."""
+        from ..voice.transcript import Subtitle
+
+        if self.transcript is None:
+            return []
+        cut_in = self.cut_in or 0.0
+        shown = []
+        for subtitle in self.transcript.subtitles():
+            start, end = max(subtitle.start, cut_in), min(subtitle.end, cut_in + self.length)
+            if start < end:
+                shown.append(Subtitle(self.start + start - cut_in, self.start + end - cut_in, subtitle.text))
+        return shown
 
     def placed(self) -> tuple[float, float, Sound, float]:
         """``(global time, skip, sound, volume)``, as :func:`mix` takes it."""
@@ -321,7 +365,8 @@ class Timeline:
 
     clips: list[Clip] = field(default_factory=list)
     audio_clips: list[AudioClip] = field(default_factory=list)
-    """Sounds on the audio tracks; edit the list freely (nothing to resolve)."""
+    """Sounds on the audio tracks. Their transcripts' words are events:
+    call :meth:`audio_changed` after changing the list or a clip in it."""
     events: dict[str, float] = field(default_factory=dict)
     """Events with a time set directly (fixed, or fired by a presenter)."""
     live: bool = False
@@ -370,15 +415,32 @@ class Timeline:
         self.events[event] = time
         self._dirty = True
 
+    def audio_changed(self) -> None:
+        """The audio clips changed: their words' events move with them."""
+        self._dirty = True
+
+    def word_events(self) -> dict[str, float]:
+        """The events of every audio clip's transcript (the first audio
+        clip with an event decides its time)."""
+        events: dict[str, float] = {}
+        for audio in self.audio_clips:
+            for event, time in audio.events().items():
+                events.setdefault(event, time)
+        return events
+
+    def subtitles(self) -> list[Subtitle]:
+        """Every audio clip's subtitles, by time."""
+        return sorted((subtitle for audio in self.audio_clips for subtitle in audio.subtitles()), key=lambda subtitle: subtitle.start)
+
     def unfire(self, event: str) -> None:
         """Forget the time set for ``event``: clips waiting for it wait again."""
         if self.events.pop(event, None) is not None:
             self._dirty = True
 
     def event_times(self) -> dict[str, float]:
-        """The time of every event known so far: set (:meth:`fire`) or
-        emitted by a placed segment. Unlike :meth:`resolve`, never raises
-        for events that do not fire."""
+        """The time of every event known so far: set (:meth:`fire`), said
+        (:meth:`word_events`) or emitted by a placed segment. Unlike
+        :meth:`resolve`, never raises for events that do not fire."""
         return self._resolve(strict=False)
 
     def resolve(self) -> dict[str, float]:
@@ -450,7 +512,7 @@ class Timeline:
         """
         for clip in self.clips:
             clip.timings = [None] * len(clip.scene.segments)
-        known = dict(self.events)
+        known = self.word_events() | self.events
         for _ in range(_MAX_PASSES):
             changed = False
             for clip in self.clips:

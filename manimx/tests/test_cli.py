@@ -281,3 +281,22 @@ def test_projects_with_the_same_package_name_load_in_turns() -> None:
     for folder in (first, second, first):  # both name their package "scenes"
         Project.load(folder).build_timeline()
         assert Path(sys.modules["scenes"].__file__).resolve().is_relative_to(folder.resolve())
+
+
+def test_transcribe_times_the_words_of_a_recording(project, capsys, monkeypatch) -> None:
+    import numpy as np
+    from manimx.animation import write_wav
+    from manimx.voice import Transcript, Word, alignment
+
+    def fake_transcribe(sound, text=None, model="small", language=None):  # Whisper is not run in tests
+        return alignment.align(text or "hello there", [Word("hello", 0.2, 0.5), Word("there", 0.6, 0.9)])
+
+    monkeypatch.setattr(alignment, "transcribe", fake_transcribe)
+    (project / "assets" / "audio").mkdir(parents=True, exist_ok=True)
+    write_wav(project / "assets" / "audio" / "voice.wav", np.zeros(8000, dtype=np.float32), 8000)
+    (project / "script.txt").write_text("Hello there!")
+    assert main(["transcribe", "assets/audio/voice.wav", "--text", "script.txt"]) == 0
+    out = capsys.readouterr().out
+    assert "voice.transcript.json" in out and "voice.hello" in out and "on no audio track yet" in out
+    assert Transcript.load(project / "assets" / "audio" / "voice.transcript.json").text == "Hello there!"
+    assert main(["transcribe", "assets/audio/missing.wav"]) == 1

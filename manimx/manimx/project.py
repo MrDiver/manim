@@ -21,6 +21,12 @@ another; an explicit ``start`` (seconds) places a clip anywhere, e.g. in
 parallel with another one on a higher ``layer``. Below the clips, the
 timeline's ``audio`` lists sound files on audio tracks (voice-overs,
 music, recordings made in the preview), mixed into the video's sound.
+
+A sound file's transcript lies next to it (``assets/audio/voice.m4a``:
+``voice.transcript.json``, see manimx/voice/): its words are events
+scenes wait for or sync their cues to, and a clip's ``cues`` bind a
+scene's cue to another event than the one of its own name
+(``{"square": "voice.middle.square"}``).
 """
 
 from __future__ import annotations
@@ -47,6 +53,7 @@ from .settings import (
 from .settings import from_json as settings_from_json
 from .settings import schema as settings_schema
 from .settings import to_json as settings_to_json
+from .voice.transcript import Transcript, transcript_path
 
 PROJECT_FILE = "manimx.json"
 SCHEMA_FILE = ".manimx/project.schema.json"
@@ -91,6 +98,8 @@ class ClipEntry:
     """In and out points in the scene's playing time."""
     speed: float = 1.0
     """How fast the clip plays: 2 is twice as fast, 0.5 slow motion."""
+    cues: dict[str, str] = field(default_factory=dict)
+    """The event each of the scene's cues syncs to (default: the event of its own name)."""
 
 
 @dataclass
@@ -119,6 +128,8 @@ class Project:
     audio: list[AudioEntry] = field(default_factory=list)
     _sounds: dict[Path, tuple[int, Sound]] = field(default_factory=dict, init=False, repr=False)
     """Sound files read, with their modification time: read again when changed."""
+    _transcripts: dict[Path, tuple[int, Transcript]] = field(default_factory=dict, init=False, repr=False)
+    """Transcripts read, with their modification time."""
 
     @property
     def output(self) -> OutputSettings:
@@ -171,7 +182,7 @@ class Project:
                 scenes[name] = SceneEntry(entry["module"], entry.get("class", name))
             clips = []
             for index, entry in enumerate(timeline.get("clips", [])):
-                _check_keys(entry, ["scene", "start", "name", "layer", "cut", "speed"], f"timeline.clips[{index}]")
+                _check_keys(entry, ["scene", "start", "name", "layer", "cut", "speed", "cues"], f"timeline.clips[{index}]")
                 clips.append(_clip_entry(entry))
             events = {name: float(time) for name, time in timeline.get("events", {}).items()}
             audio = []
@@ -286,7 +297,8 @@ class Project:
         ``prepare(index, entry)`` gives clip ``index``'s prepared scene
         (default: prepare it now; the preview reuses scenes whose files did
         not change)."""
-        timeline = Timeline(events=dict(self.events))
+        # The audio first: its words are events, which decide where clips end.
+        timeline = Timeline(audio_clips=[self.audio_clip(entry) for entry in self.audio], events=dict(self.events))
         previous_end = 0.0
         used: set[str] = set()
         previous_name = ""
@@ -305,9 +317,9 @@ class Project:
                 clip.cut(*entry.cut)
             if entry.speed != 1.0:
                 clip.set_speed(entry.speed)
+            if entry.cues:
+                clip.bind_cues(entry.cues)
             previous_end, previous_name = clip.end, clip.name
-        for entry in self.audio:
-            timeline.audio_clips.append(self.audio_clip(entry))
         return timeline
 
     def sound(self, file: str) -> Sound:
@@ -325,9 +337,35 @@ class Project:
         return known[1]
 
     def audio_clip(self, entry: AudioEntry) -> AudioClip:
-        """The timeline's audio clip for ``entry``."""
+        """The timeline's audio clip for ``entry``, with its file's transcript."""
         cut_in, cut_out = entry.cut or (None, None)
-        return AudioClip(self.sound(entry.file), entry.start, entry.track, cut_in, cut_out, entry.volume, Path(entry.file).stem)
+        sound = self.sound(entry.file)
+        return AudioClip(sound, entry.start, entry.track, cut_in, cut_out, entry.volume, Path(entry.file).stem, self.transcript(entry.file))
+
+    def transcript(self, file: str) -> Transcript | None:
+        """The transcript of the sound file ``file`` (inside the project), None without one."""
+        path = transcript_path(self.root / file)
+        try:
+            mtime = path.stat().st_mtime_ns
+        except OSError:
+            return None
+        known = self._transcripts.get(path)
+        if known is None or known[0] != mtime:
+            try:
+                known = self._transcripts[path] = (mtime, Transcript.load(path))
+            except (OSError, ValueError) as error:
+                raise ProjectError(str(error)) from None
+        return known[1]
+
+    def save_transcript(self, file: str, transcript: Transcript | None) -> None:
+        """Write (or with None remove) the transcript of the sound file ``file``."""
+        path = transcript_path(self.root / file)
+        if transcript is None:
+            path.unlink(missing_ok=True)
+            self._transcripts.pop(path, None)
+            return
+        transcript.save(path)
+        self._transcripts[path] = (path.stat().st_mtime_ns, transcript)
 
     def source(self, scene: str | None = None) -> ProjectSource:
         """What the render driver renders: the timeline, or one scene."""
@@ -500,12 +538,17 @@ def project_schema() -> dict[str, Any]:
                                     "exclusiveMinimum": 0,
                                     "description": "How fast the clip plays: 2 is twice as fast, 0.5 slow motion (default 1).",
                                 },
+                                "cues": {
+                                    "type": "object",
+                                    "description": "The event each cue of the scene syncs to, e.g. a spoken word (default: the event of the cue's own name).",
+                                    "additionalProperties": {"type": "string"},
+                                },
                             },
                         },
                     },
                     "events": {
                         "type": "object",
-                        "description": "Times (seconds) of events scenes wait for with wait_for().",
+                        "description": "Times (seconds) of events scenes wait for with wait_for() (the words of transcripts are events too).",
                         "additionalProperties": {"type": "number"},
                     },
                     "audio": {
@@ -545,7 +588,14 @@ def _clip_entry(data: dict[str, Any]) -> ClipEntry:
         layer=data.get("layer", 0),
         cut=None if cut is None else (cut[0], cut[1]),
         speed=_speed(data.get("speed", 1.0)),
+        cues=_cues(data.get("cues", {})),
     )
+
+
+def _cues(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict) or not all(isinstance(key, str) and isinstance(event, str) and event for key, event in value.items()):
+        raise ValueError(f"a clip's cues map cue names to event names, not {value!r}")
+    return dict(value)
 
 
 def _speed(value: Any) -> float:
@@ -591,4 +641,6 @@ def _clip_json(entry: ClipEntry) -> dict[str, Any]:
         data["cut"] = list(entry.cut)
     if entry.speed != 1.0:
         data["speed"] = entry.speed
+    if entry.cues:
+        data["cues"] = dict(entry.cues)
     return data

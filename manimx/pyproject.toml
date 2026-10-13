@@ -21,6 +21,11 @@ dependencies = [
 [project.scripts]
 manimx = "manimx.cli:run"
 
+[project.optional-dependencies]
+voice = [
+    "faster-whisper>=1.1",
+]
+
 [build-system]
 requires = ["maturin>=1.9,<2"]
 build-backend = "maturin"
