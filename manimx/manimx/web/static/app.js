@@ -1,10 +1,13 @@
 // The preview page: the frame at the playhead, playback, and the timeline.
 // See manimx/web/server.py for the endpoints and editing.js for editing.
 //
-// Frames are asked for one at a time. While a request is open, only the
-// newest wanted time is remembered; when the frame arrives, that time is
-// asked for next. So scrubbing and playback never queue outdated frames on
-// the server; playback shows as many frames as the server renders.
+// Frames are asked for by number at the timeline's version and kept
+// (frames.js), so a frame seen once shows at once until an edit. Scrubbing
+// asks for one frame at a time: while a request is open, only the newest
+// wanted time is remembered and asked for next, so no outdated frames
+// queue on the server. Playing fetches the frames ahead of the playhead
+// and shows the newest one that is there; a second loop plays from what
+// was kept.
 //
 // Playback runs on the audio's clock when the timeline has sounds
 // (/api/audio, mixed once per version), else on the page's clock; Loop
@@ -27,6 +30,7 @@
 // during a drag, and keeps its time.
 
 import { clipBar, eventPill, initEditing, timelineLoaded, trackLane } from "./editing.js";
+import { FrameCache } from "./frames.js";
 
 const elements = Object.fromEntries(
   [
@@ -45,7 +49,8 @@ const state = {
   intended: 0, // asked for by the user; shown again after a rebuild that makes it fit
   loading: false, // a frame request is open
   wanted: null, // the time to show once it is done
-  shownUrl: null,
+  version: 0, // the newest version of the timeline heard of: frames are kept by it
+  playingFrame: null, // the frame number shown while playing
   open: loadSet("manimx.open"), // keys of the clips and nodes whose tracks are shown
   indices: loadFlag("manimx.indices"), // index labels over the frame
   zoom: 1, // lanes width / the width beside the labels
@@ -369,31 +374,41 @@ function show(time, intended = time, reveal = false) {
   elements.playheadFrame.textContent = frameOf(time);
   elements.time.textContent = `${time.toFixed(2)} s · frame ${frameOf(time)}`;
   if (reveal) revealPlayhead();
-  if (state.loading) {
+  if (state.playing) {
+    showPlaying(time);
+  } else if (state.loading) {
     state.wanted = time;
   } else {
     load(time);
   }
 }
 
+const frames = new FrameCache();
+
+/** The width frames are fetched at: the image's on screen, at most the output's. */
+const frameWidth = () => Math.min(state.timeline.width, Math.round(elements.frame.clientWidth * devicePixelRatio) || state.timeline.width);
+
+/** The server's timeline is at `version` now: frames of older versions are gone. */
+function setVersion(version) {
+  state.version = Math.max(state.version, version);
+  frames.useVersion(state.version);
+}
+
+function display(url) {
+  elements.frame.src = url;
+  frames.show(url);
+}
+
 async function load(time) {
   state.loading = true;
   state.wanted = null;
-  const width = Math.min(state.timeline.width, Math.round(elements.frame.clientWidth * devicePixelRatio) || state.timeline.width);
   try {
-    const response = await fetch(`/api/frame?t=${time}&w=${width}`);
-    if (!response.ok) {
-      const { error } = await response.json();
-      throw new Error(error);
-    }
-    const url = URL.createObjectURL(await response.blob());
+    const url = await frames.fetch(state.version, frameOf(time), frameWidth());
     await new Promise((resolve) => {
       elements.frame.onload = resolve;
       elements.frame.onerror = resolve;
-      elements.frame.src = url;
+      display(url);
     });
-    if (state.shownUrl) URL.revokeObjectURL(state.shownUrl);
-    state.shownUrl = url;
     elements.error.hidden = true;
     if (!state.playing) await drawLabels(time);
   } catch (error) {
@@ -402,6 +417,20 @@ async function load(time) {
   } finally {
     state.loading = false;
     if (state.wanted !== null) load(state.wanted);
+  }
+}
+
+/** While playing: fetch ahead, show the newest frame there is (up to a second old). */
+function showPlaying(time) {
+  const { fps, duration } = state.timeline;
+  const frame = Math.floor(time * fps);
+  const width = frameWidth();
+  frames.prefetch(state.version, frame, width, { fps, last: Math.floor(duration * fps), loop: state.loop });
+  const found = frames.latest(state.version, frame, Math.max(0, frame - Math.round(fps)), width);
+  if (found && found.frame !== state.playingFrame) {
+    state.playingFrame = found.frame;
+    display(found.url);
+    elements.error.hidden = true;
   }
 }
 
@@ -456,6 +485,7 @@ async function play() {
   if (state.playing) return;
   if (state.time >= state.timeline.duration - 1e-9) show(0);
   state.playing = true;
+  state.playingFrame = null;
   document.body.classList.add("playing");
   const audio = state.muted ? null : await audioElement();
   let origin = performance.now() - state.time * 1000;
@@ -586,6 +616,7 @@ function listen() {
 async function loadTimeline() {
   const response = await fetch("/api/timeline");
   state.timeline = await response.json();
+  setVersion(state.timeline.version);
   const { title, width, height, error } = state.timeline;
   document.title = `${title} · manimx preview`;
   elements.title.textContent = title;
@@ -603,6 +634,7 @@ async function followChanges() {
     try {
       const response = await fetch(`/api/changes?since=${state.timeline.version}`);
       const { version } = await response.json();
+      setVersion(version);
       if (version !== state.timeline.version) {
         while (state.dragging) await new Promise((resolve) => setTimeout(resolve, 50));
         await loadTimeline();
@@ -625,6 +657,7 @@ async function start() {
     redraw: drawTimeline,
     refreshFrame: () => show(state.time, state.intended),
     showTime: (time) => show(snap(time)),
+    setVersion,
   });
   elements.indices.setAttribute("aria-pressed", String(state.indices));
   elements.mute.setAttribute("aria-pressed", String(state.muted));

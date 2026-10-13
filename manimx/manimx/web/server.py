@@ -13,6 +13,10 @@ request, answered by the standard library's HTTP server:
                              segments
     GET /api/frame?t=&w=     the frame at time t, w pixels wide (JPEG; PNG
                              with &format=png, WebP with &format=webp)
+    GET /api/frame?f=&v=&w=  frame number f; the answer's X-Version says
+                             which version it shows, and when that is v,
+                             the browser may keep it (the same URL is
+                             always the same image)
     GET /api/labels?t=       the index of every path in its group at time
                              t, with its name and place (see labels.py)
     GET /api/audio           the timeline's sounds mixed, as WAV (204
@@ -34,15 +38,15 @@ shows, and ``manimx.json`` is saved shortly after (see editing.py):
     POST /api/clip/remove    {"indices": [...]}
     POST /api/event          {"name", "time"} (time null: remove it)
     POST /api/setting        {"path": [...], "value"}
-
-The timeline can be replaced while serving (:meth:`PreviewServer.replace`,
-used by reload.py when a scene file is saved); every replacement or
-failed rebuild (:meth:`PreviewServer.report`) bumps the version, and the
     POST /api/undo, /api/redo  undo or redo the last edit
 
 Every edit is a command (commands.py) that can be undone; an edit may
 carry a "gesture" id, and the steps of one drag (the same id) are undone
 as one. Each answer gives the "history": what undo and redo would do.
+
+The timeline can be replaced while serving (:meth:`PreviewServer.replace`,
+used by reload.py when a scene file is saved); every replacement or
+failed rebuild (:meth:`PreviewServer.report`) bumps the version, and the
 page fetches the timeline again.
 
 Design decisions:
@@ -97,11 +101,13 @@ AUDIO_RATE = 24_000
 fine for previewing)."""
 CHANGES_TIMEOUT = 25.0
 """Seconds a /api/changes request waits before answering anyway."""
+IMMUTABLE = "private, max-age=86400, immutable"
+"""Cache-Control of a frame asked for by number at the version it shows."""
+EDIT_ROUTES = ("/api/clip", "/api/clip/add", "/api/clip/remove", "/api/event", "/api/setting", "/api/undo", "/api/redo")
 FORMATS = {"jpeg": ("JPEG", "image/jpeg"), "png": ("PNG", "image/png"), "webp": ("WEBP", "image/webp")}
 
 
 class PreviewServer:
-EDIT_ROUTES = ("/api/clip", "/api/clip/add", "/api/clip/remove", "/api/event", "/api/setting", "/api/undo", "/api/redo")
     """Serves ``timeline`` to the preview page (see the module docs)."""
 
     def __init__(
@@ -156,16 +162,16 @@ EDIT_ROUTES = ("/api/clip", "/api/clip/add", "/api/clip/remove", "/api/event", "
 
     def replace(self, timeline: Timeline, settings: RenderSettings | None = None) -> None:
         """Show ``timeline`` (and ``settings``) from now on; clears the error."""
-        with self._lock:
+        with self._lock:  # bumped inside: a frame's version always says what it shows
             self._use(timeline, settings or self.settings)
-        self._bump(error=None)
+            self._bump(error=None)
 
     def change(self, edit: Callable[[], None]) -> None:
         """Run ``edit`` on the timeline shown (between frames), then tell
         the page."""
         with self._lock:
             edit()
-        self._bump(error=self.error)
+            self._bump(error=self.error)
 
     def report(self, error: str) -> None:
         """A rebuild failed: keep showing the current timeline, tell the page."""
@@ -219,11 +225,11 @@ EDIT_ROUTES = ("/api/clip", "/api/clip/add", "/api/clip/remove", "/api/event", "
             "version": self.version,
             "error": self.error,
             "editable": self.editor is not None,
+            "history": self.editor.history() if self.editor is not None else None,
             "events": [{"name": name, "time": known.get(name), "fixed": name in fixed} for name in sorted({*waited, *fixed})],
             "duration": self.timeline.duration,
             "fps": self.settings.fps,
             "width": config.pixel_width,
-            "history": self.editor.history() if self.editor is not None else None,
             "height": config.pixel_height,
             "clips": [
                 {
@@ -270,6 +276,13 @@ EDIT_ROUTES = ("/api/clip", "/api/clip/add", "/api/clip/remove", "/api/event", "
         """The frame at ``time`` (clamped to the timeline), ``width`` pixels
         wide (default and at most the output width), encoded.
         """
+        return self.versioned_frame(time, width, image_format)[0]
+
+    def versioned_frame(
+        self, time: float | None, width: int | None = None, image_format: str = "jpeg", frame: int | None = None
+    ) -> tuple[bytes, int]:
+        """:meth:`frame`, at ``time`` or at frame number ``frame``, and the
+        version it shows (a frame is the same for the same version)."""
         if image_format not in FORMATS:
             raise ValueError(f"unknown image format {image_format!r}; use one of {', '.join(FORMATS)}")
         with self._lock:
@@ -277,6 +290,8 @@ EDIT_ROUTES = ("/api/clip", "/api/clip/add", "/api/clip/remove", "/api/event", "
             full_width, full_height = config.pixel_width, config.pixel_height
             width = full_width if width is None else max(MIN_WIDTH, min(int(width), full_width))
             height = max(1, round(width * full_height / full_width))
+            version = self.version
+            time = frame / self.settings.fps if frame is not None else time
             time = min(max(float(time), 0.0), self.timeline.duration)
             frame_config = dataclasses.replace(config, pixel_width=width, pixel_height=height, time=time)
             pixels = self._renderer.render(self._frame_at, frame_config, self._effects)
@@ -286,7 +301,7 @@ EDIT_ROUTES = ("/api/clip", "/api/clip/add", "/api/clip/remove", "/api/event", "
             image = image.convert("RGB")  # JPEG has no alpha
         buffer = io.BytesIO()
         image.save(buffer, pil_format, **({"quality": 85} if pil_format != "PNG" else {}))
-        return buffer.getvalue()
+        return buffer.getvalue(), version
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -364,12 +379,18 @@ class _Handler(BaseHTTPRequestHandler):
         self._json(self.preview.timeline_json())
 
     def _frame(self, query: dict[str, list[str]]) -> None:
-        time = _number(query, "t", float)
+        frame = _number(query, "f", int, required=False)
+        time = None if frame is not None else _number(query, "t", float)
         width = _number(query, "w", int, required=False)
+        asked = _number(query, "v", int, required=False)
         image_format = query.get("format", ["jpeg"])[0]
         if image_format not in FORMATS:
             raise _BadRequest(f"unknown format {image_format!r}")
-        self._send(self.preview.frame(time, width, image_format), FORMATS[image_format][1], cache=False)
+        body, version = self.preview.versioned_frame(time, width, image_format, frame)
+        # A frame number at the version it shows is always the same image:
+        # the browser keeps it. Anything else may change with the next edit.
+        cache = IMMUTABLE if frame is not None and asked == version else False
+        self._send(body, FORMATS[image_format][1], cache=cache, headers={"X-Version": str(version)})
 
     def _labels(self, query: dict[str, list[str]]) -> None:
         self._json(self.preview.labels(_number(query, "t", float)))
@@ -414,12 +435,18 @@ class _Handler(BaseHTTPRequestHandler):
     def _json(self, data: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
         self._send(json.dumps(data).encode(), "application/json", status=status, cache=False)
 
-    def _send(self, body: bytes, content_type: str, status: HTTPStatus = HTTPStatus.OK, cache: bool = True) -> None:
+    def _send(
+        self, body: bytes, content_type: str, status: HTTPStatus = HTTPStatus.OK, cache: bool | str = True, headers: dict[str, str] | None = None
+    ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        if not cache:
+        if cache is False:
             self.send_header("Cache-Control", "no-store")
+        elif isinstance(cache, str):
+            self.send_header("Cache-Control", cache)
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 

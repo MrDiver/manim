@@ -90,6 +90,21 @@ def test_frames_are_rendered_at_the_asked_width_with_one_render(server, timeline
     assert status == 200 and kind == "image/jpeg" and Image.open(io.BytesIO(body)).size == (128, 72)
 
 
+def test_a_frame_by_number_at_its_version_is_kept_by_the_browser(server, timeline) -> None:
+    def headers(path: str) -> tuple[bytes, str | None, str | None]:
+        with urllib.request.urlopen(server.url + path) as response:
+            return response.read(), response.headers["Cache-Control"], response.headers["X-Version"]
+
+    version = server.version
+    body, cache, shown = headers(f"api/frame?f=15&v={version}&w=64&format=png")
+    assert (cache, shown) == ("private, max-age=86400, immutable", str(version))
+    assert body == get(server, "/api/frame?t=1.5&w=64&format=png")[2]  # frame 15 at 10 fps
+    server.change(lambda: timeline.clips[0].move(0.5))
+    _, cache, shown = headers(f"api/frame?f=15&v={version}&w=64")  # an edit the page has not heard of
+    assert (cache, shown) == ("no-store", str(version + 1))
+    assert headers("api/frame?t=1.5")[1] == "no-store"
+
+
 def test_bad_requests_and_failing_scenes_answer_with_errors(server, monkeypatch) -> None:
     assert get(server, "/api/frame")[0] == 400
     assert get(server, "/api/frame?t=soon")[0] == 400
