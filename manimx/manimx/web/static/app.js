@@ -11,10 +11,10 @@
 // The resolution setting renders frames at 1/2, 1/4 or 1/8 of the
 // output's width, faster.
 //
-// Playback draws decoded frames onto a canvas on the page's clock and
-// waits ("buffering") when it runs out instead of skipping frames; the
-// timeline's sounds (/api/audio, mixed once per version) follow the
-// clock. Loop starts over at the end.
+// Playback draws decoded frames onto a canvas and waits ("buffering")
+// when it runs out instead of skipping frames; the timeline's sounds
+// (/api/audio, mixed once per version) play through Web Audio, whose
+// clock is the playback's. Loop starts over at the end.
 //
 // Tracks: one per layer, the highest on top, each clip of that layer on it.
 // Under a track, its events: a bar from where a clip starts waiting to the
@@ -75,7 +75,7 @@ const state = {
   playing: false,
   loop: true,
   muted: loadFlag("manimx.muted"),
-  audio: null, // { version, element } of the timeline's sounds
+  audio: null, // { version, buffer } of the timeline's sounds, decoded
 };
 
 // -- time and position ------------------------------------------------------------
@@ -626,53 +626,65 @@ async function drawLabels(time) {
 
 // -- playback ------------------------------------------------------------------------------
 
-/** The timeline's sounds as an audio element (fetched once per version), or null. */
-async function audioElement() {
+let audioContext = null; // made on the first play: browsers allow sound after a click or key
+
+/** The timeline's sounds decoded (fetched once per version), or null without sounds. */
+async function soundBuffer() {
   const version = state.timeline.version;
-  if (state.audio?.version === version) return state.audio.element;
-  let element = null;
+  if (state.audio?.version === version) return state.audio.buffer;
+  let buffer = null;
   try {
     const response = await fetch("/api/audio");
-    if (response.status === 200) {
-      element = new Audio(URL.createObjectURL(await response.blob()));
-      element.preload = "auto";
-    }
+    if (response.status === 200) buffer = await audioContext.decodeAudioData(await response.arrayBuffer());
   } catch {
-    element = null; // play without sound
+    buffer = null; // play without sound
   }
-  if (state.audio?.element) state.audio.element.pause();
-  state.audio = { version, element };
-  return element;
+  state.audio = { version, buffer };
+  return buffer;
 }
 
-/** Play from the playhead, on the page's clock, one frame per frame time.
+/** Play from the playhead, one frame per frame time.
  *
- * Like a video player: when the frame at the playhead is not there yet,
- * the clock (and the sound) stops, "buffering", until BUFFER_SECONDS of
- * frames are kept ahead, instead of skipping frames. The sound follows
- * the clock, set again when it drifts off by more than 0.15 s. The clock
- * starts in the middle of a frame, so frame borders fall between screen
- * refreshes and each frame is drawn for the same number of them.
+ * With sound, the clock is the sound's: Web Audio starts the mixed sounds
+ * at the exact position and its clock (AudioContext.currentTime) runs on
+ * from there, so picture and sound cannot drift. Without sound, the clock
+ * is the screen refresh's timestamp. Like a video player: when the frame
+ * at the playhead is not there yet, the clock (and the sound) stops,
+ * "buffering", until BUFFER_SECONDS of frames are kept ahead, instead of
+ * skipping frames. The clock starts in the middle of a frame, so frame
+ * borders fall between screen refreshes and each frame is drawn for the
+ * same number of them.
  */
 async function play() {
   if (state.playing) return;
   if (state.time >= state.timeline.duration - 1e-9) show(0);
   state.playing = true;
   document.body.classList.add("playing");
-  const audio = state.muted ? null : await audioElement();
+  audioContext ??= new AudioContext();
+  audioContext.resume();
+  const buffer = await soundBuffer();
   if (!state.playing) return; // paused while the sound loaded
-  const clock = { position: (frameOf(state.time) + 0.5) / state.timeline.fps, last: null, frame: frameOf(state.time), shown: null, buffering: false };
+  const clock = { position: (frameOf(state.time) + 0.5) / state.timeline.fps, last: null, frame: frameOf(state.time), shown: null, buffering: false, source: null, anchor: null };
   state.clock = clock;
+  /** Start the sound at the clock's position (or stop it); the clock follows it from then. */
+  const sound = (on) => {
+    clock.source?.stop();
+    clock.source = null;
+    clock.anchor = null;
+    if (!on || !buffer || state.muted || clock.position >= buffer.duration) return;
+    const source = audioContext.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioContext.destination);
+    const at = audioContext.currentTime + 0.02; // a moment to schedule it
+    source.start(at, clock.position);
+    clock.source = source;
+    clock.anchor = { at, position: clock.position };
+  };
+  clock.sound = sound;
   const setBuffering = (buffering) => {
     clock.buffering = buffering;
     elements.stage.classList.toggle("buffering", buffering);
-    if (!audio) return;
-    if (buffering) {
-      audio.pause();
-    } else {
-      audio.currentTime = clock.position;
-      audio.play().catch(() => {});
-    }
+    sound(!buffering);
   };
   setBuffering(false);
   const step = (now) => {
@@ -681,7 +693,8 @@ async function play() {
     const last = lastFrame();
     const width = frameWidth();
     const version = state.version;
-    if (!clock.buffering && clock.last !== null) clock.position += Math.min(0.1, (now - clock.last) / 1000);
+    if (clock.anchor) clock.position = clock.anchor.position + Math.max(0, audioContext.currentTime - clock.anchor.at);
+    else if (!clock.buffering && clock.last !== null) clock.position += Math.min(0.1, (now - clock.last) / 1000);
     clock.last = now;
     if (clock.position > duration) {
       if (!state.loop) {
@@ -690,10 +703,9 @@ async function play() {
         return;
       }
       clock.position = 0.5 / fps;
-      if (audio) audio.currentTime = 0;
+      if (!clock.buffering) sound(true);
     }
     clock.frame = Math.min(last, Math.floor(clock.position * fps));
-    if (audio && !clock.buffering && Math.abs(audio.currentTime - clock.position) > 0.15) audio.currentTime = clock.position;
     const kept = frames.keptAhead(version, clock.frame, width, last, Math.round(BUFFER_SECONDS * fps));
     if (clock.buffering && kept >= Math.min(Math.round(BUFFER_SECONDS * fps), last - clock.frame + 1)) setBuffering(false);
     else if (!clock.buffering && kept === 0) setBuffering(true);
@@ -712,11 +724,11 @@ async function play() {
 }
 
 function pause() {
+  state.clock?.sound?.(false);
   state.playing = false;
   state.clock = null;
   document.body.classList.remove("playing");
   elements.stage.classList.remove("buffering");
-  state.audio?.element?.pause();
   show(snap(state.time));
 }
 
@@ -726,7 +738,7 @@ function setMuted(muted) {
   state.muted = muted;
   elements.mute.setAttribute("aria-pressed", String(muted));
   saveFlag("manimx.muted", muted);
-  if (muted) state.audio?.element?.pause();
+  if (state.clock && !state.clock.buffering) state.clock.sound(!muted);
 }
 
 /** The preview's resolution: the output's width divided by `divisor`. */
