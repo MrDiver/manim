@@ -1,6 +1,6 @@
-"""Frame effects: settings for the core's composer (core/src/render/composer.rs).
+"""Frame effects: settings for the core's compositor (core/src/render/composite/).
 
-Effects are plain settings; the composer turns them into GPU work. There
+Effects are plain settings; the compositor turns them into GPU work. There
 are two kinds:
 
 * **Temporal** effects decide how often and when the renderer is called.

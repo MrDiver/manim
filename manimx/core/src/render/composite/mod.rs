@@ -13,7 +13,7 @@
 //! ```
 //!
 //! Which sub-frames and views there are is decided by the caller (in
-//! manimx, the timeline); frame_renderer.rs runs the loops and calls the
+//! manimx, the timeline); pipeline.rs runs the loops and calls the
 //! steps here. The effects themselves are in effects/.
 
 pub mod effects;

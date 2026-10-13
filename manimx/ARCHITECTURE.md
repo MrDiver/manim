@@ -55,14 +55,14 @@ manimx has two passes:
    runs per frame only where the user wrote per-frame Python (`derive()`
    functions, custom animations, unknown rate functions).
 3. **Render.** A renderer is given the render object tree and a
-   `RenderConfig`, nothing else. The core's renderer (`FrameRenderer`)
+   `RenderConfig`, nothing else. The core's renderer (`RenderPipeline`)
    packs, renders, composites and reads back; it never sees a signal.
 
 Everything else follows from this split: random access makes scrubbing,
 retiming, cutting and parallel rendering possible. The render object
 tree is the one interface between the scene side and the render side,
 so any renderer can draw a scene, and the core's renderer can draw any
-tree, built by a scene or by hand. The core's `FrameRenderer` is
+tree, built by a scene or by hand. The core's `RenderPipeline` is
 long-lived: it keeps GPU data per node uid and per value version across
 frames and only writes what changed.
 
@@ -74,7 +74,7 @@ flowchart LR
     TL -->|"frame_at(t) — any t, any order"| Plan["ScenePlan per clip<br/>(the core evaluates)"]
     Plan --> V["ViewStates<br/>RNode tree + camera"]
     V --> CP["CoreFramePipeline<br/>tree + RenderConfig"]
-    CP --> Core["manimx._core.FrameRenderer<br/>Packer, Renderer, Composer"]
+    CP --> Core["manimx._core.RenderPipeline<br/>Packer, Drawer, Compositor, Output"]
     Core --> D["drivers.render()<br/>worker processes"]
     D --> Out["VideoFile / ImageSequence"]
     TL -->|"Timeline.audio(start, end)"| D
@@ -84,7 +84,7 @@ flowchart LR
 
 | Package | Contents | Depends on |
 |---|---|---|
-| `manimx._core` | the native core (Rust, PyO3; `core/`): `Evaluator`, `FrameState`, `SceneGraph` (section 9), the render object classes (section 7), `FrameRenderer` | numpy; calls back into animation for user functions |
+| `manimx._core` | the native core (Rust, PyO3; `core/`): `Evaluator`, `FrameState`, `SceneGraph` (section 9), the render object classes (section 7), `RenderPipeline` | numpy; calls back into animation for user functions |
 | `manimx.robjects` | the render object tree, implemented in the core: `RNode` and its subclasses `RGroup`, `RClippingGroup`, `RBezierPath` (→ `RShape2D`, `RCurve3D`), `RShape3D` (→ `RParticles`), `RLight` (→ `RDirectionalLight`, `RPointLight`, `RSpotLight`); `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, `Texture`, `SurfaceShader`; `new_uid()`; in Python: `Transform`, `JointType`, `CapStyle` | `_core`, numpy |
 | `manimx.animation` (core; `signals/` and `nodes/` hold the signal and node classes) | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses (`Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D` (→ `Particles`), `Light` → `DirectionalLight`, `PointLight`, `SpotLight`; `animation.Camera`), `PositionMixin`, `RotationMixin`, `ScalableMixin`; the `Animation` contract (`Animation`, `SetValue`, `ChangeSignals`/`AnimationBuilder`) and the default rates `linear`, `smooth`; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `Simulation`; `Sound`; contributions as data (`signals/contributions.py`: `To`, `By`, `Ramp`, `Power`, `Turn`, `Keyframes`, `Between`, `Partial`), `paths.partial_path()`, `ScenePlan`, `scene_graph()`, `snapshot()` | robjects, `_core`; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
 | `manimx.userland` | everything a project could write on top of the core: shapes (`Circle`, `Dot`, `Square`, `Rectangle`, `RegularPolygon`, `Triangle`, `Polyline`, `ParametricCurve3D`, `Box`, `Sphere`, `Torus`, `ParametricSurface`), animations (`FadeIn`, `FadeOut`, `Rotate`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter`, `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`), `rate_functions`, `constants` (`UP`, `PI`, ...), `geometry` (every point and mesh generator, `align_paths()`), `load_gltf()` | animation, robjects |
@@ -109,7 +109,7 @@ sequenceDiagram
     participant TL as Timeline
     participant D as drivers.render
     participant CP as CoreFramePipeline
-    participant FR as _core.FrameRenderer
+    participant FR as _core.RenderPipeline
     participant W as _Writer thread
     participant FF as ffmpeg (VideoFile)
 
@@ -482,13 +482,13 @@ classDiagram
   (`CameraViewState`: uid, `renderer.Camera`, width, height), read from
   the plan's values like the scene camera; the renderer gets them in the
   view's `RenderConfig.camera_views`.
-- **Rendering camera views:** before a view, the core's `FrameRenderer`
+- **Rendering camera views:** before a view, the core's `RenderPipeline`
   renders each of its camera views at the frame's pixel size, with the
   view settings' aspect set to the plane's and the camera views' shapes
   hidden (`ViewSettings::picture`), so a picture never shows a
   camera view (no recursion; an explicit recursion depth is in
   FUTURE_IDEAS.md). Each picture is composited into one layer of the
-  camera view texture (core/src/render/passes/camera_views.rs). The
+  camera view texture (core/src/render/draw/geometry/camera_views.rs). The
   packer writes the layer and `1 / (width, height)` into the shape's
   `Object` record (`view`, `view_scale`); `vector.wgsl` samples the layer
   at the fill's local position.
@@ -556,8 +556,8 @@ flowchart LR
     PS["PreparedScene"] -->|"ScenePlan — once"| Plan["Evaluator (signals, tracks,<br/>derived signals)<br/>SceneGraph (nodes, slots)"]
     Plan -->|"evaluate(t), snapshot()"| T["RNode tree<br/>(robjects/)"]
     T -->|"+ RenderConfig"| Pk["Packer: Packet + arenas"]
-    Pk -->|"Renderer"| L["lit + vector layers"]
-    L -->|"Composer"| F["frame → staging buffer"]
+    Pk -->|"Drawer"| L["lit + vector layers"]
+    L -->|"Compositor"| F["frame → staging buffer"]
 ```
 
 - **`ScenePlan`** (animation/plan.py) puts every signal a prepared scene
@@ -583,8 +583,8 @@ flowchart LR
   slots kept their versions is the same render object: a tree costs
   about a walk over it. `ScenePlan.state_at(t)` and `frame_at(t)` return
   it as a Python `RGroup` without copying it.
-- **`FrameRenderer`** (core/src/render/, its Python class in
-  core/src/python/frame_renderer.rs) takes per view a tree and a
+- **`RenderPipeline`** (core/src/render/, its Python class in
+  core/src/python/render_pipeline.rs) takes per view a tree and a
   `RenderConfig`. The `Packer` flattens the tree (world matrices, alphas,
   clip scopes, lights) and packs the records of a `Packet`: retained
   vector records (`vectors.rs`), meshes, materials and particles
@@ -678,7 +678,7 @@ flowchart LR
   (`project_schema()`), the `manimx settings` menu and its `--print`
   output, and the checks all read that declaration.
   `Settings.render_config()` and `Settings.effects_chain()` turn the
-  settings into the `RenderConfig` and the composer's effects.
+  settings into the `RenderConfig` and the compositor's effects.
 - **`Project.build_timeline()`** prepares every `ClipEntry`'s scene and
   calls `Timeline.add()`. A `ClipEntry` without `start` begins at the
   previous `Clip.end`.
@@ -728,8 +728,8 @@ flowchart LR
 | `Project` | `Project.load()` / `Project.find()` | the CLI command | the command | yes; `Project.save()` |
 | `ScenePlan` (its `Evaluator` and `SceneGraph`) | `PreparedScene.plan`, on first use | the `PreparedScene` | the `PreparedScene`, or its next `refresh()` | slot values on every evaluation; the values the `SceneGraph` built |
 | `FrameState` | `Evaluator.state()` | the `ScenePlan` while it builds a tree | that tree | no |
-| `CoreFramePipeline` (its `FrameRenderer` with `Packer`, `Renderer`, `Composer`) | `drivers.render()`, `StillRenderer` | the render call, or the `StillRenderer` (one per configuration) | the call, or while among the last few configurations | its arenas, caches, GPU resources |
-| the core's wgpu device (`Gpu::shared`) | the first `FrameRenderer` | the process | the process | |
+| `CoreFramePipeline` (its `RenderPipeline` with `Packer`, `Drawer`, `Compositor`, `Output`) | `drivers.render()`, `StillRenderer` | the render call, or the `StillRenderer` (one per configuration) | the call, or while among the last few configurations | its arenas, caches, GPU resources |
+| the core's wgpu device (`Gpu::shared`) | the first `RenderPipeline` | the process | the process | |
 | `_Writer` thread, `_worker_main` processes, ffmpeg | `drivers.render()` | the render call | the call | |
 
 ## 13. Design decisions
@@ -793,7 +793,7 @@ flowchart LR
   interface, corrected").
 - **Packing never touches the GPU, the renderer decides nothing about
   the scene.** The `Packer` turns a tree into records and keeps every
-  per-node cache; the `Renderer` only uploads and draws.
+  per-node cache; the `Drawer` only uploads and draws.
 - **Retained records:** vector records stay in arenas that mirror the
   GPU buffers, patched per frame; only changed ranges are uploaded. The
   cost follows what changed, not the size of the scene.

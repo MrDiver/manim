@@ -77,7 +77,7 @@ class RenderSettings:
     config: RenderConfig = field(default_factory=RenderConfig)
     fps: float = 60.0
     effects: tuple[Effect, ...] = ()
-    """Composer effects (motion blur, bloom, tone mapping, shaders)."""
+    """Compositor effects (motion blur, bloom, tone mapping, shaders)."""
     start: float = 0.0
     end: float | None = None
     """Last time to render (default: the source's duration)."""

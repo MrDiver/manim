@@ -1,7 +1,7 @@
 //! The WGSL shaders (core/shaders/), compiled into the library: no folder
 //! is read at run time, so the renderer works where there is no file
 //! system (the browser). `#include "file.wgsl"` lines are expanded from
-//! this table (context.rs).
+//! this table (device.rs).
 //!
 //! A shader can be replaced by other code before the first device is
 //! made (`override_shader`); scripts/render_internals.py marks the

@@ -20,7 +20,7 @@ Rust sources; `import manimx._core` otherwise still loads the old module.
 Three parts, one folder each, and one interface between them: the render
 object tree (`robjects/`). The renderer is given a tree and its settings
 and nothing else; it never sees signals, slots or timelines. Every
-folder's `mod.rs` starts with a table of its modules.
+folder's `mod.rs` says in a few lines what it holds.
 
 ```text
 src/
@@ -28,11 +28,14 @@ src/
   evaluation/      signals at a time, and the render object tree of them
   robjects/        the render object tree: the interface
   render/          a tree and its settings drawn into a frame
-    packing/       the tree as GPU records
-    geometry/      fills and strokes, used by packing
-    passes/        the passes of one view
-    effects/       bloom, custom shaders, depth of field
+    pipeline.rs    RenderPipeline: runs the stages
+    pack/          Pack: the tree as GPU records (shapes/: fills, strokes)
+    draw/          Draw: geometry/ (what is drawn), passes/ (in order)
+    composite/     Composite: effects, compositing, accumulating
+    output/        Output: RGBA or NV12, read back
+    gpu/           device, shaders, buffers, fullscreen passes, timing
   python/          the Python classes of robjects/ and render/
+shaders/           the WGSL shaders, compiled into the library
 ```
 
 ```text
@@ -52,26 +55,23 @@ evaluation/   signals at a time ──snapshot──▶  robjects/  ◀──rea
 | `robjects/mod.rs` | `RNode` and its kinds, `Transform`, uids and versions | `manimx.robjects` |
 | `robjects/values.rs` | points, `Fill`, `Stroke`, `Mesh`, `Material`, `Texture`, `SurfaceShader`, particles | `Fill`, `Stroke`, `MeshData`, `PbrMaterial`, ... |
 | `python/robjects.rs` | the Python classes of the render objects | `manimx.robjects` |
-| `python/frame_renderer.rs` | `FrameRenderer`, the Python class of the renderer; reads a `RenderConfig` | drivers/core_pipeline.py drives it |
-| `render/frame_renderer.rs` | the render chain: frames in flight, held frames, read-back | |
+| `python/render_pipeline.rs` | `RenderPipeline`, the Python class of the renderer; reads a `RenderConfig` | drivers/core_pipeline.py drives it |
+| `render/pipeline.rs` | `RenderPipeline`: sub-frames and views through the stages, held frames, stage timing | |
 | `render/settings.rs` | `ViewSettings`: camera, camera views, lighting and shadow settings | `RenderConfig`, `Camera` (renderer/config.py) |
-| `render/packing/packer.rs` | `Packer`: one view's tree in, the records of a packet out | |
-| `render/packing/flatten.rs` | the tree's drawable leaves with world matrices, clip scopes and lights | |
-| `render/packing/vectors.rs` | retained records of `RShape2D` and `RCurve3D` | |
-| `render/packing/meshes.rs` | records of `RShape3D` and `RParticles` | |
-| `render/packing/lights.rs` | light records, the default light | |
-| `render/packing/shadows.rs` | shadow views, scene bounds, which shadow layers changed | |
-| `render/packing/arena.rs` | growable record arrays mirroring GPU buffers | |
-| `render/packing/records.rs` | the GPU record structs (bytemuck), as the WGSL structs declare them | core/shaders/ |
-| `render/geometry/tessellation.rs` | fills triangulated with exact curves | |
-| `render/geometry/strokes.rs` | a path's stroke records (curve links, per-point width and color) | |
-| `render/composer.rs` | sub-frames and views into one frame | |
-| `render/renderer.rs` | one view: the passes into the lit and vector layers | |
-| `render/passes/` | camera views, vectors and masks, shadow maps, meshes, lighting, texture mip levels | |
-| `render/effects/` | bloom, shader effects, depth of field | renderer/effects.py (settings) |
-| `render/fullscreen.rs` | fullscreen passes, named textures, uniform slots | |
-| `render/targets.rs` | every texture a frame renders into | |
-| `render/context.rs`, `buffer.rs`, `color.rs`, `profiler.rs`, `inspect.rs`, `error.rs` | device and shaders, growing buffers, sRGB, GPU timing, reading textures back, errors | |
+| `render/pack/packer.rs` | `Packer`: one view's tree in, a `Packet` of draws and changed records out | |
+| `render/pack/flatten.rs` | the tree's drawable leaves with world matrices, clip scopes and lights | |
+| `render/pack/vectors.rs` | retained records of `RShape2D` and `RCurve3D` | |
+| `render/pack/meshes.rs` | records of `RShape3D` and `RParticles` | |
+| `render/pack/lights.rs`, `shadows.rs` | light records and the default light; shadow views, scene bounds, which shadow layers changed | |
+| `render/pack/arena.rs`, `records.rs` | growable record arrays mirroring GPU buffers; the GPU record structs (bytemuck), as the WGSL structs declare them | shaders/ |
+| `render/pack/shapes/` | fills as triangles (lyon, nonzero rule), strokes as linked curve records | |
+| `render/draw/mod.rs` | `Drawer`: prepares the geometry, runs the passes of one view | |
+| `render/draw/geometry/` | `VectorGeometry`, `MeshGeometry`: buffers, pipelines, draws per role; images, camera views, material textures | |
+| `render/draw/passes/` | `mask`, `shadow`, `gbuffer`, `lighting`, `vector`, `translucent` | |
+| `render/draw/targets.rs` | every texture a view is drawn into | |
+| `render/composite/` | `Compositor`: lit-stage effects, compositing, depth of field, accumulating, frame-stage effects; `effects/` | renderer/effects.py (settings) |
+| `render/output/` | `Output`, `PixelFormat`: the frame as RGBA or NV12, staging buffers, read-back | drivers/sinks.py (`PixelFormat`) |
+| `render/gpu/` | the device, the shader table, growing buffers, fullscreen passes, GPU and CPU timing, reading textures back | |
 
 Math is [glam](https://docs.rs/glam) (`DMat4`, `DQuat`, `DVec3` in f64,
 converted to f32 only when a record is written); records are `#[repr(C)]`
@@ -79,8 +79,11 @@ structs written with [bytemuck](https://docs.rs/bytemuck).
 
 ## The renderer: target architecture
 
-Agreed on 2026-10-13; the code moves there step by step. Until then the
-module table above describes what exists.
+Agreed on 2026-10-13. Done: the stage folders and names, Output, the
+geometry and passes of Draw, the shaders compiled in. Still to come:
+the settings in Rust (`OutputConfig`, `ViewConfig`) and a queued way to
+run the stages, which the measurements so far do not call for
+(PERFORMANCE.md).
 
 ### A pipeline of stages
 
@@ -100,7 +103,7 @@ drivers.render():  Evaluate ─▶ [ RenderPipeline: Pack ─▶ Draw ─▶ Com
 | Pack | `Packer` | `FrameScene` | `Packet`: draw lists and the record ranges that changed | path and mesh caches, the arenas the GPU buffers mirror | CPU |
 | Draw | `Drawer` | `Packet` | `Layers`: lit (HDR), vector, depths | GPU buffers, pipelines, render targets | GPU |
 | Composite | `Compositor` | `Layers` of every view and sub-frame | `Image`: the accumulated frame after its effects | effect textures | GPU |
-| Output | `Output` (a trait) | `Image` | the frame where it goes | staging buffers, an encoder | GPU, then CPU |
+| Output | `Output` | `Image` | the frame where it goes | staging buffers, an encoder | GPU, then CPU |
 
 `RenderPipeline` owns the stages and passes frames between them:
 `submit(index, frame)`, then `receive()`. The Python class is a thin
@@ -140,20 +143,21 @@ Two kinds of things, kept apart:
   G-buffer). `VectorGeometry` draws `RShape2D` and `RCurve3D`,
   `MeshGeometry` draws `RShape3D` and `RParticles`.
 * **Passes** (`draw/passes/`): one per step, in the order they run:
-  `MaskPass`, `ShadowPass`, `GeometryPass`, `LightingPass`,
-  `VectorPass`, `TranslucentPass`. A pass decides the target and which
-  geometry it draws in which role, and nothing else. Shadows are only
+  mask, shadow, gbuffer, lighting, vector, translucent. A pass decides
+  the target and which geometry it draws in which role, and nothing
+  else. Shadows are only
   in `ShadowPass`; camera view pictures are an input of `VectorPass`.
 
-The shape math of packing (fills, strokes) is CPU work and belongs to
+The shape math of packing (fills, strokes) is CPU work and lives in
 `pack/shapes/`.
 
 ### Output
 
 Output finishes the frame for where it goes, so read-back and encoding
-are one stage:
+are one stage. Today `Output` (output/) is the first row below; the
+others would join it as kinds of output:
 
-| `Output` | What it does | Where |
+| Output | What it does | Where |
 |---|---|---|
 | `FramesOutput` | RGBA or NV12 read back to the caller | Python sinks, preview, tests |
 | `PipeOutput` | NV12 read back and piped to ffmpeg | desktop video |
@@ -176,16 +180,16 @@ NVENC through CUDA) would be another `Output`; it is not planned.
   table, with no folder to read at run time (there is none in the
   browser).
 
-### From today's names
+### Former names
 
-| Today | Target |
+| Before | Now |
 |---|---|
 | `FrameRenderer` (render/frame_renderer.rs) | `RenderPipeline` |
 | `Packer` (render/packing/) | `Packer` (pack/) |
 | `Renderer` (render/renderer.rs) and render/passes/ | `Drawer` (draw/), its geometry and passes |
 | `Composer` (render/composer.rs), render/effects/ | `Compositor` (composite/) |
 | read-back in `FrameRenderer`, drivers/sinks.py | `Output` (output/) |
-| `RenderConfig`, `RendererOptions`, `ViewSettings` | `OutputConfig`, `ViewConfig` |
+| `RenderConfig`, `RendererOptions`, `ViewSettings` | `RenderConfig`, `PipelineOptions`, `ViewSettings`; to become `OutputConfig`, `ViewConfig` |
 | manimx/renderer/shaders/ | core/shaders/ |
 
 ## Rules

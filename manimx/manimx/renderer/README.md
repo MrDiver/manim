@@ -4,7 +4,7 @@ How manimx turns a scene at one time into an image. A renderer is given
 a render object tree (`manimx.robjects`: `RGroup`, `RShape2D`, ...) and a
 `RenderConfig`, nothing else. The renderer itself is Rust on
 [wgpu](https://wgpu.rs), in the core
-([core/src/render/](../../core/src/render/mod.rs), `manimx._core.FrameRenderer`);
+([core/src/render/](../../core/src/render/mod.rs), `manimx._core.RenderPipeline`);
 this package holds what it is given next to the tree:
 
 - `RenderConfig` and `Camera` (config.py): size, background, camera,
@@ -265,7 +265,7 @@ flowchart LR
     S["Scene"] -->|"prepare()"| P["PreparedScene"]
     P -->|"ScenePlan"| Plan["Evaluator + SceneGraph<br/>(the core)"]
     Plan -->|"frame_at(t)"| V["ViewState<br/>RNode tree + camera"]
-    V -->|"CoreFramePipeline:<br/>tree + RenderConfig"| FR["FrameRenderer<br/>(the core)"]
+    V -->|"CoreFramePipeline:<br/>tree + RenderConfig"| FR["RenderPipeline<br/>(the core)"]
     FR --> Out["frame"]
 ```
 
@@ -278,17 +278,17 @@ flowchart LR
   versions.
 - **`CoreFramePipeline`** (manimx/drivers/core_pipeline.py) asks for the
   views of each sub-frame (one, or the motion blur samples) and hands the
-  `FrameRenderer` each view's tree with its `RenderConfig` (the view's
+  `RenderPipeline` each view's tree with its `RenderConfig` (the view's
   camera and camera views, the time).
-- **`FrameRenderer`** (core/src/render/frame_renderer.rs) does the rest in
+- **`RenderPipeline`** (core/src/render/pipeline.rs) does the rest in
   Rust, reading only the tree and the config: for each sub-frame and
-  view, the `Packer` (core/src/render/packing/packer.rs) turns the tree
-  into records, the `Renderer`
-  (core/src/render/renderer.rs) draws them into two layers, and the
-  `Composer` (core/src/render/composer.rs) applies effects and composites
-  them into the frame. The frame is copied into a buffer that is read
-  back while the next frames are prepared; up to `in_flight` frames are
-  on the GPU at once.
+  view, the `Packer` (core/src/render/pack/) turns the tree into
+  records, the `Drawer` (core/src/render/draw/) draws them into two
+  layers, and the `Compositor` (core/src/render/composite/) applies
+  effects and composites them into the frame; `Output`
+  (core/src/render/output/) turns the frame into RGBA or NV12 and copies
+  it into a buffer that is read back while the next frames are prepared.
+  Up to `in_flight` frames are on the GPU at once.
 
 ### One view
 
@@ -299,7 +299,7 @@ flowchart TD
     B --> D["meshes.rs, lights.rs:<br/>mesh objects, materials, lights<br/>(skipped without meshes)"]
     D --> E["shadows.rs: one view per directional or spot light,<br/>six per point light; which layers changed"]
     C & D & E --> K["Packet"]
-    K --> F["Renderer: upload the changed ranges<br/>to persistent GPU buffers"]
+    K --> F["Drawer: upload the changed ranges<br/>to persistent GPU buffers"]
     F --> P1
 
     subgraph GPU["one command encoder per frame"]
@@ -312,7 +312,7 @@ flowchart TD
     end
 
     P5 --> L["lit (rgba16float), vector (rgba8)"]
-    L --> Comp["Composer: lit-stage effects, composite,<br/>depth of field, accumulate"]
+    L --> Comp["Compositor: lit-stage effects, composite,<br/>depth of field, accumulate"]
 ```
 
 ### Data flow into the GPU
@@ -344,12 +344,12 @@ a single `multi_draw_indirect` call, and so is the transparent list.
 Strokes are expanded on the GPU: one instance per cubic curve, with ribbon,
 joint and cap triangles generated in the vertex shader.
 
-### The composer
+### The compositor
 
 ```mermaid
 sequenceDiagram
     participant Py as CoreFramePipeline
-    participant FR as FrameRenderer
+    participant FR as RenderPipeline
     participant GPU
 
     Py->>FR: render(index, sub-frames: weight and views)
@@ -376,7 +376,7 @@ sequenceDiagram
 ### Shader modules
 
 WGSL has no module system. The core expands `#include "file.wgsl"` lines
-(each file at most once per shader, core/src/render/context.rs).
+(each file at most once per shader, core/src/render/gpu/device.rs).
 
 ```mermaid
 flowchart BT
@@ -413,7 +413,7 @@ reaches.
 
 ### What is kept between frames
 
-A `FrameRenderer` lives as long as its pipeline, and keeps:
+A `RenderPipeline` lives as long as its pipeline, and keeps:
 
 | What | Kept by | Key | Dropped |
 |---|---|---|---|
@@ -424,7 +424,7 @@ A `FrameRenderer` lives as long as its pipeline, and keeps:
 | shadow map layers | `ShadowLayers` (shadows.rs) decides, the shadow pass keeps the depth | the layer's Frame record and its scope's casters (fingerprint, world matrix) | rendered again when the key changes or the maps are made again |
 | textures and their mip levels | the mesh pass (textures.rs) | texture uid and color space | when no frame uses them |
 | render targets | `RenderTargets` (core/src/render/targets.rs) | size, MSAA, mask layers | on a size change |
-| the last frame | `FrameRenderer` | every view's tree fingerprint (uids, transforms, plain values, versions) and settings without the time | when a frame with another key is rendered |
+| the last frame | `RenderPipeline` | every view's tree fingerprint (uids, transforms, plain values, versions) and settings without the time | when a frame with another key is rendered |
 
 Every render object has its node's uid and every costly value a version
 that is new exactly when the value is (`RNode.version()`,
@@ -438,12 +438,11 @@ patches its object entry. Changing its points does.
 |---|---|
 | `config.py` | `RenderConfig`, `Camera`, `ViewState`, `CameraViewState` |
 | `effects.py` | effect settings |
-| core/shaders/ | every WGSL shader, compiled into the core (core/src/render/shaders.rs) |
+| core/shaders/ | every WGSL shader, compiled into the core (core/src/render/gpu/shaders.rs) |
 | core/src/render/settings.rs | `ViewSettings`: what the renderer reads from a `RenderConfig`; the camera's Frame record |
-| core/src/render/packing/ | records of a frame (core/README.md maps them) |
-| core/src/render/ | the passes, the composer, the `FrameRenderer` (its `mod.rs` maps them) |
-| core/src/python/frame_renderer.rs | the `FrameRenderer`'s Python class |
-| manimx/drivers/core_pipeline.py | `CoreFramePipeline`: views with their configs to the `FrameRenderer` |
+| core/src/render/ | the `RenderPipeline` and its stages (core/README.md maps them) |
+| core/src/python/render_pipeline.rs | the `RenderPipeline`'s Python class |
+| manimx/drivers/core_pipeline.py | `CoreFramePipeline`: views with their configs to the `RenderPipeline` |
 
 ---
 
@@ -524,7 +523,7 @@ filtered over 2x2 texels, so the shadow is as light as the caster is
 clear, without the grain of a dithered depth map.
 
 **2D colors stay exact.** Lit meshes render to a linear HDR layer and 2D
-content to a separate sRGB layer. The composer tone-maps only the lit
+content to a separate sRGB layer. The compositor tone-maps only the lit
 layer, then blends the vector layer over it in sRGB values, which is how
 Manim blends. A `#FC6255` square comes out as `#FC6255` under any tone
 mapping operator. Only the tone-mapped lit layer is dithered (half a
@@ -594,7 +593,7 @@ while blurred things in front spread over sharp things behind.
 
 **Motion blur by sub-frames.** The renderer is stateless and frames can be
 rendered in any order, so it cannot remember the previous frame for motion
-vectors. The composer renders the scene at several times inside the
+vectors. The pipeline renders the scene at several times inside the
 shutter and averages them in linear light. That is exact for any change,
 including morphing points, at the cost of one render per sample.
 
