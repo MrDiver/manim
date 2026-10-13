@@ -75,7 +75,7 @@ pub struct DrawIndirect {
 }
 
 /// Bytes per record of the vector buffers whose records are built as bytes.
-pub const FILL_VERTEX_SIZE: usize = 32;
+pub const FILL_VERTEX_SIZE: usize = 16;
 pub const FILL_COLOR_SIZE: usize = 16;
 pub const STROKE_POINT_SIZE: usize = 32;
 

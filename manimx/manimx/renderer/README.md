@@ -448,14 +448,20 @@ patches its object entry. Changing its points does.
 
 ## Design decisions
 
-**Triangulated fills with exact curves, not stencil-then-cover.** Fills are
-triangulated on the CPU (earcut) with one extra Loop-Blinn triangle per
-quadratic, whose fragment test keeps curved edges exact at any zoom. Cubics
-are split into quadratics with a bounded error. Triangles batch into shared
-buffers, are cached per object version, and are real geometry for shadows
-and later ray tracing. Stencil-then-cover would handle self-intersecting
-paths exactly and needs no CPU work when points change every frame, but it
-needs two passes per object and batches poorly.
+**Triangulated fills by the nonzero rule, not stencil-then-cover.** Fills
+are triangulated on the CPU by lyon's fill tessellator with the nonzero
+winding rule, Cairo's: any path fills like Cairo draws it, also one whose
+subpaths cross (a morph's in-between shapes), and a path that changes a
+little fills a little differently, never flipping. Curves are flattened
+within 1e-4 of the path's size. Triangles batch into shared buffers, are
+cached per object version, and are real geometry for shadows and later ray
+tracing. An earlier fill kept curves exact (earcut plus Loop-Blinn curve
+triangles) but assumed subpaths that never cross: mid-morph, holes filled
+and emptied from one frame to the next. Measured on 1,000,000 mid-morph
+glyphs, lyon takes 27 µs per path on one core (earcut with exact curves
+15 µs); only paths whose points changed are triangulated again.
+Stencil-then-cover would keep curves exact at any zoom, by the same rule,
+but needs two passes per object and batches poorly.
 
 **Strokes expanded on the GPU.** One instance per cubic curve, sampled in
 24 segments, with miter, bevel and round joints and butt, square and round

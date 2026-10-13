@@ -1,103 +1,46 @@
-//! Fills of 2D paths as triangles with exact curves.
+//! Fills of 2D paths as triangles, by the nonzero winding rule.
 //!
-//! The approach is ManimGL's, after Charles Loop and Jim Blinn,
-//! [Resolution Independent Curve Rendering using Programmable Graphics
-//! Hardware](https://www.microsoft.com/en-us/research/publication/resolution-independent-curve-rendering-using-programmable-graphics-hardware/)
-//! (SIGGRAPH 2005):
+//! A point is inside a path when the subpaths around it do not cancel
+//! out: their windings (+1 counterclockwise, -1 clockwise) add up to
+//! anything but 0. It is the rule of Cairo, SVG and fonts, and it holds
+//! for any path: subpaths that cross each other or themselves (a path in
+//! the middle of a morph) fill like the same path drawn by Cairo, and a
+//! path that changes a little fills a little differently, never flipping.
 //!
-//! 1. Every cubic Bezier becomes quadratics within a bounded error.
-//! 2. Every subpath becomes a polygon *ring*: a quadratic that bulges into
-//!    the filled region (concave) adds its control point to the ring, one
-//!    that bulges out (convex) only its chord.
-//! 3. Rings are grouped into outer rings and their holes (even-odd rule)
-//!    and triangulated with [earcut](https://github.com/mapbox/earcut)
-//!    (ear clipping with holes bridged in, see David Eberly,
-//!    [Triangulation by Ear Clipping](https://www.geometrictools.com/Documentation/TriangulationByEarClipping.pdf);
-//!    the Rust port is the [earcutr](https://crates.io/crates/earcutr) crate).
-//! 4. Every bending quadratic adds one *curve triangle* (start, control,
-//!    end); the fragment shader keeps the side of the curve that is inside.
+//! [lyon](https://github.com/nical/lyon)'s fill tessellator does it: the
+//! cubics are flattened to lines within a tolerance relative to the path's
+//! size, and a sweep line splits the edges where they cross and emits
+//! monotone pieces as triangles (lyon's design notes:
+//! <https://github.com/nical/lyon/wiki/Fill-tessellator>).
 //!
 //! Each vertex records where it comes from, the index of its source cubic
 //! and the parameter `t` on it, so colors are computed on the GPU and a fill
-//! depends on the points alone.
+//! depends on the points alone. They ride through the tessellator as one
+//! attribute, `curve + t`, which it interpolates along edges and where
+//! edges cross.
 
 use glam::DVec2;
+use lyon_tessellation::geom::point;
+use lyon_tessellation::path::Path;
+use lyon_tessellation::{
+    BuffersBuilder, FillOptions, FillRule, FillTessellator, FillVertex as LyonVertex,
+    VertexBuffers,
+};
 
-/// Max distance between a cubic and its quadratic approximation.
-const TOLERANCE: f64 = 1e-5;
-const MAX_QUADRATICS_PER_CUBIC: usize = 32;
+/// Flattening tolerance, as a fraction of the path's size (width or height,
+/// the larger): a glyph 1000 pixels tall is off by at most 0.1 pixel.
+const TOLERANCE: f64 = 1e-4;
 /// Points closer than this are the same point.
 const POINT_EQUALITY: f64 = 1e-8;
-/// Quadratics bending less than this (relative to their chord) are lines.
-const BEND_EPSILON: f64 = 1e-9;
 
-/// Which side of a triangle the fragment shader keeps (`SIDE_*`).
-const SIDE_SOLID: f32 = 0.0;
-const SIDE_CONTROL: f32 = 1.0;
-const SIDE_CHORD: f32 = -1.0;
-
-/// Implicit-curve coordinates of a quadratic's (start, control, end).
-const CURVE_UV: [[f32; 2]; 3] = [[0.0, 0.0], [0.5, 0.0], [1.0, 1.0]];
-
-/// One vertex of a fill (`FILL_VERTEX_DTYPE`, 32 bytes).
+/// One vertex of a fill (`FILL_VERTEX_SIZE`, 16 bytes).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct FillVertex {
     pub position: [f32; 2],
-    pub uv: [f32; 2],
-    pub side: f32,
     pub curve: u32,
     pub t: f32,
-    pub pad: f32,
 }
-
-/// Where a point of a quadratic lies on the original cubics.
-#[derive(Clone, Copy)]
-struct Source {
-    curve: u32,
-    t: f64,
-}
-
-#[derive(Clone, Copy)]
-struct Quadratic {
-    start: DVec2,
-    control: DVec2,
-    end: DVec2,
-    start_source: Source,
-    control_source: Source,
-    end_source: Source,
-}
-
-impl Quadratic {
-    fn reversed(&self) -> Quadratic {
-        Quadratic {
-            start: self.end,
-            control: self.control,
-            end: self.start,
-            start_source: self.end_source,
-            control_source: self.control_source,
-            end_source: self.start_source,
-        }
-    }
-
-    /// Signed bend: > 0 when the control point is left of the chord.
-    fn bend(&self) -> f64 {
-        let chord = self.end - self.start;
-        let length_sq = chord.length_squared();
-        if length_sq > 0.0 {
-            chord.perp_dot(self.control - self.start) / length_sq
-        } else {
-            0.0
-        }
-    }
-
-    fn sample(&self, t: f64) -> DVec2 {
-        let s = 1.0 - t;
-        s * s * self.start + 2.0 * s * t * self.control + t * t * self.end
-    }
-}
-
-type Ring = Vec<Quadratic>;
 
 /// The fill of a path in the RBezierPath layout (four 2D points per cubic,
 /// a new subpath wherever a curve does not start where the last one
@@ -108,27 +51,55 @@ pub fn tessellate_fill(points: &[DVec2]) -> Vec<FillVertex> {
         .chunks_exact(4)
         .map(|c| [c[0], c[1], c[2], c[3]])
         .collect();
-    let rings: Vec<Ring> = subpath_ranges(&curves)
-        .into_iter()
-        .map(|(start, stop)| ring(&curves[start..stop], start))
-        .filter(|ring| !ring.is_empty())
-        .collect();
-    let mut vertices = Vec::new();
-    for (outer, holes) in classify_rings(rings) {
-        add_polygon(&mut vertices, &outer, &holes);
-    }
-    vertices
-}
-
-// --------------------------------------------------------------------------
-// Step 1: subpaths and cubic -> quadratic conversion
-// --------------------------------------------------------------------------
-
-/// `[start, stop)` curve ranges of the continuous subpaths.
-fn subpath_ranges(curves: &[[DVec2; 4]]) -> Vec<(usize, usize)> {
     if curves.is_empty() {
         return Vec::new();
     }
+    let (mut low, mut high) = (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY));
+    for point in points {
+        low = low.min(*point);
+        high = high.max(*point);
+    }
+    let size = (high - low).max_element();
+    if size <= POINT_EQUALITY {
+        return Vec::new();
+    }
+    // Relative to the path's lowest corner, so f32 keeps the precision.
+    let local = |p: DVec2| point((p.x - low.x) as f32, (p.y - low.y) as f32);
+    let mut builder = Path::builder_with_attributes(1);
+    for (start, stop) in subpath_ranges(&curves) {
+        builder.begin(local(curves[start][0]), &[start as f32]);
+        for (index, curve) in curves[start..stop].iter().enumerate() {
+            let end = (start + index + 1) as f32; // the end of cubic i is curve + t = i + 1
+            builder.cubic_bezier_to(local(curve[1]), local(curve[2]), local(curve[3]), &[end]);
+        }
+        builder.end(true);
+    }
+    let path = builder.build();
+    let options = FillOptions::tolerance((size * TOLERANCE) as f32).with_fill_rule(FillRule::NonZero);
+    let last_curve = curves.len() - 1;
+    let mut buffers: VertexBuffers<FillVertex, u32> = VertexBuffers::new();
+    let result = FillTessellator::new().tessellate_path(
+        &path,
+        &options,
+        &mut BuffersBuilder::new(&mut buffers, |mut vertex: LyonVertex| {
+            let position = vertex.position();
+            let along = vertex.interpolated_attributes()[0].max(0.0);
+            let curve = (along.floor() as usize).min(last_curve);
+            FillVertex {
+                position: [(position.x as f64 + low.x) as f32, (position.y as f64 + low.y) as f32],
+                curve: curve as u32,
+                t: (along - curve as f32).clamp(0.0, 1.0),
+            }
+        }),
+    );
+    if result.is_err() {
+        return Vec::new(); // a path lyon cannot fill (NaN points): drawn without a fill
+    }
+    buffers.indices.iter().map(|&index| buffers.vertices[index as usize]).collect()
+}
+
+/// `[start, stop)` curve ranges of the continuous subpaths.
+fn subpath_ranges(curves: &[[DVec2; 4]]) -> Vec<(usize, usize)> {
     let mut breaks = vec![0];
     for index in 1..curves.len() {
         if curves[index][0].distance(curves[index - 1][3]) > POINT_EQUALITY {
@@ -137,226 +108,6 @@ fn subpath_ranges(curves: &[[DVec2; 4]]) -> Vec<(usize, usize)> {
     }
     breaks.push(curves.len());
     breaks.windows(2).map(|pair| (pair[0], pair[1])).collect()
-}
-
-/// The closed ring of quadratics of one subpath (empty if it has no area).
-fn ring(curves: &[[DVec2; 4]], first_curve: usize) -> Ring {
-    let mut ring: Ring = curves
-        .iter()
-        .enumerate()
-        .flat_map(|(index, curve)| cubic_to_quadratics(curve, (first_curve + index) as u32))
-        .collect();
-    let (first, last) = (ring[0], ring[ring.len() - 1]);
-    if last.end.distance(first.start) > POINT_EQUALITY {
-        // The closing line is straight: its control point never becomes a
-        // vertex, so any source does for it.
-        ring.push(Quadratic {
-            start: last.end,
-            control: (last.end + first.start) / 2.0,
-            end: first.start,
-            start_source: last.end_source,
-            control_source: last.end_source,
-            end_source: first.start_source,
-        });
-    }
-    if signed_area(&ring).abs() > 1e-12 {
-        ring
-    } else {
-        Vec::new()
-    }
-}
-
-/// One cubic as quadratics whose error stays below `TOLERANCE`. A single
-/// quadratic with control `(3 (p1 + p2) - p0 - p3) / 4` is off by at most
-/// `sqrt(3) / 36 * |p3 - 3 p2 + 3 p1 - p0|`; `n` pieces divide that by `n^3`
-/// (<http://caffeineowl.com/graphics/2d/vectorial/cubic2quad01.html>).
-fn cubic_to_quadratics(curve: &[DVec2; 4], curve_index: u32) -> Vec<Quadratic> {
-    let [p0, p1, p2, p3] = *curve;
-    let error = 3f64.sqrt() / 36.0 * (p3 - 3.0 * p2 + 3.0 * p1 - p0).length();
-    let count =
-        ((error / TOLERANCE).powf(1.0 / 3.0).ceil() as usize).clamp(1, MAX_QUADRATICS_PER_CUBIC);
-    (0..count)
-        .map(|index| {
-            let (t0, t1) = (
-                index as f64 / count as f64,
-                (index + 1) as f64 / count as f64,
-            );
-            // The sub-cubic on [t0, t1] from its ends and end tangents.
-            let (q0, q3) = (bezier(curve, t0), bezier(curve, t1));
-            let q1 = q0 + (t1 - t0) / 3.0 * bezier_derivative(curve, t0);
-            let q2 = q3 - (t1 - t0) / 3.0 * bezier_derivative(curve, t1);
-            let source = |t| Source {
-                curve: curve_index,
-                t,
-            };
-            Quadratic {
-                start: q0,
-                control: (3.0 * (q1 + q2) - q0 - q3) / 4.0,
-                end: q3,
-                start_source: source(t0),
-                control_source: source((t0 + t1) / 2.0),
-                end_source: source(t1),
-            }
-        })
-        .collect()
-}
-
-fn bezier(c: &[DVec2; 4], t: f64) -> DVec2 {
-    let s = 1.0 - t;
-    s * s * s * c[0] + 3.0 * s * s * t * c[1] + 3.0 * s * t * t * c[2] + t * t * t * c[3]
-}
-
-fn bezier_derivative(c: &[DVec2; 4], t: f64) -> DVec2 {
-    let s = 1.0 - t;
-    3.0 * (s * s * (c[1] - c[0]) + 2.0 * s * t * (c[2] - c[1]) + t * t * (c[3] - c[2]))
-}
-
-// --------------------------------------------------------------------------
-// Step 2: outer rings, holes and orientation
-// --------------------------------------------------------------------------
-
-/// Rings grouped into `(outer, holes)` by nesting depth (even-odd rule),
-/// outer rings counterclockwise and holes clockwise, so the filled region
-/// is always on the left of a ring.
-fn classify_rings(rings: Vec<Ring>) -> Vec<(Ring, Vec<Ring>)> {
-    let outlines: Vec<Vec<DVec2>> = rings
-        .iter()
-        .map(|ring| {
-            ring.iter()
-                .flat_map(|q| [0.0, 0.25, 0.5, 0.75].map(|t| q.sample(t)))
-                .collect()
-        })
-        .collect();
-    let containers: Vec<Vec<usize>> = rings
-        .iter()
-        .enumerate()
-        .map(|(i, ring)| {
-            let probe = ring[0].sample(0.5);
-            (0..rings.len())
-                .filter(|&j| j != i && contains(&outlines[j], probe))
-                .collect()
-        })
-        .collect();
-    let depth: Vec<usize> = containers.iter().map(Vec::len).collect();
-
-    // Outer rings first, in ring order; then each hole goes to the
-    // innermost outer ring around it. Rings that cross (a path in the middle
-    // of a morph) can disagree about nesting: a hole without an outer ring
-    // around it is filled as an outer ring of its own.
-    let mut groups: Vec<(usize, Ring, Vec<Ring>)> = Vec::new();
-    for (i, ring) in rings.iter().enumerate() {
-        if depth[i].is_multiple_of(2) {
-            groups.push((i, oriented(ring, true), Vec::new()));
-        }
-    }
-    for (i, ring) in rings.iter().enumerate() {
-        if depth[i] % 2 == 1 {
-            let parent = containers[i]
-                .iter()
-                .filter(|&&j| groups.iter().any(|group| group.0 == j))
-                .max_by_key(|&&j| depth[j])
-                .copied();
-            match parent {
-                Some(parent) => {
-                    let group = groups.iter_mut().find(|group| group.0 == parent).unwrap();
-                    group.2.push(oriented(ring, false));
-                }
-                None => groups.push((i, oriented(ring, true), Vec::new())),
-            }
-        }
-    }
-    groups
-        .into_iter()
-        .map(|(_, outer, holes)| (outer, holes))
-        .collect()
-}
-
-fn oriented(ring: &Ring, counter_clockwise: bool) -> Ring {
-    if (signed_area(ring) > 0.0) == counter_clockwise {
-        ring.clone()
-    } else {
-        ring.iter().rev().map(Quadratic::reversed).collect()
-    }
-}
-
-/// The exact signed area of a closed ring of quadratics (counterclockwise
-/// positive): the chord's shoelace term plus the parabolic segment, 2/3 of
-/// the triangle (start, control, end).
-fn signed_area(ring: &Ring) -> f64 {
-    ring.iter()
-        .map(|q| {
-            q.start.perp_dot(q.end) / 2.0
-                + (2.0 / 3.0) * (q.control - q.start).perp_dot(q.end - q.start) / 2.0
-        })
-        .sum()
-}
-
-/// Even-odd point-in-polygon test.
-fn contains(outline: &[DVec2], point: DVec2) -> bool {
-    let mut inside = false;
-    for (index, a) in outline.iter().enumerate() {
-        let b = outline[(index + 1) % outline.len()];
-        if (a.y > point.y) != (b.y > point.y) {
-            let x_at_y = a.x + (point.y - a.y) * (b.x - a.x) / (b.y - a.y);
-            if point.x < x_at_y {
-                inside = !inside;
-            }
-        }
-    }
-    inside
-}
-
-// --------------------------------------------------------------------------
-// Step 3 + 4: earcut polygons and curve triangles
-// --------------------------------------------------------------------------
-
-fn add_polygon(vertices: &mut Vec<FillVertex>, outer: &Ring, holes: &[Ring]) {
-    let mut corners: Vec<(DVec2, Source)> = Vec::new();
-    let mut hole_starts = Vec::new();
-    for (index, ring) in std::iter::once(outer).chain(holes).enumerate() {
-        if index > 0 {
-            hole_starts.push(corners.len());
-        }
-        for q in ring {
-            corners.push((q.start, q.start_source));
-            let bend = q.bend();
-            if bend > BEND_EPSILON {
-                // Concave: the ring walks around the control point.
-                corners.push((q.control, q.control_source));
-                add_curve_triangle(vertices, q, SIDE_CONTROL);
-            } else if bend < -BEND_EPSILON {
-                // Convex: the curve triangle adds the bulge.
-                add_curve_triangle(vertices, q, SIDE_CHORD);
-            }
-        }
-    }
-    let flat: Vec<f64> = corners.iter().flat_map(|(p, _)| [p.x, p.y]).collect();
-    let indices = earcutr::earcut(&flat, &hole_starts, 2).unwrap_or_default();
-    for index in indices {
-        let (position, source) = corners[index];
-        vertices.push(vertex(position, [0.0, 0.0], SIDE_SOLID, source));
-    }
-}
-
-fn add_curve_triangle(vertices: &mut Vec<FillVertex>, q: &Quadratic, side: f32) {
-    for (position, source, uv) in [
-        (q.start, q.start_source, CURVE_UV[0]),
-        (q.control, q.control_source, CURVE_UV[1]),
-        (q.end, q.end_source, CURVE_UV[2]),
-    ] {
-        vertices.push(vertex(position, uv, side, source));
-    }
-}
-
-fn vertex(position: DVec2, uv: [f32; 2], side: f32, source: Source) -> FillVertex {
-    FillVertex {
-        position: [position.x as f32, position.y as f32],
-        uv,
-        side,
-        curve: source.curve,
-        t: source.t as f32,
-        pad: 0.0,
-    }
 }
 
 #[cfg(test)]
@@ -384,7 +135,6 @@ mod tests {
     fn area(vertices: &[FillVertex]) -> f64 {
         vertices
             .chunks_exact(3)
-            .filter(|t| t[0].side == SIDE_SOLID)
             .map(|t| {
                 let p = |v: &FillVertex| DVec2::new(v.position[0] as f64, v.position[1] as f64);
                 ((p(&t[1]) - p(&t[0])).perp_dot(p(&t[2]) - p(&t[0])) / 2.0).abs()
@@ -393,24 +143,90 @@ mod tests {
     }
 
     #[test]
-    fn a_square_with_a_hole_fills_the_ring_between() {
+    fn nested_subpaths_fill_by_the_nonzero_rule() {
+        // Wound against the outer square: a hole.
         let mut points = square(4.0, DVec2::ZERO, false);
-        points.extend(square(2.0, DVec2::new(1.0, 1.0), false)); // same direction: still a hole
-        let vertices = tessellate_fill(&points);
-        assert!((area(&vertices) - 12.0).abs() < 1e-9);
+        points.extend(square(2.0, DVec2::new(1.0, 1.0), true));
+        assert!((area(&tessellate_fill(&points)) - 12.0).abs() < 1e-4);
+        // Wound the same way: covered twice, filled.
+        let mut points = square(4.0, DVec2::ZERO, false);
+        points.extend(square(2.0, DVec2::new(1.0, 1.0), false));
+        assert!((area(&tessellate_fill(&points)) - 16.0).abs() < 1e-4);
     }
 
     #[test]
-    fn crossing_rings_are_filled_on_their_own() {
+    fn crossing_subpaths_fill_by_the_nonzero_rule() {
+        let mut points = square(2.0, DVec2::ZERO, false);
+        points.extend(square(2.0, DVec2::new(1.0, 1.0), false));
+        assert!((area(&tessellate_fill(&points)) - 7.0).abs() < 1e-4); // the union
         let mut points = square(2.0, DVec2::ZERO, false);
         points.extend(square(2.0, DVec2::new(1.0, 1.0), true));
-        assert!((area(&tessellate_fill(&points)) - 8.0).abs() < 1e-9);
+        assert!((area(&tessellate_fill(&points)) - 6.0).abs() < 1e-4); // the overlap cancels
+    }
+
+    #[test]
+    fn a_subpath_crossing_itself_fills_both_loops() {
+        // A bow tie: two triangles of opposite winding, each filled.
+        let corners = [DVec2::new(0.0, 0.0), DVec2::new(2.0, 2.0), DVec2::new(2.0, 0.0), DVec2::new(0.0, 2.0)];
+        let mut points = Vec::new();
+        for index in 0..4 {
+            let (a, b) = (corners[index], corners[(index + 1) % 4]);
+            points.extend([a, a + (b - a) / 3.0, a + 2.0 * (b - a) / 3.0, b]);
+        }
+        assert!((area(&tessellate_fill(&points)) - 2.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn curves_are_within_the_tolerance_and_vertices_know_their_source() {
+        // A circle of radius 1 from four cubics (kappa = 0.5523).
+        let k = 0.552_284_749_8;
+        let quarter = |a: DVec2, b: DVec2| [a, a + k * b, b + k * a, b];
+        let (x, y) = (DVec2::X, DVec2::Y);
+        let points: Vec<DVec2> = [quarter(x, y), quarter(y, -x), quarter(-x, -y), quarter(-y, x)].concat();
+        let vertices = tessellate_fill(&points);
+        assert!((area(&vertices) - std::f64::consts::PI).abs() < 2e-3);
+        for vertex in &vertices {
+            let (curve, t) = (vertex.curve as usize, vertex.t);
+            assert!(curve < 4 && (0.0..=1.0).contains(&t));
+        }
+        let left = vertices.iter().find(|v| (v.position[0] + 1.0).abs() < 1e-6).unwrap();
+        assert!(left.curve == 1 && (left.t - 1.0).abs() < 1e-4 || left.curve == 2 && left.t.abs() < 1e-4);
     }
 
     #[test]
     fn nothing_without_area() {
         let line = vec![DVec2::ZERO, DVec2::X, DVec2::X * 2.0, DVec2::X * 3.0];
-        assert!(tessellate_fill(&line).is_empty());
+        assert!(area(&tessellate_fill(&line)) < 1e-12);
         assert!(tessellate_fill(&[]).is_empty());
+    }
+
+    /// `MANIMX_BENCH_PATHS=file cargo test --release --lib tessellation_benchmark -- --ignored --nocapture`
+    /// (the file: u32 path count, then per path a u32 point count and f64 x, y pairs).
+    #[test]
+    #[ignore]
+    fn tessellation_benchmark() {
+        let bytes = std::fs::read(std::env::var("MANIMX_BENCH_PATHS").unwrap()).unwrap();
+        let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+        let float = |at: usize| f64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
+        let (mut paths, mut at) = (Vec::new(), 4);
+        for _ in 0..word(0) {
+            let count = word(at);
+            at += 4;
+            paths.push((0..count).map(|i| DVec2::new(float(at + 16 * i), float(at + 16 * i + 8))).collect::<Vec<_>>());
+            at += 16 * count;
+        }
+        let total = 1_000_000;
+        let started = std::time::Instant::now();
+        let mut vertices = 0;
+        for index in 0..total {
+            vertices += tessellate_fill(&paths[index % paths.len()]).len();
+        }
+        let seconds = started.elapsed().as_secs_f64();
+        println!(
+            "{total} fills of {} paths: {seconds:.2} s, {:.2} us/path, {:.0} vertices/path",
+            paths.len(),
+            seconds * 1e6 / total as f64,
+            vertices as f64 / total as f64
+        );
     }
 }

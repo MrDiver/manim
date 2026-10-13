@@ -85,11 +85,8 @@ struct Instance {
 // so a triangulation stays valid while colors and opacity animate.
 struct FillVertex {
     position: vec2<f32>,        // local 2D
-    uv: vec2<f32>,              // implicit curve coordinates
-    side: f32,                  // 0 solid, +1 keep control side, -1 keep chord side
     curve: u32,                 // source cubic, relative to the shape
     t: f32,                     // parameter on the source cubic
-    _pad: f32,
 };
 
 struct StrokePoint {
@@ -135,11 +132,6 @@ struct VertexOutput {
     @location(0) color: vec4<f32>,
     @location(3) @interpolate(flat) layer: f32,
     @location(4) @interpolate(flat) clip: i32,
-    // Interpolated per MSAA sample, so the curve test in the fragment shader
-    // runs per sample and curved edges get the same antialiasing as polygon
-    // edges.
-    @location(1) @interpolate(perspective, sample) uv: vec2<f32>,
-    @location(2) @interpolate(flat) side: f32,
     // 1 / clip w, linear in screen space: see layer_slope().
     @location(5) @interpolate(linear) inverse_w: f32,
     // Camera views: the layer (NO_VIEW for everything else) and where in
@@ -284,16 +276,6 @@ fn premultiplied(color: vec4<f32>) -> vec4<f32> {
 }
 
 fn shade(in: VertexOutput, gradients: vec4<f32>) -> vec4<f32> {
-    // Loop-Blinn curve test: u^2 - v is negative on the chord side of the
-    // quadratic and positive on the control-point side (Loop and Blinn 2005,
-    // "Resolution Independent Curve Rendering using Programmable Graphics
-    // Hardware", https://www.microsoft.com/en-us/research/publication/resolution-independent-curve-rendering-using-programmable-graphics-hardware/).
-    if in.side != 0.0 {
-        let implicit = in.uv.x * in.uv.x - in.uv.y;
-        if implicit * in.side < 0.0 {
-            discard;
-        }
-    }
     var color = in.color;
     if in.view >= 0 {
         color = tinted_picture(color, in);
@@ -363,8 +345,6 @@ fn fill_vertex(object: Object, vertex_index: u32) -> VertexOutput {
     out.layer = object.layer;
     out.clip = object.clip;
     out.color = faded(fill_color(object, vertex), object);
-    out.uv = vertex.uv;
-    out.side = vertex.side;
     out.view = object.view;
     // The plane is centered on the local origin; texture rows go down.
     out.picture = vec2<f32>(0.5, 0.5) + vec2<f32>(1.0, -1.0) * vertex.position * object.view_scale;
@@ -546,8 +526,6 @@ fn stroke_vertex(object: Object, record: StrokeCurve, vertex_index: u32) -> Vert
     var curve = load_curve(object, record.first_point);
 
     var out: VertexOutput;
-    out.uv = vec2<f32>(0.0);
-    out.side = 0.0;
     out.view = NO_VIEW;
     out.picture = vec2<f32>(0.0);
     out.layer = object.layer + 1.0;
@@ -696,9 +674,6 @@ fn fan_corner(start: vec3<f32>, normal: vec3<f32>, angle: f32, triangle: u32, co
 
 @fragment
 fn fs_shadow(in: VertexOutput) {
-    if in.side != 0.0 && (in.uv.x * in.uv.x - in.uv.y) * in.side < 0.0 {
-        discard;
-    }
     if in.color.a < 0.5 {
         discard;
     }
