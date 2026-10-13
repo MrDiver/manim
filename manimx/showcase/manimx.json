@@ -132,6 +132,10 @@
     "Indications": {
       "module": "scenes.indications",
       "class": "Indications"
+    },
+    "Events": {
+      "module": "scenes.events",
+      "class": "Events"
     }
   },
   "timeline": {
@@ -200,8 +204,15 @@
         "scene": "LowerThird",
         "start": 45.7,
         "layer": 1
+      },
+      {
+        "scene": "Events",
+        "start": 236.0
       }
     ],
-    "events": {}
+    "events": {
+      "answer": 239.8,
+      "next": 243.4
+    }
   }
 }
