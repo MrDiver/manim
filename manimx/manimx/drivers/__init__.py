@@ -7,7 +7,8 @@ optionally across worker processes.
 """
 
 from .core_pipeline import CoreFramePipeline
-from .offline import FrameSource, RenderSettings, RenderStats, load_source, render
+from .encoders import H264Encoder, choose_encoder
+from .offline import FrameSource, RenderCancelled, RenderSettings, RenderStats, load_source, render
 from .sinks import (
     FrameFormat,
     FrameList,
@@ -25,13 +26,16 @@ __all__ = [
     "CoreFramePipeline",
     "FrameSink",
     "FrameSource",
+    "H264Encoder",
     "ImageSequence",
+    "RenderCancelled",
     "RenderSettings",
     "RenderStats",
     "Tee",
     "VideoFile",
     "StillRenderer",
     "Window",
+    "choose_encoder",
     "load_source",
     "render",
     "render_image",

@@ -84,6 +84,11 @@ class OutputSettings:
         minimum=1,
         note=lambda settings: _spacing(settings) if settings.effects.motion_blur.enabled else "",
     )
+    encoder: str = setting(
+        "auto",
+        "H.264 encoder of videos: auto uses the GPU's (NVENC, AMF, Quick Sync, VA-API, VideoToolbox) when one works, else x264 on the CPU.",
+        choices=("auto", "nvenc", "amf", "qsv", "vaapi", "videotoolbox", "x264"),
+    )
     audio: bool = setting(True, "Include the scenes' sounds.")
     sample_rate: int = setting(48_000, "Audio sample rate.", minimum=8000, unit="Hz")
     directory: str = setting("renders", "Where renders go, relative to the project.")

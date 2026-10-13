@@ -12,6 +12,7 @@ from manimx.drivers import (
     FrameSink,
     FrameSource,
     ImageSequence,
+    RenderCancelled,
     RenderSettings,
     Tee,
     VideoFile,
@@ -20,6 +21,7 @@ from manimx.drivers import (
     render,
     render_image,
 )
+from manimx.drivers.encoders import X264, candidates, choose_encoder, working_encoders
 from manimx.examples.navigation import Navigation, config
 from PIL import Image
 
@@ -99,6 +101,44 @@ def test_video_files_and_encoder_errors(tmp_path) -> None:
 
     with pytest.raises(RuntimeError, match="ffmpeg failed"):
         render(SOURCE, VideoFile(tmp_path / "bad.mp4", codec_args=["-c:v", "no-such-codec"]), settings())
+
+
+def test_h264_encoders_are_chosen_from_those_that_work(tmp_path) -> None:
+    working = working_encoders()
+    assert working and working[-1] == X264  # x264 is always there, and tried last
+    assert choose_encoder("auto") == working[0]
+    assert choose_encoder("x264") == X264
+    with pytest.raises(ValueError, match="unknown encoder"):
+        choose_encoder("divx")
+    missing = next((encoder.name for encoder in candidates() if encoder not in working), None)
+    if missing is not None:
+        with pytest.raises(RuntimeError, match=f"the {missing} encoder does not work here"):
+            choose_encoder(missing)
+
+    hardware = next(encoder for encoder in candidates() if encoder.hardware)
+    assert not hardware.fits(64, 36) and hardware.fits(1920, 1080) and X264.fits(2, 2)
+    path = tmp_path / "small.mp4"  # too small for a hardware encoder: x264 encodes it
+    render(SOURCE, VideoFile(path, encoder=hardware), RenderSettings(config(64, 36), fps=10, end=0.3))
+    assert path.stat().st_size > 0
+    large = tmp_path / "large.mp4"
+    render(SOURCE, VideoFile(large, encoder=choose_encoder("auto")), RenderSettings(config(320, 180), fps=10, end=0.3))
+    probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(large)], capture_output=True, text=True)
+    assert probe.stdout.strip() == "h264"
+
+
+def test_renders_stop_when_cancelled() -> None:
+    frames = FrameList()
+    asked = []
+
+    def cancelled() -> bool:
+        asked.append(len(frames.frames))
+        return len(asked) > 3
+
+    with pytest.raises(RenderCancelled):
+        render(SOURCE, frames, settings(), cancelled=cancelled)
+    assert len(frames.frames) < len(settings().frame_times(10.0))
+    with pytest.raises(RenderCancelled):
+        render(SOURCE, FrameList(), settings(), workers=2, cancelled=lambda: True)
 
 
 def test_sink_errors_stop_the_render() -> None:

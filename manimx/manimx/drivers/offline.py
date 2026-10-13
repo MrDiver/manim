@@ -139,20 +139,28 @@ def _format(source: FrameSource, settings: RenderSettings, times: list[float]) -
     return FrameFormat(config.pixel_width, config.pixel_height, settings.fps, audio, settings.sample_rate)
 
 
+class RenderCancelled(Exception):
+    """``cancelled()`` said yes: the render stopped early."""
+
+
 def render(
     source: Any,
     sink: FrameSink,
     settings: RenderSettings | None = None,
     workers: int = 1,
     progress: Progress | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> RenderStats:
-    """Render every frame of ``source`` into ``sink``; see the module docs."""
+    """Render every frame of ``source`` into ``sink``; see the module docs.
+    ``cancelled`` is asked between frames; when it says yes, the render
+    stops (the sink is closed) and :class:`RenderCancelled` is raised."""
     settings = settings or RenderSettings()
+    stop = cancelled or (lambda: False)
     started = time.perf_counter()
     if workers <= 1:
-        count = _render_here(load_source(source), sink, settings, progress)
+        count = _render_here(load_source(source), sink, settings, progress, stop)
     else:
-        count = _render_in_workers(source, sink, settings, workers, progress)
+        count = _render_in_workers(source, sink, settings, workers, progress, stop)
     return RenderStats(count, time.perf_counter() - started)
 
 
@@ -241,7 +249,9 @@ def _pipeline(settings: RenderSettings) -> Any:
     return CoreFramePipeline(settings.effects, settings.config, settings.in_flight)
 
 
-def _render_here(source: FrameSource, sink: FrameSink, settings: RenderSettings, progress: Progress | None) -> int:
+def _render_here(
+    source: FrameSource, sink: FrameSink, settings: RenderSettings, progress: Progress | None, cancelled: Callable[[], bool]
+) -> int:
     times = settings.frame_times(source.duration)
     pipeline = _pipeline(settings)
     sink.open(_format(source, settings, times))
@@ -249,6 +259,10 @@ def _render_here(source: FrameSource, sink: FrameSink, settings: RenderSettings,
         writer = _Writer(sink, len(times), progress, capacity=2 * settings.in_flight + 4)
         for index, t in enumerate(times):
             writer.raise_error()  # stop early if the sink failed
+            if cancelled():
+                pipeline.flush()
+                writer.stop()
+                raise RenderCancelled
             future = pipeline.submit(index, t, source.frame_at)
             future.add_done_callback(lambda done, index=index: writer.put(index, done.result()))
         pipeline.flush()
@@ -264,7 +278,7 @@ def _render_here(source: FrameSource, sink: FrameSink, settings: RenderSettings,
 
 
 def _render_in_workers(
-    spec: Any, sink: FrameSink, settings: RenderSettings, workers: int, progress: Progress | None
+    spec: Any, sink: FrameSink, settings: RenderSettings, workers: int, progress: Progress | None, cancelled: Callable[[], bool]
 ) -> int:
     try:
         pickle.dumps(spec)
@@ -307,12 +321,18 @@ def _render_in_workers(
         writer = _Writer(sink, len(times), progress, capacity=workers * slots + 1)
         running = workers
         while running:
-            message = done.get()
+            if cancelled():
+                raise RenderCancelled
+            try:
+                message = done.get(timeout=0.2)
+            except queue.Empty:
+                continue
             if message[0] == "frame":
                 _, worker, index, slot = message
                 image = np.ndarray(shape, np.uint8, buffer=memories[worker].buf, offset=slot * frame_bytes)
                 writer.put(index, image, lambda queue=free[worker], slot=slot: queue.put(slot))
                 del image
+                writer.raise_error()  # the sink failed: stop the workers
             elif message[0] == "done":
                 running -= 1
             else:

@@ -26,6 +26,7 @@ import numpy as np
 from PIL import Image
 
 from ..animation.audio import write_wav
+from .encoders import X264, H264Encoder
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -67,24 +68,27 @@ class FrameList(FrameSink):
 class VideoFile(FrameSink):
     """Encodes frames into a video file with ffmpeg (from ``PATH``).
 
-    The defaults give H.264 in yuv420p, which plays everywhere.
-    ``codec_args`` replaces the codec settings, e.g. ``["-c:v",
-    "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le"]`` for
-    a .mov with alpha.
+    The defaults give H.264 in yuv420p from x264, which plays everywhere;
+    ``encoder`` uses another H.264 encoder, e.g. the GPU's (see
+    encoders.py: ``choose_encoder("auto")``). ``codec_args`` replaces the
+    codec settings, e.g. ``["-c:v", "prores_ks", "-profile:v", "4444",
+    "-pix_fmt", "yuva444p10le"]`` for a .mov with alpha.
     """
 
     path: str | Path
-    codec_args: list[str] = field(
-        default_factory=lambda: ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p"]
-    )
+    codec_args: list[str] = field(default_factory=lambda: list(X264.codec_args))
+    encoder: H264Encoder | None = None
+    """An H.264 encoder: its codec settings replace ``codec_args``."""
     audio_args: list[str] = field(default_factory=lambda: ["-c:a", "aac", "-b:a", "192k"])
     ffmpeg: str = "ffmpeg"
     _process: subprocess.Popen | None = field(default=None, init=False, repr=False)
     _audio_directory: tempfile.TemporaryDirectory | None = field(default=None, init=False, repr=False)
 
     def open(self, format: FrameFormat) -> None:
+        encoder = self.encoder if self.encoder is None or self.encoder.fits(format.width, format.height) else X264
+        input_args, codec_args = (encoder.input_args, encoder.codec_args) if encoder else ((), self.codec_args)
         command = [
-            self.ffmpeg, "-y", "-loglevel", "error",
+            self.ffmpeg, "-y", "-loglevel", "error", *input_args,
             "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{format.width}x{format.height}", "-r", str(format.fps),
             "-i", "-",
         ]  # fmt: skip
@@ -95,7 +99,7 @@ class VideoFile(FrameSink):
             audio_path = Path(self._audio_directory.name) / "audio.wav"
             write_wav(audio_path, format.audio, format.sample_rate)
             command += ["-i", str(audio_path), "-map", "0:v", "-map", "1:a", *self.audio_args]
-        command += [*self.codec_args, str(self.path)]
+        command += [*codec_args, str(self.path)]
         self._process = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def write(self, index: int, image: np.ndarray) -> None:

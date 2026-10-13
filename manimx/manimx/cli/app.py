@@ -265,11 +265,14 @@ def render(
     start: Annotated[float, typer.Option(help="First second to render.")] = 0.0,
     end: Annotated[float | None, typer.Option(help="Last second to render.", show_default=False)] = None,
     audio: Annotated[bool | None, typer.Option("--audio/--no-audio", help="Include sounds (default: output.audio).", show_default=False)] = None,
+    encoder: Annotated[
+        str | None, typer.Option(help="H.264 encoder: auto (the GPU's if one works), nvenc, amf, qsv, vaapi, videotoolbox or x264.", show_default=False)
+    ] = None,
     open_: Annotated[bool, typer.Option("--open", "-O", help="Open the result when done.")] = False,
 ) -> None:
     """Render the timeline (or one scene) to a video or PNG sequence, a
     window, or both."""
-    from ..drivers import ImageSequence, Tee, VideoFile, Window
+    from ..drivers import ImageSequence, Tee, VideoFile, Window, choose_encoder
     from ..drivers import render as render_frames
 
     write = not window if write is None else write
@@ -288,6 +291,7 @@ def render(
     _override(chosen, ("output", "height"), height)
     _override(chosen, ("output", "fps"), fps)
     _override(chosen, ("output", "audio"), audio)
+    _override(chosen, ("output", "encoder"), encoder)
     _override(chosen, ("effects", "motion_blur", "shutter_angle"), shutter_angle)
     _override(chosen, ("output", "samples"), samples)
     _override(chosen, ("effects", "motion_blur", "enabled"), motion_blur)
@@ -299,7 +303,9 @@ def render(
     renders = f"{options.samples} sample{'s' * (options.samples != 1)}"
     if chosen.effects.motion_blur.enabled:
         renders += f" · motion blur {chosen.effects.motion_blur.shutter_angle:g}°"
-    ui.header(project.name, what, f"{options.width}×{options.height}", f"{options.fps} fps", renders, f"{workers} worker{'s' * (workers != 1)}")
+    video_encoder = choose_encoder(options.encoder) if write and not png else None
+    shown = [f"{options.width}×{options.height}", f"{options.fps} fps", renders, f"{workers} worker{'s' * (workers != 1)}"]
+    ui.header(project.name, what, *shown, *([video_encoder.description] if video_encoder else []))
     if scene is None:
         source: Any = _build(project)
         ui.console.print(_timeline_table(project, source))
@@ -316,7 +322,7 @@ def render(
         folder = project.root / options.directory
         target = output or folder / (f"{scene or project.name}" + ("" if png else ".mp4"))
         target.parent.mkdir(parents=True, exist_ok=True)
-        sinks.append(ImageSequence(target) if png else VideoFile(target))
+        sinks.append(ImageSequence(target) if png else VideoFile(target, encoder=video_encoder))
     if window:
         sinks.append(Window(title=f"{project.name} · {what}"))
     sink = sinks[0] if len(sinks) == 1 else Tee(tuple(sinks))
