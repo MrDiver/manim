@@ -530,7 +530,11 @@ class Morph(_PlannedAnimation, Generic[MorphTarget]):
 
     Paths (``Shape2D`` and ``Curve3D``, in tree order) are paired evenly,
     as Manim pairs submobjects: with more on one side, each path of the
-    other side stands for several in a row. A pair's paths are aligned
+    other side stands for several in a row, and, as in Manim, all but the
+    first of those copies fade in from nothing (or out to nothing, when
+    the target side has fewer paths). A pair's points move in straight
+    lines in the scene's space, as in Manim (paths in planes tilted
+    against the screen morph in their own spaces instead). A pair's paths are aligned
     once, when the animation is created; its in-between shape goes from
     the source path (where it is, how it looks) to the target path.
     """
@@ -555,10 +559,20 @@ class Morph(_PlannedAnimation, Generic[MorphTarget]):
 
     def _pair(self, sources: list[Node], targets: list[Node]) -> None:
         count = max(len(sources), len(targets))
+        previous: tuple[Node, Node] | None = None
         for index in range(count):
             source = sources[index * len(sources) // count]
             target = targets[index * len(targets) // count]
-            self._inbetween(source, target)
+            # A path standing for one more of the other side is a copy that
+            # starts (or ends) unseen, as Manim's repeated submobjects fade:
+            # copies drawn on top of each other would look bold.
+            if previous is not None and source is previous[0]:
+                self._inbetween(source, target, (0.0, _world_alpha(target)))
+            elif previous is not None and target is previous[1]:
+                self._inbetween(source, target, (_world_alpha(source), 0.0))
+            else:
+                self._inbetween(source, target)
+            previous = (source, target)
 
     def _inbetween(
         self,
@@ -574,8 +588,17 @@ class Morph(_PlannedAnimation, Generic[MorphTarget]):
         ``start``'s to ``end``'s over the whole morph)."""
         flat = isinstance(start, Shape2D) and isinstance(end, Shape2D)
         dimension = 2 if flat else 3
-        here = _resized(_points(start), dimension)
-        there = _resized(_points(end), dimension)
+        start_world, end_world = self._worlds[start.uid], self._worlds[end.uid]
+        # Like Manim, points move in straight lines in the scene's space; a
+        # Shape2D's points stay 2D, so that needs both paths in planes
+        # parallel to the screen's (else their own spaces are morphed).
+        in_world = not flat or (_parallel_to_screen(start_world) and _parallel_to_screen(end_world))
+        if in_world:
+            here = _in_space_of(_points(start), start_world, np.eye(4), dimension)
+            there = _in_space_of(_points(end), end_world, np.eye(4), dimension) + np.asarray(shift, dtype=np.float64)[:dimension]
+        else:
+            here = _resized(_points(start), dimension)
+            there = _resized(_points(end), dimension)
         first, last = align_paths(here, there)
         shape: Shape2D | Curve3D = Shape2D(first, f"{start.name}-morph") if flat else Curve3D(first, f"{start.name}-morph")
         self._between(shape.points, first, last)
@@ -584,8 +607,18 @@ class Morph(_PlannedAnimation, Generic[MorphTarget]):
                 begin, finish = authoring_current(getattr(start, name)), authoring_current(getattr(end, name))
                 getattr(shape, name).set(begin)
                 self._between(getattr(shape, name), begin, finish)
+        if in_world:
+            if flat:  # the planes' depths
+                shape.position.axes[2].set(start_world[2, 3])
+                self._between(shape.position.axes[2], start_world[2, 3], end_world[2, 3] + shift[2])
+            if alpha is None:
+                alpha = (_world_alpha(start), _world_alpha(end))
+            shape.alpha.set(alpha[0])
+            self._between(shape.alpha, alpha[0], alpha[1], *window)
+            self._inbetweens.append(shape)
+            return
         (start_position, start_rotation, start_scale), (end_position, end_rotation, end_scale) = (
-            _decomposed(self._worlds[start.uid]), _decomposed(self._worlds[end.uid])
+            _decomposed(start_world), _decomposed(end_world)
         )  # fmt: skip
         for axis, begin, finish, offset in zip(shape.position.axes, start_position, end_position, shift, strict=True):
             axis.set(begin)
@@ -945,6 +978,12 @@ def _decomposed(matrix: np.ndarray) -> tuple[tuple[float, ...], quaternion.quate
     if np.linalg.det(rotation) < 0:  # a mirror: put it in the scale
         scale[0], rotation[:, 0] = -scale[0], -rotation[:, 0]
     return tuple(matrix[:3, 3]), quaternion.from_rotation_matrix(rotation), tuple(scale)
+
+
+def _parallel_to_screen(world: np.ndarray) -> bool:
+    """Whether a world matrix keeps its z = 0 plane parallel to the screen's
+    (moved, scaled and turned within it only)."""
+    return bool(np.abs(world[2, :2]).max() < 1e-9 and np.abs(world[:2, 2]).max() < 1e-9)
 
 
 def _world_alpha(node: Node) -> float:

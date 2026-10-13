@@ -140,15 +140,26 @@ def test_morph_shows_in_between_shapes_and_leaves_the_target() -> None:
 
 def test_extra_shapes_start_and_end_as_copies() -> None:
     """Paths are paired evenly: an extra target starts as a copy of its
-    source, an extra source ends as a copy of its target."""
+    source, unseen (as Manim's repeated submobjects), an extra source ends
+    as a copy of its target, fading out."""
     one = Group(Square(), name="one")
     three = Group(Square(), Circle().shift(RIGHT * 3), Circle().shift(UP * 3), name="three")
-    prepared = prepare(lambda s: (s.add(one), s.play(Morph(one, three))))
-    start = _drawn(prepared, 0.0)
-    assert len(start) == 3
-    for node in start:  # all where the square is, not points
-        low, high = _world_box(node)
+    morph = Morph(one, three)
+    prepared = prepare(lambda s: (s.add(one), s.play(morph)))
+    assert len(_drawn(prepared, 0.0)) == 1  # the copies are there, unseen
+    copies = {shape.uid for shape in morph.inbetweens}
+
+    def shapes(node):
+        yield from [node] if node.uid in copies else []
+        for child in getattr(node, "children", []):
+            yield from shapes(child)
+
+    found = list(shapes(prepared.state_at(0.0)))
+    assert len(found) == 3
+    for node in found:
+        low, high = _world_box(node)  # all where the square is, not points
         assert np.allclose(low, [-1.0, -1.0], atol=1e-6) and np.allclose(high, [1.0, 1.0], atol=1e-6)
+    assert len(_drawn(prepared, 0.5)) == 3
 
     many = Group(Square(), Circle().shift(RIGHT * 3), name="many")
     single = Group(Square(side_length=1.0).shift(UP * 2), name="single")
@@ -228,7 +239,8 @@ def test_morph_matching_moves_equal_shapes_and_fades_the_rest() -> None:
     assert set(halfway) == {sliding.uid, fading_out.uid, fading_in.uid}
     assert 0.0 < halfway[fading_out.uid].alpha < 1.0 and 0.0 < halfway[fading_in.uid].alpha < 1.0
     triangle_center = (np.asarray(new.points.value).min(axis=0) + np.asarray(new.points.value).max(axis=0)) / 2 + [0.0, -2.0]
-    np.testing.assert_allclose(halfway[fading_out.uid].transform.position[:2], ([2.0, 0.0] + triangle_center) / 2, atol=1e-6)
+    low, high = _world_box(halfway[fading_out.uid])
+    np.testing.assert_allclose((low + high) / 2, ([2.0, 0.0] + triangle_center) / 2, atol=1e-6)
     assert {node.uid for node in _drawn(prepared, 2.0)} == {new.uid, moved.uid}
     with pytest.raises(ValueError, match="MorphMatching needs"):
         MorphMatching(Group(), Square())
