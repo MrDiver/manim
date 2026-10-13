@@ -369,6 +369,17 @@ keeps several frames queued on the GPU, and with `-w` it spreads over
 processes. Each process prepares the scenes itself, which costs about a
 second at startup and pays off for longer videos.
 
+Videos are H.264, encoded on the GPU's video encoder when one works
+(NVIDIA NVENC, AMD AMF, Intel Quick Sync, VA-API on Linux, VideoToolbox
+on macOS), else with x264 on the CPU; the render's header names it.
+`output.encoder` (or `--encoder`) picks one: `auto`, `nvenc`, `amf`,
+`qsv`, `vaapi`, `videotoolbox` or `x264`.
+
+The preview page renders too: **Render** saves `manimx.json` and runs
+`manimx render` in a process of its own (so editing goes on meanwhile),
+for the whole timeline or a range, shows its progress, cancels it, and
+plays the finished video.
+
 ## 10. When something goes wrong
 
 Errors name the problem and how to fix it:

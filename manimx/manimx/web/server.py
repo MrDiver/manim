@@ -54,6 +54,11 @@ shows, and ``manimx.json`` is saved shortly after (see editing.py):
     POST /api/asset?name=    the body is a sound file (dropped or recorded),
                              saved to assets/audio/; answers its "file"
     GET  /api/waveform?index=&from=&to=&n=  an audio clip's peaks
+    POST /api/render         {"start", "end"}: render the video (saved
+                             first; full quality, the chosen encoder) in
+                             a process of its own; /api/render/cancel
+    GET  /api/render         the render's state and progress (rendering.py)
+    GET  /api/render/video   the last finished video
     POST /api/undo, /api/redo  undo or redo the last edit
 
 Every edit is a command (commands.py) that can be undone; an edit may
@@ -109,6 +114,7 @@ from ..drivers.stills import StillRenderer
 from ..renderer import RenderSamples
 from .commands import EditError, parse
 from .editing import ProjectEditor
+from .rendering import RenderJob
 from .labels import index_labels
 from .tracks import clip_nodes
 
@@ -158,6 +164,8 @@ class PreviewServer:
         images the browser may keep, since versions and uids start over."""
         self.editor = editor
         """Changes the project when the page edits it (None: read only)."""
+        self.render_job = RenderJob(editor.root) if editor is not None else None
+        """Renders the project's video for the page (with an editor)."""
         if editor is not None:
             editor.attach(self)
         self._renderer = renderer or StillRenderer()
@@ -231,7 +239,10 @@ class PreviewServer:
             self._changed.notify_all()
 
     def close(self) -> None:
-        """Stop serving (from another thread) and release the port."""
+        """Stop serving (from another thread) and release the port; a render
+        running for the page is stopped."""
+        if self.render_job is not None:
+            self.render_job.cancel()
         with self._changed:
             self._closing = True  # open /api/changes requests answer now
             self._changed.notify_all()
@@ -393,6 +404,8 @@ class _Handler(BaseHTTPRequestHandler):
             "/api/settings": self._settings,
             "/api/scenes": self._scenes,
             "/api/audio": self._audio,
+            "/api/render": self._render_status,
+            "/api/render/video": self._render_video,
         }
         route = routes.get(url.path)
         try:
@@ -410,6 +423,9 @@ class _Handler(BaseHTTPRequestHandler):
         route = urlparse(self.path).path
         if route == "/api/asset" and editor is not None:
             self._asset(editor)
+            return
+        if route in ("/api/render", "/api/render/cancel") and editor is not None:
+            self._render(editor, route)
             return
         if route not in EDIT_ROUTES:
             self._json({"error": f"not found: {self.path}"}, HTTPStatus.NOT_FOUND)
@@ -498,6 +514,37 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"error": "this preview has no project settings"}, HTTPStatus.NOT_FOUND)
             return
         self._json(self.preview.editor.settings())
+
+    def _render(self, editor: ProjectEditor, route: str) -> None:
+        """POST /api/render {"start", "end"} starts a render, /api/render/cancel stops it."""
+        job = self.preview.render_job
+        assert job is not None
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if route == "/api/render/cancel":
+                job.cancel()
+            else:
+                start, end = body.get("start") or 0.0, body.get("end")
+                if not isinstance(start, (int, float)) or not (end is None or isinstance(end, (int, float))):
+                    raise _BadRequest("start and end are seconds")
+                editor.save()  # the render reads manimx.json
+                job.start(float(start), None if end is None else float(end))
+            self._json(job.status())
+        except (_BadRequest, EditError, json.JSONDecodeError) as error:
+            self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+
+    def _render_status(self, query: dict[str, list[str]]) -> None:
+        if self.preview.render_job is None:
+            raise _BadRequest("this preview has no project to render")
+        self._json(self.preview.render_job.status())
+
+    def _render_video(self, query: dict[str, list[str]]) -> None:
+        video = self.preview.render_job.video() if self.preview.render_job is not None else None
+        if video is None:
+            self._json({"error": "no finished render"}, HTTPStatus.NOT_FOUND)
+            return
+        self._send(video.read_bytes(), "video/mp4", cache=False, headers={"Content-Disposition": f'inline; filename="{video.name}"'})
 
     def _scenes(self, query: dict[str, list[str]]) -> None:
         if self.preview.editor is None:

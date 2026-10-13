@@ -415,6 +415,45 @@ def test_the_page_uploads_sound_files(root, renderer) -> None:
         server.close()
 
 
+def wait_for_render(server: PreviewServer, states: set[str], timeout: float = 180.0) -> dict:
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status = request(server, "/api/render")[1]
+        if status["state"] in states:
+            return status
+        time.sleep(0.2)
+    raise AssertionError(f"the render did not end: {status}")
+
+
+def test_the_page_renders_the_video_and_can_cancel(root, renderer) -> None:
+    editor = ProjectEditor(root, lambda project: SETTINGS, save_delay=60.0)
+    server = PreviewServer(Timeline(), SETTINGS, renderer=renderer, editor=editor)
+    editor.load()
+    for path, value in [(["output", "width"], 320), (["output", "height"], 180), (["output", "fps"], 10), (["performance", "workers"], 1)]:
+        editor.set_setting(path, value)
+    server.start()
+    try:
+        assert request(server, "/api/render")[1] == {"state": "idle"}
+        assert request(server, "/api/render/video")[0] == 404
+        assert request(server, "/api/render", {"start": 0, "end": 1.0})[0] == 200
+        assert request(server, "/api/render", {})[1] == {"error": "a render is running already"}
+        status = wait_for_render(server, {"done", "failed"})
+        assert status["state"] == "done", status
+        assert status["done"] == status["total"] == 11 and status["encoder"]
+        with urllib.request.urlopen(server.url + "api/render/video") as response:
+            assert response.headers["Content-Type"] == "video/mp4" and len(response.read()) > 0
+
+        request(server, "/api/render", {"start": 0})
+        assert request(server, "/api/render/cancel", {})[0] == 200
+        status = wait_for_render(server, {"cancelled", "done", "failed"})
+        assert status["state"] == "cancelled" and not Path(status.get("file") or root / "none").exists()
+        assert request(server, "/api/render", {"start": "soon"})[0] == 400
+    finally:
+        server.close()
+
+
 def test_commands_are_parsed_from_the_pages_requests() -> None:
     assert parse("/api/clip", {"clips": [{"index": 1, "layer": 2}]}) == EditClips((ClipEdit(1, (("layer", 2),)),))
     assert parse("/api/clip/add", {"scene": "Intro"}) == AddClip("Intro", 0.0, 0)

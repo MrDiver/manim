@@ -44,6 +44,7 @@
 import { clipBar, eventPill, initEditing, timelineLoaded, trackLane } from "./editing.js";
 import { drawAudioTracks, initAudio } from "./audiotracks.js";
 import { FrameCache } from "./frames.js";
+import { initRender, renderAvailable } from "./render.js";
 import { initThumbs, thumbnails } from "./thumbs.js";
 
 const elements = Object.fromEntries(
@@ -875,6 +876,7 @@ async function loadTimeline() {
   elements.problem.hidden = !error;
   drawTimeline();
   timelineLoaded();
+  renderAvailable(state.timeline.editable);
 }
 
 /** Wait for the server's changes, forever; show each one at the same time. */
@@ -897,6 +899,7 @@ async function followChanges() {
 
 async function start() {
   initThumbs({ state });
+  initRender({ state });
   initAudio({ state, elements, percent, addRow, play, pause, redraw: drawTimeline, showTime: (time) => show(snap(time)) });
   initEditing({
     state,

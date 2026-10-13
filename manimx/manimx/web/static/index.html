@@ -17,6 +17,7 @@
       <button id="redo" type="button" class="icon" hidden disabled title="Nothing to redo">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3" fill="none"/></svg>
       </button>
+      <button id="render-button" type="button" hidden title="Render the video at full quality (saved to the project's renders folder)">Render</button>
       <button id="settings-button" type="button" hidden title="The project's settings (saved to manimx.json)">Settings</button>
       <button id="indices" type="button" aria-pressed="false" title="Show the index of every path in its group (for MorphMatching pairs)">Indices</button>
       <output id="time" aria-live="off">0.00 s</output>
@@ -109,6 +110,12 @@
   <p class="hint footer">Drag on the ruler to scrub. Drag a clip to move it (up or down to another track), its handles to cut it, empty track space to select several; Delete removes the selection. Drag an event to time it. S splits at the playhead, Ctrl+D duplicates, Ctrl+C / X / V copy, cut and paste at the playhead; drop sound files on an audio track, ● records a voice-over; drags snap to edges, the playhead and events (Alt: freely). Ctrl+Z undoes, Ctrl+Shift+Z redoes. Space plays, ← → step frames, Ctrl+wheel zooms.</p>
 
   <div id="marquee" hidden></div>
+  <dialog id="render-dialog" aria-label="Render the video">
+    <form method="dialog">
+      <header><h2>Render</h2><button type="submit">Close</button></header>
+      <div id="render-body"></div>
+    </form>
+  </dialog>
   <dialog id="settings" aria-label="Project settings">
     <form method="dialog">
       <header><h2>Settings</h2><button type="submit">Close</button></header>

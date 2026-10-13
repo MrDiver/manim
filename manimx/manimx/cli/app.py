@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import json
+import sys
 import time
 from pathlib import Path
 from typing import Annotated, Any
@@ -269,6 +271,9 @@ def render(
         str | None, typer.Option(help="H.264 encoder: auto (the GPU's if one works), nvenc, amf, qsv, vaapi, videotoolbox or x264.", show_default=False)
     ] = None,
     open_: Annotated[bool, typer.Option("--open", "-O", help="Open the result when done.")] = False,
+    progress_lines: Annotated[
+        bool, typer.Option("--progress-lines", hidden=True, help="Print progress as JSON lines (for the preview page).")
+    ] = False,
 ) -> None:
     """Render the timeline (or one scene) to a video or PNG sequence, a
     window, or both."""
@@ -329,11 +334,15 @@ def render(
 
     columns = (SpinnerColumn(), TextColumn("Rendering"), BarColumn(), MofNCompleteColumn(), _RateColumn(), TimeRemainingColumn())
     began = time.perf_counter()
-    with Progress(*columns, console=ui.console, transient=True) as progress:
-        task = progress.add_task("render", total=None)
-        stats = render_frames(
-            source, sink, settings, workers=workers, progress=lambda done, total: progress.update(task, completed=done, total=total)
-        )
+    if progress_lines:  # the preview page's render job reads these
+        _line({"file": str(target) if write else None, "encoder": video_encoder.description if video_encoder else None})
+        stats = render_frames(source, sink, settings, workers=workers, progress=lambda done, total: _line({"done": done, "total": total}))
+    else:
+        with Progress(*columns, console=ui.console, transient=True) as progress:
+            task = progress.add_task("render", total=None)
+            stats = render_frames(
+                source, sink, settings, workers=workers, progress=lambda done, total: progress.update(task, completed=done, total=total)
+            )
     elapsed = time.perf_counter() - began
     seconds = stats.frames / options.fps
     if not write:
@@ -456,6 +465,12 @@ def _override(settings: Settings, path: tuple[str, ...], value: Any) -> None:
             set_value(settings, path, value)
         except SettingsError as error:
             raise ProjectError(str(error).replace(f'"{".".join(path)}"', f"--{path[-1].replace('_', '-')}")) from None
+
+
+def _line(data: dict[str, Any]) -> None:
+    """One line of JSON on stdout, at once."""
+    sys.stdout.write(json.dumps(data) + "\n")
+    sys.stdout.flush()
 
 
 def _open(path: Path) -> None:
