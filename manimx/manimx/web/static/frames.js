@@ -1,12 +1,13 @@
 // The frames the page has fetched, by timeline version, frame number and
 // width, and fetching ahead of the playhead.
 //
-// A frame is asked for by number at a version (/api/frame?f=&v=&w=); the
+// A frame is asked for by number at a version (/api/frame?f=&v=&s=&w=); the
 // server answers which version it rendered (X-Version). Only a frame of
 // the version asked for is kept: one rendered after an edit the page has
 // not heard of yet is shown, never kept. When the version changes, every
 // older frame is dropped. The browser's HTTP cache keeps the same frames
-// (the server marks them immutable), so they survive a reload of the page.
+// (the server marks them immutable), so they survive a reload of the page;
+// `s` is the server's session, since a new server counts versions anew.
 //
 // Kept frames are encoded blobs (a JPEG is about 20 times smaller than its
 // pixels), the least recently used dropped first once they take more than
@@ -25,6 +26,7 @@ export class FrameCache {
   constructor(budget = 256 * 2 ** 20) {
     this.budget = budget;
     this.version = null;
+    this.session = "";
     this.kept = new Map(); // key: { blob, version }, least recently used first
     this.open = new Map(); // key: Promise of the blob
     this.decoded = new Map(); // key: { bitmap (once decoded) }
@@ -39,6 +41,15 @@ export class FrameCache {
   /** Whether the frame is kept. */
   has(version, frame, width) {
     return this.kept.has(FrameCache.key(version, frame, width));
+  }
+
+  /** A new server (its versions start over): forget everything. */
+  useSession(session) {
+    if (session === this.session) return;
+    this.session = session;
+    this.version = null;
+    for (const [key, entry] of this.kept) this.drop(key, entry);
+    for (const [key, entry] of this.decoded) this.forget(key, entry);
   }
 
   /** Forget every frame of another version than `version`. */
@@ -71,7 +82,7 @@ export class FrameCache {
   }
 
   async request(key, version, frame, width) {
-    const response = await fetch(`/api/frame?f=${frame}&v=${version}&w=${width}`);
+    const response = await fetch(`/api/frame?f=${frame}&v=${version}&s=${this.session}&w=${width}`);
     if (!response.ok) {
       const { error } = await response.json();
       throw new Error(error);

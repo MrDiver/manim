@@ -13,10 +13,14 @@ request, answered by the standard library's HTTP server:
                              segments
     GET /api/frame?t=&w=     the frame at time t, w pixels wide (JPEG; PNG
                              with &format=png, WebP with &format=webp)
-    GET /api/frame?f=&v=&w=  frame number f; the answer's X-Version says
-                             which version it shows, and when that is v,
-                             the browser may keep it (the same URL is
-                             always the same image)
+    GET /api/frame?f=&v=&s=&w=  frame number f; the answer's X-Version
+                             says which version it shows, and when that
+                             is v (and s this server's session), the
+                             browser may keep it (the same URL is always
+                             the same image)
+    GET /api/thumbnail?clip=&scene=&at=&s=&w=  clip alone at its scene's
+                             playing time `at`, while it shows the scene
+                             with that uid (kept by the browser)
     GET /api/labels?t=       the index of every path in its group at time
                              t, with its name and place (see labels.py)
     GET /api/audio           the timeline's sounds mixed, as WAV (204
@@ -76,6 +80,7 @@ import dataclasses
 import io
 import json
 import mimetypes
+import secrets
 import threading
 from collections.abc import Callable
 from functools import partial
@@ -133,6 +138,9 @@ class PreviewServer:
         editor: ProjectEditor | None = None,
     ) -> None:
         self.title = title
+        self.session = secrets.token_hex(6)
+        """Changes with every server: the page puts it into the URLs of the
+        images the browser may keep, since versions and uids start over."""
         self.editor = editor
         """Changes the project when the page edits it (None: read only)."""
         if editor is not None:
@@ -239,6 +247,7 @@ class PreviewServer:
             "version": self.version,
             "error": self.error,
             "editable": self.editor is not None,
+            "session": self.session,
             "events": [{"name": name, "time": known.get(name), "fixed": name in fixed} for name in sorted({*waited, *fixed})],
             "duration": self.timeline.duration,
             "fps": self.settings.fps,
@@ -250,6 +259,7 @@ class PreviewServer:
                     "start": clip.start,
                     "end": None if clip.end == NEVER else clip.end,
                     "layer": clip.layer,
+                    "scene": clip.scene.uid,
                     "length": clip.scene.playing_time,
                     "entry": entry,
                     "waits": _waits(clip, known),
@@ -308,13 +318,36 @@ class PreviewServer:
             time = max(float(time), 0.0)  # past the end: the background, nothing plays there
             frame_config = dataclasses.replace(config, pixel_width=width, pixel_height=height, time=time)
             pixels = self._renderer.render(self._frame_at, frame_config, self._effects)
-        pil_format, _ = FORMATS[image_format]
-        image = Image.fromarray(pixels, "RGBA")
-        if pil_format == "JPEG":
-            image = image.convert("RGB")  # JPEG has no alpha
-        buffer = io.BytesIO()
-        image.save(buffer, pil_format, **({"quality": 85} if pil_format != "PNG" else {}))
-        return buffer.getvalue(), version
+        return _encode(pixels, image_format), version
+
+    def thumbnail(self, clip: int, scene: int, at: float, width: int) -> bytes | None:
+        """Clip ``clip`` alone at its scene's playing time ``at``, ``width``
+        pixels wide (JPEG); None unless the clip still shows the prepared
+        scene with uid ``scene``. Where a clip is placed does not change its
+        thumbnails, so the page keeps them while clips move."""
+        with self._lock:
+            clips = self.timeline.clips
+            if not 0 <= clip < len(clips) or clips[clip].scene.uid != scene:
+                return None
+            shown = clips[clip]
+            config = self.settings.config
+            width = max(MIN_WIDTH, min(int(width), config.pixel_width))
+            height = max(1, round(width * config.pixel_height / config.pixel_width))
+            at = min(max(float(at), 0.0), shown.scene.playing_time)
+            compiled = shown.scene.compiled_time_at(at)
+            frame_config = dataclasses.replace(config, pixel_width=width, pixel_height=height, time=at)
+            pixels = self._renderer.render(lambda _: (shown.scene.plan.frame_at(compiled, global_time=at, uid=shown.uid),), frame_config, ())
+        return _encode(pixels, "jpeg")
+
+
+def _encode(pixels: Any, image_format: str) -> bytes:
+    pil_format, _ = FORMATS[image_format]
+    image = Image.fromarray(pixels, "RGBA")
+    if pil_format == "JPEG":
+        image = image.convert("RGB")  # JPEG has no alpha
+    buffer = io.BytesIO()
+    image.save(buffer, pil_format, **({"quality": 85} if pil_format != "PNG" else {}))
+    return buffer.getvalue()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -338,6 +371,7 @@ class _Handler(BaseHTTPRequestHandler):
             "/api/timeline": self._timeline,
             "/api/frame": self._frame,
             "/api/labels": self._labels,
+            "/api/thumbnail": self._thumbnail,
             "/api/changes": self._changes,
             "/api/settings": self._settings,
             "/api/scenes": self._scenes,
@@ -402,8 +436,17 @@ class _Handler(BaseHTTPRequestHandler):
         body, version = self.preview.versioned_frame(time, width, image_format, frame)
         # A frame number at the version it shows is always the same image:
         # the browser keeps it. Anything else may change with the next edit.
-        cache = IMMUTABLE if frame is not None and asked == version else False
+        same_server = query.get("s", [None])[0] == self.preview.session
+        cache = IMMUTABLE if frame is not None and asked == version and same_server else False
         self._send(body, FORMATS[image_format][1], cache=cache, headers={"X-Version": str(version)})
+
+    def _thumbnail(self, query: dict[str, list[str]]) -> None:
+        clip, scene, width = (_number(query, name, int) for name in ("clip", "scene", "w"))
+        body = self.preview.thumbnail(clip, scene, _number(query, "at", float), width)
+        if body is None:
+            raise _BadRequest(f"clip {clip} does not show scene {scene} (any more)")
+        same_server = query.get("s", [None])[0] == self.preview.session
+        self._send(body, "image/jpeg", cache=IMMUTABLE if same_server else False)
 
     def _labels(self, query: dict[str, list[str]]) -> None:
         self._json(self.preview.labels(_number(query, "t", float)))

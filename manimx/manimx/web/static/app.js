@@ -23,6 +23,11 @@
 // Which clips and nodes are open is kept in localStorage by key (clip,
 // node path), so a reload keeps them.
 //
+// Layout: the page fills the window. Splitters resize the scenes sidebar,
+// the inspector and the timeline (kept per browser; a double-click resets
+// one); the timeline scrolls up and down under its sticky ruler, and the
+// frame is as large as fits the space left.
+//
 // Zoom: at zoom 1 the timeline's duration fills the space beside the
 // labels; the lanes (the CSS variable --lanes) are `zoom` times that, and
 // the timeline scrolls sideways under its sticky labels. Like in Blender,
@@ -38,11 +43,12 @@
 
 import { clipBar, eventPill, initEditing, timelineLoaded, trackLane } from "./editing.js";
 import { FrameCache } from "./frames.js";
+import { initThumbs, thumbnails } from "./thumbs.js";
 
 const elements = Object.fromEntries(
   [
     "problem", "title", "time", "frame", "error", "timeline", "ruler", "rows", "playhead", "collapse", "indices",
-    "labels", "playhead-frame", "play", "mute", "loop", "to-start", "to-end", "previous-frame", "next-frame", "after-end", "cached", "stage", "resolution", "prefetch",
+    "labels", "playhead-frame", "play", "mute", "loop", "to-start", "to-end", "previous-frame", "next-frame", "after-end", "cached", "stage", "picture", "resolution", "prefetch",
     "zoom-in", "zoom-out", "zoom-fit",
   ].map((id) => [id.replace(/-(\w)/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]),
 );
@@ -161,7 +167,7 @@ function revealPlayhead() {
 /** Ticks in frames, about one per 80 pixels. */
 function drawRuler() {
   const { fps } = state.timeline;
-  elements.ruler.replaceChildren();
+  for (const tick of elements.ruler.querySelectorAll(".tick")) tick.remove();
   const frames = Math.max(1, Math.round(state.span * fps));
   const step = niceStep((frames * 80) / elements.ruler.offsetWidth || 1);
   for (let frame = 0; frame <= frames; frame += step) {
@@ -245,7 +251,11 @@ function clipBody(clip, index) {
     });
     body.append(expand);
   }
-  body.append(clip.name);
+  const name = document.createElement("span");
+  name.className = "clip-name";
+  name.textContent = clip.name;
+  body.append(name);
+  thumbnails(body, clip, index, (percent(end - clip.start) / 100) * elements.ruler.offsetWidth);
   clipBar(body, clip, index);
   return body;
 }
@@ -358,6 +368,62 @@ function toggle(key) {
   drawTimeline();
 }
 
+// -- the layout: splitters and the frame's size -------------------------------------------
+
+const SIZES = { sidebar: [230, 140], inspector: [300, 200], timeline: [300, 90] }; // default, least (px)
+
+/** The frame as large as fits the stage, at the output's aspect ratio. */
+function fitPicture() {
+  if (!state.timeline) return;
+  const { width, height } = state.timeline;
+  const box = elements.stage.getBoundingClientRect();
+  const scale = Math.min(box.width / width, box.height / height);
+  elements.picture.style.width = `${Math.floor(width * scale)}px`;
+  elements.picture.style.height = `${Math.floor(height * scale)}px`;
+}
+
+function setSize(name, pixels) {
+  const [, least] = SIZES[name];
+  const most = name === "timeline" ? innerHeight - 220 : innerWidth / 3;
+  const size = Math.round(Math.max(least, Math.min(most, pixels)));
+  document.documentElement.style.setProperty(`--${name}`, `${size}px`);
+  return size;
+}
+
+/** Each splitter resizes the panel named by its data-size; sizes are kept per browser. */
+function initSplitters() {
+  const saved = loadObject("manimx.layout");
+  for (const [name, [size]] of Object.entries(SIZES)) setSize(name, saved[name] ?? size);
+  for (const splitter of document.querySelectorAll(".splitter")) {
+    const name = splitter.dataset.size;
+    const direction = Number(splitter.dataset.direction);
+    const vertical = splitter.classList.contains("horizontal");
+    const current = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(`--${name}`));
+    splitter.addEventListener("pointerdown", (down) => {
+      splitter.setPointerCapture(down.pointerId);
+      splitter.classList.add("dragging");
+      const from = current();
+      const onMove = (move) => {
+        const delta = vertical ? move.clientY - down.clientY : move.clientX - down.clientX;
+        saved[name] = setSize(name, from + direction * delta);
+      };
+      const onUp = () => {
+        splitter.classList.remove("dragging");
+        splitter.removeEventListener("pointermove", onMove);
+        splitter.removeEventListener("pointerup", onUp);
+        saveObject("manimx.layout", saved);
+      };
+      splitter.addEventListener("pointermove", onMove);
+      splitter.addEventListener("pointerup", onUp);
+    });
+    splitter.addEventListener("dblclick", () => {
+      delete saved[name];
+      setSize(name, SIZES[name][0]);
+      saveObject("manimx.layout", saved);
+    });
+  }
+}
+
 // -- remembered preferences ---------------------------------------------------------------
 
 function loadSet(name) {
@@ -373,6 +439,23 @@ function saveSet(name, set) {
     localStorage.setItem(name, JSON.stringify([...set]));
   } catch {
     // storage is unavailable: it lasts for this page only
+  }
+}
+
+function loadObject(name) {
+  try {
+    const value = JSON.parse(localStorage.getItem(name) ?? "{}");
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveObject(name, value) {
+  try {
+    localStorage.setItem(name, JSON.stringify(value));
+  } catch {
+    // storage is unavailable: it lasts until a reload
   }
 }
 
@@ -423,6 +506,7 @@ function show(time, intended = time, reveal = false) {
   if (!state.playing) history.replaceState(null, "", `#t=${intended.toFixed(3)}`); // a link keeps the place
   elements.playhead.style.left = `${percent(time)}%`;
   elements.playheadFrame.textContent = frameOf(time);
+  elements.playheadFrame.style.left = `${percent(time)}%`;
   elements.time.textContent = `${time.toFixed(2)} s · frame ${frameOf(time)}`;
   if (reveal) revealPlayhead();
   if (state.playing) return;
@@ -702,6 +786,8 @@ function listen() {
     state.loop = !state.loop;
     elements.loop.setAttribute("aria-pressed", String(state.loop));
   });
+  initSplitters();
+  new ResizeObserver(fitPicture).observe(elements.stage);
   elements.resolution.addEventListener("change", () => setResolution(Number(elements.resolution.value)));
   elements.prefetch.addEventListener("change", () => {
     const count = Math.round(Number(elements.prefetch.value));
@@ -753,12 +839,16 @@ function listen() {
 async function loadTimeline() {
   const response = await fetch("/api/timeline");
   state.timeline = await response.json();
+  if (state.timeline.session !== frames.session) {
+    frames.useSession(state.timeline.session); // the server restarted: its versions start over
+    state.version = 0;
+  }
   fitSpan();
   setVersion(state.timeline.version);
   const { title, width, height, error } = state.timeline;
   document.title = `${title} · manimx preview`;
   elements.title.textContent = title;
-  elements.frame.style.aspectRatio = `${width} / ${height}`;
+  fitPicture();
   elements.problem.textContent = error ?? "";
   elements.problem.hidden = !error;
   drawTimeline();
@@ -784,6 +874,7 @@ async function followChanges() {
 }
 
 async function start() {
+  initThumbs({ state });
   initEditing({
     state,
     elements,

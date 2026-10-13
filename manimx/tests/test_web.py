@@ -98,14 +98,27 @@ def test_a_frame_by_number_at_its_version_is_kept_by_the_browser(server, timelin
         with urllib.request.urlopen(server.url + path) as response:
             return response.read(), response.headers["Cache-Control"], response.headers["X-Version"]
 
-    version = server.version
-    body, cache, shown = headers(f"api/frame?f=15&v={version}&w=64&format=png")
+    version, session = server.version, server.session
+    assert headers(f"api/frame?f=15&v={version}&w=64")[1] == "no-store"  # another server's frame
+    body, cache, shown = headers(f"api/frame?f=15&v={version}&s={session}&w=64&format=png")
     assert (cache, shown) == ("private, max-age=86400, immutable", str(version))
     assert body == get(server, "/api/frame?t=1.5&w=64&format=png")[2]  # frame 15 at 10 fps
     server.change(lambda: timeline.clips[0].move(0.5))
-    _, cache, shown = headers(f"api/frame?f=15&v={version}&w=64")  # an edit the page has not heard of
+    _, cache, shown = headers(f"api/frame?f=15&v={version}&s={session}&w=64")  # an edit the page has not heard of
     assert (cache, shown) == ("no-store", str(version + 1))
     assert headers("api/frame?t=1.5")[1] == "no-store"
+
+
+def test_thumbnails_show_a_clip_alone_at_a_scene_time(server, timeline) -> None:
+    scene = timeline.clips[0].scene.uid
+    assert server.timeline_json()["clips"][0]["scene"] == scene
+    with urllib.request.urlopen(f"{server.url}api/thumbnail?clip=0&scene={scene}&at=1.5&s={server.session}&w=64") as response:
+        assert response.headers["Cache-Control"] == "private, max-age=86400, immutable"
+        assert Image.open(io.BytesIO(response.read())).size == (64, 36)
+    server.change(lambda: timeline.clips[0].move(3.0))  # moved: the same thumbnail
+    assert server.thumbnail(0, scene, 1.5, 64) is not None
+    assert get(server, f"/api/thumbnail?clip=0&scene={scene + 1}&at=1&w=64")[0] == 400  # not that scene
+    assert get(server, f"/api/thumbnail?clip=5&scene={scene}&at=1&w=64")[0] == 400
 
 
 def test_bad_requests_and_failing_scenes_answer_with_errors(server, monkeypatch) -> None:

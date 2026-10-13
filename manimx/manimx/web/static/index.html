@@ -29,12 +29,15 @@
       <ul id="scene-list"></ul>
       <p class="hint">Drag a scene onto a track to add a clip.</p>
     </aside>
+    <div class="splitter" data-size="sidebar" data-direction="1" role="separator" aria-orientation="vertical" title="Drag to resize; double-click resets"></div>
 
     <section class="viewer">
       <pre id="problem" role="alert" hidden></pre>
       <figure id="stage">
-        <canvas id="frame" role="img" aria-label="The frame at the current time"></canvas>
-        <div id="labels" aria-hidden="true"></div>
+        <div id="picture">
+          <canvas id="frame" role="img" aria-label="The frame at the current time"></canvas>
+          <div id="labels" aria-hidden="true"></div>
+        </div>
         <figcaption id="error" hidden></figcaption>
       </figure>
       <div class="controls" role="toolbar" aria-label="Playback">
@@ -80,6 +83,7 @@
       </div>
     </section>
 
+    <div class="splitter" data-size="inspector" data-direction="-1" role="separator" aria-orientation="vertical" title="Drag to resize; double-click resets"></div>
     <aside id="inspector" aria-label="Edit the project" hidden>
       <p id="edit-message" role="status" aria-live="polite">Edits show at once and are saved to manimx.json.</p>
       <div id="clip-editor"></div>
@@ -87,13 +91,16 @@
     </aside>
   </div>
 
+  <div class="splitter horizontal" data-size="timeline" data-direction="-1" role="separator" aria-orientation="horizontal" title="Drag to resize; double-click resets"></div>
   <section id="timeline" aria-label="Timeline" tabindex="0">
-    <div class="row ruler-row">
-      <div class="label"><button id="collapse" type="button" title="Close every clip's tracks">Collapse all</button></div>
-      <div class="lane" id="ruler"></div>
+    <div id="timeline-content">
+      <div class="row ruler-row">
+        <div class="label"><button id="collapse" type="button" title="Close every clip's tracks">Collapse all</button></div>
+        <div class="lane" id="ruler"><div id="cached" title="Frames kept: they show and play at once"></div><span id="playhead-frame">0</span></div>
+      </div>
+      <div id="rows" role="tree" aria-label="Tracks, clips, events, nodes and animations"></div>
+      <div id="overlay"><div id="after-end" title="Past the end: nothing plays here yet"></div><div id="playhead"></div></div>
     </div>
-    <div id="rows" role="tree" aria-label="Tracks, clips, events, nodes and animations"></div>
-    <div id="overlay"><div id="after-end" title="Past the end: nothing plays here yet"></div><div id="cached" title="Frames kept: they show and play at once"></div><div id="playhead"><span id="playhead-frame">0</span></div></div>
   </section>
   <p class="hint footer">Drag on the ruler to scrub. Drag a clip to move it (up or down to another track), its handles to cut it, empty track space to select several; Delete removes the selection. Drag an event to time it. S splits at the playhead, Ctrl+D duplicates; drags snap to edges, the playhead and events (Alt: freely). Ctrl+Z undoes, Ctrl+Shift+Z redoes. Space plays, ← → step frames, Ctrl+wheel zooms.</p>
 
