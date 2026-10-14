@@ -558,12 +558,17 @@ class Timeline:
 
     def stems(self, start: float = 0.0, end: float | None = None, sample_rate: int = DEFAULT_SAMPLE_RATE) -> dict[tuple[str, int], np.ndarray]:
         """Per track that sounds, ``(kind, index)`` to its sounds mixed like
-        :meth:`audio` mixes them, but with the track's own volume, mute and
-        solo left out: for an audio program to set (see manimx.drivers.session)."""
+        :meth:`audio` mixes them, at the track's volume but with mute and
+        solo left out: every track is there for an audio program to mute
+        (see manimx.drivers.session)."""
         end = self.duration if end is None else end
         order = list(TRACK_NAMES)  # as the preview shows them: video, script, then audio tracks
         tracks = sorted(self.sounds_by_track().items(), key=lambda item: (order.index(item[0][0]), item[0][1]))
-        return {key: mix(entries, start, end, sample_rate) for key, entries in tracks}
+        stems = {}
+        for key, entries in tracks:
+            volume = self.track(*key).volume
+            stems[key] = mix([(entry[0], entry[1], entry[2], entry[3] * volume, *entry[4:]) for entry in entries], start, end, sample_rate)
+        return stems
 
     def sounds_by_track(self) -> dict[tuple[str, int], list[tuple]]:
         """``(kind, index)`` (kind "scenes", "scripts" or "audio") to the

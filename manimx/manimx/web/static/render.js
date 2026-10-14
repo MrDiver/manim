@@ -9,8 +9,8 @@
 // in the dialog.
 //
 // "Sound for editing" renders the video without sound and, next to it, a
-// WAV per track and a Reaper (.rpp) and OpenTimelineIO (.otio) session
-// using them (manimx/drivers/session.py): open one in Reaper, Kdenlive or
+// WAV per track and an OpenTimelineIO (.otio) timeline of them
+// (manimx/drivers/session.py): open it in Kdenlive, DaVinci Resolve or
 // another program to mix and master the sound there.
 
 const POLL = 400; // ms between progress requests
@@ -93,7 +93,7 @@ function draw(status) {
     const seconds = status.finished && status.started ? ` in ${(status.finished - status.started).toFixed(1)} s` : "";
     line(`Rendered ${status.total} frames${seconds} with ${status.encoder}: ${status.file}`);
     if (status.session) {
-      line(`Sound for editing: ${status.stems} track${status.stems === 1 ? "" : "s"} as WAV files, and ${status.session} (Reaper) with an .otio beside it (Kdenlive, Resolve, …). The video has no sound of its own.`, "hint");
+      line(`Sound for editing: ${status.stems} track${status.stems === 1 ? "" : "s"} as WAV files, and ${status.session} placing them and the video (open it in Kdenlive, Resolve, …). The video has no sound of its own.`, "hint");
     }
     const video = document.createElement("video");
     video.controls = true;
@@ -139,8 +139,8 @@ function rangeForm() {
   });
   const choice = document.createElement("label");
   choice.className = "render-stems";
-  choice.title = "Mix the sound in an audio program: the video comes without sound, each track's sound as a WAV file, and a session for Reaper (.rpp) and for Kdenlive or Resolve (.otio) with all of them in place";
-  choice.append(separate, " Sound for editing (Reaper, Kdenlive): a WAV per track");
+  choice.title = "Mix the sound in an audio program: the video comes without sound, each track's sound as a WAV file, and an .otio timeline for Kdenlive or Resolve with all of them in place";
+  choice.append(separate, " Sound for editing (Kdenlive, Resolve): a WAV per track");
   form.append(label("From", start, "s"), label("To", end, "s"), fromPlayhead, choice, go);
   return form;
 }

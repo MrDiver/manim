@@ -272,7 +272,7 @@ def render(
         bool,
         typer.Option(
             "--stems",
-            help="Sound for editing: the video without sound, a WAV per track and a Reaper (.rpp) and OpenTimelineIO (.otio) session using them.",
+            help="Sound for editing: the video without sound, a WAV per track and an OpenTimelineIO (.otio) timeline of them (Kdenlive, Resolve).",
         ),
     ] = False,
     encoder: Annotated[
@@ -362,7 +362,7 @@ def render(
 
         session = export_session(timeline, target, start, end, options.sample_rate, options.fps)
         if progress_lines:
-            _line({"session": str(session.rpp), "stems": len(session.stems)})
+            _line({"session": str(session.otio), "stems": len(session.stems)})
     if not write:
         pace = "real time" if elapsed <= seconds * 1.05 else f"{seconds / elapsed:.2f}× real time"
         ui.success(f"[bold]{stats.frames} frames[/]  [dim]{seconds:.1f} s shown in {elapsed:.1f} s ({pace})[/]")
@@ -374,7 +374,7 @@ def render(
     )
     if session is not None:
         names = ", ".join(stem.name for stem in session.stems) or "no track sounds"
-        ui.success(f"[bold]{_shown(session.rpp)}[/], [bold]{_shown(session.otio)}[/]  [dim]stems: {names}[/]")
+        ui.success(f"[bold]{_shown(session.otio)}[/]  [dim]stems: {names}[/]")
     if open_:
         _open(target)
 

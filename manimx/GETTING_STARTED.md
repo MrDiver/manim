@@ -362,12 +362,12 @@ uv run manimx render --stems            # the sound for editing elsewhere (below
 ```
 
 `--stems` renders the video without sound and writes next to it a WAV
-per track (`renders/<name>-stems/`) and two sessions with the video and
-all of them in place: `<name>.rpp` for Reaper and `<name>.otio`
-(OpenTimelineIO) for Kdenlive, DaVinci Resolve and others. Clean,
-compress and master the sound there. Each WAV has its clips' volumes
-and fades; the tracks' volumes, mutes and solos are the session's
-faders and buttons.
+per track (`renders/<name>-stems/`) and `<name>.otio`, an
+OpenTimelineIO timeline with the video and all of them in place: open
+it in Kdenlive, DaVinci Resolve or another editor to clean, compress
+and master the sound there. Each WAV sounds as its track did in the
+preview (clip and track volumes, fades); muted tracks are written too,
+named "(muted)".
 
 Options on the command line override `manimx.json` for that run. Rendering
 keeps several frames queued on the GPU, and with `-w` it spreads over

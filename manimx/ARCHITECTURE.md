@@ -88,7 +88,7 @@ flowchart LR
 | `manimx.animation` (core; `signals/` and `nodes/` hold the signal and node classes) | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses (`Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D` (→ `Particles`), `Light` → `DirectionalLight`, `PointLight`, `SpotLight`; `animation.Camera`), `PositionMixin`, `RotationMixin`, `ScalableMixin`; the `Animation` contract (`Animation`, `SetValue`, `ChangeSignals`/`AnimationBuilder`) and the default rates `linear`, `smooth`; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `Simulation`; `Sound`; contributions as data (`signals/contributions.py`: `To`, `By`, `Ramp`, `Power`, `Turn`, `Keyframes`, `Between`, `Partial`), `paths.partial_path()`, `ScenePlan`, `scene_graph()`, `snapshot()` | robjects, `_core`; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
 | `manimx.userland` | everything a project could write on top of the core: shapes (`Circle`, `Dot`, `Square`, `Rectangle`, `RegularPolygon`, `Triangle`, `Polyline`, `ParametricCurve3D`, `Box`, `Sphere`, `Torus`, `ParametricSurface`), animations (`FadeIn`, `FadeOut`, `Rotate`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter`, `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`), `rate_functions`, `constants` (`UP`, `PI`, ...), `geometry` (every point and mesh generator, `align_paths()`), `load_gltf()` | animation, robjects |
 | `manimx.renderer` | what a renderer is given next to the tree: `RenderConfig`, `renderer.Camera`, `ViewState`, `CameraViewState`; `RenderSamples`, `Bloom`, `ToneMap`, `ShaderEffect` | robjects |
-| `manimx.drivers` | `render()`, `CoreFramePipeline`, `StillRenderer`, `render_image()`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`); `session.export_session()` (stems, .rpp, .otio) | renderer, animation, `_core` |
+| `manimx.drivers` | `render()`, `CoreFramePipeline`, `StillRenderer`, `render_image()`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`); `session.export_session()` (stems, .otio) | renderer, animation, `_core` |
 | `manimx.voice` | `Script`, `Part`, `Take`; `Transcript`, `Word`, `Subtitle`, `srt()`; `align()`, `time_take()`, `transcribe()`, `recognize()` (Whisper), `trim_silence()` | animation (`Sound`); faster-whisper only to time takes |
 | `manimx.project` | `Project`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers, settings, voice |
 | `manimx.settings` | `Settings` and its sections (`OutputSettings`, `EffectsSettings`, `LightingSettings`, `PerformanceSettings`), `setting()` | renderer (config, effects) |
@@ -496,8 +496,8 @@ classDiagram
   reads it), `muted`, `solo` and `volume`. `Timeline.sounds_by_track()`
   groups the mix entries per `(kind, index)` with their clips' volume
   and fades; `audio()` applies each track's volume, mute and solo and
-  mixes them all, `stems()` mixes each track on its own without them
-  (for `drivers.session`).
+  mixes them all, `stems()` mixes each track on its own at its volume,
+  without mute and solo (for `drivers.session`).
 - **Voice (`manimx/voice/`):** a `Script` (`scripts/narration.txt`, its
   times in `narration.json`) is the author's text in `Part`s (split by
   `---` lines), each part a `Transcript`: its text and one `Word` (text,
@@ -704,11 +704,10 @@ flowchart LR
   before rendering starts. A silent mix means no audio track.
 - **Sound for editing (`drivers/session.py`, `manimx render --stems`):**
   the video is rendered without sound; `export_session()` writes
-  `Timeline.stems()` as one 24-bit WAV per track, as long as the render,
-  and a Reaper project (`.rpp`, the tracks' volume, mute and solo as its
-  faders) and an OpenTimelineIO timeline (`.otio`) placing the video and
-  every stem at zero, with a marker at each clip's start. Both formats
-  are written by hand (text and JSON).
+  `Timeline.stems()` as one 24-bit WAV per track, as long as the render
+  (muted tracks too, named "(muted)"), and an OpenTimelineIO timeline
+  (`.otio`, JSON written by hand) placing the video and every stem at
+  zero, with a marker at each clip's start.
 
 ## 11. `Project` and the CLI
 
@@ -937,7 +936,7 @@ flowchart LR
 - `manimx ui` with reload on save, live editing with undo, the bin,
   video, script and audio tracks with headers, scripts recorded with a
   countdown and teleprompter and timed by Whisper, fades, subtitles,
-  rendering, and the sound for editing (`--stems`: WAVs, .rpp, .otio);
+  rendering, and the sound for editing (`--stems`: WAVs and an .otio);
 - performance (PERFORMANCE.md): the benchmark project from 48.6 fps to
   123.5 with the core; light-show 70 to 23 ms per frame.
 
