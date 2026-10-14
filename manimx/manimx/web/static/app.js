@@ -50,6 +50,7 @@ import { clipBar, eventPill, initEditing, timelineLoaded, trackLane } from "./ed
 import { drawAudioTracks, initAudio } from "./audiotracks.js";
 import { initBin, refreshBin } from "./bin.js";
 import { initScriptView, scriptViewLoaded } from "./scriptview.js";
+import { drawPrompter, initRecording } from "./recording.js";
 import { initTrackHeads, trackHead } from "./trackheads.js";
 import { FrameCache } from "./frames.js";
 import { initRender, renderAvailable } from "./render.js";
@@ -540,6 +541,7 @@ function show(time, intended = time, reveal = false) {
   elements.playheadFrame.style.left = `${percent(time)}%`;
   elements.time.textContent = `${time.toFixed(2)} s · frame ${frameOf(time)}`;
   drawSubtitle(time);
+  drawPrompter(time);
   if (reveal) revealPlayhead();
   if (state.playing) return;
   if (state.loading) {
@@ -940,7 +942,8 @@ async function start() {
   initThumbs({ state });
   initTrackHeads({ state });
   initBin({ state });
-  initScriptView({ state });
+  initScriptView({ state, setVersion });
+  initRecording({ state, loadFlag, saveFlag, seek, play, pause, setVersion });
   initRender({ state });
   initAudio({ state, elements, percent, addRow, play, pause, redraw: drawTimeline, showTime: (time) => show(snap(time)) });
   initEditing({

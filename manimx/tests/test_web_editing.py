@@ -568,6 +568,14 @@ def test_scripts_are_written_placed_recorded_and_synced_live(root, renderer, mon
         assert request(server, "/api/clip", {"index": 0, "cues": {"hit": "narration.on"}})[0] == 200
         on = editor.timeline.event_times()["narration.on"]
         assert first.compiled_time(on) == pytest.approx(1.0)
+        # Fit to scenes: the sentence moves so "on" lands where the cue is at the scene's own pace (1 s).
+        assert request(server, "/api/script/fit", {"script": "narration"})[1]["moved"] == 1
+        assert editor.timeline.event_times()["narration.on"] == pytest.approx(1.0)
+        assert editor.history()["undo"] == "fit narration to the scenes"
+        editor.undo()
+        assert editor.timeline.event_times()["narration.on"] == pytest.approx(on)
+        assert [word["sentence"] for word in request(server, "/api/scripts")[1][0]["parts"][1]["words"]] == [0, 0]
+        assert request(server, "/api/timeline")[1]["voice"] == {"countdown": 3.0, "lead": 1.5}
         assert request(server, "/api/script/words", {"script": "narration", "part": 1, "words": [{"index": 1, "start": 2.0, "end": 2.3}], "gesture": "g"})[0] == 200
         assert first.compiled_time(3.0) == pytest.approx(1.0)  # the word moved by hand, the scene with it
         assert editor.history()["undo"] == "time a word"

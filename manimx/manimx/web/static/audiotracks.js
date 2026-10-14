@@ -23,6 +23,7 @@
 import { PART_TYPE, SOUND_TYPE, scriptPart } from "./bin.js";
 import { button, field, liveSender, liveSlider, numberInput, onFrame, paragraph, post, say, showSnap, snapTo, timeAtUnclamped } from "./editing.js";
 import { isLocked, trackHead } from "./trackheads.js";
+import { recordPart, recordingPart, stopTake } from "./recording.js";
 
 const SNAP_PIXELS = 8;
 const selected = new Set(); // indices of the selected audio clips
@@ -35,7 +36,11 @@ const recordButton = document.getElementById("record");
 
 export function initAudio(shared) {
   page = shared;
-  recordButton.addEventListener("click", () => (recording ? stopRecording() : startRecording()));
+  recordButton.addEventListener("click", record);
+  document.addEventListener("keydown", (event) => {
+    if (event.target.closest("input, select, textarea, dialog") || !page.state.timeline?.editable) return;
+    if (event.key.toLowerCase() === "r" && !event.ctrlKey && !event.metaKey && !event.altKey) record();
+  });
   document.addEventListener("manimx:scripts", () => {
     if (!page.state.dragging) page.redraw(); // the script parts' words arrived
   });
@@ -156,6 +161,30 @@ async function placeFile(blob, name, start, track) {
   }
 }
 
+/** ●: record the selected script part (with a countdown and the
+ * teleprompter), or with nothing selected a free voice-over from the
+ * playhead; pressed again, stop. */
+async function record() {
+  if (recordingPart()) {
+    recordButton.setAttribute("aria-pressed", "false");
+    await stopTake();
+    return;
+  }
+  if (recording) {
+    stopRecording();
+    return;
+  }
+  const { audio } = page.state.timeline;
+  const part = [...selected].find((index) => audio[index]?.script);
+  if (part !== undefined) {
+    recordButton.setAttribute("aria-pressed", "true");
+    await recordPart(part);
+    if (!recordingPart()) recordButton.setAttribute("aria-pressed", "false"); // no microphone
+    return;
+  }
+  startRecording();
+}
+
 async function startRecording() {
   let stream;
   try {
@@ -238,6 +267,7 @@ function volumeLine(clip, index) {
   if (!page.state.timeline.editable || isLocked("audio", clip.track)) return line;
   line.addEventListener("pointerdown", (event) => {
     event.stopPropagation();
+    selectOnly(index);
     line.setPointerCapture(event.pointerId);
     const height = line.parentElement.getBoundingClientRect().height;
     const send = liveSender("/api/audio/edit", () => {});
@@ -283,6 +313,7 @@ function fades(clip) {
     if (!page.state.timeline.editable || isLocked("audio", clip.track)) return ramp;
     handle.addEventListener("pointerdown", (event) => {
       event.stopPropagation();
+      selectOnly(index);
       handle.setPointerCapture(event.pointerId);
       const secondsPerPixel = page.state.span / page.elements.ruler.getBoundingClientRect().width;
       const send = liveSender("/api/audio/edit", () => {});
@@ -322,8 +353,9 @@ function wordBlocks(clip) {
     if (word.end < cutIn || word.start > cutIn + length) return;
     const block = document.createElement("div");
     block.className = "word";
+    block.dataset.index = index;
     block.textContent = word.text;
-    block.title = `${word.text} at ${(clip.start + word.start - cutIn).toFixed(2)} s${page.state.timeline.editable ? ": drag to time it" : ""}`;
+    block.title = `${word.text} at ${(clip.start + word.start - cutIn).toFixed(2)} s${page.state.timeline.editable ? ": drag to time it, Shift+drag moves its sentence" : ""}`;
     place(block, word);
     if (page.state.timeline.editable && !isLocked("audio", clip.track)) block.addEventListener("pointerdown", (event) => dragWord(event, block, clip, index, word, place));
     layer.append(block);
@@ -331,22 +363,26 @@ function wordBlocks(clip) {
   return layer;
 }
 
-/** Drag a word in time (the frame at its start shows meanwhile). */
+/** Drag a word in time, with Shift its whole sentence (the frame at the word shows meanwhile). */
 function dragWord(event, block, clip, index, word, place) {
   event.stopPropagation();
+  selectOnly(page.state.timeline.audio.indexOf(clip));
   block.setPointerCapture(event.pointerId);
   const cutIn = clip.cut?.[0] ?? 0;
   const secondsPerPixel = page.state.span / page.elements.ruler.getBoundingClientRect().width;
-  const moved = { start: word.start, end: word.end };
-  const send = liveSender("/api/script/words", () => page.showTime(clip.start + moved.start - cutIn));
+  const words = scriptPart(clip.script, clip.part).words;
+  const indices = event.shiftKey ? words.map((other, i) => (other.sentence === word.sentence ? i : -1)).filter((i) => i >= 0) : [index];
+  const blocks = new Map(indices.map((i) => [i, block.parentElement.querySelector(`.word[data-index="${i}"]`)]));
+  const earliest = Math.min(...indices.map((i) => words[i].start));
+  let delta = 0;
+  const send = liveSender("/api/script/words", () => page.showTime(clip.start + word.start + delta - cutIn));
   page.state.dragging = true;
   const round = (value) => Math.round(value * 1000) / 1000;
   const onMove = (move) => {
-    const delta = Math.max(-word.start, (move.clientX - event.clientX) * secondsPerPixel);
-    moved.start = round(word.start + delta);
-    moved.end = round(word.end + delta);
-    place(block, moved);
-    send({ script: clip.script, part: clip.part, words: [{ index, ...moved }] });
+    delta = Math.max(-earliest, (move.clientX - event.clientX) * secondsPerPixel);
+    const moved = indices.map((i) => ({ index: i, start: round(words[i].start + delta), end: round(words[i].end + delta) }));
+    for (const item of moved) if (blocks.get(item.index)) place(blocks.get(item.index), item);
+    send({ script: clip.script, part: clip.part, words: moved });
   };
   const onUp = async () => {
     block.removeEventListener("pointermove", onMove);
@@ -382,6 +418,16 @@ async function drawWaveform(canvas, clip, index, pixels) {
     const top = 32 - high * 32 * clip.volume;
     context.fillRect(x, top, 1, Math.max(1, (high - low) * 32 * clip.volume));
   });
+}
+
+/** Select audio clip `index` alone (a click on it, or on its words, volume line or fades). */
+function selectOnly(index) {
+  if (selected.size === 1 && selected.has(index)) return;
+  selected.clear();
+  selected.add(index);
+  document.dispatchEvent(new CustomEvent("manimx:select", { detail: "audio" }));
+  markSelected();
+  drawPanel();
 }
 
 function markSelected() {

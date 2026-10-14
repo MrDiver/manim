@@ -92,6 +92,8 @@ def time_take(sound: Sound, text: str, offset: float = 0.0, model: str = DEFAULT
     countdown). Times count from that start; what is said before it
     (counting along) is left out."""
     heard = [word for word in trim_silence(recognize(sound, model, language), sound) if word.end > offset]
+    if not heard:
+        raise ValueError("Whisper heard no words in the take")
     shifted = [Word(word.text, max(0.0, word.start - offset), word.end - offset) for word in heard]
     return align(text, shifted).words
 

@@ -310,3 +310,7 @@ def test_a_take_is_timed_from_where_its_part_starts(monkeypatch) -> None:
     monkeypatch.setattr(alignment, "trim_silence", lambda words, sound: list(words))
     words = time_take(Sound(np.zeros(8000 * 5, dtype=np.float32), 8000), "Hello there!", offset=3.0)
     assert [(word.text, round(word.start, 3), round(word.end, 3)) for word in words] == [("Hello", 0.2, 0.6), ("there!", 0.7, 1.1)]
+
+    monkeypatch.setattr(alignment, "recognize", lambda sound, model, language: [])
+    with pytest.raises(ValueError, match="heard no words"):
+        time_take(Sound(np.zeros(800, dtype=np.float32), 8000), "Hello", offset=0.0)

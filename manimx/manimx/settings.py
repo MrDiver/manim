@@ -201,6 +201,8 @@ class VoiceSettings:
         choices=("tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"),
     )
     language: str = setting("", "The language spoken, e.g. en or de; empty: Whisper finds it.")
+    countdown: float = setting(3.0, "Seconds of counting down (3, 2, 1) before a recorded part starts; they are recorded too, then cut off.", minimum=0.0, maximum=10.0, unit="s")
+    lead: float = setting(1.5, "How early the teleprompter shows a sentence before it is to be said.", minimum=0.0, maximum=10.0, unit="s")
 
 
 @dataclass

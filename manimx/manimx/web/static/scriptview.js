@@ -96,6 +96,13 @@ function draw() {
   status.className = "script-status";
   head.append(status);
   if (script !== null) {
+    const fit = button("Fit to scenes", async () => {
+      const answer = await fetch("/api/script/fit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ script: script.name }) }).then((r) => r.json());
+      status.textContent = answer.error ?? (answer.moved ? `Moved ${answer.moved} sentence${answer.moved === 1 ? "" : "s"} to where the scenes wait for their words` : "Every word the scenes wait for is in place already");
+      if (!answer.error) page.setVersion(answer.version);
+    });
+    fit.title = "Move each sentence so the words the scenes' cues wait for are said where those cues are";
+    head.append(fit);
     const remove = button("Delete script", () => {
       if (confirm(`Delete the script ${script.name}? Its recordings stay in the project's sounds.`)) post("/api/script", { name: script.name, delete: true });
     });

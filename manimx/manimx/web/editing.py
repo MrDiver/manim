@@ -518,7 +518,7 @@ class ProjectEditor:
                     "parts": [
                         {
                             "title": part.title,
-                            "words": [{"text": w.text, "start": w.start, "end": w.end} for w in part.words],
+                            "words": _words_json(part),
                             "take": None if part.take is None else {"file": part.take.file, "offset": part.take.offset},
                             "length": part.planned_length,
                             "clip": placed.get(index),
@@ -555,6 +555,64 @@ class ProjectEditor:
             words, problem = old.words, f"the words keep their planned times: {error}"
         self.run(SetScript(name, script.with_part(part, Part(old.text, words, Take(file, offset)))))
         return problem
+
+    def fit_to_scenes(self, name: str) -> int:
+        """Move the sentences of script ``name``'s placed parts so each
+        word a scene's cue waits for lands where that cue is at the scene's
+        own pace; a part whose first sentence would start before it moves
+        earlier itself. One edit; returns how many sentences moved."""
+        script = self._script(name)
+        if script is None:
+            raise EditError(f"there is no script {name}")
+        targets = self._cue_times()
+        project = self._project()
+        names = script.event_names()
+        new = script
+        moves: list[UICommand] = []
+        moved = 0
+        for position, (entry, clip) in enumerate(zip(project.audio, self.timeline.audio_clips, strict=True)):
+            if entry.script != name:
+                continue
+            part = new.parts[entry.part]
+            words = list(part.words)
+            for sentence in _sentences(part):
+                # The word's global time is the clip's start plus its time in the part (minus a cut).
+                shifts = [
+                    targets[event] - (clip.start + words[index].start - ((clip.cut_in or 0.0) - clip.offset))
+                    for index in sentence
+                    for event in names[entry.part][index]
+                    if event in targets
+                ]
+                if not shifts or abs(shifts[0]) < 1e-3:
+                    continue
+                for index in sentence:
+                    words[index] = Word(words[index].text, words[index].start + shifts[0], words[index].end + shifts[0])
+                moved += 1
+            early = min((word.start for word in words), default=0.0)
+            if early < 0.0:  # the part starts earlier, its words as much later in it
+                words = [Word(word.text, word.start - early, word.end - early) for word in words]
+                moves.append(EditAudio((ClipEdit(position, (("start", max(0.0, entry.start + early)),)),)))
+            words = [Word(word.text, round(word.start, 3), round(word.end, 3)) for word in words]
+            new = new.with_part(entry.part, Part(part.text, tuple(words), part.take))
+        if moved:
+            self.run(Batch((*moves, SetScript(name, new)), f"fit {name} to the scenes"))
+        return moved
+
+    def _cue_times(self) -> dict[str, float]:
+        """Every cue's event and where the cue is at its scene's own pace
+        (as if no event bent the clip's time): where its word should be."""
+        times: dict[str, float] = {}
+        for clip in self.timeline.clips:
+            for segment, timing in zip(clip.scene.segments, clip.timings, strict=True):
+                compiled = clip._compiled_range(segment)
+                if timing is None or compiled is None:
+                    continue
+                scale = clip.scales.get(segment.index, 1.0)
+                for cue in segment.cues:
+                    at = segment.offset + cue.time
+                    if compiled[0] <= at <= compiled[1]:
+                        times.setdefault(clip.event_of(cue.name), timing.start + (at - compiled[0]) * scale)
+        return times
 
     def _script(self, name: str) -> Script | None:
         project = self._project()
@@ -655,6 +713,11 @@ class ProjectEditor:
             kind: {str(index): dataclasses.asdict(track) for index, track in tracks.items()}
             for kind, tracks in (("scenes", project.scene_tracks), ("audio", project.audio_tracks))
         }
+
+    def voice(self) -> dict[str, float]:
+        """What recording needs to know: the countdown and the teleprompter's lead."""
+        voice = self._project().settings.voice
+        return {"countdown": voice.countdown, "lead": voice.lead}
 
     def sounds(self) -> list[dict[str, Any]]:
         """The sound files in assets/audio/: path, and how many audio clips play each."""
@@ -823,6 +886,33 @@ class ProjectEditor:
             self._unsaved = False
             self.project.save()
             self.saved_mtime = _mtime(self.root / PROJECT_FILE)
+
+
+def _sentences(part: Part) -> list[list[int]]:
+    """The indices of ``part``'s words, sentence by sentence."""
+    sentences: list[list[int]] = []
+    current = -1
+    for index, word in enumerate(_words_json(part)):
+        if word["sentence"] != current:
+            sentences.append([])
+            current = word["sentence"]
+        sentences[-1].append(index)
+    return sentences
+
+
+def _words_json(part: Part) -> list[dict[str, Any]]:
+    """A part's words as the page shows them: text, times, and which
+    sentence each belongs to (a sentence ends with . ! ? or its line)."""
+    from ..voice.transcript import tokens
+
+    words, sentence = [], 0
+    marks = tokens(part.text)
+    for index, (word, token) in enumerate(zip(part.words, marks, strict=True)):
+        words.append({"text": word.text, "start": word.start, "end": word.end, "sentence": sentence})
+        following = marks[index + 1] if index + 1 < len(marks) else None
+        if token.text.endswith((".", "!", "?")) or (following is not None and following.line != token.line):
+            sentence += 1
+    return words
 
 
 def _take_file(clip: Any) -> str | None:

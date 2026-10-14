@@ -20,6 +20,7 @@
       <button id="render-button" type="button" hidden title="Render the video at full quality (saved to the project's renders folder)">Render</button>
       <button id="settings-button" type="button" hidden title="The project's settings (saved to manimx.json)">Settings</button>
       <button id="indices" type="button" aria-pressed="false" title="Show the index of every path in its group (for MorphMatching pairs)">Indices</button>
+      <button id="prompter-button" type="button" aria-pressed="false" title="Teleprompter: show over the frame what the scripts say, a moment before it is due (T)">Teleprompter</button>
       <button id="captions" type="button" aria-pressed="true" title="Show what the scripts say over the frame (C)">Subtitles</button>
       <output id="time" aria-live="off">0.00 s</output>
     </div>
@@ -56,6 +57,8 @@
           <canvas id="frame" role="img" aria-label="The frame at the current time"></canvas>
           <div id="labels" aria-hidden="true"></div>
           <p id="subtitles" hidden></p>
+          <div id="prompter" aria-live="off" hidden></div>
+          <div id="countdown" aria-live="assertive" hidden></div>
         </div>
         <figcaption id="error" hidden></figcaption>
       </figure>

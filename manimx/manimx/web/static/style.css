@@ -1135,6 +1135,64 @@ button.toggle[aria-expanded="true"]::before,
   pointer-events: none;
 }
 
+/* -- the teleprompter and the countdown over the frame (recording.js) ---------------- */
+
+#prompter {
+  position: absolute;
+  left: 4%;
+  right: 4%;
+  top: 4%;
+  padding: 10px 16px;
+  background: rgb(0 0 0 / 0.72);
+  border-radius: 8px;
+  color: #ffffff;
+  text-align: center;
+  pointer-events: none;
+}
+
+.prompt {
+  margin: 0;
+}
+
+.prompt.now {
+  font: 600 clamp(14px, 2.6vw, 30px) / 1.35 system-ui, sans-serif;
+}
+
+.prompt.now span {
+  color: rgb(255 255 255 / 0.55);
+}
+
+.prompt.now span.said {
+  color: #ffd666;
+}
+
+.prompt.next {
+  margin-top: 6px;
+  font: clamp(11px, 1.6vw, 18px) / 1.35 system-ui, sans-serif;
+  color: rgb(255 255 255 / 0.6);
+}
+
+#countdown {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.35);
+  color: #ffffff;
+  font: 700 clamp(48px, 14vw, 180px) / 1 system-ui, sans-serif;
+  pointer-events: none;
+}
+
+#countdown[hidden],
+#prompter[hidden] {
+  display: none;
+}
+
+body.recording-take #stage {
+  outline: 3px solid #d04848;
+  outline-offset: -3px;
+}
+
 /* -- the view tabs and the Script tab (scriptview.js) ------------------------------ */
 
 .tabs {

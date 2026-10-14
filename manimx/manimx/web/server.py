@@ -62,6 +62,8 @@ shows, and ``manimx.json`` is saved shortly after (see editing.py):
                              {"name", "delete": true}
     POST /api/script/words   {"script", "part", "words": [{"index",
                              "start", "end"}]}: time words by hand
+    POST /api/script/fit     {"script"}: move its sentences so the words
+                             scenes' cues wait for land on those cues
     POST /api/script/take    {"script", "part", "file", "offset"}: a
                              recorded take of a part (uploaded first);
                              Whisper times its words, answers when done
@@ -314,6 +316,7 @@ class PreviewServer:
             ],
             "audio": self.editor.audio_clips() if self.editor is not None else [],
             "transcriber": _transcriber(),
+            "voice": self.editor.voice() if self.editor is not None else None,
             "tracks": self.editor.tracks() if self.editor is not None else {"scenes": {}, "audio": {}},
             "said": [{"name": name, "time": time} for name, time in sorted(self.timeline.word_events().items(), key=lambda item: item[1])],
             "subtitles": [{"start": item.start, "end": item.end, "text": item.text} for item in self.timeline.subtitles()],
@@ -455,6 +458,9 @@ class _Handler(BaseHTTPRequestHandler):
         if route == "/api/script/take" and editor is not None:
             self._take(editor)
             return
+        if route == "/api/script/fit" and editor is not None:
+            self._fit(editor)
+            return
         if route not in EDIT_ROUTES:
             self._json({"error": f"not found: {self.path}"}, HTTPStatus.NOT_FOUND)
             return
@@ -490,6 +496,18 @@ class _Handler(BaseHTTPRequestHandler):
                 raise _BadRequest(f"a sound file must be between 1 byte and {MAX_ASSET // 2**20} MB")
             self._json({"file": editor.save_asset(name, self.rfile.read(length))})
         except (_BadRequest, EditError) as error:
+            self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+
+    def _fit(self, editor: ProjectEditor) -> None:
+        """POST /api/script/fit {"script"}: its sentences moved to the scenes' cues."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(body, dict) or not isinstance(body.get("script"), str):
+                raise _BadRequest('fitting takes {"script": "..."}')
+            moved = editor.fit_to_scenes(body["script"])
+            self._json({"ok": True, "version": self.preview.version, "history": editor.history(), "moved": moved})
+        except (_BadRequest, EditError, json.JSONDecodeError) as error:
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
 
     def _take(self, editor: ProjectEditor) -> None:
