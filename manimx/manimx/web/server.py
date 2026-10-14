@@ -100,6 +100,7 @@ Design decisions:
 from __future__ import annotations
 
 import dataclasses
+import importlib.util
 import io
 import json
 import mimetypes
@@ -305,6 +306,7 @@ class PreviewServer:
                 for clip, entry in zip(clips, entries, strict=True)
             ],
             "audio": self.editor.audio_clips() if self.editor is not None else [],
+            "transcriber": _transcriber(),
             "said": [{"name": name, "time": time} for name, time in sorted(self.timeline.word_events().items(), key=lambda item: item[1])],
             "subtitles": [{"start": item.start, "end": item.end, "text": item.text} for item in self.timeline.subtitles()],
             "segments": [
@@ -642,6 +644,11 @@ def _waits(clip: Clip, known: dict[str, float]) -> list[dict[str, Any]]:
             waits.append({"event": segment.waits_for, "from": previous_end, "time": known.get(segment.waits_for)})
         previous_end = None if timing is None else timing.end
     return waits
+
+
+def _transcriber() -> bool:
+    """Whether Whisper (the optional faster-whisper) can transcribe here."""
+    return importlib.util.find_spec("faster_whisper") is not None
 
 
 def _cues(clip: Clip, known: dict[str, float]) -> list[dict[str, Any]]:

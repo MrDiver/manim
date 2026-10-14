@@ -542,7 +542,7 @@ def test_transcripts_and_cues_are_edited_live(root, renderer, monkeypatch) -> No
     calls = []
 
     def fake_transcribe(sound, text=None, model="small", language=None):  # Whisper is not run in tests
-        calls.append(text)
+        calls.append((text, model, language))
         return heard if text is None else alignment.align(text, heard.words)
 
     monkeypatch.setattr(alignment, "transcribe", fake_transcribe)
@@ -578,8 +578,11 @@ def test_transcripts_and_cues_are_edited_live(root, renderer, monkeypatch) -> No
         assert request(server, "/api/transcript", {"file": file, "text": "go now, go!\n[end]\nmore"})[0] == 200
         words = editor.timeline.audio_clips[0].transcript.words
         assert [word.text for word in words] == ["go", "now,", "go!", "more"] and words[2].start == 2.5
+        editor.set_setting(["voice", "model"], "large-v3-turbo")  # the project's Whisper
+        editor.set_setting(["voice", "language"], "en")
         assert request(server, "/api/transcript/transcribe", {"file": file, "text": "go now go"})[0] == 200
-        assert calls == [None, "go now go"]
+        assert calls == [(None, "small", None), ("go now go", "large-v3-turbo", "en")]
+        assert request(server, "/api/timeline")[1]["transcriber"] in (True, False)
         editor.save()
         assert Project.load(root).timeline[0].cues == {"hit": "voice.go.2"}
         assert request(server, "/api/transcript", {"file": file, "remove": True})[0] == 200

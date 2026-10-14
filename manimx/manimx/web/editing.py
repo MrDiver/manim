@@ -481,17 +481,19 @@ class ProjectEditor:
 
     # -- transcripts ----------------------------------------------------------------
 
-    def transcribe(self, file: str, text: str | None = None, model: str | None = None) -> None:
-        """Time the words of the sound file ``file`` with Whisper: ``text``,
-        or (None) the words Whisper hears; one edit, undone like others.
-        Runs for seconds, without holding the editor."""
-        from ..voice.alignment import DEFAULT_MODEL, transcribe
+    def transcribe(self, file: str, text: str | None = None) -> None:
+        """Time the words of the sound file ``file`` with Whisper (the
+        project's ``voice`` settings): ``text``, or (None) the words Whisper
+        hears; one edit, undone like others. Runs for seconds, without
+        holding the editor."""
+        from ..voice.alignment import transcribe
 
         project = self._project()
         if not any(entry.file == file for entry in project.audio):
             raise EditError(f"{file} is on no audio track")
         try:
-            transcript = transcribe(project.sound(file), text, model or DEFAULT_MODEL)
+            voice = project.settings.voice
+            transcript = transcribe(project.sound(file), text, voice.model, voice.language or None)
         except Exception as error:  # no faster-whisper, a model that does not download, ...
             raise EditError(f"cannot transcribe {file}: {error}") from None
         self.run(SetTranscript(file, transcript))

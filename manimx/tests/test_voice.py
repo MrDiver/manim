@@ -235,5 +235,5 @@ def test_transcribing_needs_faster_whisper(monkeypatch) -> None:
         return real(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", without_whisper)
-    with pytest.raises(RuntimeError, match="pip install 'manimx\\[voice\\]'"):
+    with pytest.raises(RuntimeError, match="uv add 'manimx\\[voice\\]'"):
         recognize(Sound(np.zeros(800, dtype=np.float32), 8000))

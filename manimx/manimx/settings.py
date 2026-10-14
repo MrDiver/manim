@@ -191,6 +191,19 @@ class PerformanceSettings:
 
 
 @dataclass
+class VoiceSettings:
+    """How recordings are transcribed (manimx transcribe, the preview's Transcribe)."""
+
+    model: str = setting(
+        "small",
+        "Whisper model: larger ones hear better and time words a bit more surely, but are slower and download more once "
+        "(base 150 MB, small 470 MB, medium 1.5 GB, large-v3 3 GB; large-v3-turbo is nearly as good as large-v3 and much faster).",
+        choices=("tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"),
+    )
+    language: str = setting("", "The language spoken, e.g. en or de; empty: Whisper finds it.")
+
+
+@dataclass
 class Settings:
     """All settings of a project (everything in manimx.json except scenes and timeline)."""
 
@@ -198,6 +211,7 @@ class Settings:
     effects: EffectsSettings = section(EffectsSettings, "Motion blur, bloom, shadows and tone mapping.")
     lighting: LightingSettings = section(LightingSettings, "Ambient and default light for 3D objects.")
     performance: PerformanceSettings = section(PerformanceSettings, "Processes and GPU queueing.")
+    voice: VoiceSettings = section(VoiceSettings, "Transcribing recordings: the Whisper model and the language.")
 
     # -- for the renderer -----------------------------------------------------
 

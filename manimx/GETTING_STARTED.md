@@ -221,11 +221,13 @@ track (drop it in `manimx ui`, or list it under `"audio"` in
 `manimx.json`) and time its words with Whisper:
 
 ```bash
-uv add 'manimx[voice]'                      # faster-whisper, once
 uv run manimx transcribe assets/audio/voice.m4a --text script.txt
 ```
 
-This writes `assets/audio/voice.transcript.json` next to the recording
+Whisper comes with `manimx[voice]`, which projects made by `manimx new`
+depend on (in an older project: `uv add 'manimx[voice]'`); its model,
+downloaded on first use, is the setting `voice.model`. This writes
+`assets/audio/voice.transcript.json` next to the recording
 (`--text` is what is said; without it, what Whisper hears; a line
 `[middle]` starts a section). Every word is now an event named after the
 file: `voice.square` the first "square", `voice.square.2` the second,
@@ -299,6 +301,7 @@ opens a menu with every setting (see below).
 | `effects.tone_map` | how lit 3D colors map to the screen (`pbr_neutral`, `aces`, `agx`, `reinhard`, `none`) and their `exposure`. 2D colors always stay exact |
 | `lighting` | ambient light for 3D objects, and a default key light for scenes without lights |
 | `performance` | speed only, never the image: render processes, frames queued on the GPU |
+| `voice` | transcribing recordings: the Whisper `model` (`small`; `large-v3-turbo` hears better) and the `language` (empty: Whisper finds it) |
 | `timeline.clips` | clips in order. Without `start` a clip begins when the previous one ends. `layer` draws on top; `cut` keeps only that part of the scene, in seconds; `speed` plays it faster (2) or in slow motion (0.5) |
 | `timeline.events` | times of the events scenes `wait_for` |
 

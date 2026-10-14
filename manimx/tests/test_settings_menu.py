@@ -28,7 +28,7 @@ def text(menu: SettingsMenu) -> str:
 
 def test_sections_open_and_close() -> None:
     menu = SettingsMenu(Settings())
-    assert labels(menu) == ["output", "effects", "lighting", "performance"]
+    assert labels(menu) == ["output", "effects", "lighting", "performance", "voice"]
 
     go_to(menu, "effects")
     press(menu, "right")
@@ -41,7 +41,7 @@ def test_sections_open_and_close() -> None:
     press(menu, "left")  # from a value: close its section, select it
     assert labels(menu)[menu.cursor] == "effects.motion_blur" and "effects.motion_blur.shutter_angle" not in labels(menu)
     press(menu, "up", "left")
-    assert labels(menu) == ["output", "effects", "lighting", "performance"]
+    assert labels(menu) == ["output", "effects", "lighting", "performance", "voice"]
     press(menu, "up", "up", "up", "down")
     assert menu.cursor == 1
 

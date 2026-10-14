@@ -403,8 +403,8 @@ def transcribe(
     text: Annotated[
         Path | None, typer.Option("--text", "-t", help="What is said, as a text file ([name] lines start sections); default: what Whisper hears.", show_default=False)
     ] = None,
-    model: Annotated[str | None, typer.Option(help="Whisper model: base, small (default), medium, large-v3, ...", show_default=False)] = None,
-    language: Annotated[str | None, typer.Option(help="The language spoken, e.g. en or de (default: Whisper finds it).", show_default=False)] = None,
+    model: Annotated[str | None, typer.Option(help="Whisper model: base, small, medium, large-v3, ... (default: voice.model).", show_default=False)] = None,
+    language: Annotated[str | None, typer.Option(help="The language spoken, e.g. en or de (default: voice.language, or Whisper finds it).", show_default=False)] = None,
 ) -> None:
     """Time the words of a recording with Whisper, so scenes sync to them.
 
@@ -413,7 +413,6 @@ def transcribe(
     voice.middle.square (after a [middle] line).
     """
     from ..animation.audio import Sound
-    from ..voice.alignment import DEFAULT_MODEL
     from ..voice.alignment import transcribe as transcribe_sound
     from ..voice.transcript import transcript_path
 
@@ -423,7 +422,8 @@ def transcribe(
         raise ProjectError(f"no sound file {sound}")
     written = text.read_text(encoding="utf-8") if text is not None else None
     with ui.console.status("Transcribing with Whisper… (the first time, it downloads its model)", spinner="dots"):
-        transcript = transcribe_sound(Sound.load(path), written, model or DEFAULT_MODEL, language)
+        voice = project.settings.voice
+        transcript = transcribe_sound(Sound.load(path), written, model or voice.model, language or voice.language or None)
     target = transcript_path(path)
     transcript.save(target)
     name = path.stem

@@ -5,7 +5,7 @@
     transcript = transcribe(sound)                    # both; Whisper's text as the text
 
 Whisper (faster-whisper, https://github.com/SYSTRAN/faster-whisper, an
-optional dependency: ``pip install manimx[voice]``) recognizes the
+optional dependency: ``uv add 'manimx[voice]'``) recognizes the
 recording's words with their times (``word_timestamps``, from the
 attention of its decoder on the audio, see
 https://github.com/openai/whisper/blob/main/whisper/timing.py). Whisper
@@ -44,13 +44,16 @@ import numpy as np
 from ..animation.audio import Sound
 from .transcript import Transcript, Word, tokens, word_key
 
+INSTALL = "uv add 'manimx[voice]' in the project (or pip install 'manimx[voice]')"
+"""How to install the optional dependency transcribing needs."""
+
 WHISPER_RATE = 16_000
 """The sample rate Whisper listens at."""
 
 DEFAULT_MODEL = "small"
-"""Whisper's model (downloaded once, ~460 MB; ``base`` is smaller and
-less sure, ``large-v3`` slower and surer). Multilingual: Whisper finds
-the language itself."""
+"""Whisper's model when none is given (a project's is its ``voice.model``
+setting): downloaded once, ~470 MB; multilingual, Whisper finds the
+language itself."""
 
 UNSURE = 0.1
 """Recognized words Whisper is less sure of than this are left out (at
@@ -62,7 +65,7 @@ def recognize(sound: Sound, model: str = DEFAULT_MODEL, language: str | None = N
     try:
         from faster_whisper import WhisperModel
     except ImportError:
-        raise RuntimeError("transcribing needs faster-whisper: pip install 'manimx[voice]'") from None
+        raise RuntimeError(f"transcribing needs faster-whisper: {INSTALL}") from None
     samples = _mono(sound, WHISPER_RATE)
     whisper = WhisperModel(model, device="cpu", compute_type="int8")
     segments, _ = whisper.transcribe(samples, word_timestamps=True, language=language, vad_filter=False)

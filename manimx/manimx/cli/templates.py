@@ -91,7 +91,7 @@ name = "{package}"
 version = "0.1.0"
 description = "A manimx project."
 requires-python = ">=3.11"
-dependencies = ["manimx"]
+dependencies = ["manimx[voice]"]
 
 [tool.uv]
 package = false

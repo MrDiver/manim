@@ -428,16 +428,21 @@ function transcriptPanel(clip) {
     await post("/api/transcript/transcribe", { file: clip.file, text: text.value.trim() || null });
     transcribe.disabled = false;
   });
-  transcribe.title = "Whisper times the words of the text (or, empty, of what it hears)";
+  transcribe.title = "Whisper times the words of the text (or, empty, of what it hears); its model is a setting (voice.model)";
   const row = document.createElement("div");
   row.className = "actions";
   row.append(transcribe);
+  if (!page.state.timeline.transcriber) {
+    transcribe.disabled = true;
+    transcribe.title = "Whisper is not installed in this project";
+  }
   if (clip.transcript) {
     const apply = button("Apply text", () => post("/api/transcript", { file: clip.file, text: text.value }));
     apply.title = "Use the edited text: its words keep the times of the words they match, new ones fit in between";
     row.append(apply, button("Remove", () => post("/api/transcript", { file: clip.file, remove: true })));
   }
   section.append(heading, text, row);
+  if (!page.state.timeline.transcriber) section.append(paragraph("Transcribing needs Whisper: run uv add 'manimx[voice]' in the project, then restart manimx ui."));
   if (clip.transcript) {
     const first = clip.transcript.words[0]?.text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "") ?? "word";
     section.append(
