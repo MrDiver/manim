@@ -36,6 +36,19 @@
 //! per-point colors, a stroke's curve links and points, a path's center)
 //! is built once per version of the values it comes from and kept in
 //! `PathCache`.
+//!
+//! Pages: a GPU binds at most `max_storage_buffer_binding_size` bytes of a
+//! buffer at once (128 MiB is WebGPU's default, 2 GiB is common), and a
+//! large scene (100 000 dice: 3 GB of fill triangles) has more. So the
+//! arenas come in pages (`Page`), each drawn with its own bind group, none
+//! larger than `budget` bytes per arena. A node's records all live on one
+//! page, and every index in them (instance to object, curve to points)
+//! counts from its page's start, so a page is drawn exactly as the one set
+//! of buffers was before. A new node goes to the first page with room for
+//! its records; a node whose new records no longer fit its page moves to
+//! one that has room. The draw lists keep their order (transparent draws
+//! back to front across pages) and say which page each run of draws is on
+//! (`DrawList`). Garbage is repacked per page.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -43,7 +56,7 @@ use std::sync::Arc;
 use glam::{DMat4, DVec2, DVec3};
 
 use crate::render::pack::arena::Arena;
-use crate::render::pack::flatten::{DrawItem, FlatScene, ShadowList, NO_CLIP};
+use crate::render::pack::flatten::{DrawItem, FlatScene, NO_CLIP};
 use crate::render::pack::records::{self, DrawIndirect, Instance, Object, StrokeCurve};
 use crate::render::pack::shapes::strokes::{stroke_records, StrokeStyle};
 use crate::render::pack::shapes::tessellation::tessellate_fill;
@@ -51,6 +64,8 @@ use crate::robjects::{Fill, Kind, Path, Points, Texture};
 
 /// Where one path's records live, and what they were built from (`_Slot`).
 struct Slot {
+    /// The page holding all of its records.
+    page: usize,
     object: usize,
     world: Option<DMat4>,
     placement: (usize, i32, u32, f64, CameraView),
@@ -72,8 +87,9 @@ struct Slot {
 }
 
 impl Slot {
-    fn new(object: usize) -> Slot {
+    fn new(page: usize, object: usize) -> Slot {
         Slot {
+            page,
             object,
             world: None,
             placement: (usize::MAX, NO_CLIP - 1, u32::MAX, -1.0, NOT_A_VIEW),
@@ -123,6 +139,8 @@ struct FillColors {
 /// One indirect draw before encoding, with what it needs for sorting (`_Draw`).
 pub struct Draw {
     pub args: DrawIndirect,
+    /// The page whose buffers it draws from.
+    pub page: usize,
     pub opaque: bool,
     /// Depth of the path's center along the view direction: paths in one
     /// plane facing the camera tie, so their layers order them.
@@ -133,44 +151,82 @@ pub struct Draw {
     pub clip: i32,
 }
 
-/// The draw lists of one frame (the records are in the arenas).
+/// One draw list: its indirect draws, and the runs of consecutive draws
+/// on one page, `(page, count)`, in order.
+#[derive(Default)]
+pub struct DrawList {
+    pub bytes: Vec<u8>,
+    pub runs: Vec<(usize, u32)>,
+}
+
+impl DrawList {
+    fn new(draws: impl IntoIterator<Item = (DrawIndirect, usize)>) -> DrawList {
+        let mut list = DrawList::default();
+        for (args, page) in draws {
+            list.bytes.extend_from_slice(bytemuck::bytes_of(&args));
+            match list.runs.last_mut() {
+                Some((last, count)) if *last == page => *count += 1,
+                _ => list.runs.push((page, 1)),
+            }
+        }
+        list
+    }
+}
+
+/// One light scope's shadow casters: the scope, the casters sorted by clip
+/// scope (their page runs split where clip scopes change) and the runs of
+/// clip scopes `(clip, count)` (`FlatScene::shadow_lists`).
+pub type ShadowDraws = (i32, DrawList, Vec<(i32, u32)>);
+
+/// The draw lists of one frame (the records are in the pages' arenas).
 #[derive(Default)]
 pub struct VectorDraws {
-    pub opaque: Vec<u8>,
-    pub transparent: Vec<u8>,
-    pub masks: Vec<Vec<u8>>,
-    /// Per light scope (NO_CLIP first), the casters sorted by clip scope
-    /// and their runs (`FlatScene::shadow_lists`).
-    pub shadows: Vec<ShadowList<u8>>,
+    pub opaque: DrawList,
+    pub transparent: DrawList,
+    pub masks: Vec<DrawList>,
+    /// Per light scope (NO_CLIP first), its shadow casters.
+    pub shadows: Vec<ShadowDraws>,
     /// The images fills show, by layer of the image texture.
     pub images: Vec<Arc<Texture>>,
 }
 
-pub struct VectorPacker {
+/// One set of the record arenas, drawn with one bind group (see "Pages").
+pub struct Page {
     pub objects: Arena,
     pub instances: Arena,
     pub fill_vertices: Arena,
     pub fill_colors: Arena,
     pub stroke_points: Arena,
     pub stroke_curves: Arena,
-    slots: HashMap<(u64, i32), Slot>,
     free_objects: Vec<usize>,
-    pub paths: HashMap<u64, PathCache>,
 }
 
-impl VectorPacker {
-    pub fn new() -> VectorPacker {
-        VectorPacker {
+/// Records per arena, in `Page::arenas` order: objects, instances, fill
+/// vertices, fill colors, stroke points, stroke curves.
+type Records = [usize; 6];
+
+impl Page {
+    fn new() -> Page {
+        Page {
             objects: Arena::new(size_of::<Object>()),
             instances: Arena::new(size_of::<Instance>()),
             fill_vertices: Arena::new(records::FILL_VERTEX_SIZE),
             fill_colors: Arena::new(records::FILL_COLOR_SIZE),
             stroke_points: Arena::new(records::STROKE_POINT_SIZE),
             stroke_curves: Arena::new(size_of::<StrokeCurve>()),
-            slots: HashMap::new(),
             free_objects: Vec::new(),
-            paths: HashMap::new(),
         }
+    }
+
+    pub fn arenas(&self) -> [&Arena; 6] {
+        [
+            &self.objects,
+            &self.instances,
+            &self.fill_vertices,
+            &self.fill_colors,
+            &self.stroke_points,
+            &self.stroke_curves,
+        ]
     }
 
     pub fn arenas_mut(&mut self) -> [(&'static str, &mut Arena); 6] {
@@ -190,6 +246,58 @@ impl VectorPacker {
             .any(|(_, arena)| arena.too_much_garbage(4096))
     }
 
+    /// Whether `need` more records keep every arena within `budget` bytes
+    /// (an empty page takes anything: a node larger than a page has no
+    /// better place).
+    fn fits(&self, need: &Records, budget: usize) -> bool {
+        self.objects.used == 0
+            || self
+                .arenas()
+                .iter()
+                .zip(need)
+                .all(|(arena, &count)| (arena.used + count) * arena.record_size <= budget)
+    }
+
+    fn object_slot(&mut self) -> usize {
+        self.free_objects
+            .pop()
+            .unwrap_or_else(|| self.objects.allocate(1))
+    }
+}
+
+/// Bytes per arena of a page when nothing else is known (the renderer
+/// passes its device's limit): WebGPU's default binding size.
+pub const DEFAULT_PAGE_BYTES: usize = 128 << 20;
+
+pub struct VectorPacker {
+    pub pages: Vec<Page>,
+    /// The largest an arena of a page may grow, in bytes.
+    budget: usize,
+    slots: HashMap<(u64, i32), Slot>,
+    pub paths: HashMap<u64, PathCache>,
+}
+
+impl VectorPacker {
+    pub fn new(budget: usize) -> VectorPacker {
+        VectorPacker {
+            pages: vec![Page::new()],
+            budget,
+            slots: HashMap::new(),
+            paths: HashMap::new(),
+        }
+    }
+
+    /// The first page with room for `need`, a new one if none has.
+    fn page_with_room(&mut self, need: &Records) -> usize {
+        match self.pages.iter().position(|page| page.fits(need, self.budget)) {
+            Some(index) => index,
+            None => {
+                self.pages.push(Page::new());
+                self.pages.len() - 1
+            }
+        }
+    }
+
     /// Update the records for the flattened `scene` and return the
     /// frame's draws.
     pub fn pack(
@@ -199,11 +307,13 @@ impl VectorPacker {
         camera_views: &CameraViews,
         generation: u64,
     ) -> VectorDraws {
-        if self.too_much_garbage() {
-            // Repack everything from scratch (keeps the per-path cache).
-            let paths = std::mem::take(&mut self.paths);
-            *self = VectorPacker::new();
-            self.paths = paths;
+        for index in 0..self.pages.len() {
+            if self.pages[index].too_much_garbage() {
+                // Pack this page's nodes again from scratch, into whichever
+                // pages have room (keeps the per-path cache).
+                self.slots.retain(|_, slot| slot.page != index);
+                self.pages[index] = Page::new();
+            }
         }
         let mut draws = Vec::new();
         let mut seen = HashSet::new();
@@ -277,8 +387,9 @@ impl VectorPacker {
         let key = (node.uid, mask_of);
         seen.insert(key);
         if !self.slots.contains_key(&key) {
-            let object = self.object_slot();
-            self.slots.insert(key, Slot::new(object));
+            let page = self.page_with_room(&[1, 0, 0, 0, 0, 0]);
+            let object = self.pages[page].object_slot();
+            self.slots.insert(key, Slot::new(page, object));
         }
         let points_version = path.points.version;
         let mut slot = self.slots.remove(&key).unwrap();
@@ -288,6 +399,15 @@ impl VectorPacker {
             slot.stroke_key = None;
             slot.colors_key = None;
             slot.points_version = points_version;
+        }
+        let cache = self.paths.entry(node.uid).or_default();
+        cache.last_used = context.generation;
+        if item.alpha > 0.0 {
+            // The records about to be placed must fit the slot's page.
+            let need = self.records_needed(node.uid, path, fill, &slot);
+            if !self.pages[slot.page].fits(&need, self.budget) {
+                slot = self.move_to_page_with_room(slot, node.uid, path, fill);
+            }
         }
 
         let layer = 2 * item.order;
@@ -309,7 +429,7 @@ impl VectorPacker {
         };
         let placement = (layer, item.clip, flags, item.alpha, view);
         if slot.world != Some(item.world) || slot.placement != placement {
-            let entry: &mut Object = self.objects.record_mut(slot.object);
+            let entry: &mut Object = self.pages[slot.page].objects.record_mut(slot.object);
             entry.model = records::gpu_matrix(&item.world);
             entry.layer = layer as f32;
             entry.clip = item.clip;
@@ -324,8 +444,7 @@ impl VectorPacker {
             return; // invisible: the slot stays, nothing is drawn
         }
 
-        let cache = self.paths.entry(node.uid).or_default();
-        cache.last_used = context.generation;
+        let cache = self.paths.get_mut(&node.uid).unwrap();
         let center = path_center(cache, &path.points);
         let world_center = item.world.transform_point3(center);
         let distance = -context.view.transform_point3(world_center).z;
@@ -348,6 +467,7 @@ impl VectorPacker {
             draw.mask_of = mask_of;
             draw.casts_shadow = casts_shadow;
             draw.clip = item.clip;
+            draw.page = slot.page;
             draws.push(draw);
         }
         self.slots.insert(key, slot);
@@ -380,8 +500,9 @@ impl VectorPacker {
         if vertices.is_empty() {
             return None;
         }
+        let page = &mut self.pages[slot.page];
         if slot.fill_version != Some(points_version) {
-            slot.fill_first = self
+            slot.fill_first = page
                 .fill_vertices
                 .place(vertices, slot.fill_first, slot.fill_count);
             slot.fill_count = vertices.len() / records::FILL_VERTEX_SIZE;
@@ -389,11 +510,11 @@ impl VectorPacker {
         }
         if slot.colors_key.as_ref() != Some(&colors_key) {
             let colors = &cache.fill_colors.as_ref().unwrap().1.records;
-            let first = self
+            let first = page
                 .fill_colors
                 .place(colors, slot.colors_first, slot.colors_count);
             if first != slot.colors_first || slot.colors_count == 0 {
-                let entry: &mut Object = self.objects.record_mut(slot.object);
+                let entry: &mut Object = page.objects.record_mut(slot.object);
                 entry.fill_colors = first as u32;
             }
             slot.colors_first = first;
@@ -401,14 +522,14 @@ impl VectorPacker {
             slot.colors_key = Some(colors_key);
         }
         if slot.fill_instance.is_none() {
-            let instance = self.instances.allocate(1);
+            let instance = page.instances.allocate(1);
             let record = Instance {
                 kind: records::KIND_FILL,
                 object: slot.object as u32,
                 curve: 0,
                 _pad: 0,
             };
-            self.instances.write(instance, bytemuck::bytes_of(&record));
+            page.instances.write(instance, bytemuck::bytes_of(&record));
             slot.fill_instance = Some(instance);
         }
         Some(Draw {
@@ -418,6 +539,7 @@ impl VectorPacker {
                 first_vertex: slot.fill_first as u32,
                 first_instance: slot.fill_instance.unwrap() as u32,
             },
+            page: slot.page,
             opaque,
             camera_distance: distance,
             layer,
@@ -443,15 +565,16 @@ impl VectorPacker {
             return None;
         }
         let opaque = stroke.opaque;
+        let page = &mut self.pages[slot.page];
         if slot.stroke_key.as_ref() != Some(&stroke_key) {
             slot.points_first =
-                self.stroke_points
+                page.stroke_points
                     .place(&stroke.points, slot.points_first, slot.points_count);
             slot.points_count = stroke.points.len() / records::STROKE_POINT_SIZE;
             let mut curves = stroke.curves.clone();
             offset_curves(&mut curves, slot.points_first);
             let count = curves.len() / size_of::<StrokeCurve>();
-            let first = self
+            let first = page
                 .stroke_curves
                 .place(&curves, slot.curves_first, slot.curves_count);
             if first != slot.curves_first
@@ -472,7 +595,7 @@ impl VectorPacker {
                 } else {
                     0
                 };
-                slot.stroke_instances = Some(self.instances.place(
+                slot.stroke_instances = Some(page.instances.place(
                     rows,
                     slot.stroke_instances.unwrap_or(0),
                     old,
@@ -489,6 +612,7 @@ impl VectorPacker {
                 first_vertex: 0,
                 first_instance: slot.stroke_instances.unwrap() as u32,
             },
+            page: slot.page,
             opaque,
             camera_distance: distance,
             layer,
@@ -498,19 +622,54 @@ impl VectorPacker {
         })
     }
 
-    fn object_slot(&mut self) -> usize {
-        self.free_objects
-            .pop()
-            .unwrap_or_else(|| self.objects.allocate(1))
+    /// The records placing `path`'s stale ranges would add (an upper
+    /// bound: a range of the same size is written over in place).
+    fn records_needed(&mut self, uid: u64, path: &Path, fill: Option<&Fill>, slot: &Slot) -> Records {
+        let version = slot.points_version;
+        let cache = self.paths.get_mut(&uid).unwrap();
+        let mut need = [0; 6];
+        if let Some(fill) = fill {
+            if slot.fill_version != Some(version) {
+                need[2] = fill_vertices(cache, &path.points).len() / records::FILL_VERTEX_SIZE;
+            }
+            if slot.colors_key.as_deref() != Some(&[version, fill.version][..]) {
+                need[3] = path.points.count();
+            }
+            need[1] += usize::from(slot.fill_instance.is_none());
+        }
+        let stroke_key = [version, path.stroke.version];
+        if slot.stroke_key.as_deref() != Some(&stroke_key[..]) {
+            let stroke = stroke(cache, path, &stroke_key);
+            need[4] = stroke.points.len() / records::STROKE_POINT_SIZE;
+            need[5] = stroke.curves.len() / size_of::<StrokeCurve>();
+            need[1] += need[5];
+        }
+        need
+    }
+
+    /// Free `slot` and start the node over on a page with room for all of
+    /// its records.
+    fn move_to_page_with_room(&mut self, slot: Slot, uid: u64, path: &Path, fill: Option<&Fill>) -> Slot {
+        self.free(&slot);
+        let mut fresh = Slot::new(slot.page, slot.object);
+        fresh.points_version = slot.points_version;
+        let mut need = self.records_needed(uid, path, fill, &fresh);
+        need[0] = 1;
+        let page = self.page_with_room(&need);
+        let object = self.pages[page].object_slot();
+        let mut moved = Slot::new(page, object);
+        moved.points_version = slot.points_version;
+        moved
     }
 
     fn free(&mut self, slot: &Slot) {
-        self.free_objects.push(slot.object);
-        self.fill_vertices.garbage += slot.fill_count;
-        self.stroke_points.garbage += slot.points_count;
-        self.stroke_curves.garbage += slot.curves_count;
-        self.instances.garbage += slot.curves_count + usize::from(slot.fill_instance.is_some());
-        self.fill_colors.garbage += slot.colors_count;
+        let page = &mut self.pages[slot.page];
+        page.free_objects.push(slot.object);
+        page.fill_vertices.garbage += slot.fill_count;
+        page.stroke_points.garbage += slot.points_count;
+        page.stroke_curves.garbage += slot.curves_count;
+        page.instances.garbage += slot.curves_count + usize::from(slot.fill_instance.is_some());
+        page.fill_colors.garbage += slot.colors_count;
     }
 }
 
@@ -527,11 +686,14 @@ fn offset_curves(curves: &mut [u8], first_point: usize) {
     }
 }
 
-/// The draw lists: opaque draws, transparent ones back to front,
-/// mask draws per scope in painter's order, shadow casters per scope.
+/// The draw lists: opaque draws (grouped by page: their order does not
+/// matter), transparent ones back to front, mask draws per scope in
+/// painter's order, shadow casters per scope (grouped by page within each
+/// clip scope).
 fn batch(scene: &FlatScene, draws: Vec<Draw>) -> VectorDraws {
     let frame: Vec<&Draw> = draws.iter().filter(|d| d.mask_of == NO_CLIP).collect();
-    let opaque: Vec<DrawIndirect> = frame.iter().filter(|d| d.opaque).map(|d| d.args).collect();
+    let mut opaque: Vec<&&Draw> = frame.iter().filter(|d| d.opaque).collect();
+    opaque.sort_by_key(|d| d.page);
     let mut transparent: Vec<&&Draw> = frame.iter().filter(|d| !d.opaque).collect();
     // Farthest first; coplanar shapes in painter's order (distances
     // rounded to 6 decimals, so equal depths keep their tree order).
@@ -540,31 +702,37 @@ fn batch(scene: &FlatScene, draws: Vec<Draw>) -> VectorDraws {
         .map(|scope| {
             let mut mask: Vec<&Draw> = draws.iter().filter(|d| d.mask_of == scope).collect();
             mask.sort_by_key(|d| d.layer);
-            draw_bytes(mask.iter().map(|d| d.args))
+            DrawList::new(mask.iter().map(|d| (d.args, d.page)))
         })
         .collect();
-    let casters: Vec<(DrawIndirect, i32)> = frame
+    let mut casters: Vec<((DrawIndirect, usize), i32)> = frame
         .iter()
         .filter(|d| d.casts_shadow)
-        .map(|d| (d.args, d.clip))
+        .map(|d| ((d.args, d.page), d.clip))
         .collect();
+    casters.sort_by_key(|((_, page), _)| *page); // shadow_lists sorts by clip scope stably after
     let shadows = scene
         .shadow_lists(&casters)
         .into_iter()
-        .map(|(scope, draws, runs)| (scope, draw_bytes(draws), runs))
+        .map(|(scope, draws, runs)| {
+            // Page runs never cross from one clip scope's casters to the next.
+            let mut list = DrawList::default();
+            let mut draws = draws.into_iter();
+            for &(_, count) in &runs {
+                let part = DrawList::new(draws.by_ref().take(count as usize));
+                list.bytes.extend(part.bytes);
+                list.runs.extend(part.runs);
+            }
+            (scope, list, runs)
+        })
         .collect();
     VectorDraws {
-        opaque: draw_bytes(opaque),
-        transparent: draw_bytes(transparent.iter().map(|d| d.args)),
+        opaque: DrawList::new(opaque.iter().map(|d| (d.args, d.page))),
+        transparent: DrawList::new(transparent.iter().map(|d| (d.args, d.page))),
         masks,
         shadows,
         images: Vec::new(),
     }
-}
-
-fn draw_bytes(draws: impl IntoIterator<Item = DrawIndirect>) -> Vec<u8> {
-    let draws: Vec<DrawIndirect> = draws.into_iter().collect();
-    bytemuck::cast_slice(&draws).to_vec()
 }
 
 /// A camera view's layer and `1 / (width, height)` of its plane.

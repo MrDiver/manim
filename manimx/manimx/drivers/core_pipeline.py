@@ -35,8 +35,17 @@ class CoreFramePipeline:
     """Renders frames of the core with up to ``in_flight`` of them on the GPU."""
 
     def __init__(
-        self, effects: tuple[Effect, ...], config: RenderConfig, in_flight: int = 3, profile: bool = False, pixel_format: PixelFormat = "rgba"
+        self,
+        effects: tuple[Effect, ...],
+        config: RenderConfig,
+        in_flight: int = 3,
+        profile: bool = False,
+        pixel_format: PixelFormat = "rgba",
+        page_bytes: int | None = None,
     ) -> None:
+        """``page_bytes`` limits a page of the core's vector records (None:
+        what the GPU binds at once); tests make it small to draw a scene
+        from many pages."""
         self.effects = tuple(effects)
         self.config = config
         self.in_flight = in_flight
@@ -48,6 +57,7 @@ class CoreFramePipeline:
             in_flight,
             profile,
             pixel_format,
+            page_bytes,
         )
         self._samples = next((effect for effect in effects if isinstance(effect, RenderSamples)), RenderSamples(1))
         self._futures: dict[int, Future[np.ndarray]] = {}

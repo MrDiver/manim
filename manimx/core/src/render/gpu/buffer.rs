@@ -14,6 +14,9 @@ pub struct GrowableBuffer {
     pub buffer: wgpu::Buffer,
     label: &'static str,
     usage: wgpu::BufferUsages,
+    /// The size it never grows past by doubling (what one binding may
+    /// see); data larger than it still gets a buffer of its size.
+    limit: u64,
 }
 
 impl GrowableBuffer {
@@ -27,6 +30,15 @@ impl GrowableBuffer {
             buffer: allocate(device, label, usage, MIN_SIZE),
             label,
             usage,
+            limit: u64::MAX,
+        }
+    }
+
+    /// A buffer that grows by doubling up to `limit` bytes at most.
+    pub fn with_limit(device: &wgpu::Device, label: &'static str, usage: wgpu::BufferUsages, limit: u64) -> GrowableBuffer {
+        GrowableBuffer {
+            limit,
+            ..GrowableBuffer::new(device, label, usage)
         }
     }
 
@@ -36,12 +48,13 @@ impl GrowableBuffer {
         let size = MIN_SIZE.max(data.len() as u64);
         let grown = size > self.buffer.size();
         if grown {
-            // Grow geometrically, so a slowly growing scene reallocates rarely.
+            // Grow geometrically, so a slowly growing scene reallocates
+            // rarely, but not past the limit.
             self.buffer = allocate(
                 device,
                 self.label,
                 self.usage,
-                size.max(2 * self.buffer.size()),
+                (2 * self.buffer.size()).min(self.limit).max(size),
             );
         }
         if !data.is_empty() {

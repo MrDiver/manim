@@ -17,7 +17,7 @@ use crate::render::pack::lights;
 use crate::render::pack::meshes::{MeshOutput, MeshPacker};
 use crate::render::pack::records::Light;
 use crate::render::pack::shadows::{self, Bounds, FrameSettings, ShadowLayers, ShadowViews};
-use crate::render::pack::vectors::{CameraViews, VectorDraws, VectorPacker};
+use crate::render::pack::vectors::{CameraViews, VectorDraws, VectorPacker, DEFAULT_PAGE_BYTES};
 use crate::robjects::{Kind, RNode};
 
 /// Packs after which per-node data unused since is dropped.
@@ -64,8 +64,14 @@ pub struct Packer {
 
 impl Packer {
     pub fn new() -> Packer {
+        Packer::with_page_bytes(DEFAULT_PAGE_BYTES)
+    }
+
+    /// A packer whose vector record pages hold at most `budget` bytes per
+    /// arena (the GPU's largest storage binding; see pack/vectors.rs).
+    pub fn with_page_bytes(budget: usize) -> Packer {
         Packer {
-            vectors: VectorPacker::new(),
+            vectors: VectorPacker::new(budget),
             meshes: MeshPacker::new(),
             bounds: Bounds::default(),
             shadow_layers: ShadowLayers::default(),

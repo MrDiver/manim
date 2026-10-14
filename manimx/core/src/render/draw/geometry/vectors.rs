@@ -1,14 +1,17 @@
 //! `VectorGeometry`: the GPU side of 2D shapes and 3D curves: buffers,
 //! pipelines and draws.
 //!
-//! Per frame, `prepare` uploads the records into persistent storage
-//! buffers and one indirect-draw buffer laid out as
+//! Per frame, `prepare` uploads the records of each page (pack/vectors.rs)
+//! into that page's persistent storage buffers, bound by the page's own
+//! bind group, and every draw list into one indirect-draw buffer laid out as
 //!
 //! ```text
 //! [opaque draws][transparent draws][shadow draws per scope][mask 0 draws]...
 //! ```
 //!
-//! Every list is then issued with a single `multi_draw_indirect`.
+//! Each list is issued as one `multi_draw_indirect` per run of draws on
+//! one page (`Run`), switching the bind group between runs: with one page
+//! that is one call per list, as before pages existed.
 
 use std::collections::HashMap;
 
@@ -19,22 +22,24 @@ use crate::render::gpu::buffer::{GrowableBuffer, Records};
 use crate::render::gpu::device::{
     shadow_depth_stencil, Gpu, ShadowStencil, COLOR_FORMAT, DEPTH_FORMAT,
 };
-use crate::render::pack::flatten::ShadowList;
 use crate::render::pack::records::Frame;
+use crate::render::pack::vectors::{DrawList, ShadowDraws};
 
 /// Bytes of one indirect draw (`DrawIndirectArgs`).
 const DRAW_SIZE: u64 = 16;
+/// Storage buffers per page (pack/vectors.rs `Page::arenas`).
+const BUFFERS: u32 = 6;
 
 /// The records of one frame's vector buffers and draw lists.
 pub struct VectorData<'a> {
-    /// objects, instances, fill vertices, fill colors, stroke points, stroke curves.
-    pub buffers: [Records<'a>; 6],
-    pub opaque: &'a [u8],
-    pub transparent: &'a [u8],
-    pub masks: &'a [Vec<u8>],
-    /// Per light scope (NO_CLIP first), the shadow casters' draws sorted
-    /// by clip scope, and their runs.
-    pub shadows: &'a [ShadowList<u8>],
+    /// Per page: objects, instances, fill vertices, fill colors, stroke
+    /// points, stroke curves.
+    pub pages: Vec<[Records<'a>; 6]>,
+    pub opaque: &'a DrawList,
+    pub transparent: &'a DrawList,
+    pub masks: &'a [DrawList],
+    /// Per light scope (NO_CLIP first), its shadow casters.
+    pub shadows: &'a [ShadowDraws],
     /// The images fills show, by layer.
     pub images: &'a [std::sync::Arc<crate::robjects::Texture>],
 }
@@ -56,23 +61,70 @@ enum Role {
 /// channel accumulates the union of all mask shapes.
 const ALPHA_BLEND: wgpu::BlendState = wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING;
 
-pub struct VectorGeometry {
+/// Consecutive draws of a list on one page: `count` draws from `first`.
+#[derive(Clone, Copy)]
+struct Run {
+    first: u64,
+    count: u32,
+    page: usize,
+}
+
+/// A shadow map frame to draw from: the shadow frames buffer and this
+/// frame's offset in it, and the textures the bind group binds.
+struct ShadowFrame<'a> {
+    frames: &'a wgpu::Buffer,
+    offset: u64,
+    mask_layers: &'a wgpu::TextureView,
+    mesh_depth: &'a wgpu::TextureView,
+}
+
+/// One page's buffers and the bind groups that bind them.
+struct PageBuffers {
     buffers: Vec<GrowableBuffer>,
+    bind_group: Option<wgpu::BindGroup>,
+    /// Per shadow frame offset.
+    shadow_groups: HashMap<u64, wgpu::BindGroup>,
+}
+
+impl PageBuffers {
+    fn new(gpu: &Gpu, limit: u64) -> PageBuffers {
+        let names = [
+            "vector objects",
+            "vector instances",
+            "fill vertices",
+            "fill colors",
+            "stroke points",
+            "stroke curves",
+        ];
+        let storage = wgpu::BufferUsages::STORAGE;
+        PageBuffers {
+            buffers: names
+                .iter()
+                .map(|name| GrowableBuffer::with_limit(&gpu.device, name, storage, limit))
+                .collect(),
+            bind_group: None,
+            shadow_groups: HashMap::new(),
+        }
+    }
+}
+
+pub struct VectorGeometry {
+    pages: Vec<PageBuffers>,
+    /// The largest a page's buffer grows by doubling (the binding limit).
+    limit: u64,
     indirect: GrowableBuffer,
     /// Shader and layout depend on whether the meshes' depth is multisampled.
     multisampled: Option<bool>,
     layout: Option<wgpu::BindGroupLayout>,
     shader: Option<wgpu::ShaderModule>,
     pipelines: HashMap<(Role, u32), wgpu::RenderPipeline>,
-    bind_group: Option<wgpu::BindGroup>,
-    /// The render targets the bind group was made with.
+    /// The render targets the bind groups were made with.
     targets_generation: u64,
-    opaque: (u64, u32),
-    transparent: (u64, u32),
-    masks: Vec<(u64, u32)>,
-    /// (first, count) of each (light scope, clip scope) run of casters.
-    shadows: HashMap<(i32, i32), (u64, u32)>,
-    shadow_groups: HashMap<u64, wgpu::BindGroup>,
+    opaque: Vec<Run>,
+    transparent: Vec<Run>,
+    masks: Vec<Vec<Run>>,
+    /// The runs of each (light scope, clip scope)'s casters.
+    shadows: HashMap<(i32, i32), Vec<Run>>,
     /// The pictures of the frame's camera views.
     pub camera_views: CameraViewTexture,
     /// The camera view texture the bind group was made with.
@@ -84,21 +136,12 @@ pub struct VectorGeometry {
 }
 
 impl VectorGeometry {
-    pub fn new(gpu: &Gpu) -> VectorGeometry {
-        let storage = wgpu::BufferUsages::STORAGE;
-        let names = [
-            "vector objects",
-            "vector instances",
-            "fill vertices",
-            "fill colors",
-            "stroke points",
-            "stroke curves",
-        ];
+    /// Vector geometry whose page buffers grow by doubling up to `limit`
+    /// bytes (the device's largest storage binding).
+    pub fn new(gpu: &Gpu, limit: u64) -> VectorGeometry {
         VectorGeometry {
-            buffers: names
-                .iter()
-                .map(|name| GrowableBuffer::new(&gpu.device, name, storage))
-                .collect(),
+            pages: Vec::new(),
+            limit,
             indirect: GrowableBuffer::new(
                 &gpu.device,
                 "vector draws",
@@ -108,13 +151,11 @@ impl VectorGeometry {
             layout: None,
             shader: None,
             pipelines: HashMap::new(),
-            bind_group: None,
             targets_generation: u64::MAX,
-            opaque: (0, 0),
-            transparent: (0, 0),
+            opaque: Vec::new(),
+            transparent: Vec::new(),
             masks: Vec::new(),
             shadows: HashMap::new(),
-            shadow_groups: HashMap::new(),
             camera_views: CameraViewTexture::new(&gpu.device),
             camera_views_generation: u64::MAX,
             images: ImageTexture::new(&gpu.device),
@@ -138,47 +179,76 @@ impl VectorGeometry {
     ) -> Result<()> {
         let changed = self.use_variant(gpu, multisampled)?;
         self.images.ensure(&gpu.device, &gpu.queue, data.images);
-        let mut grown = false;
-        for (buffer, records) in self.buffers.iter_mut().zip(&data.buffers) {
-            grown |= buffer.write_records(&gpu.device, &gpu.queue, records);
-        }
-
-        let mut lists: Vec<&[u8]> = vec![data.opaque, data.transparent];
-        lists.extend(data.shadows.iter().map(|(_, draws, _)| draws.as_slice()));
-        lists.extend(data.masks.iter().map(|draws| draws.as_slice()));
-        self.indirect
-            .upload(&gpu.device, &gpu.queue, &lists.concat());
-        let mut ranges = Vec::with_capacity(lists.len());
-        let mut first = 0u64;
-        for list in &lists {
-            let count = list.len() as u64 / DRAW_SIZE;
-            ranges.push((first, count as u32));
-            first += count;
-        }
-        self.opaque = ranges[0];
-        self.transparent = ranges[1];
-        let shadow_count = data.shadows.len();
-        self.shadows = shadow_runs(
-            data.shadows
-                .iter()
-                .zip(&ranges[2..2 + shadow_count])
-                .map(|((scope, _, runs), range)| (*scope, *range, runs.as_slice())),
-        );
-        self.masks = ranges[2 + shadow_count..].to_vec();
-
-        if grown
-            || changed
-            || self.bind_group.is_none()
+        // What every page's bind groups bind besides its own buffers.
+        let everything = changed
             || targets_generation != self.targets_generation
             || self.camera_views.generation != self.camera_views_generation
-            || self.images.generation != self.images_generation
-        {
-            self.targets_generation = targets_generation;
-            self.camera_views_generation = self.camera_views.generation;
-            self.images_generation = self.images.generation;
-            self.bind_group =
-                Some(self.create_bind_group(gpu, frame_uniform, 0, mask_layers, mesh_depth));
-            self.shadow_groups.clear();
+            || self.images.generation != self.images_generation;
+        while self.pages.len() < data.pages.len() {
+            self.pages.push(PageBuffers::new(gpu, self.limit));
+        }
+        for (page, records) in self.pages.iter_mut().zip(&data.pages) {
+            let mut grown = false;
+            for (buffer, records) in page.buffers.iter_mut().zip(records) {
+                grown |= buffer.write_records(&gpu.device, &gpu.queue, records);
+            }
+            if grown || everything {
+                page.bind_group = None;
+                page.shadow_groups.clear();
+            }
+        }
+
+        let mut lists: Vec<&DrawList> = vec![data.opaque, data.transparent];
+        lists.extend(data.shadows.iter().map(|(_, draws, _)| draws));
+        lists.extend(data.masks.iter());
+        let bytes: Vec<u8> = lists
+            .iter()
+            .flat_map(|list| list.bytes.iter().copied())
+            .collect();
+        self.indirect.upload(&gpu.device, &gpu.queue, &bytes);
+        let mut first = 0u64;
+        let mut ranges = lists.iter().map(|list| {
+            let runs: Vec<Run> = list
+                .runs
+                .iter()
+                .map(|&(page, count)| {
+                    let run = Run { first, count, page };
+                    first += count as u64;
+                    run
+                })
+                .collect();
+            runs
+        });
+        self.opaque = ranges.next().unwrap();
+        self.transparent = ranges.next().unwrap();
+        self.shadows = HashMap::new();
+        for (scope, _, clips) in data.shadows {
+            // The scope's page runs split by clip scope: they never cross one.
+            let mut runs = ranges.next().unwrap().into_iter();
+            for &(clip, count) in clips {
+                let mut left = count;
+                let mut chosen = Vec::new();
+                while left > 0 {
+                    let run = runs
+                        .next()
+                        .expect("page runs end where clip scope runs end");
+                    left -= run.count;
+                    chosen.push(run);
+                }
+                self.shadows.insert((*scope, clip), chosen);
+            }
+        }
+        self.masks = ranges.collect();
+
+        self.targets_generation = targets_generation;
+        self.camera_views_generation = self.camera_views.generation;
+        self.images_generation = self.images.generation;
+        for index in 0..self.pages.len() {
+            if self.pages[index].bind_group.is_none() {
+                let group =
+                    self.create_bind_group(gpu, index, frame_uniform, 0, mask_layers, mesh_depth);
+                self.pages[index].bind_group = Some(group);
+            }
         }
         Ok(())
     }
@@ -191,17 +261,15 @@ impl VectorGeometry {
         sample_count: u32,
         scope: usize,
     ) {
-        pass.set_bind_group(0, self.bind_group.as_ref(), &[]);
-        let draws = self.masks[scope];
-        self.draw(gpu, pass, Role::Mask, sample_count, draws);
+        let runs = self.masks[scope].clone();
+        self.draw(gpu, pass, Role::Mask, sample_count, &runs, None);
     }
 
     /// Draw all opaque, then all transparent shapes into the frame.
     pub fn draw_color(&mut self, gpu: &Gpu, pass: &mut wgpu::RenderPass, sample_count: u32) {
-        pass.set_bind_group(0, self.bind_group.as_ref(), &[]);
-        let (opaque, transparent) = (self.opaque, self.transparent);
-        self.draw(gpu, pass, Role::Opaque, sample_count, opaque);
-        self.draw(gpu, pass, Role::Transparent, sample_count, transparent);
+        let (opaque, transparent) = (self.opaque.clone(), self.transparent.clone());
+        self.draw(gpu, pass, Role::Opaque, sample_count, &opaque, None);
+        self.draw(gpu, pass, Role::Transparent, sample_count, &transparent, None);
     }
 
     /// The clip scopes of light scope `scope`'s shadow casters.
@@ -227,14 +295,19 @@ impl VectorGeometry {
         mask_layers: &wgpu::TextureView,
         mesh_depth: &wgpu::TextureView,
     ) {
-        self.use_shadow_frame(gpu, pass, frames, offset, mask_layers, mesh_depth);
         let stencil = if clipped {
             ShadowStencil::Clipped
         } else {
             ShadowStencil::None
         };
-        let draws = self.shadows.get(&(scope, clip)).copied().unwrap_or((0, 0));
-        self.draw(gpu, pass, Role::Shadow(stencil), 1, draws);
+        let runs = self.shadows.get(&(scope, clip)).cloned().unwrap_or_default();
+        let frame = ShadowFrame {
+            frames,
+            offset,
+            mask_layers,
+            mesh_depth,
+        };
+        self.draw(gpu, pass, Role::Shadow(stencil), 1, &runs, Some(frame));
     }
 
     /// Draw clip scope `clip`'s mask into the stencil, seen from the frame
@@ -251,52 +324,73 @@ impl VectorGeometry {
         mask_layers: &wgpu::TextureView,
         mesh_depth: &wgpu::TextureView,
     ) {
-        self.use_shadow_frame(gpu, pass, frames, offset, mask_layers, mesh_depth);
         let stencil = if inner {
             ShadowStencil::InnerMask
         } else {
             ShadowStencil::Mask
         };
-        let draws = self.masks[clip as usize];
-        self.draw(gpu, pass, Role::Shadow(stencil), 1, draws);
-    }
-
-    fn use_shadow_frame(
-        &mut self,
-        gpu: &Gpu,
-        pass: &mut wgpu::RenderPass,
-        frames: &wgpu::Buffer,
-        offset: u64,
-        mask_layers: &wgpu::TextureView,
-        mesh_depth: &wgpu::TextureView,
-    ) {
-        if !self.shadow_groups.contains_key(&offset) {
-            let group = self.create_bind_group(gpu, frames, offset, mask_layers, mesh_depth);
-            self.shadow_groups.insert(offset, group);
-        }
-        pass.set_bind_group(0, self.shadow_groups.get(&offset), &[]);
+        let runs = self.masks[clip as usize].clone();
+        let frame = ShadowFrame {
+            frames,
+            offset,
+            mask_layers,
+            mesh_depth,
+        };
+        self.draw(gpu, pass, Role::Shadow(stencil), 1, &runs, Some(frame));
     }
 
     /// The shadow bind groups refer to the shadow frames buffer: forget
     /// them when it grows.
     pub fn forget_shadow_groups(&mut self) {
-        self.shadow_groups.clear();
+        for page in &mut self.pages {
+            page.shadow_groups.clear();
+        }
     }
 
+    /// Issue `runs`, each with its page's bind group: the frame's, or
+    /// (`shadow`) the one that sees through a shadow map's frame.
     fn draw(
         &mut self,
         gpu: &Gpu,
         pass: &mut wgpu::RenderPass,
         role: Role,
         sample_count: u32,
-        (first, count): (u64, u32),
+        runs: &[Run],
+        shadow: Option<ShadowFrame>,
     ) {
-        if count == 0 {
+        if runs.iter().all(|run| run.count == 0) {
             return;
         }
-        let pipeline = self.pipeline(gpu, role, sample_count);
-        pass.set_pipeline(pipeline);
-        pass.multi_draw_indirect(&self.indirect.buffer, first * DRAW_SIZE, count);
+        if let Some(frame) = &shadow {
+            for run in runs {
+                if !self.pages[run.page].shadow_groups.contains_key(&frame.offset) {
+                    let group = self.create_bind_group(
+                        gpu,
+                        run.page,
+                        frame.frames,
+                        frame.offset,
+                        frame.mask_layers,
+                        frame.mesh_depth,
+                    );
+                    self.pages[run.page].shadow_groups.insert(frame.offset, group);
+                }
+            }
+        }
+        self.pipeline(gpu, role, sample_count);
+        pass.set_pipeline(&self.pipelines[&(role, sample_count)]);
+        let mut bound = None;
+        for run in runs.iter().filter(|run| run.count > 0) {
+            if bound != Some(run.page) {
+                let page = &self.pages[run.page];
+                let group = match &shadow {
+                    Some(frame) => page.shadow_groups.get(&frame.offset),
+                    None => page.bind_group.as_ref(),
+                };
+                pass.set_bind_group(0, group, &[]);
+                bound = Some(run.page);
+            }
+            pass.multi_draw_indirect(&self.indirect.buffer, run.first * DRAW_SIZE, run.count);
+        }
     }
 
     // -- setup ------------------------------------------------------------
@@ -400,7 +494,7 @@ impl VectorGeometry {
             },
             count: None,
         }];
-        for binding in 1..=self.buffers.len() as u32 {
+        for binding in 1..=BUFFERS {
             entries.push(wgpu::BindGroupLayoutEntry {
                 binding,
                 visibility: vertex,
@@ -412,7 +506,7 @@ impl VectorGeometry {
                 count: None,
             });
         }
-        let next = 1 + self.buffers.len() as u32;
+        let next = 1 + BUFFERS;
         entries.push(wgpu::BindGroupLayoutEntry {
             binding: next,
             visibility: fragment,
@@ -482,9 +576,12 @@ impl VectorGeometry {
             })
     }
 
+    /// The bind group of page `page`'s buffers, with the frame at `offset`
+    /// of `frames`.
     fn create_bind_group(
         &self,
         gpu: &Gpu,
+        page: usize,
         frames: &wgpu::Buffer,
         offset: u64,
         mask_layers: &wgpu::TextureView,
@@ -501,13 +598,13 @@ impl VectorGeometry {
                 size: wgpu::BufferSize::new(size_of::<Frame>() as u64),
             }),
         }];
-        for (index, buffer) in self.buffers.iter().enumerate() {
+        for (index, buffer) in self.pages[page].buffers.iter().enumerate() {
             entries.push(wgpu::BindGroupEntry {
                 binding: 1 + index as u32,
                 resource: buffer.binding(),
             });
         }
-        let next = 1 + self.buffers.len() as u32;
+        let next = 1 + BUFFERS;
         entries.push(wgpu::BindGroupEntry {
             binding: next,
             resource: wgpu::BindingResource::TextureView(mask_layers),

@@ -274,7 +274,7 @@ flowchart LR
         M["Shape3D / Particles"] -->|"mesh, cached per version"| MB["meshes.rs"]
         Li["lights"] --> MB
     end
-    subgraph Buffers["shared storage buffers (vertex pulling)"]
+    subgraph Buffers["shared storage buffers (vertex pulling), one set per page"]
         VB --> O["objects<br/>model, layer, clip, flags"]
         VB --> I["instances<br/>fill or stroke curve"]
         VB --> FV["fill_vertices"]
@@ -283,7 +283,7 @@ flowchart LR
         MB --> MO["mesh objects, vertices,<br/>indices, materials, lights"]
         MB --> MD["indexed indirect draws<br/>per texture set + shadow per scope"]
     end
-    ID -->|"one multi_draw_indirect per list"| VP["vector.wgsl"]
+    ID -->|"one multi_draw_indirect per list and page"| VP["vector.wgsl"]
     MD -->|"one multi_draw_indexed_indirect per texture set"| MP["mesh.wgsl"]
 ```
 
@@ -368,7 +368,7 @@ A `RenderPipeline` lives as long as its `CoreFramePipeline`, and keeps:
 |---|---|---|---|
 | a path's fill triangles, stroke links, colors | `PathCache` (pack/vectors.rs) | node uid + versions of the values they come from | when the node is not drawn for 1024 packs |
 | a mesh's interleaved vertices, a material's entry | `MeshPacker` (pack/meshes.rs) | node uid + mesh or material versions | when the node is not drawn for 1024 packs |
-| vector records on the GPU | the arenas of `VectorPacker` (pack/vectors.rs, pack/arena.rs) | (node uid, drawn as a mask) | when the node leaves the scene; everything packed again when garbage outweighs live records |
+| vector records on the GPU | the arenas of `VectorPacker`'s pages (pack/vectors.rs, pack/arena.rs), each page at most the GPU's largest storage binding | (node uid, drawn as a mask) | when the node leaves the scene; a page packed again when its garbage outweighs its live records |
 | mesh vertices and indices on the GPU | the arenas of `MeshPacker` | node uid + mesh version | when the mesh is not placed in a frame with meshes; packed again when garbage outweighs live data |
 | shadow map layers | `ShadowLayers` (pack/shadows.rs) decides, the shadow pass keeps the depth | the layer's Frame record and its scope's casters (fingerprint, world matrix) | rendered again when the key changes or the maps are made again |
 | textures and their mip levels | `MeshGeometry` (draw/geometry/textures.rs) | texture uid and color space | when no frame uses them |

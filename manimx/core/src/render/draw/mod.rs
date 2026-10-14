@@ -105,7 +105,9 @@ impl Drawer {
         self.shadow_pass.layer_count()
     }
 
-    pub fn new(gpu: &Gpu) -> Result<Drawer> {
+    /// A drawer whose vector page buffers grow by doubling up to
+    /// `page_bytes` (the binding limit the packer's pages keep to).
+    pub fn new(gpu: &Gpu, page_bytes: u64) -> Result<Drawer> {
         Ok(Drawer {
             frame_uniform: gpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("frame"),
@@ -113,7 +115,7 @@ impl Drawer {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
-            vectors: VectorGeometry::new(gpu),
+            vectors: VectorGeometry::new(gpu, page_bytes),
             meshes: MeshGeometry::new(gpu)?,
             lighting_pass: LightingPass::new(gpu),
             shadow_pass: ShadowPass::new(gpu),
@@ -154,28 +156,32 @@ impl Drawer {
         gpu.queue
             .write_buffer(&self.frame_uniform, 0, bytemuck::bytes_of(frame));
 
-        let vectors = &mut packer.vectors;
-        let ranges: Vec<Option<Vec<(usize, usize)>>> = vectors
-            .arenas_mut()
-            .into_iter()
-            .map(|(_, arena)| arena.ranges())
+        // Per page and arena, the record ranges written since the last
+        // upload (None: all of them).
+        let pages = &mut packer.vectors.pages;
+        let written: Vec<Vec<_>> = pages
+            .iter_mut()
+            .map(|page| {
+                page.arenas_mut()
+                    .into_iter()
+                    .map(|(_, arena)| arena.ranges())
+                    .collect()
+            })
             .collect();
-        let arenas = [
-            &vectors.objects,
-            &vectors.instances,
-            &vectors.fill_vertices,
-            &vectors.fill_colors,
-            &vectors.stroke_points,
-            &vectors.stroke_curves,
-        ];
-        let mut ranges = ranges.into_iter();
-        let buffers = arenas.map(|arena| Records {
-            bytes: arena.bytes(),
-            record_size: arena.record_size,
-            written: ranges.next().unwrap(),
-        });
+        let pages = pages
+            .iter()
+            .zip(written)
+            .map(|(page, written)| {
+                let mut written = written.into_iter();
+                page.arenas().map(|arena| Records {
+                    bytes: arena.bytes(),
+                    record_size: arena.record_size,
+                    written: written.next().unwrap(),
+                })
+            })
+            .collect();
         let data = VectorData {
-            buffers,
+            pages,
             opaque: &packet.draws.opaque,
             transparent: &packet.draws.transparent,
             masks: &packet.draws.masks,

@@ -62,6 +62,9 @@ pub struct PipelineOptions {
     /// Measure GPU time per pass.
     pub profile: bool,
     pub pixel_format: PixelFormat,
+    /// The largest page of vector records, in bytes per buffer
+    /// (pack/vectors.rs); None: the most the device binds at once.
+    pub page_bytes: Option<u64>,
 }
 
 pub struct RenderPipeline {
@@ -89,9 +92,13 @@ impl RenderPipeline {
         }
         let gpu = Gpu::shared()?;
         let size = (options.width, options.height);
+        let limits = gpu.device.limits();
+        let page_bytes = options.page_bytes.unwrap_or_else(|| {
+            limits.max_storage_buffer_binding_size.min(limits.max_buffer_size)
+        });
         Ok(RenderPipeline {
-            packer: Packer::new(),
-            drawer: Drawer::new(&gpu)?,
+            packer: Packer::with_page_bytes(page_bytes as usize),
+            drawer: Drawer::new(&gpu, page_bytes)?,
             compositor: Compositor::new(&gpu, options.effects, options.tone_map),
             output: Output::new(&gpu, size, options.pixel_format, options.in_flight)?,
             profiler: GpuProfiler::new(&gpu.device, options.profile && gpu.timestamps),

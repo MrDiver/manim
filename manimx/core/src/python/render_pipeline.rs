@@ -43,9 +43,12 @@ impl RenderPipeline {
     /// threshold, knee, intensity, radius, levels)` and `("shader", code,
     /// stage, values)`, in chain order; `tone_map` a `ToneMapOperator`
     /// value. Up to `in_flight` frames are on the GPU at once.
-    /// `pixel_format` is "rgba" or "nv12" (see `finished`).
+    /// `pixel_format` is "rgba" or "nv12" (see `finished`). `page_bytes`
+    /// limits a page of vector records (None: the device's largest storage
+    /// binding); tests make it small to draw from many pages.
     #[new]
-    #[pyo3(signature = (config, tone_map, effects, in_flight, profile=false, pixel_format="rgba"))]
+    #[pyo3(signature = (config, tone_map, effects, in_flight, profile=false, pixel_format="rgba", page_bytes=None))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         config: &Bound<'_, PyAny>,
         tone_map: u32,
@@ -53,6 +56,7 @@ impl RenderPipeline {
         in_flight: usize,
         profile: bool,
         pixel_format: &str,
+        page_bytes: Option<u64>,
     ) -> PyResult<Self> {
         let pixel_format = match pixel_format {
             "rgba" => PixelFormat::Rgba,
@@ -80,6 +84,7 @@ impl RenderPipeline {
             in_flight,
             profile,
             pixel_format,
+            page_bytes,
         };
         let shape = match pixel_format {
             PixelFormat::Rgba => [height as usize, width as usize, 4],

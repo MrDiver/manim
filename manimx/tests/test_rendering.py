@@ -103,8 +103,8 @@ class ClippedShadow(Scene):
 
 
 
-def render(frame_at, times, effects=(), config: RenderConfig = CONFIG) -> list[np.ndarray]:
-    pipeline = CoreFramePipeline(tuple(effects), config, 2)
+def render(frame_at, times, effects=(), config: RenderConfig = CONFIG, page_bytes: int | None = None) -> list[np.ndarray]:
+    pipeline = CoreFramePipeline(tuple(effects), config, 2, page_bytes=page_bytes)
     futures = [pipeline.submit(index, float(t), frame_at) for index, t in enumerate(times)]
     pipeline.flush()
     return [future.result() for future in futures]
@@ -130,6 +130,21 @@ def test_effects_render_like_their_reference(update_references: bool) -> None:
 def test_projects_render_like_their_references(project: str, update_references: bool) -> None:
     timeline = Project.load(ROOT / project).build_timeline()
     check(Path(project).name, timeline.frame_at, timeline.duration * np.array([0.25, 0.5, 0.75]), update_references)
+
+
+@pytest.mark.parametrize("scene_class", [EveryAnimation, EveryNode])
+def test_shapes_on_many_pages_draw_as_on_one(scene_class: type[Scene]) -> None:
+    """A GPU binds only so many bytes of a buffer at once, so the vector
+    records come in pages, each drawn with its own bind group. Pages of
+    two kilobytes split these scenes over many (clip masks, shadows,
+    curves, transparent shapes sorted across pages, records moving as
+    shapes change): every frame is the same as from one page."""
+    scene = scene_class().prepare()
+    times = scene.duration * np.linspace(0.05, 0.95, 7)
+    one = render(scene.frame_at, times)
+    many = render(scene.frame_at, times, page_bytes=2048)
+    for a, b in zip(one, many, strict=True):
+        assert np.array_equal(a, b)
 
 
 def test_several_views_draw_over_each_other_and_no_view_shows_the_background() -> None:
