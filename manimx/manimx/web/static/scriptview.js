@@ -99,7 +99,7 @@ function draw() {
     const fit = button("Fit to scenes", async () => {
       const answer = await fetch("/api/script/fit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ script: script.name }) }).then((r) => r.json());
       status.textContent = answer.error ?? (answer.moved ? `Moved ${answer.moved} sentence${answer.moved === 1 ? "" : "s"} to where the scenes wait for their words` : "Every word the scenes wait for is in place already");
-      if (!answer.error) page.setVersion(answer.version);
+      if (!answer.error) page.setVersion(answer.picture);
     });
     fit.title = "Move each sentence so the words the scenes' cues wait for are said where those cues are";
     head.append(fit);

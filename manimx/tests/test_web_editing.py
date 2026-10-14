@@ -633,3 +633,23 @@ def test_tracks_are_named_hidden_muted_soloed_and_louder(root, editor) -> None:
     assert len(editor.timeline.frame_at(0.5)) == 2
     with pytest.raises(EditError, match="tracks have no colour"):
         parse("/api/track", {"kind": "audio", "index": 0, "colour": "red"})
+
+
+def test_sound_edits_keep_the_frames(root, renderer) -> None:
+    editor = ProjectEditor(root, lambda project: SETTINGS, save_delay=60.0)
+    server = PreviewServer(Timeline(), SETTINGS, renderer=renderer, editor=editor)
+    editor.load()
+    server.start()
+    try:
+        file = editor.save_asset("music.wav", tone(root, 1.0))
+        picture = request(server, "/api/timeline")[1]["picture"]
+        status, answer = request(server, "/api/audio/add", {"file": file, "start": 0.0})
+        assert status == 200 and answer["picture"] == picture  # a sound draws nothing
+        answer = request(server, "/api/audio/edit", {"index": 0, "start": 0.5, "volume": 0.5, "fade_in": 0.2})[1]
+        assert answer["picture"] == picture and answer["version"] > picture
+        answer = request(server, "/api/clip", {"index": 0, "start": 1.0})[1]
+        assert answer["picture"] == picture + 1  # a scene clip moved: new frames
+        with urllib.request.urlopen(server.url + "api/frame?f=3&w=32") as response:
+            assert response.headers["X-Version"] == str(answer["picture"])
+    finally:
+        server.close()

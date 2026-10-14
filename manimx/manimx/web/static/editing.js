@@ -179,7 +179,7 @@ export async function post(route, body) {
     const response = await fetch(route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const answer = await response.json();
     if (!response.ok) throw new Error(answer.error);
-    page.setVersion(answer.version); // the next frames are of the edited timeline
+    page.setVersion(answer.picture); // the next frames are of the edited timeline (if it changed the picture)
     showHistory(answer.history);
     say("Live; saved to manimx.json a moment after the last edit.");
     return true;

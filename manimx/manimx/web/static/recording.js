@@ -173,7 +173,7 @@ export async function stopTake() {
     say(answer.error, true);
     return;
   }
-  page.setVersion(answer.version);
+  page.setVersion(answer.picture);
   say(answer.problem ? `Recorded; ${answer.problem}` : `Recorded part ${clip.part + 1}: its words are timed to your voice. Ctrl+Z puts the plan back.`, Boolean(answer.problem));
 }
 

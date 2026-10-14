@@ -86,6 +86,13 @@ used by reload.py when a scene file is saved); every replacement or
 failed rebuild (:meth:`PreviewServer.report`) bumps the version, and the
 page fetches the timeline again.
 
+Two versions: ``version`` counts every change (the page fetches the
+timeline and the sound again), ``picture`` only those that change the
+frames, which the page keeps by it. Moving a sound, its volume or its
+fades changes no frame, so the frames kept stay; when a sound's words
+move a scene synced to them, the clips' timings change and so does the
+picture.
+
 Design decisions:
 
 * **Plain HTTP, the browser asks.** Scrubbing needs no pushes from the
@@ -193,7 +200,10 @@ class PreviewServer:
         """Held while rendering or replacing the timeline."""
         self._changed = threading.Condition()
         self.version = 0
-        """Bumped by every replace() and report()."""
+        """Bumped by every replace(), change() and report()."""
+        self.picture = 0
+        """Bumped when the frames may change: every replace(), and a
+        change() after which a clip is timed or drawn differently."""
         self.error: str | None = None
         """The last failed rebuild, until the next successful one."""
         self._closing = False
@@ -227,14 +237,34 @@ class PreviewServer:
         """Show ``timeline`` (and ``settings``) from now on; clears the error."""
         with self._lock:  # bumped inside: a frame's version always says what it shows
             self._use(timeline, settings or self.settings)
+            self.picture += 1
             self._bump(error=None)
 
     def change(self, edit: Callable[[], None]) -> None:
         """Run ``edit`` on the timeline shown (between frames), then tell
         the page."""
         with self._lock:
+            before = self._picture_key()
             edit()
+            if self._picture_key() != before:
+                self.picture += 1
             self._bump(error=self.error)
+
+    def versions(self) -> dict[str, int]:
+        """What the page keeps things by: ``version`` and ``picture``."""
+        return {"version": self.version, "picture": self.picture}
+
+    def _picture_key(self) -> tuple:
+        """What the frames depend on besides the settings: each clip's
+        scene, layer and timings (start, cut, speed and the events that
+        bend it), and the hidden scene tracks."""
+        timeline = self.timeline
+        timeline.event_times()  # resolved
+        clips = tuple(
+            (clip.uid, clip.scene.uid, clip.layer, tuple(None if timing is None else timing.key() for timing in clip.timings))
+            for clip in timeline.clips
+        )
+        return clips, tuple(sorted(layer for layer, track in timeline.scene_tracks.items() if track.hidden))
 
     def report(self, error: str) -> None:
         """A rebuild failed: keep showing the current timeline, tell the page."""
@@ -291,6 +321,7 @@ class PreviewServer:
         return {
             "title": self.title,
             "version": self.version,
+            "picture": self.picture,
             "error": self.error,
             "editable": self.editor is not None,
             "session": self.session,
@@ -366,7 +397,7 @@ class PreviewServer:
             full_width, full_height = config.pixel_width, config.pixel_height
             width = full_width if width is None else max(MIN_WIDTH, min(int(width), full_width))
             height = max(1, round(width * full_height / full_width))
-            version = self.version
+            version = self.picture
             time = frame / self.settings.fps if frame is not None else time
             time = max(float(time), 0.0)  # past the end: the background, nothing plays there
             frame_config = dataclasses.replace(config, pixel_width=width, pixel_height=height, time=time)
@@ -483,7 +514,7 @@ class _Handler(BaseHTTPRequestHandler):
                 case _:
                     gesture = body.pop("gesture", None)
                     editor.run(parse(route, body), gesture if isinstance(gesture, str) else None)
-            self._json({"ok": True, "version": self.preview.version, "history": editor.history()})
+            self._json({"ok": True, **self.preview.versions(), "history": editor.history()})
         except (_BadRequest, EditError) as error:
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
 
@@ -506,7 +537,7 @@ class _Handler(BaseHTTPRequestHandler):
             if not isinstance(body, dict) or not isinstance(body.get("script"), str):
                 raise _BadRequest('fitting takes {"script": "..."}')
             moved = editor.fit_to_scenes(body["script"])
-            self._json({"ok": True, "version": self.preview.version, "history": editor.history(), "moved": moved})
+            self._json({"ok": True, **self.preview.versions(), "history": editor.history(), "moved": moved})
         except (_BadRequest, EditError, json.JSONDecodeError) as error:
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
 
@@ -522,7 +553,7 @@ class _Handler(BaseHTTPRequestHandler):
             if not (isinstance(script, str) and isinstance(part, int) and isinstance(file, str) and isinstance(offset, (int, float))):
                 raise _BadRequest('a take is {"script", "part", "file", "offset"}')
             problem = editor.record_take(script, part, file, float(offset))
-            self._json({"ok": True, "version": self.preview.version, "history": editor.history(), "problem": problem})
+            self._json({"ok": True, **self.preview.versions(), "history": editor.history(), "problem": problem})
         except (_BadRequest, EditError, json.JSONDecodeError) as error:
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
 
@@ -637,7 +668,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _changes(self, query: dict[str, list[str]]) -> None:
         version, error = self.preview.wait_for_change(_number(query, "since", int))
-        self._json({"version": version, "error": error})
+        self._json({"version": version, "picture": self.preview.picture, "error": error})
 
     def _static(self, path: str) -> None:
         name = "index.html" if path in ("", "/") else path.lstrip("/")

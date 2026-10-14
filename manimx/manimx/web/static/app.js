@@ -571,7 +571,7 @@ const frameWidth = () => Math.max(16, Math.round(state.timeline.width / state.re
 /** The last frame number of the timeline. */
 const lastFrame = () => Math.floor(state.timeline.duration * state.timeline.fps);
 
-/** The server's timeline is at `version` now: frames of older versions are gone. */
+/** The server's picture is at `version` now: frames of older versions are gone. */
 function setVersion(version) {
   state.version = Math.max(state.version, version);
   frames.useVersion(state.version);
@@ -677,6 +677,16 @@ async function drawLabels(time) {
 let audioContext = null; // made on the first play: browsers allow sound after a click or key
 
 /** The timeline's sounds decoded (fetched once per version), or null without sounds. */
+/** While playing: the sound changed (an edit), so play the new mix on from where it is. */
+async function refreshSound() {
+  const clock = state.clock;
+  if (!clock) return;
+  const buffer = await soundBuffer();
+  if (state.clock !== clock || clock.buffer === buffer) return;
+  clock.buffer = buffer;
+  if (!clock.buffering) clock.sound(true);
+}
+
 async function soundBuffer() {
   const version = state.timeline.version;
   if (state.audio?.version === version) return state.audio.buffer;
@@ -712,13 +722,15 @@ async function play() {
   audioContext.resume();
   const buffer = await soundBuffer();
   if (!state.playing) return; // paused while the sound loaded
-  const clock = { position: (frameOf(state.time) + 0.5) / state.timeline.fps, last: null, frame: frameOf(state.time), shown: null, buffering: false, source: null, anchor: null };
+  const clock = {
+    buffer, position: (frameOf(state.time) + 0.5) / state.timeline.fps, last: null, frame: frameOf(state.time), shown: null, buffering: false, source: null, anchor: null };
   state.clock = clock;
   /** Start the sound at the clock's position (or stop it); the clock follows it from then. */
   const sound = (on) => {
     clock.source?.stop();
     clock.source = null;
     clock.anchor = null;
+    const buffer = clock.buffer;
     if (!on || !buffer || state.muted || clock.position >= buffer.duration) return;
     const source = audioContext.createBufferSource();
     source.buffer = buffer;
@@ -906,7 +918,8 @@ async function loadTimeline() {
     state.version = 0;
   }
   fitSpan();
-  setVersion(state.timeline.version);
+  setVersion(state.timeline.picture);
+  if (state.playing) refreshSound();
   const { title, width, height, error } = state.timeline;
   document.title = `${title} · manimx preview`;
   elements.title.textContent = title;
@@ -925,8 +938,8 @@ async function followChanges() {
   for (;;) {
     try {
       const response = await fetch(`/api/changes?since=${state.timeline.version}`);
-      const { version } = await response.json();
-      setVersion(version);
+      const { version, picture } = await response.json();
+      setVersion(picture);
       if (version !== state.timeline.version) {
         while (state.dragging) await new Promise((resolve) => setTimeout(resolve, 50));
         await loadTimeline();
