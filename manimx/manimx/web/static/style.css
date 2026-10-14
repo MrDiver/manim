@@ -886,10 +886,6 @@ button.toggle[aria-expanded="true"]::before,
   font: 600 11px/18px var(--mono);
 }
 
-.footer {
-  margin: 8px 16px 16px;
-}
-
 #marquee {
   position: absolute;
   z-index: 10;
@@ -988,6 +984,7 @@ button.toggle[aria-expanded="true"]::before,
 }
 
 #settings,
+#help,
 #render-dialog {
   width: min(640px, calc(100vw - 32px));
   max-height: calc(100vh - 64px);
@@ -998,11 +995,13 @@ button.toggle[aria-expanded="true"]::before,
 }
 
 #settings::backdrop,
+#help::backdrop,
 #render-dialog::backdrop {
   background: rgb(0 0 0 / 0.55);
 }
 
 #settings form,
+#help form,
 #render-dialog form {
   max-height: calc(100vh - 64px);
   overflow-y: auto;
@@ -1013,6 +1012,7 @@ button.toggle[aria-expanded="true"]::before,
 }
 
 #settings header,
+#help header,
 #render-dialog header {
   position: sticky;
   top: -12px;
@@ -1023,6 +1023,7 @@ button.toggle[aria-expanded="true"]::before,
   background: var(--panel);
 }
 
+#help h3,
 #settings h3 {
   margin: 12px 0 4px;
   font-size: 12px;
@@ -1115,29 +1116,38 @@ button.toggle[aria-expanded="true"]::before,
   font-size: 13px;
 }
 
-/* A cue on a track's events row, where its event (a spoken word) puts it. */
-.cue {
+/* A cue on its clip, where its event (a spoken word) puts it; named on hover. */
+.cue-mark {
   position: absolute;
-  top: 4px;
-  bottom: 4px;
-  z-index: 1;
-  padding: 0 6px 0 10px;
+  bottom: 5px;
+  z-index: 2;
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  background: rgb(120 220 160);
+  border: 1px solid rgb(0 0 0 / 0.5);
+  transform: rotate(45deg);
+}
+
+.cue-mark:hover {
+  background: #fff;
+}
+
+.cue-mark:hover::after {
+  content: attr(data-name);
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  transform: rotate(-45deg);
+  transform-origin: left bottom;
+  padding: 1px 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
   color: var(--text);
   font: 500 11px/16px var(--mono);
   white-space: nowrap;
-  border-left: 2px solid rgb(120 220 160 / 0.9);
-  pointer-events: auto;
-}
-
-.cue::before {
-  content: "";
-  position: absolute;
-  left: -6px;
-  top: 3px;
-  width: 8px;
-  height: 8px;
-  background: rgb(120 220 160);
-  transform: rotate(45deg);
+  pointer-events: none;
 }
 
 /* -- subtitles over the frame ------------------------------------------------------ */
@@ -1515,4 +1525,46 @@ button.primary {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+}
+
+/* -- keys and mouse (the ? dialog) -------------------------------------------------- */
+
+.keys {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 4px 16px;
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.keys dt {
+  font: 12px var(--mono);
+  color: var(--accent);
+}
+
+.keys dd {
+  margin: 0;
+}
+
+/* -- the settings, grouped (editing.js SETTING_GROUPS) ------------------------------- */
+
+#settings .field {
+  grid-template-columns: 180px 1fr;
+}
+
+.setting-group + .setting-group {
+  margin-top: 14px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.setting-group h2,
+.setting-group summary {
+  margin: 8px 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.setting-group summary {
+  cursor: pointer;
 }

@@ -30,7 +30,7 @@
 // where things land. app.js does not redraw the timeline during a drag
 // (state.dragging); it fetches the edited timeline once the drag ends.
 
-import { isLocked } from "./trackheads.js";
+import { isLocked, trackName } from "./trackheads.js";
 
 let page = null; // what app.js shares: state, elements and its helpers
 const selected = new Set(); // indices of the selected clips
@@ -553,7 +553,7 @@ function drawClipPanel() {
   panels.clip.append(
     field("Start", numberInput(clip.start, 0, null, 1 / page.state.timeline.fps, (value) => editClip(index, { start: value })), "s", follows ? "after the previous clip; typing a time fixes it" : ""),
     follows ? "" : button("Follow the previous clip", () => editClip(index, { start: null })),
-    field("Layer", numberInput(entry.layer, null, null, 1, (value) => editClip(index, { layer: Math.round(value) })), "", "higher layers are drawn on top"),
+    field("Track", trackPicker(entry.layer, (layer) => editClip(index, { layer })), "", "higher tracks are drawn on top"),
     field("Cut in", numberInput(entry.cut?.[0] ?? null, 0, clip.length, 0.01, (value) => editClip(index, { cut: [value, entry.cut?.[1] ?? null] }), "start"), "s", `in the scene's playing time (${clip.length.toFixed(2)} s long)`),
     field("Cut out", numberInput(entry.cut?.[1] ?? null, 0, clip.length, 0.01, (value) => editClip(index, { cut: [entry.cut?.[0] ?? null, value] }), "end"), "s"),
     field("Speed", numberInput(entry.speed, 0.01, null, 0.05, (value) => editClip(index, { speed: value })), "×", "2 plays twice as fast, 0.5 is slow motion"),
@@ -657,6 +657,41 @@ function drawEventsPanel() {
 
 // -- the settings dialog ------------------------------------------------------------
 
+// The settings, grouped by what they are for, each with a plain name; the
+// description (from the server, the same as in `manimx settings`) is the
+// small text under it. A setting no group names lands in Advanced.
+const SETTING_GROUPS = [
+  ["Video", [
+    ["output.width", "Width"], ["output.height", "Height"], ["output.fps", "Frames per second"],
+    ["output.background", "Background"], ["output.background_opacity", "Background opacity"],
+    ["output.directory", "Renders folder"],
+  ]],
+  ["Look", [
+    ["output.antialiasing", "Smooth edges"], ["output.samples", "Renders per frame"],
+    "Motion blur",
+    ["effects.motion_blur.enabled", "Motion blur"], ["effects.motion_blur.shutter_angle", "Shutter angle"],
+    "Glow (bloom)",
+    ["effects.bloom.enabled", "Glow"], ["effects.bloom.intensity", "Strength"], ["effects.bloom.threshold", "From brightness"],
+    ["effects.bloom.knee", "Softness"], ["effects.bloom.radius", "Radius"], ["effects.bloom.levels", "Spread"],
+    "Light and shadows (3D)",
+    ["lighting.ambient_color", "Ambient color"], ["lighting.ambient_intensity", "Ambient strength"],
+    ["lighting.default_lights", "Light when there is none"],
+    ["effects.shadows.enabled", "Shadows"], ["effects.shadows.softness", "Shadow softness"],
+    ["effects.shadows.samples", "Shadow smoothness"], ["effects.shadows.resolution", "Shadow detail"],
+    ["effects.shadows.method", "Shadow method"],
+    ["effects.tone_map.operator", "Color mapping"], ["effects.tone_map.exposure", "Exposure"],
+  ]],
+  ["Sound", [["output.audio", "Sound in the video"], ["output.sample_rate", "Sample rate"]]],
+  ["Voice", [
+    ["voice.countdown", "Countdown"], ["voice.lead", "Teleprompter ahead by"],
+    ["voice.language", "Language"], ["voice.model", "Listening model"],
+  ]],
+  ["Advanced", [
+    ["output.encoder", "Video encoder"], ["performance.workers", "Render processes"],
+    ["performance.frames_in_flight", "Frames queued on the GPU"],
+  ]],
+];
+
 async function openSettings() {
   panels.settingsForm.replaceChildren(paragraph("Loading…"));
   panels.settings.showModal();
@@ -667,20 +702,31 @@ async function openSettings() {
     panels.settingsForm.append(paragraph(items.error));
     return;
   }
-  for (const item of items) {
-    if (item.section) {
-      const heading = document.createElement(item.path.length === 1 ? "h2" : "h3");
-      heading.textContent = item.path.join(".");
-      heading.title = item.description;
-      panels.settingsForm.append(heading);
-      continue;
+  const byPath = new Map(items.filter((item) => !item.section).map((item) => [item.path.join("."), item]));
+  const named = new Set(SETTING_GROUPS.flatMap(([, entries]) => entries.filter(Array.isArray).map(([path]) => path)));
+  const others = [...byPath.keys()].filter((path) => !named.has(path)).map((path) => [path, null]);
+  for (const [group, entries] of SETTING_GROUPS) {
+    const box = document.createElement(group === "Advanced" ? "details" : "section");
+    box.className = "setting-group";
+    const heading = document.createElement(group === "Advanced" ? "summary" : "h2");
+    heading.textContent = group;
+    box.append(heading);
+    for (const entry of group === "Advanced" ? [...entries, ...others] : entries) {
+      if (typeof entry === "string") {
+        const subheading = document.createElement("h3");
+        subheading.textContent = entry;
+        box.append(subheading);
+        continue;
+      }
+      const [path, label] = entry;
+      if (byPath.has(path)) box.append(settingField(byPath.get(path), label));
     }
-    panels.settingsForm.append(settingField(item));
+    panels.settingsForm.append(box);
   }
 }
 
-function settingField(item) {
-  const name = item.path.at(-1);
+function settingField(item, label = null) {
+  const name = label ?? item.path.at(-1).replaceAll("_", " ");
   const save = async (value, input) => {
     const ok = await post("/api/setting", { path: item.path, value });
     input.setCustomValidity(ok ? "" : panels.message.textContent);
@@ -716,10 +762,26 @@ function settingField(item) {
     parts.push(swatch);
   }
   const description = item.note ? `${item.description} (${item.note})` : item.description;
-  return field(name, parts, item.unit ?? "", description);
+  const row = field(name, parts, item.unit ?? "", description);
+  row.title = item.path.join("."); // its key in manimx.json
+  return row;
 }
 
 // -- form parts ------------------------------------------------------------------------
+
+/** A choice of video track: the ones in use, the clip's own, and a new one above them. */
+function trackPicker(layer, change) {
+  const layers = page.state.timeline.clips.map((clip) => clip.layer);
+  const top = Math.max(layer, ...layers) + 1;
+  const picker = document.createElement("select");
+  for (let index = top; index >= Math.min(0, layer, ...layers); index--) {
+    const used = index === layer || layers.includes(index);
+    if (!used && index !== top) continue;
+    picker.append(new Option(index === top ? `New track (${trackName("scenes", index)})` : trackName("scenes", index), String(index), false, index === layer));
+  }
+  picker.addEventListener("change", () => change(Number(picker.value)));
+  return picker;
+}
 
 /** A number field that calls `change(value, input)` when a valid number is entered (null when emptied and `empty` names what empty means). */
 export function numberInput(value, minimum, maximum, step, change, empty = null) {

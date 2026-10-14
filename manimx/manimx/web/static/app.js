@@ -18,8 +18,9 @@
 //
 // Tracks: one per layer, the highest on top, each clip of that layer on it.
 // Under a track, its events: a bar from where a clip starts waiting to the
-// event, and the event's pill; and its clips' cues, where the event each
-// is synced to (a spoken word) puts it. A clip's arrow opens its scene's nodes; under a
+// event, and the event's pill. A clip's cues are diamonds on it, where the
+// event each is synced to (a spoken word) puts it; hovering one names it.
+// A clip's arrow opens its scene's nodes; under a
 // node, the signals animations change; under a signal, those animations.
 // Which clips and nodes are open is kept in localStorage by key (clip,
 // node path), so a reload keeps them.
@@ -181,20 +182,34 @@ function drawRuler() {
   const { fps } = state.timeline;
   for (const tick of elements.ruler.querySelectorAll(".tick")) tick.remove();
   const frames = Math.max(1, Math.round(state.span * fps));
-  const step = niceStep((frames * 80) / elements.ruler.offsetWidth || 1);
+  const step = rulerStep((frames * 80) / elements.ruler.offsetWidth || 1, fps);
   for (let frame = 0; frame <= frames; frame += step) {
     const tick = document.createElement("span");
     tick.className = "tick";
     tick.style.left = `${percent(frame / fps)}%`;
-    tick.textContent = frame;
+    tick.textContent = rulerLabel(frame, fps);
     elements.ruler.append(tick);
   }
 }
 
-/** The smallest of 1, 2, 5, 10, 20, 50, ... frames that is at least `raw`. */
-function niceStep(raw) {
-  const power = 10 ** Math.floor(Math.log10(Math.max(raw, 1)));
-  return [1, 2, 5, 10].map((m) => m * power).find((step) => step >= raw);
+/** Frames between ruler marks, at least `raw`: whole seconds (1, 2, 5,
+ * 10, 15, 30 s, 1, 2, 5, 10 min, ...), or zoomed in to less than a second,
+ * the parts of a second that are whole frames. */
+function rulerStep(raw, fps) {
+  if (raw >= fps) {
+    const seconds = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600].find((step) => step * fps >= raw) ?? 3600;
+    return seconds * fps;
+  }
+  const parts = [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 24, 25, 30, 40, 50, 60].filter((step) => fps % step === 0 && step < fps);
+  return parts.find((step) => step >= raw) ?? fps;
+}
+
+/** A ruler mark: minutes:seconds on whole seconds, the frame in its second between them ("+12"). */
+function rulerLabel(frame, fps) {
+  const within = frame % fps;
+  if (within) return `+${within}`;
+  const seconds = frame / fps;
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
 /** The layers that have tracks: every clip's, highest first, and one free one above. */
@@ -279,6 +294,15 @@ function clipBody(clip, index) {
   name.className = "clip-name";
   name.textContent = clip.name;
   body.append(name);
+  for (const cue of clip.cues ?? []) {
+    if (cue.time === null) continue;
+    const mark = document.createElement("span");
+    mark.className = "cue-mark";
+    mark.style.left = `${(100 * (cue.time - clip.start)) / Math.max(end - clip.start, 1e-9)}%`;
+    mark.dataset.name = cue.name;
+    mark.title = `Cue ${cue.name}: at ${cue.event}, frame ${frameOf(cue.time)} (bind it to another event in the clip's panel)`;
+    body.append(mark);
+  }
   thumbnails(body, clip, index, (percent(end - clip.start) / 100) * elements.ruler.offsetWidth);
   clipBar(body, clip, index);
   return body;
@@ -333,11 +357,10 @@ async function drawSceneWaveform(canvas, index, buckets) {
   peaks.forEach(([low, high], x) => context.fillRect(x, 20 - high * 20, 1, Math.max(1, (high - low) * 20)));
 }
 
-/** The events row under a track: per wait, a bar and a pill; per synced cue, a mark (none: no row). */
+/** The events row under a track: per wait, a bar and a pill (none: no row). */
 function drawEvents(onTrack) {
   const waits = onTrack.flatMap(({ clip, index }) => clip.waits.map((wait) => ({ ...wait, clip, index })));
-  const cues = onTrack.flatMap(({ clip }) => (clip.cues ?? []).filter((cue) => cue.time !== null).map((cue) => ({ ...cue, clip })));
-  if (!waits.length && !cues.length) return;
+  if (!waits.length) return;
   const { lane } = addRow(`events:${onTrack[0].clip.layer}`, 1, "events", "events", false);
   const fixed = new Set(state.timeline.events.filter((event) => event.fixed).map((event) => event.name));
   for (const wait of waits) {
@@ -357,14 +380,6 @@ function drawEvents(onTrack) {
       : `${wait.event} at frame ${frameOf(wait.time)}${fixed.has(wait.event) ? "" : " (emitted by a scene)"}: drag to time it`;
     lane.append(pill);
     eventPill(pill, wait, bar);
-  }
-  for (const cue of cues) {
-    const mark = document.createElement("div");
-    mark.className = "cue";
-    mark.style.left = `${percent(cue.time)}%`;
-    mark.textContent = cue.name;
-    mark.title = `${cue.clip.name}'s cue ${cue.name} is at ${cue.event}, frame ${frameOf(cue.time)} (bind it to another event in the clip's panel)`;
-    lane.append(mark);
   }
 }
 
@@ -930,6 +945,7 @@ function listen() {
     drawCached();
   }).observe(timeline);
   timeline.addEventListener("scroll", growAtEnd, { passive: true });
+  document.getElementById("help-button").addEventListener("click", () => document.getElementById("help").showModal());
   elements.collapse.addEventListener("click", () => {
     state.open.clear();
     saveSet("manimx.open", state.open);
@@ -947,6 +963,7 @@ function listen() {
       "=": () => zoomBy(1.5),
       "-": () => zoomBy(1 / 1.5),
       0: () => zoomTo(1, 0),
+      "?": () => document.getElementById("help").showModal(),
       ArrowLeft: () => seek(state.time - (event.shiftKey ? 1 : 1 / fps)),
       ArrowRight: () => seek(state.time + (event.shiftKey ? 1 : 1 / fps)),
       Home: () => seek(0),

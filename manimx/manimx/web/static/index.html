@@ -23,6 +23,7 @@
       <button id="prompter-button" type="button" aria-pressed="false" title="Teleprompter: show over the frame what the scripts say, a moment before it is due (T)">Teleprompter</button>
       <button id="captions" type="button" aria-pressed="true" title="Show what the scripts say over the frame (C)">Subtitles</button>
       <output id="time" aria-live="off">0.00 s</output>
+      <button id="help-button" type="button" class="icon" title="Keys and mouse: what does what (?)">?</button>
     </div>
   </header>
 
@@ -128,13 +129,54 @@
       <div id="overlay"><div id="after-end" title="Past the end: nothing plays here yet"></div><div id="playhead"></div></div>
     </div>
   </section>
-  <p class="hint footer">Drag on the ruler to scrub. Drag a clip to move it (up or down to another track), its handles to cut it, empty track space to select several; Delete removes the selection. Drag an event to time it. S splits at the playhead, Ctrl+D duplicates, Ctrl+C / X / V copy, cut and paste at the playhead; drop sound files on an audio track, ● records a voice-over; drags snap to edges, the playhead and events (Alt: freely). Ctrl+Z undoes, Ctrl+Shift+Z redoes. Space plays, ← → step frames, Ctrl+wheel zooms.</p>
 
   <div id="marquee" hidden></div>
   <dialog id="render-dialog" aria-label="Render the video">
     <form method="dialog">
       <header><h2>Render</h2><button type="submit">Close</button></header>
       <div id="render-body"></div>
+    </form>
+  </dialog>
+  <dialog id="help" aria-label="Keys and mouse">
+    <form method="dialog">
+      <header><h2>Keys and mouse</h2><button type="submit">Close</button></header>
+      <h3>Playing</h3>
+      <dl class="keys">
+        <dt>Space</dt><dd>Play or pause</dd>
+        <dt>← →</dt><dd>One frame back or on (with Shift: one second)</dd>
+        <dt>Home End</dt><dd>To the start or the end</dd>
+        <dt>Drag on the ruler</dt><dd>Move the playhead</dd>
+        <dt>L</dt><dd>Play in a loop</dd>
+        <dt>M</dt><dd>Sound off or on</dd>
+      </dl>
+      <h3>The timeline</h3>
+      <dl class="keys">
+        <dt>Ctrl + wheel, + −</dt><dd>Zoom in or out (0: see everything)</dd>
+        <dt>Drag a clip</dt><dd>Move it, also up or down onto another track</dd>
+        <dt>Drag a clip's edge</dt><dd>Cut its start or end off</dd>
+        <dt>Drag on empty track space</dt><dd>Select several clips</dd>
+        <dt>Alt while dragging</dt><dd>Don't snap to edges, the playhead and cues</dd>
+        <dt>Drag a cue</dt><dd>Change when it happens</dd>
+      </dl>
+      <h3>Editing</h3>
+      <dl class="keys">
+        <dt>S</dt><dd>Split the clips under the playhead</dd>
+        <dt>Delete</dt><dd>Remove the selected clips</dd>
+        <dt>Ctrl + D</dt><dd>Duplicate the selected clips</dd>
+        <dt>Ctrl + C, X, V</dt><dd>Copy, cut, and paste at the playhead</dd>
+        <dt>Ctrl + Z</dt><dd>Undo (Ctrl + Shift + Z: redo)</dd>
+        <dt>Escape</dt><dd>Select nothing</dd>
+      </dl>
+      <h3>Voice</h3>
+      <dl class="keys">
+        <dt>Drag a script part</dt><dd>Place it on a script track</dd>
+        <dt>R or ●</dt><dd>Record the selected script part (or freely, with none selected); again to stop</dd>
+        <dt>Escape</dt><dd>While recording: throw the take away</dd>
+        <dt>Drag a word</dt><dd>Change when it is said (with Shift: its whole sentence)</dd>
+        <dt>T</dt><dd>Teleprompter on or off</dd>
+        <dt>C</dt><dd>Subtitles on or off</dd>
+        <dt>Drop sound files</dt><dd>On an audio track: copied into the project and placed there</dd>
+      </dl>
     </form>
   </dialog>
   <dialog id="settings" aria-label="Project settings">
