@@ -578,6 +578,29 @@ button.toggle[aria-expanded="true"]::before,
   background: var(--accent-soft);
 }
 
+/* Under a scene track: the sounds its scenes play. */
+.row.scene-sounds {
+  height: 26px;
+}
+
+.scene-sound {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  overflow: hidden;
+  background: #24433a;
+  border-radius: 4px;
+}
+
+.scene-sound.muted {
+  opacity: 0.35;
+}
+
+.scene-sound canvas {
+  width: 100%;
+  height: 100%;
+}
+
 .row.events {
   height: 28px;
 }

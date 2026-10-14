@@ -241,6 +241,7 @@ function drawRows() {
       }
     }
     drawEvents(onTrack);
+    drawSceneSounds(onTrack, layer);
     for (const { clip, index } of onTrack) {
       const key = clipKey(clip, index);
       if (state.open.has(key)) for (const node of clip.nodes) addNode(node, key, 1);
@@ -281,6 +282,50 @@ function clipBody(clip, index) {
   thumbnails(body, clip, index, (percent(end - clip.start) / 100) * elements.ruler.offsetWidth);
   clipBar(body, clip, index);
   return body;
+}
+
+const sceneWaveforms = new Map(); // request URL: peaks
+
+/** The sound row under a scene track: the waveform of what its clips' scenes play (none: no row). */
+function drawSceneSounds(onTrack, layer) {
+  const sounding = onTrack.filter(({ clip }) => clip.sounds);
+  if (!sounding.length) return;
+  const { row, lane } = addRow(`sounds:${layer}`, 1, "sound", "scene-sounds", false);
+  row.title = "What the scenes on this track play (play_sound); mute them with the track's speaker";
+  const muted = Boolean(state.timeline.tracks?.scenes?.[layer]?.muted);
+  for (const { clip, index } of sounding) {
+    const end = clip.end ?? state.span;
+    const bar = document.createElement("div");
+    bar.className = `scene-sound${muted ? " muted" : ""}`;
+    bar.style.left = `${percent(clip.start)}%`;
+    bar.style.width = `${percent(end - clip.start)}%`;
+    bar.title = `${clip.name}: ${clip.sounds} sound${clip.sounds === 1 ? "" : "s"}`;
+    const canvas = document.createElement("canvas");
+    bar.append(canvas);
+    lane.append(bar);
+    const pixels = (percent(end - clip.start) / 100) * elements.ruler.offsetWidth;
+    drawSceneWaveform(canvas, index, Math.max(1, Math.min(4000, Math.round(pixels / 2))));
+  }
+}
+
+async function drawSceneWaveform(canvas, index, buckets) {
+  const url = `/api/clip/waveform?clip=${index}&n=${buckets}&v=${state.version}`;
+  let peaks = sceneWaveforms.get(url);
+  if (!peaks) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return;
+      peaks = await response.json();
+      sceneWaveforms.set(url, peaks);
+    } catch {
+      return;
+    }
+  }
+  canvas.width = buckets;
+  canvas.height = 40;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "rgb(120 220 160 / 0.8)";
+  peaks.forEach(([low, high], x) => context.fillRect(x, 20 - high * 20, 1, Math.max(1, (high - low) * 20)));
 }
 
 /** The events row under a track: per wait, a bar and a pill; per synced cue, a mark (none: no row). */

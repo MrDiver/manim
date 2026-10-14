@@ -263,3 +263,21 @@ def test_labels_give_every_paths_index_in_its_group_on_the_frame() -> None:
 def test_the_labels_route_answers_json(server) -> None:
     status, kind, body = get(server, "/api/labels?t=0.5")
     assert status == 200 and kind == "application/json" and isinstance(json.loads(body), list)
+
+
+def test_scene_clips_that_play_sounds_show_them(renderer) -> None:
+    from manimx.examples.bouncing import Bouncing
+
+    timeline = Timeline()
+    timeline.add(Bouncing().prepare(), name="bouncing")
+    server = PreviewServer(timeline, RenderSettings(config(64, 36), fps=10), renderer=renderer)
+    server.start()
+    try:
+        status, _, body = get(server, "/api/timeline")
+        assert json.loads(body)["clips"][0]["sounds"] > 0
+        status, _, body = get(server, "/api/clip/waveform?clip=0&n=16")
+        peaks = json.loads(body)
+        assert status == 200 and len(peaks) == 16 and max(high for _, high in peaks) > 0.01
+        assert get(server, "/api/clip/waveform?clip=5&n=16")[0] == 400
+    finally:
+        server.close()

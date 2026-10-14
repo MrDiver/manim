@@ -70,6 +70,7 @@ shows, and ``manimx.json`` is saved shortly after (see editing.py):
     POST /api/asset?name=    the body is a sound file (dropped or recorded),
                              saved to assets/audio/; answers its "file"
     GET  /api/waveform?index=&from=&to=&n=  an audio clip's peaks
+    GET  /api/clip/waveform?clip=&n=  a scene clip's own sounds' peaks
     POST /api/render         {"start", "end"}: render the video (saved
                              first; full quality, the chosen encoder) in
                              a process of its own; /api/render/cancel
@@ -129,9 +130,10 @@ from importlib import resources
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+import numpy as np
 from PIL import Image
 
-from ..animation import write_wav
+from ..animation import mix, write_wav
 from ..animation.timing import NEVER, Clip, Timeline
 from ..drivers.offline import RenderSettings
 from ..drivers.stills import StillRenderer
@@ -169,6 +171,8 @@ EDIT_ROUTES = (
     "/api/undo",
     "/api/redo",
 )
+WAVEFORM_RATE = 8000
+"""Samples a second the waveforms of scene clips' sounds are drawn from."""
 FORMATS = {"jpeg": ("JPEG", "image/jpeg"), "png": ("PNG", "image/png"), "webp": ("WEBP", "image/webp")}
 
 
@@ -341,6 +345,7 @@ class PreviewServer:
                     "entry": entry,
                     "waits": _waits(clip, known),
                     "cues": _cues(clip, known),
+                    "sounds": len(clip.placed_sounds()),
                     "nodes": clip_nodes(clip),
                 }
                 for clip, entry in zip(clips, entries, strict=True)
@@ -404,6 +409,21 @@ class PreviewServer:
             pixels = self._renderer.render(self._frame_at, frame_config, self._effects)
         return _encode(pixels, image_format), version
 
+    def clip_waveform(self, index: int, buckets: int) -> list[list[float]] | None:
+        """The sounds of scene clip ``index`` (its scenes' play_sound
+        calls) from its start to its end: the loudest and quietest sample
+        in each of ``buckets`` slices, for drawing; None without the clip."""
+        with self._lock:
+            clips = self.timeline.clips
+            if not 0 <= index < len(clips):
+                return None
+            clip = clips[index]
+            end = clip.end if clip.end != NEVER else clip.start + clip.scene.playing_time
+            samples = mix(clip.placed_sounds(), clip.start, end, WAVEFORM_RATE).mean(axis=1)
+        buckets = max(1, min(int(buckets), 4000))
+        edges = np.linspace(0, len(samples), buckets + 1).astype(int)
+        return [[round(float(samples[a:b].min()), 3), round(float(samples[a:b].max()), 3)] if b > a else [0.0, 0.0] for a, b in zip(edges[:-1], edges[1:], strict=True)]
+
     def thumbnail(self, clip: int, scene: int, at: float, width: int) -> bytes | None:
         """Clip ``clip`` alone at its scene's playing time ``at``, ``width``
         pixels wide (JPEG); None unless the clip still shows the prepared
@@ -457,6 +477,7 @@ class _Handler(BaseHTTPRequestHandler):
             "/api/labels": self._labels,
             "/api/thumbnail": self._thumbnail,
             "/api/waveform": self._waveform,
+            "/api/clip/waveform": self._clip_waveform,
             "/api/changes": self._changes,
             "/api/settings": self._settings,
             "/api/scenes": self._scenes,
@@ -590,6 +611,13 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(editor.waveform(index, start, end, buckets))
         except EditError as error:
             raise _BadRequest(str(error)) from None
+
+    def _clip_waveform(self, query: dict[str, list[str]]) -> None:
+        index, buckets = _number(query, "clip", int), _number(query, "n", int)
+        peaks = self.preview.clip_waveform(index, buckets)
+        if peaks is None:
+            raise _BadRequest(f"there is no clip {index}")
+        self._json(peaks)
 
     def _thumbnail(self, query: dict[str, list[str]]) -> None:
         clip, scene, width = (_number(query, name, int) for name in ("clip", "scene", "w"))
