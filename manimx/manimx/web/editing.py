@@ -58,7 +58,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from ..animation import PreparedScene, Timeline
+from ..animation import PreparedScene, Timeline, Track
 from ..animation.timing import NEVER
 from ..drivers.offline import RenderSettings
 from ..project import PROJECT_FILE, AudioEntry, ClipEntry, Project, ProjectError
@@ -74,6 +74,7 @@ from .commands import (
     EditAudio,
     EditClips,
     EditError,
+    EditTrack,
     InsertClips,
     MoveWords,
     RemoveAudio,
@@ -397,6 +398,21 @@ class ProjectEditor:
                 inverse = SetEvent(name, project.events.get(name))
                 self._change(lambda: self._set_event(name, time))
                 return inverse
+            case EditTrack(kind, index, updates):
+                tracks = project.scene_tracks if kind == "scenes" else project.audio_tracks
+                old = tracks.get(index, Track())
+                new = dataclasses.replace(old, **dict(updates))
+
+                def edit_track() -> None:
+                    for target in (tracks, self.timeline.scene_tracks if kind == "scenes" else self.timeline.audio_tracks):
+                        if new == Track():
+                            target.pop(index, None)
+                        else:
+                            target[index] = new
+                    self.timeline.audio_changed()
+
+                self._change(edit_track)
+                return EditTrack(kind, index, tuple((key, getattr(old, key)) for key, _ in updates))
             case SetScript(name, script):
                 old = self._script(name)
                 if script is None:
@@ -623,7 +639,7 @@ class ProjectEditor:
                 "track": entry.track,
                 "cut": None if entry.cut is None else list(entry.cut),
                 "volume": entry.volume,
-                "length": clip.source_length,
+                "length": clip.source_length - clip.offset,  # like the cut, from the script part's start
                 "script": entry.script,
                 "part": entry.part,
                 "offset": clip.offset,
@@ -631,6 +647,26 @@ class ProjectEditor:
             }
             for entry, clip in zip(project.audio, self.timeline.audio_clips, strict=True)
         ]
+
+    def tracks(self) -> dict[str, dict[str, dict[str, Any]]]:
+        """The tracks that have settings, as the page shows them."""
+        project = self._project()
+        return {
+            kind: {str(index): dataclasses.asdict(track) for index, track in tracks.items()}
+            for kind, tracks in (("scenes", project.scene_tracks), ("audio", project.audio_tracks))
+        }
+
+    def sounds(self) -> list[dict[str, Any]]:
+        """The sound files in assets/audio/: path, and how many audio clips play each."""
+        project = self._project()
+        folder = self.root / AUDIO_FOLDER
+        used: dict[str, int] = {}
+        for entry in project.audio:
+            file = entry.file if entry.script is None else None
+            if file:
+                used[file] = used.get(file, 0) + 1
+        files = sorted(path for path in folder.iterdir() if path.suffix.lower().lstrip(".") in AUDIO_SUFFIXES) if folder.is_dir() else []
+        return [{"file": path.relative_to(self.root).as_posix(), "name": path.stem, "clips": used.get(path.relative_to(self.root).as_posix(), 0)} for path in files]
 
     def waveform(self, index: int, start: float, end: float, buckets: int) -> list[list[float]]:
         """Audio clip ``index``'s loudest and quietest sample in each of

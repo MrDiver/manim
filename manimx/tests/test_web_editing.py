@@ -600,3 +600,28 @@ def test_scripts_are_written_placed_recorded_and_synced_live(root, renderer, mon
         assert Project.load(root).audio[0].script == "narration"
     finally:
         server.close()
+
+
+def test_tracks_are_named_hidden_muted_soloed_and_louder(root, editor) -> None:
+    file = editor.save_asset("music.wav", tone(root, 1.0))
+    editor.run(parse("/api/audio/add", {"file": file, "start": 0.0, "track": 0}))
+    editor.run(parse("/api/audio/add", {"file": file, "start": 0.0, "track": 1}))
+    loud = lambda: float(np.abs(editor.timeline.audio(0.0, 1.0, 8000)).max())  # noqa: E731
+    both = loud()
+    editor.run(parse("/api/track", {"kind": "audio", "index": 1, "name": "Music", "volume": 0.5}))
+    assert editor.tracks()["audio"]["1"]["name"] == "Music" and loud() == pytest.approx(0.75 * both, rel=0.01)
+    editor.run(parse("/api/track", {"kind": "audio", "index": 0, "muted": True}))
+    assert loud() == pytest.approx(0.25 * both, rel=0.01)
+    editor.run(parse("/api/track", {"kind": "audio", "index": 0, "muted": False, "solo": True}))
+    assert loud() == pytest.approx(0.5 * both, rel=0.01)  # only the soloed track
+    assert len(editor.timeline.frame_at(0.5)) == 2
+    editor.run(parse("/api/track", {"kind": "scenes", "index": 1, "hidden": True}))
+    assert len(editor.timeline.frame_at(0.5)) == 1  # the Waiting clip on layer 1 is not drawn
+    editor.save()
+    project = Project.load(root)
+    assert project.audio_tracks[1].name == "Music" and project.scene_tracks[1].hidden
+    assert project.to_json()["timeline"]["tracks"] == {"scenes": {"1": {"hidden": True}}, "audio": {"0": {"solo": True}, "1": {"name": "Music", "volume": 0.5}}}
+    editor.undo()
+    assert len(editor.timeline.frame_at(0.5)) == 2
+    with pytest.raises(EditError, match="tracks have no colour"):
+        parse("/api/track", {"kind": "audio", "index": 0, "colour": "red"})

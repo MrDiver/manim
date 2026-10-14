@@ -66,6 +66,7 @@ from .timing import (
     Ramp,
     SegmentTiming,
     Timeline,
+    Track,
     UnresolvedEvents,
 )
 
@@ -85,6 +86,7 @@ __all__ = [
     "AnimationBuilder",
     "AnimationGroup",
     "AudioClip",
+    "Track",
     "Camera",
     "CameraView",
     "Change",

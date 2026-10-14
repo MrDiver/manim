@@ -189,13 +189,29 @@ h1 {
   background: var(--accent);
 }
 
-#scene-list {
+/* The project bin: scenes, scripts and sounds to drag onto the timeline. */
+.bin + .bin {
+  margin-top: 14px;
+}
+
+.bin h2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+button.small {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.bin-list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-#scene-list li {
+.bin-list li {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -207,11 +223,46 @@ h1 {
   cursor: grab;
 }
 
-#scene-list li:hover {
+.bin-list li:hover {
   outline: 1px solid var(--accent);
 }
 
-#scene-list .count {
+.bin-list li.hint {
+  background: none;
+  cursor: default;
+}
+
+.part-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bin-script + .bin-script {
+  margin-top: 8px;
+}
+
+.bin-script-name {
+  display: block;
+  width: 100%;
+  margin: 0 0 4px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.bin-list.parts li {
+  margin-left: 10px;
+  background: #2c3a4a;
+}
+
+.bin-list.parts li.placed {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.bin-list .count {
+  flex: none;
+  white-space: nowrap;
   font: 11px var(--mono);
   color: var(--muted);
 }
@@ -371,7 +422,7 @@ h1 {
 /* -- the timeline ------------------------------------------------------------ */
 
 #timeline {
-  --label: 170px;
+  --label: 230px;
   --lanes: calc(100% - var(--label) - 12px); /* set in pixels by app.js, times the zoom */
   flex: none;
   height: var(--timeline);
@@ -1082,6 +1133,152 @@ button.toggle[aria-expanded="true"]::before,
   font: 500 clamp(11px, 2.4vw, 22px) / 1.35 system-ui, sans-serif;
   text-align: center;
   pointer-events: none;
+}
+
+/* -- the view tabs and the Script tab (scriptview.js) ------------------------------ */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tabs button[aria-selected="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+#script-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+#script-view[hidden],
+#stage[hidden] {
+  display: none;
+}
+
+.script-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.script-status {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.script-text {
+  flex: 1;
+  min-height: 200px;
+  resize: vertical;
+  padding: 12px 14px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: 17px/1.6 system-ui, sans-serif;
+}
+
+.script-parts h3 {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.script-part {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  border-top: 1px solid var(--line);
+}
+
+.script-part .hint {
+  margin: 0;
+}
+
+.script-part button {
+  margin-left: auto;
+}
+
+button.danger:hover {
+  border-color: var(--problem);
+  color: var(--problem);
+}
+
+/* -- track headers (trackheads.js) ------------------------------------------------- */
+
+.track-head {
+  gap: 4px;
+}
+
+.track-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-rename {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+}
+
+.track-switches {
+  display: flex;
+  gap: 2px;
+}
+
+.switch {
+  min-width: 22px;
+  padding: 1px 4px;
+  font-size: 11px;
+  line-height: 16px;
+  opacity: 0.55;
+}
+
+.switch[aria-pressed="true"] {
+  opacity: 1;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.switch.muted[aria-pressed="true"],
+.switch.hidden[aria-pressed="true"] {
+  border-color: var(--problem);
+  color: var(--problem);
+}
+
+.switch.solo[aria-pressed="true"] {
+  border-color: #e0c341;
+  color: #e0c341;
+}
+
+input.volume {
+  width: 56px;
+  accent-color: var(--accent);
+}
+
+.row.hidden-track .lane {
+  opacity: 0.35;
+}
+
+/* A script part not recorded yet: dashed, silent. */
+.audio-body.planned {
+  background: repeating-linear-gradient(135deg, #22303e 0 8px, #1d2834 8px 16px);
+  outline: 1px dashed #5d7fa3;
+  outline-offset: -1px;
 }
 
 /* -- the render dialog (render.js) ------------------------------------------------ */

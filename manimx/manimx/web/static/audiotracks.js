@@ -14,9 +14,15 @@
 // drag moves it (up or down to another audio track), its ends cut it,
 // drags snap (Alt: freely), Delete removes, every edit is undone with
 // Ctrl+Z. The inspector shows the selected audio clip's start and volume.
+//
+// Script parts (bin.js) are dropped onto audio tracks too. Before a part
+// is recorded its bar is dashed and silent; its words are blocks on it,
+// timed as if read out, and dragging a word times it by hand (scenes synced
+// to it follow at once). A locked track's clips do not move.
 
-
+import { PART_TYPE, SOUND_TYPE, scriptPart } from "./bin.js";
 import { button, field, liveSender, numberInput, onFrame, paragraph, post, say, showSnap, snapTo, timeAtUnclamped } from "./editing.js";
+import { isLocked, trackHead } from "./trackheads.js";
 
 const SNAP_PIXELS = 8;
 const selected = new Set(); // indices of the selected audio clips
@@ -30,6 +36,9 @@ const recordButton = document.getElementById("record");
 export function initAudio(shared) {
   page = shared;
   recordButton.addEventListener("click", () => (recording ? stopRecording() : startRecording()));
+  document.addEventListener("manimx:scripts", () => {
+    if (!page.state.dragging) page.redraw(); // the script parts' words arrived
+  });
   document.addEventListener("manimx:select", (event) => {
     if (event.detail !== "audio" && selected.size) {
       selected.clear();
@@ -59,10 +68,12 @@ export function drawAudioTracks() {
   for (const index of [...selected]) if (!audio[index]) selected.delete(index);
   recordButton.hidden = !editable;
   if (!editable && !audio.length) return;
-  const tracks = [...new Set(audio.map((clip) => clip.track))].sort((a, b) => a - b);
+  const named = Object.keys(page.state.timeline.tracks?.audio ?? {}).map(Number);
+  const tracks = [...new Set([...audio.map((clip) => clip.track), ...named])].sort((a, b) => a - b);
   const free = tracks.length ? tracks[tracks.length - 1] + 1 : 0;
   for (const track of tracks) {
-    const { lane } = page.addRow(`audio:${track}`, 0, `Audio ${track + 1}`, "track audio-track", false);
+    const { row, lane } = page.addRow(`audio:${track}`, 0, "", "track audio-track", false);
+    trackHead(row, "audio", track);
     audioLane(lane, track);
     audio.forEach((clip, index) => {
       if (clip.track === track) lane.append(audioBar(clip, index));
@@ -70,7 +81,7 @@ export function drawAudioTracks() {
   }
   if (editable) {
     const { row, lane } = page.addRow(`audio:${free}`, 0, "New audio track", "track audio-track new-track", false);
-    row.title = "Drop sound files here to put them on a new audio track";
+    row.title = "Drop a script part or a sound here to put it on a new audio track";
     audioLane(lane, free);
   }
   drawPanel();
@@ -82,8 +93,9 @@ function audioLane(lane, track) {
   lane.dataset.audioTrack = track;
   if (!page.state.timeline.editable) return;
   const row = lane.parentElement;
+  const types = ["Files", PART_TYPE, SOUND_TYPE];
   lane.addEventListener("dragover", (event) => {
-    if (!event.dataTransfer.types.includes("Files")) return;
+    if (!types.some((type) => event.dataTransfer.types.includes(type))) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
     row.classList.add("drop");
@@ -91,6 +103,22 @@ function audioLane(lane, track) {
   lane.addEventListener("dragleave", () => row.classList.remove("drop"));
   lane.addEventListener("drop", async (event) => {
     row.classList.remove("drop");
+    const at = onFrame(timeAtUnclamped(event.clientX));
+    const part = event.dataTransfer.getData(PART_TYPE);
+    if (part) {
+      event.preventDefault();
+      const { script, part: index } = JSON.parse(part);
+      const placed = scriptPart(script, index)?.clip;
+      if (placed !== null && placed !== undefined) post("/api/audio/edit", { index: placed, start: at, track });
+      else post("/api/audio/add", { script, part: index, start: at, track });
+      return;
+    }
+    const sound = event.dataTransfer.getData(SOUND_TYPE);
+    if (sound) {
+      event.preventDefault();
+      post("/api/audio/add", { file: sound, start: at, track });
+      return;
+    }
     const files = [...event.dataTransfer.files];
     if (!files.length) return;
     event.preventDefault();
@@ -167,11 +195,12 @@ async function stopRecording() {
 
 function audioBar(clip, index) {
   const bar = document.createElement("div");
-  bar.className = "clip-body audio-body";
+  bar.className = `clip-body audio-body${clip.recorded ? "" : " planned"}`;
   bar.dataset.audio = index;
   bar.style.left = `${page.percent(clip.start)}%`;
   bar.style.width = `${page.percent(clip.end - clip.start)}%`;
-  bar.title = `${clip.file}: ${clip.start.toFixed(2)} – ${clip.end.toFixed(2)} s`;
+  const what = clip.script ? `Part ${clip.part + 1} of the script ${clip.script}${clip.recorded ? "" : ", not recorded yet"}` : clip.file;
+  bar.title = `${what}: ${clip.start.toFixed(2)} – ${clip.end.toFixed(2)} s`;
   bar.classList.toggle("selected", selected.has(index));
   const canvas = document.createElement("canvas");
   canvas.className = "waveform";
@@ -180,8 +209,9 @@ function audioBar(clip, index) {
   name.className = "clip-name";
   name.textContent = clip.name;
   bar.append(name);
-  drawWaveform(canvas, clip, index, (page.percent(clip.end - clip.start) / 100) * page.elements.ruler.offsetWidth);
-  if (page.state.timeline.editable) {
+  if (clip.recorded) drawWaveform(canvas, clip, index, (page.percent(clip.end - clip.start) / 100) * page.elements.ruler.offsetWidth);
+  if (clip.script) bar.append(wordBlocks(clip));
+  if (page.state.timeline.editable && !isLocked("audio", clip.track)) {
     bar.classList.add("editable");
     for (const edge of ["in", "out"]) {
       const handle = document.createElement("div");
@@ -195,10 +225,62 @@ function audioBar(clip, index) {
   return bar;
 }
 
+/** The words of a script part's clip it plays, as blocks on its bar. */
+function wordBlocks(clip) {
+  const layer = document.createElement("div");
+  layer.className = "words";
+  const part = scriptPart(clip.script, clip.part);
+  if (!part) return layer;
+  const cutIn = clip.cut?.[0] ?? 0;
+  const length = clip.end - clip.start;
+  const place = (block, word) => {
+    block.style.left = `${((word.start - cutIn) / length) * 100}%`;
+    block.style.width = `${(Math.max(word.end - word.start, 0.02) / length) * 100}%`;
+  };
+  part.words.forEach((word, index) => {
+    if (word.end < cutIn || word.start > cutIn + length) return;
+    const block = document.createElement("div");
+    block.className = "word";
+    block.textContent = word.text;
+    block.title = `${word.text} at ${(clip.start + word.start - cutIn).toFixed(2)} s${page.state.timeline.editable ? ": drag to time it" : ""}`;
+    place(block, word);
+    if (page.state.timeline.editable && !isLocked("audio", clip.track)) block.addEventListener("pointerdown", (event) => dragWord(event, block, clip, index, word, place));
+    layer.append(block);
+  });
+  return layer;
+}
+
+/** Drag a word in time (the frame at its start shows meanwhile). */
+function dragWord(event, block, clip, index, word, place) {
+  event.stopPropagation();
+  block.setPointerCapture(event.pointerId);
+  const cutIn = clip.cut?.[0] ?? 0;
+  const secondsPerPixel = page.state.span / page.elements.ruler.getBoundingClientRect().width;
+  const moved = { start: word.start, end: word.end };
+  const send = liveSender("/api/script/words", () => page.showTime(clip.start + moved.start - cutIn));
+  page.state.dragging = true;
+  const round = (value) => Math.round(value * 1000) / 1000;
+  const onMove = (move) => {
+    const delta = Math.max(-word.start, (move.clientX - event.clientX) * secondsPerPixel);
+    moved.start = round(word.start + delta);
+    moved.end = round(word.end + delta);
+    place(block, moved);
+    send({ script: clip.script, part: clip.part, words: [{ index, ...moved }] });
+  };
+  const onUp = async () => {
+    block.removeEventListener("pointermove", onMove);
+    block.removeEventListener("pointerup", onUp);
+    await send.idle();
+    page.state.dragging = false;
+  };
+  block.addEventListener("pointermove", onMove);
+  block.addEventListener("pointerup", onUp);
+}
+
 async function drawWaveform(canvas, clip, index, pixels) {
   const buckets = Math.max(1, Math.min(4000, Math.round(pixels / 2)));
-  const from = clip.cut?.[0] ?? 0;
-  const to = clip.cut?.[1] ?? clip.length;
+  const from = clip.offset + (clip.cut?.[0] ?? 0); // the file's seconds
+  const to = clip.offset + (clip.cut?.[1] ?? clip.length);
   const url = `/api/waveform?index=${index}&from=${from}&to=${to}&n=${buckets}&file=${encodeURIComponent(clip.file)}`;
   let peaks = waveforms.get(url);
   if (!peaks) {

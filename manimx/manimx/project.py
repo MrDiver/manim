@@ -44,7 +44,7 @@ from typing import Any
 
 from .animation.audio import Sound
 from .animation.scene import PreparedScene, Scene
-from .animation.timing import NEVER, AudioClip, Timeline
+from .animation.timing import NEVER, AudioClip, Timeline, Track
 from .settings import (
     OutputSettings,
     PerformanceSettings,
@@ -131,6 +131,10 @@ class Project:
     events: dict[str, float] = field(default_factory=dict)
     """Event times set by hand (a click; the words of scripts are events of their own)."""
     audio: list[AudioEntry] = field(default_factory=list)
+    scene_tracks: dict[int, Track] = field(default_factory=dict)
+    """Names, visibility, mute, solo and volume of the scene tracks (layers) that have them."""
+    audio_tracks: dict[int, Track] = field(default_factory=dict)
+    """The same of the audio tracks."""
     _sounds: dict[Path, tuple[int, Sound]] = field(default_factory=dict, init=False, repr=False)
     """Sound files read, with their modification time: read again when changed."""
     _scripts: dict[str, tuple[tuple[int | None, int | None], Script]] = field(default_factory=dict, init=False, repr=False)
@@ -172,7 +176,7 @@ class Project:
         if not isinstance(data.get("name"), str):
             raise ProjectError(f'invalid {PROJECT_FILE}: "name" must be a string')
         timeline = data.get("timeline", {})
-        _check_keys(timeline, ["clips", "events", "audio"], "timeline")
+        _check_keys(timeline, ["clips", "events", "audio", "tracks"], "timeline")
         try:
             settings = settings_from_json({key: data[key] for key in SECTIONS if key in data})
         except UnknownSetting as error:
@@ -194,9 +198,16 @@ class Project:
             for index, entry in enumerate(timeline.get("audio", [])):
                 _check_keys(entry, ["file", "script", "part", "start", "track", "cut", "volume"], f"timeline.audio[{index}]")
                 audio.append(_audio_entry(entry))
+            tracks = timeline.get("tracks", {})
+            _check_keys(tracks, ["scenes", "audio"], "timeline.tracks")
+            scene_tracks = {int(index): _track(data, f"timeline.tracks.scenes.{index}") for index, data in tracks.get("scenes", {}).items()}
+            audio_tracks = {int(index): _track(data, f"timeline.tracks.audio.{index}") for index, data in tracks.get("audio", {}).items()}
         except (KeyError, TypeError, ValueError, AttributeError) as error:
             raise ProjectError(f"invalid {PROJECT_FILE}: {error}") from error
-        return cls(root=root, name=data["name"], settings=settings, scenes=scenes, timeline=clips, events=events, audio=audio)
+        return cls(
+            root=root, name=data["name"], settings=settings, scenes=scenes, timeline=clips, events=events, audio=audio,
+            scene_tracks=scene_tracks, audio_tracks=audio_tracks,
+        )  # fmt: skip
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -209,6 +220,7 @@ class Project:
                 "clips": [_clip_json(entry) for entry in self.timeline],
                 "events": dict(self.events),
                 **({"audio": [_audio_json(entry) for entry in self.audio]} if self.audio else {}),
+                **({"tracks": _tracks_json(self.scene_tracks, self.audio_tracks)} if _tracks_json(self.scene_tracks, self.audio_tracks) else {}),
             },
         }
 
@@ -303,7 +315,10 @@ class Project:
         (default: prepare it now; the preview reuses scenes whose files did
         not change)."""
         # The audio first: its words are events, which decide where clips end.
-        timeline = Timeline(audio_clips=[self.audio_clip(entry) for entry in self.audio], events=dict(self.events))
+        timeline = Timeline(
+            audio_clips=[self.audio_clip(entry) for entry in self.audio], events=dict(self.events),
+            scene_tracks=dict(self.scene_tracks), audio_tracks=dict(self.audio_tracks),
+        )  # fmt: skip
         previous_end = 0.0
         used: set[str] = set()
         previous_name = ""
@@ -586,6 +601,29 @@ def project_schema() -> dict[str, Any]:
                         "description": "Times (seconds) of events scenes wait for with wait_for() (the words of scripts are events too).",
                         "additionalProperties": {"type": "number"},
                     },
+                    "tracks": {
+                        "type": "object",
+                        "description": "Names, visibility, mute, solo and volume of tracks, by number (only what differs from the default).",
+                        "additionalProperties": False,
+                        "properties": {
+                            key: {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "name": {"type": "string"},
+                                        "hidden": {"type": "boolean", "description": "Scene tracks: not drawn."},
+                                        "locked": {"type": "boolean", "description": "Not edited in the preview."},
+                                        "muted": {"type": "boolean"},
+                                        "solo": {"type": "boolean", "description": "When tracks solo, only those are heard."},
+                                        "volume": {"type": "number", "minimum": 0},
+                                    },
+                                },
+                            }
+                            for key in ("scenes", "audio")
+                        },
+                    },
                     "audio": {
                         "type": "array",
                         "description": "Sounds on the audio tracks: sound files (music, recordings) and parts of scripts.",
@@ -639,6 +677,31 @@ def _speed(value: Any) -> float:
     if not speed > 0.0:
         raise ValueError(f"a clip's speed must be positive, not {value!r}")
     return speed
+
+
+TRACK_FIELDS = {"name": str, "hidden": bool, "locked": bool, "muted": bool, "solo": bool, "volume": float}
+
+
+def _track(data: Any, where: str) -> Track:
+    _check_keys(data, list(TRACK_FIELDS), where)
+    track = Track(**{key: kind(data[key]) if kind is float else data[key] for key, kind in TRACK_FIELDS.items() if key in data})
+    if not isinstance(track.name, str) or not all(isinstance(getattr(track, key), bool) for key in ("hidden", "locked", "muted", "solo")):
+        raise ValueError(f"{where}: a track has a name (text), hidden, locked, muted and solo (true or false) and a volume")
+    if track.volume < 0:
+        raise ValueError(f"{where}: a track's volume is at least 0")
+    return track
+
+
+def _tracks_json(scenes: dict[int, Track], audio: dict[int, Track]) -> dict[str, Any]:
+    """The tracks that differ from the default, with only what differs."""
+    default = Track()
+    result = {}
+    for key, tracks in (("scenes", scenes), ("audio", audio)):
+        changed = {str(index): {name: getattr(track, name) for name in TRACK_FIELDS if getattr(track, name) != getattr(default, name)} for index, track in sorted(tracks.items())}
+        changed = {index: data for index, data in changed.items() if data}
+        if changed:
+            result[key] = changed
+    return result
 
 
 def _audio_entry(data: dict[str, Any]) -> AudioEntry:

@@ -51,6 +51,10 @@ shows, and ``manimx.json`` is saved shortly after (see editing.py):
     POST /api/audio/remove   {"indices": [...]}
     POST /api/audio/edit     {"index", and any of "start", "track", "cut",
                              "volume"}, or {"clips": [...]} of those
+    POST /api/track          {"kind": "scenes" or "audio", "index", and any
+                             of "name", "hidden", "locked", "muted",
+                             "solo", "volume"}
+    GET  /api/sounds         the sound files in assets/audio/
     GET  /api/scripts        the project's scripts: text, parts, word
                              times, takes, where each part is placed
     POST /api/script         {"name", "text"}: write a script (new or
@@ -150,6 +154,7 @@ EDIT_ROUTES = (
     "/api/audio/edit",
     "/api/script",
     "/api/script/words",
+    "/api/track",
     "/api/event",
     "/api/setting",
     "/api/undo",
@@ -309,6 +314,7 @@ class PreviewServer:
             ],
             "audio": self.editor.audio_clips() if self.editor is not None else [],
             "transcriber": _transcriber(),
+            "tracks": self.editor.tracks() if self.editor is not None else {"scenes": {}, "audio": {}},
             "said": [{"name": name, "time": time} for name, time in sorted(self.timeline.word_events().items(), key=lambda item: item[1])],
             "subtitles": [{"start": item.start, "end": item.end, "text": item.text} for item in self.timeline.subtitles()],
             "segments": [
@@ -421,6 +427,7 @@ class _Handler(BaseHTTPRequestHandler):
             "/api/settings": self._settings,
             "/api/scenes": self._scenes,
             "/api/scripts": self._scripts,
+            "/api/sounds": self._sounds,
             "/api/audio": self._audio,
             "/api/render": self._render_status,
             "/api/render/video": self._render_video,
@@ -588,6 +595,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"error": "this preview has no project"}, HTTPStatus.NOT_FOUND)
             return
         self._json(self.preview.editor.scenes())
+
+    def _sounds(self, query: dict[str, list[str]]) -> None:
+        if self.preview.editor is None:
+            self._json({"error": "this preview has no project"}, HTTPStatus.NOT_FOUND)
+            return
+        self._json(self.preview.editor.sounds())
 
     def _scripts(self, query: dict[str, list[str]]) -> None:
         if self.preview.editor is None:

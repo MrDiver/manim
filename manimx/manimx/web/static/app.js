@@ -48,6 +48,9 @@
 
 import { clipBar, eventPill, initEditing, timelineLoaded, trackLane } from "./editing.js";
 import { drawAudioTracks, initAudio } from "./audiotracks.js";
+import { initBin, refreshBin } from "./bin.js";
+import { initScriptView, scriptViewLoaded } from "./scriptview.js";
+import { initTrackHeads, trackHead } from "./trackheads.js";
 import { FrameCache } from "./frames.js";
 import { initRender, renderAvailable } from "./render.js";
 import { initThumbs, thumbnails } from "./thumbs.js";
@@ -220,7 +223,9 @@ function drawRows() {
     trackLane(lane, free);
   }
   for (const layer of used) {
-    const { lane } = addRow(`track:${layer}`, 0, `Track ${layer}`, "track", false);
+    const { row, lane } = addRow(`track:${layer}`, 0, "", "track", false);
+    trackHead(row, "scenes", layer);
+    row.classList.toggle("hidden-track", Boolean(state.timeline.tracks?.scenes?.[layer]?.hidden));
     trackLane(lane, layer);
     const onTrack = clips.map((clip, index) => ({ clip, index })).filter(({ clip }) => clip.layer === layer);
     for (const { clip, index } of onTrack) {
@@ -908,6 +913,8 @@ async function loadTimeline() {
   elements.problem.hidden = !error;
   drawTimeline();
   timelineLoaded();
+  scriptViewLoaded();
+  refreshBin();
   renderAvailable(state.timeline.editable);
 }
 
@@ -931,6 +938,9 @@ async function followChanges() {
 
 async function start() {
   initThumbs({ state });
+  initTrackHeads({ state });
+  initBin({ state });
+  initScriptView({ state });
   initRender({ state });
   initAudio({ state, elements, percent, addRow, play, pause, redraw: drawTimeline, showTime: (time) => show(snap(time)) });
   initEditing({

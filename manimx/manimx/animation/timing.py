@@ -381,6 +381,27 @@ class AudioClip:
         return (self.start, self.cut_in or 0.0, sound, self.volume)
 
 
+@dataclass
+class Track:
+    """How a track of the timeline plays: its name, and whether it is
+    shown, heard and how loud. Scene tracks are the clips' layers, audio
+    tracks the audio clips' tracks; both mute and solo (a scene track's
+    sounds are its scenes' play_sound calls)."""
+
+    name: str = ""
+    hidden: bool = False
+    """Scene tracks: their clips are not drawn."""
+    locked: bool = False
+    """Not edited in the preview (it only guards against slips)."""
+    muted: bool = False
+    solo: bool = False
+    """Some tracks solo: only those are heard."""
+    volume: float = 1.0
+
+
+_DEFAULT_TRACK = Track()
+
+
 @dataclass(eq=False)
 class Timeline:
     """Clips on one global timeline, with their events, and the audio
@@ -392,6 +413,10 @@ class Timeline:
     call :meth:`audio_changed` after changing the list or a clip in it."""
     events: dict[str, float] = field(default_factory=dict)
     """Events with a time set directly (fixed, or fired by a presenter)."""
+    scene_tracks: dict[int, Track] = field(default_factory=dict)
+    """Per layer, how its track plays (missing: as a default Track)."""
+    audio_tracks: dict[int, Track] = field(default_factory=dict)
+    """Per audio track, how it plays (missing: as a default Track)."""
     live: bool = False
     """Live mode: unfired events hold instead of being an error."""
     uid: int = field(default_factory=new_uid, init=False, repr=False)
@@ -492,6 +517,8 @@ class Timeline:
         self._ensure_resolved()
         views = []
         for clip in sorted(self.clips, key=lambda clip: clip.layer):  # stable
+            if self.scene_tracks.get(clip.layer, _DEFAULT_TRACK).hidden:
+                continue
             compiled = clip.compiled_time(t)
             if compiled is not None:
                 views.append(clip.scene.plan.frame_at(compiled, global_time=t, uid=clip.uid))
@@ -506,9 +533,22 @@ class Timeline:
     def audio(self, start: float = 0.0, end: float | None = None, sample_rate: int = DEFAULT_SAMPLE_RATE) -> np.ndarray:
         """Every clip's sounds and the audio clips mixed on the global timeline, stereo float32
         for ``[start, end)`` (default: the whole timeline)."""
-        placed = [entry for clip in self.clips for entry in clip.placed_sounds()]
-        placed += [entry for entry in (audio.placed() for audio in self.audio_clips) if entry is not None]
-        return mix(placed, start, self.duration if end is None else end, sample_rate)
+        soloing = any(track.solo for track in (*self.scene_tracks.values(), *self.audio_tracks.values()))
+
+        def heard(track: Track) -> float:
+            """How loud a track is heard: 0 when muted, or when others solo."""
+            return 0.0 if track.muted or (soloing and not track.solo) else track.volume
+
+        placed = []
+        for clip in self.clips:
+            loudness = heard(self.scene_tracks.get(clip.layer, _DEFAULT_TRACK))
+            placed += [(time, skip, sound, volume * loudness) for time, skip, sound, volume in clip.placed_sounds()]
+        for audio in self.audio_clips:
+            entry = audio.placed()
+            if entry is not None:
+                time, skip, sound, volume = entry
+                placed.append((time, skip, sound, volume * heard(self.audio_tracks.get(audio.track, _DEFAULT_TRACK))))
+        return mix([entry for entry in placed if entry[3] > 0.0], start, self.duration if end is None else end, sample_rate)
 
     def segments(self) -> Iterable[tuple[Clip, int, float, float]]:
         """``(clip, segment index, global start, global end)`` of every

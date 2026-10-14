@@ -273,6 +273,22 @@ class MoveWords(UICommand):
 
 
 @dataclass(frozen=True)
+class EditTrack(UICommand):
+    """Change a track: ``kind`` "scenes" or "audio", its ``index``, and
+    any of name, hidden, locked, muted, solo and volume."""
+
+    kind: str
+    index: int
+    updates: tuple[tuple[str, Any], ...]
+
+    @property
+    def label(self) -> str:
+        keys = {key for key, _ in self.updates}
+        what = "rename" if keys == {"name"} else "change the volume of" if keys == {"volume"} else "change"
+        return f"{what} a track"
+
+
+@dataclass(frozen=True)
 class SetSetting(UICommand):
     """Set the project setting at ``path``."""
 
@@ -322,6 +338,10 @@ def parse(route: str, body: dict[str, Any]) -> UICommand:
             return SetScript(name, None)
         case "/api/script/words", {"script": str(script), "part": part, "words": list(words)}:
             return MoveWords(script, _index(part), tuple(_word_time(word) for word in words))
+        case "/api/track", {"kind": "scenes" | "audio" as kind, "index": index}:
+            return EditTrack(kind, _layer(index), tuple(track_updates({key: value for key, value in body.items() if key not in ("kind", "index")}).items()))
+        case "/api/track", _:
+            raise EditError(f"{route} does not take {body}")
         case "/api/script" | "/api/script/words", _:
             raise EditError(f"{route} does not take {body}")
         case "/api/audio/add" | "/api/audio/remove" | "/api/audio/edit", _:
@@ -399,6 +419,22 @@ def _audio_edit(edit: Any) -> ClipEdit:
         raise EditError("an audio clip edit is an object")
     changes = {key: value for key, value in edit.items() if key != "index"}
     return ClipEdit(_index(edit.get("index")), tuple(audio_updates(changes).items()))
+
+
+def track_updates(changes: dict[str, Any]) -> dict[str, Any]:
+    """``changes`` to a track, checked."""
+    updates: dict[str, Any] = {}
+    for key, value in changes.items():
+        match key, value:
+            case "name", str():
+                updates[key] = value.strip()[:60]
+            case "hidden" | "locked" | "muted" | "solo", bool():
+                updates[key] = value
+            case "volume", _:
+                updates[key] = min(_number(value, "volume", minimum=0.0), 4.0)
+            case _:
+                raise EditError(f"tracks have no {key} like {value!r}")
+    return updates
 
 
 def _script_name(name: str) -> str:

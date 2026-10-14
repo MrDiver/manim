@@ -30,6 +30,8 @@
 // where things land. app.js does not redraw the timeline during a drag
 // (state.dragging); it fetches the edited timeline once the drag ends.
 
+import { isLocked } from "./trackheads.js";
+
 let page = null; // what app.js shares: state, elements and its helpers
 const selected = new Set(); // indices of the selected clips
 const SCENE_TYPE = "application/x-manimx-scene";
@@ -347,7 +349,7 @@ function markSelected() {
 
 /** Make a clip's bar editable (app.js calls this for every clip bar). */
 export function clipBar(body, clip, index) {
-  if (!page.state.timeline.editable || !clip.entry) return;
+  if (!page.state.timeline.editable || !clip.entry || isLocked("scenes", clip.layer)) return;
   body.classList.add("editable");
   body.classList.toggle("selected", selected.has(index));
   body.dataset.index = index;

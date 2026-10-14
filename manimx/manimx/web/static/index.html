@@ -26,16 +26,32 @@
   </header>
 
   <div class="workspace">
-    <aside id="sidebar" aria-label="Scenes" hidden>
-      <h2>Scenes</h2>
-      <ul id="scene-list"></ul>
-      <p class="hint">Drag a scene onto a track to add a clip.</p>
+    <aside id="sidebar" aria-label="Project" hidden>
+      <section class="bin">
+        <h2>Scenes</h2>
+        <ul id="scene-list" class="bin-list"></ul>
+      </section>
+      <section class="bin">
+        <h2>Scripts <button id="new-script" type="button" class="small" title="Write a new script: what is said, before it is recorded">+ New</button></h2>
+        <div id="script-list"></div>
+      </section>
+      <section class="bin">
+        <h2>Sounds <button id="import-sound" type="button" class="small" title="Add sound files (music, effects, recordings) to the project">+ Import</button></h2>
+        <input id="sound-file" type="file" accept="audio/*,.webm,.ogg,.m4a,.flac" multiple hidden>
+        <ul id="sound-list" class="bin-list"></ul>
+      </section>
+      <p class="hint">Drag scenes, script parts and sounds onto the timeline.</p>
     </aside>
     <div class="splitter" data-size="sidebar" data-direction="1" role="separator" aria-orientation="vertical" title="Drag to resize; double-click resets"></div>
 
     <section class="viewer">
+      <div class="tabs" role="tablist" aria-label="View" hidden>
+        <button id="tab-preview" type="button" role="tab" aria-selected="true" aria-controls="stage">Preview</button>
+        <button id="tab-script" type="button" role="tab" aria-selected="false" aria-controls="script-view">Script</button>
+      </div>
       <pre id="problem" role="alert" hidden></pre>
-      <figure id="stage">
+      <section id="script-view" role="tabpanel" aria-label="Script" hidden></section>
+      <figure id="stage" role="tabpanel">
         <div id="picture">
           <canvas id="frame" role="img" aria-label="The frame at the current time"></canvas>
           <div id="labels" aria-hidden="true"></div>
