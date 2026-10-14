@@ -88,7 +88,7 @@ flowchart LR
 | `manimx.animation` (core; `signals/` and `nodes/` hold the signal and node classes) | `RootSignal`, `DerivedSignal`, `Vector3Signal`, `TimeSignals`; `Node` and its subclasses (`Group`, `ClippingGroup`, `Shape2D`, `Curve3D`, `Shape3D` (→ `Particles`), `Light` → `DirectionalLight`, `PointLight`, `SpotLight`; `animation.Camera`), `PositionMixin`, `RotationMixin`, `ScalableMixin`; the `Animation` contract (`Animation`, `SetValue`, `ChangeSignals`/`AnimationBuilder`) and the default rates `linear`, `smooth`; `Scene`, `SceneCompiler`, `PreparedScene`; `Timeline`, `Clip`; `Simulation`; `Sound`; contributions as data (`signals/contributions.py`: `To`, `By`, `Ramp`, `Power`, `Turn`, `Keyframes`, `Between`, `Partial`), `paths.partial_path()`, `ScenePlan`, `scene_graph()`, `snapshot()` | robjects, `_core`; from `manimx.renderer` only the dataclasses `renderer.Camera` and `ViewState` |
 | `manimx.userland` | everything a project could write on top of the core: shapes (`Circle`, `Dot`, `Square`, `Rectangle`, `RegularPolygon`, `Triangle`, `Polyline`, `ParametricCurve3D`, `Box`, `Sphere`, `Torus`, `ParametricSurface`), animations (`FadeIn`, `FadeOut`, `Rotate`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter`, `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`), `rate_functions`, `constants` (`UP`, `PI`, ...), `geometry` (every point and mesh generator, `align_paths()`), `load_gltf()` | animation, robjects |
 | `manimx.renderer` | what a renderer is given next to the tree: `RenderConfig`, `renderer.Camera`, `ViewState`, `CameraViewState`; `RenderSamples`, `Bloom`, `ToneMap`, `ShaderEffect` | robjects |
-| `manimx.drivers` | `render()`, `CoreFramePipeline`, `StillRenderer`, `render_image()`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation, `_core` |
+| `manimx.drivers` | `render()`, `CoreFramePipeline`, `StillRenderer`, `render_image()`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`); `session.export_session()` (stems, .rpp, .otio) | renderer, animation, `_core` |
 | `manimx.voice` | `Script`, `Part`, `Take`; `Transcript`, `Word`, `Subtitle`, `srt()`; `align()`, `time_take()`, `transcribe()`, `recognize()` (Whisper), `trim_silence()` | animation (`Sound`); faster-whisper only to time takes |
 | `manimx.project` | `Project`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers, settings, voice |
 | `manimx.settings` | `Settings` and its sections (`OutputSettings`, `EffectsSettings`, `LightingSettings`, `PerformanceSettings`), `setting()` | renderer (config, effects) |
@@ -420,6 +420,9 @@ classDiagram
         frame_at(t)
         state_at(t)
         audio(start, end)
+        stems(start, end)
+        sounds_by_track()
+        track(kind, index)
         word_events()
         subtitles()
         resolve()
@@ -427,6 +430,7 @@ classDiagram
     class AudioClip {
         sound (None: a planned part)
         start, track, cut_in, cut_out, volume, name
+        fade_in, fade_out
         script: Script, part, offset, planned
     }
     class Clip {
@@ -463,7 +467,7 @@ classDiagram
   one compiled time axis, separated by `SEGMENT_GAP`, which is never shown.
   `Segment.play_offset` counts the time without those gaps.
 - **Event names:** they get their times from `Timeline.events`
-  (`Timeline.fire()`), from the words of the script parts on the audio tracks
+  (`Timeline.fire()`), from the words of the script parts on the script tracks
   (`Timeline.word_events()`, see below) or from an `Emit` in any `Clip`.
   `Timeline._resolve()` iterates to a fixed point: a `Segment` starts at the
   time of its `waits_for` event, or when the previous one ends if that is
@@ -484,10 +488,20 @@ classDiagram
   `Clip.bind_cue()`, `Clip.bind_cues()`, `Clip.set_scale()` and
   `Timeline.audio_changed()` mark the `Timeline` dirty, and the next query
   resolves it once.
+- **Tracks:** three kinds, each numbered from 0: scene tracks (one per
+  `Clip.layer`), script tracks (`AudioClip`s of script parts) and audio
+  tracks (other `AudioClip`s). A `Track` in `Timeline.scene_tracks`,
+  `script_tracks` or `audio_tracks` (missing: the default) holds its
+  name, `hidden` (scene tracks: not drawn), `locked` (only the page
+  reads it), `muted`, `solo` and `volume`. `Timeline.sounds_by_track()`
+  groups the mix entries per `(kind, index)` with their clips' volume
+  and fades; `audio()` applies each track's volume, mute and solo and
+  mixes them all, `stems()` mixes each track on its own without them
+  (for `drivers.session`).
 - **Voice (`manimx/voice/`):** a `Script` (`scripts/narration.txt`, its
   times in `narration.json`) is the author's text in `Part`s (split by
   `---` lines), each part a `Transcript`: its text and one `Word` (text,
-  start, end, from the part's start) per word. A part goes onto an audio
+  start, end, from the part's start) per word. A part goes onto a script
   track as an `AudioClip` with `script` and `part`: before it is
   recorded it has no sound and lasts `planned` seconds, its words timed
   as if read out (`Transcript.fake()`); once recorded, its `Take` (a file
@@ -688,6 +702,13 @@ flowchart LR
 - **Audio:** `FrameSource.audio(start, end, sample_rate)` (from
   `Timeline.audio` or `PreparedScene.audio`) mixes exactly the rendered range
   before rendering starts. A silent mix means no audio track.
+- **Sound for editing (`drivers/session.py`, `manimx render --stems`):**
+  the video is rendered without sound; `export_session()` writes
+  `Timeline.stems()` as one 24-bit WAV per track, as long as the render,
+  and a Reaper project (`.rpp`, the tracks' volume, mute and solo as its
+  faders) and an OpenTimelineIO timeline (`.otio`) placing the video and
+  every stem at zero, with a marker at each clip's start. Both formats
+  are written by hand (text and JSON).
 
 ## 11. `Project` and the CLI
 
@@ -723,29 +744,33 @@ flowchart LR
 - **`Project.scene_class()`** imports each scene module on its own, so a
   broken module only fails its own `SceneEntry`. A package of the same name
   from another project is evicted from `sys.modules` first.
-- **`manimx ui`** builds the `Timeline` and serves it with
-  `web.PreviewServer` (the first slice of the web UI: scrubbing only).
-  The page asks for `GET /api/timeline` once (duration, frame rate, size,
-  clips, segments) and then for one `GET /api/frame?t=&w=` at a time,
-  remembering only the newest time it wants while a request is open, so
-  the server never works through outdated times. With `--reload` (the
-  default) `ProjectReloader` polls the modification times of
-  `manimx.json` and the project's own `.py` files four times a second;
-  after a change it loads the `Project` again, forgets its modules
-  (`Project.unload_modules()`, which skips hidden folders and
-  site-packages), builds the whole `Timeline` and calls
-  `PreviewServer.replace()`. A failed build keeps the last timeline and
-  calls `PreviewServer.report()`. Both bump `PreviewServer.version`; the
-  page long-polls `GET /api/changes?since=`, fetches the timeline again
-  and shows the time the user chose (clamped while it does not fit), or
-  the error with the user's own frames only. The first build goes through
-  the reloader too, so a broken scene does not stop `manimx ui`. Frames are rendered
-  under one lock (its `StillRenderer` is not thread-safe) with the
-  project's settings without motion blur, at the page's width, as JPEG.
-  HTTP/1.1 keeps the connection open between frames. The time is part of
-  the page's URL (`#t=`). A frame of the benchmark project takes 9.7 ms
-  (2D) to 19.7 ms (3D) at 960 pixels, request included (measured with
-  the Python renderer, before the core rendered).
+- **`manimx ui`** serves the project with `web.PreviewServer`
+  (standard library HTTP) and a page of plain JS modules (`web/static/`).
+  - **Building and reloading:** `ProjectReloader` polls the modification
+    times of `manimx.json`, `scripts/` and the project's `.py` files;
+    `ProjectEditor` (`web/editing.py`) prepares only the scenes of a
+    changed file again and swaps them into their clips. A failed build
+    keeps the last timeline and calls `PreviewServer.report()`.
+  - **Editing:** every edit is a `UICommand` (`web/commands.py`), plain
+    data that applies itself to the live `Timeline` and returns its
+    inverse, so undo and redo are one operation. `manimx.json` is saved
+    a moment after the last edit; scripts are written at once.
+  - **Two versions:** `version` counts every change, `picture` only the
+    changes that alter frames (a key of the clips' scenes, layers,
+    timings and hidden tracks). The page long-polls `GET
+    /api/changes?since=`, refetches the timeline on a new `version` and
+    drops its cached frames only on a new `picture`, so moving a sound or
+    changing a volume keeps them. Frames (`GET /api/frame`) are rendered
+    under one lock, without motion blur, at the page's width, as JPEG,
+    and carry the `picture` they show.
+  - **The page:** `app.js` (frame, playback, timeline rows), `editing.js`
+    (clips, events, settings, the inspector), `bin.js` (scenes, scripts,
+    sounds to drag), `scriptview.js` (the Script tab), `trackheads.js`,
+    `audiotracks.js` (script and audio tracks, words, fades),
+    `recording.js` (countdown, teleprompter, recording a part: the take
+    is uploaded and timed by `alignment.time_take()` on the server),
+    `render.js` (`web/rendering.py` runs `manimx render` in a process of
+    its own), `frames.js` and `thumbs.js` (caches).
 - **`cli.ui`** prompts (questionary) only for missing arguments in a
   terminal. A `ProjectError` is printed as a panel with its `hint`. A
   `SceneError` comes with a rich traceback of the user's frames.
@@ -909,7 +934,10 @@ flowchart LR
   `AnimationGroup`, `Succession`, `LaggedStart`; the Grow family,
   `FadeTransform`, `Homotopy`, letter by letter; `Flash`,
   `ShowPassingFlash`, `Circumscribe`, `Wiggle`, `ApplyWave`;
-- `manimx ui` with reload on save;
+- `manimx ui` with reload on save, live editing with undo, the bin,
+  video, script and audio tracks with headers, scripts recorded with a
+  countdown and teleprompter and timed by Whisper, fades, subtitles,
+  rendering, and the sound for editing (`--stems`: WAVs, .rpp, .otio);
 - performance (PERFORMANCE.md): the benchmark project from 48.6 fps to
   123.5 with the core; light-show 70 to 23 ms per frame.
 
@@ -918,8 +946,8 @@ a forward pass after the deferred lighting and cast tinted shadows
 (core/README.md, design decisions).
 
 **Next, in the agreed order:** porting Manim's remaining classes
-(batches d, e, f), the rendering ideas, the web UI, then editing scenes
-in the UI (keyframes, clips made in the UI, gizmos). FUTURE_IDEAS.md
+(batches d, e, f), the rendering ideas, then editing scenes in the UI
+(keyframes, clips made in the UI, gizmos). FUTURE_IDEAS.md
 keeps the ideas.
 
 **Working conventions:**
@@ -959,6 +987,6 @@ keeps the ideas.
 - Identity is a counted id, never a Python object address.
 - Benchmark: check the power mode, run `scripts/benchmark_project.py
   tests/projects/benchmark --check-reference <ref.npz>`, report.
-- Don't run `ruff check` without `--no-fix`: the project config fixes files
-  in place.
+- Run `ruff check` from `manimx/`: its own config there never fixes files
+  (the repository root's config does).
 - Describe everything with its name from the Python code.

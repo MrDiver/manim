@@ -4,8 +4,8 @@ manimx is an animation engine in the spirit of
 [Manim](https://www.manim.community/): you write scenes in Python, and
 manimx renders them on the GPU, with 2D shapes, lit 3D meshes, shadows,
 motion blur and sound. Scenes are put together into a project with a
-timeline, rendered to video from the command line, and previewed in the
-browser.
+timeline, rendered to video from the command line, and edited in the
+browser, where narration is written, recorded and timed to the scenes.
 
 ```python
 from manimx.animation import Scene
@@ -49,12 +49,14 @@ manimx/            the Python package
   robjects/        render state (what a scene shows at one time) and the
                    value types nodes take: materials, meshes, styles
   renderer/        the settings Python gives the renderer, and its shaders
-  drivers/         rendering videos and stills: frames in flight, workers
+  drivers/         rendering videos and stills: frames in flight, workers;
+                   the sound for editing elsewhere (stems, .rpp, .otio)
   voice/           scripts: what is said, in parts recorded as takes; their
                    words timed (Whisper) as events scenes sync to, subtitles
   project.py       a project: manimx.json, its scenes and timeline
   cli/             the manimx command
-  web/             the browser preview (manimx ui)
+  web/             the browser editor (manimx ui): timeline, scripts,
+                   recording, rendering
 core/              the native core in Rust (evaluation, packing, rendering)
 tests/             the tests, and the reference images in tests/references/
 scripts/           benchmarks, rendering scripts, the renderer's pictures

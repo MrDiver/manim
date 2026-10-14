@@ -217,7 +217,8 @@ click.
 ### Timed by a voice
 
 What is said is written in a script, `scripts/narration.txt` (in
-`manimx ui`: the Scripts section), before anything is recorded. A line
+`manimx ui`: **+ New** under Scripts, then the Script tab), before
+anything is recorded. A line
 `---` ends a part, what is recorded in one go; a line `[middle]` names a
 section:
 
@@ -230,8 +231,8 @@ Time has run out for the square.
 
 Every word is an event named after the script: `narration.square` the
 first "square", `narration.square.2` the second, `narration.middle.square`
-the first after `[middle]`. Put a part on an audio track and its words
-are timed as if read out evenly at once; a scene puts a `cue` where a
+the first after `[middle]`. Put a part on a script track and its words
+are timed as if read out at once (each word as long as its letters); a scene puts a `cue` where a
 word should land, and `start`/`stop` run animations from one word to
 another while the scene goes on:
 
@@ -244,8 +245,9 @@ self.stop(flight)                                # lands on the second "circle"
 ```
 
 The clip's time bends smoothly so every cue lands on its word. Record a
-part (or use a recording: `uv run manimx take narration take.m4a --part 1`)
-and Whisper times its words: the scene follows the real voice without
+part (in `manimx ui`, see [the preview page](#10-the-preview-page); or
+use a recording: `uv run manimx take narration take.m4a --part 1`) and
+Whisper times its words: the scene follows the real voice without
 changes. Whisper comes with `manimx[voice]`, which projects made by
 `manimx new` depend on (in an older project: `uv add 'manimx[voice]'`);
 its model, downloaded on first use, is the setting `voice.model`. A
@@ -356,54 +358,16 @@ uv run manimx render --window --write   # both
 uv run manimx render --open             # open the video when done
 uv run manimx render --samples 16       # renders averaged per frame
 uv run manimx render --motion-blur --shutter-angle 720
+uv run manimx render --stems            # the sound for editing elsewhere (below)
 ```
 
-To look at the timeline without rendering a video, preview it in the
-browser:
-
-```sh
-uv run manimx ui                        # opens the preview page; Ctrl+C stops it
-uv run manimx ui --port 8000 --no-open  # a fixed address, without opening a browser
-```
-
-The page shows the frame at the playhead with playback controls (Space
-plays, ← and → step frames, Shift+← and Shift+→ one second, Home and End,
-L loops, M mutes the scenes' sounds) above the timeline. Its ruler counts
-frames; drag on it to scrub, Ctrl+wheel or + and − zoom, 0 shows all of
-it. The timeline has a track per layer, higher layers on top; a clip's
-arrow opens its scene's nodes, signals and animations, and its bar shows
-thumbnails of the scene. Splitters between the panels resize them. The
-page keeps the frames it fetched and fetches the ones after the
-playhead ahead (the "Ahead" box, a yellow line marks the frames kept);
-the menu beside it renders the preview at 1/2, 1/4 or 1/8 of the size. Saving a scene file
-updates the preview at the same time, preparing only the scenes in that
-file again; an error (a typo, a failing `construct()`) is shown above the
-frame until the next save fixes it (`--no-reload` turns this off). The
-page's address keeps the time (`#t=2.5`). Frames are rendered once each
-(no motion blur or render samples), at the size of the page.
-
-The page also edits the project, live: the frame shows every edit while
-you drag, and `manimx.json` is saved a moment after the last edit.
-
-- drag a clip to move it, up or down onto another track to change its
-  layer; drag the handles at its ends to cut its start or end; drag on
-  empty track space to select several clips (or Shift/Ctrl click) and
-  move them together; Delete removes the selected clips;
-- drag a scene from the sidebar onto a track to add a clip of it there;
-- click a clip to type its start, layer, cut and `speed` (2 plays twice
-  as fast, 0.5 is slow motion);
-- a scene that calls `wait_for(event)` holds until the event's time: the
-  clip's track gets an events row with a pill per event, dragged to time
-  it (the showcase's Events scene shows how);
-- S splits the clips under the playhead, Ctrl+D duplicates the selected
-  clips, Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste them at the
-  playhead; drags snap to clip edges, the playhead and events (Alt drags
-  freely); Ctrl+Z undoes any edit, Ctrl+Shift+Z redoes it;
-- drop sound files onto an audio track (below the scenes' tracks) to put
-  them there, or press ● to record a voice-over while the timeline
-  plays; the files are saved to `assets/audio/` and listed under
-  `"audio"` in the timeline of `manimx.json`, and mixed into the video;
-- **Settings** changes everything `manimx settings` changes.
+`--stems` renders the video without sound and writes next to it a WAV
+per track (`renders/<name>-stems/`) and two sessions with the video and
+all of them in place: `<name>.rpp` for Reaper and `<name>.otio`
+(OpenTimelineIO) for Kdenlive, DaVinci Resolve and others. Clean,
+compress and master the sound there. Each WAV has its clips' volumes
+and fades; the tracks' volumes, mutes and solos are the session's
+faders and buttons.
 
 Options on the command line override `manimx.json` for that run. Rendering
 keeps several frames queued on the GPU, and with `-w` it spreads over
@@ -416,12 +380,81 @@ on macOS), else with x264 on the CPU; the render's header names it.
 `output.encoder` (or `--encoder`) picks one: `auto`, `nvenc`, `amf`,
 `qsv`, `vaapi`, `videotoolbox` or `x264`.
 
-The preview page renders too: **Render** saves `manimx.json` and runs
-`manimx render` in a process of its own (so editing goes on meanwhile),
-for the whole timeline or a range, shows its progress, cancels it, and
-plays the finished video.
+## 10. The preview page
 
-## 10. When something goes wrong
+```sh
+uv run manimx ui                        # opens the preview page; Ctrl+C stops it
+uv run manimx ui --port 8000 --no-open  # a fixed address, without opening a browser
+```
+
+The page is a video editor for the project. Everything you do on it is
+saved to `manimx.json` (and `scripts/`) a moment later, and shows at
+once; Ctrl+Z undoes any of it. **?** (or the ? key) lists every key and
+mouse action.
+
+- **Left, the bin:** the project's scenes, scripts and sounds. Drag one
+  onto the timeline to use it; **+ Import** copies sound files in.
+- **Middle, the frame** at the playhead, with the playback buttons
+  (Space plays). The **Script** tab beside **Preview** is where scripts
+  are written.
+- **Right, the inspector:** what is selected, to type exact values.
+- **Below, the timeline:** the ruler in minutes and seconds (drag on it
+  to scrub, Ctrl+wheel zooms), and three kinds of tracks:
+  - **Video** tracks hold scenes; higher tracks are drawn on top. A
+    clip shows thumbnails, its cues as small diamonds (hover to name
+    them), and its arrow opens the scene's nodes and animations. A
+    scene that plays sounds gets a *sound* row under its track, with a
+    volume slider.
+  - **Script** tracks hold parts of scripts, each word a block.
+  - **Audio** tracks hold music, effects and free recordings.
+
+Every track's header names it (double-click to rename) and has its
+switches: hide a video track, mute (M) or solo (S) a sound track, lock
+any track against slips, and a volume slider. Drag a clip to move it,
+its edges to cut it, the corners of a sound to fade it in or out; S
+splits at the playhead.
+
+### Narrating
+
+1. Write a script in the Script tab: what is said, a `---` line between
+   parts recorded in one go.
+2. Drag its parts from the bin onto a script track (or **Place at the
+   playhead**). Until recorded, they are timed as if read out; **Fit to
+   scenes** moves the sentences so the words the scenes' cues wait for
+   are said there.
+3. Select a part and press ● (or R). The microphone opens, playback
+   starts a few seconds before the part with 3, 2, 1 over the frame,
+   and the **Teleprompter** shows each sentence a moment before it is
+   due. Press ● again to stop, Escape to throw the take away. Wear
+   headphones, so the timeline's sound stays out of the microphone.
+4. Whisper times the take's words, and the scenes synced to them follow
+   your voice. A word dragged on the track moves it (Shift: its
+   sentence).
+
+The teleprompter (T) and the subtitles (C) can also be shown while just
+playing. The settings `voice.countdown` and `voice.lead` set how long
+the countdown is and how early sentences show.
+
+### Rendering from the page
+
+**Render** saves `manimx.json` and runs `manimx render` in a process of
+its own (so editing goes on meanwhile), for the whole timeline or a
+range, shows its progress, can cancel it, and plays the finished video.
+**Sound for editing** is `--stems`. **Settings** changes everything
+`manimx settings` changes, grouped as Video, Look, Sound, Voice and
+Advanced.
+
+The preview keeps the frames it fetched and fetches the ones after the
+playhead ahead (the "Ahead" box; a yellow line on the ruler marks the
+frames kept); the menu beside it renders the preview at 1/2, 1/4 or 1/8
+of the size. Frames are rendered once each (no motion blur or render
+samples). Moving sounds or changing their volume keeps the frames;
+only edits that move a scene fetch them again. Saving a scene file
+updates the preview, preparing only that file's scenes again; an error
+shows above the frame until the next save fixes it (`--no-reload` turns
+this off). The page's address keeps the time (`#t=2.5`).
+
+## 11. When something goes wrong
 
 Errors name the problem and how to fix it:
 
@@ -443,6 +476,7 @@ AttributeError: Square.shfit cannot be animated
 
 ## What's next
 
-The web UI (scrubbing, editing the timeline, presenting with clicks) builds
-on the same `manimx.json`: what you do in the UI and what you write in code
-end up in the same project file.
+Presenting (firing events with clicks) and editing scenes in the UI
+(keyframes, gizmos) come next. They build on the same `manimx.json`:
+what you do in the UI and what you write in code end up in the same
+project file.
