@@ -216,45 +216,43 @@ click.
 
 ### Timed by a voice
 
-A recording's words can be events too. Put the recording on an audio
-track (drop it in `manimx ui`, or list it under `"audio"` in
-`manimx.json`) and time its words with Whisper:
+What is said is written in a script, `scripts/narration.txt` (in
+`manimx ui`: the Scripts section), before anything is recorded. A line
+`---` ends a part, what is recorded in one go; a line `[middle]` names a
+section:
 
-```bash
-uv run manimx transcribe assets/audio/voice.m4a --text script.txt
+```text
+Every flash, every circle, every square.
+---
+[middle]
+Time has run out for the square.
 ```
 
-Whisper comes with `manimx[voice]`, which projects made by `manimx new`
-depend on (in an older project: `uv add 'manimx[voice]'`); its model,
-downloaded on first use, is the setting `voice.model`. This writes
-`assets/audio/voice.transcript.json` next to the recording
-(`--text` is what is said; without it, what Whisper hears; a line
-`[middle]` starts a section). Every word is now an event named after the
-file: `voice.square` the first "square", `voice.square.2` the second,
-`voice.middle.square` the first after `[middle]`. A scene puts a `cue`
-where a word should land, and `start`/`stop` run animations from one word
-to another while the scene goes on:
+Every word is an event named after the script: `narration.square` the
+first "square", `narration.square.2` the second, `narration.middle.square`
+the first after `[middle]`. Put a part on an audio track and its words
+are timed as if read out evenly at once; a scene puts a `cue` where a
+word should land, and `start`/`stop` run animations from one word to
+another while the scene goes on:
 
 ```python
-self.cue("voice.circle")                         # here, "circle" is said
+self.cue("narration.circle")                     # here, "circle" is said
 flight = self.start(MoveAlongPath(dot, path))    # flies while the scene goes on
 self.wait(2)
-self.cue("voice.circle.2")
+self.cue("narration.circle.2")
 self.stop(flight)                                # lands on the second "circle"
 ```
 
-The clip's time bends smoothly so every cue lands on its word: record
-again, faster or slower, transcribe again, and the scene follows without
-changes. A clip's `"cues": {"square": "voice.middle.square"}` in
-`manimx.json` (or its panel in `manimx ui`) syncs a cue to another event.
-Renders put the transcript's subtitles into the video and an `.srt` file
-next to it.
-
-Before anything is recorded, `Transcript.fake(script)` times the script
-as if read out evenly (each word by its letters, pauses after sentences
-and lines): write the scene along it, and the clip plays at that pace
-until the recording is transcribed and the cues find their words. The example project's Voice scene is reanimate's voice
-example remade this way.
+The clip's time bends smoothly so every cue lands on its word. Record a
+part (or use a recording: `uv run manimx take narration take.m4a --part 1`)
+and Whisper times its words: the scene follows the real voice without
+changes. Whisper comes with `manimx[voice]`, which projects made by
+`manimx new` depend on (in an older project: `uv add 'manimx[voice]'`);
+its model, downloaded on first use, is the setting `voice.model`. A
+clip's `"cues": {"square": "narration.middle.square"}` in `manimx.json`
+syncs a cue to another event. Renders put the parts' subtitles into the
+video and an `.srt` file next to it. The example project's Voice scene
+is reanimate's voice example remade this way.
 
 ## 8. The project file
 
@@ -306,7 +304,7 @@ opens a menu with every setting (see below).
 | `effects.tone_map` | how lit 3D colors map to the screen (`pbr_neutral`, `aces`, `agx`, `reinhard`, `none`) and their `exposure`. 2D colors always stay exact |
 | `lighting` | ambient light for 3D objects, and a default key light for scenes without lights |
 | `performance` | speed only, never the image: render processes, frames queued on the GPU |
-| `voice` | transcribing recordings: the Whisper `model` (`small`; `large-v3-turbo` hears better) and the `language` (empty: Whisper finds it) |
+| `voice` | timing recorded takes: the Whisper `model` (`small`; `large-v3-turbo` hears better) and the `language` (empty: Whisper finds it) |
 | `timeline.clips` | clips in order. Without `start` a clip begins when the previous one ends. `layer` draws on top; `cut` keeps only that part of the scene, in seconds; `speed` plays it faster (2) or in slow motion (0.5) |
 | `timeline.events` | times of the events scenes `wait_for` |
 
@@ -405,11 +403,6 @@ you drag, and `manimx.json` is saved a moment after the last edit.
   them there, or press ● to record a voice-over while the timeline
   plays; the files are saved to `assets/audio/` and listed under
   `"audio"` in the timeline of `manimx.json`, and mixed into the video;
-- select an audio clip and press **Transcribe** to time its words (type
-  or paste the script first, or let Whisper write it down); its words
-  show as blocks on the waveform, dragged to time them, and the clip's
-  panel syncs a scene's cues to them; **Subtitles** (C) shows the
-  transcript over the frame;
 - **Settings** changes everything `manimx settings` changes.
 
 Options on the command line override `manimx.json` for that run. Rendering

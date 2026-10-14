@@ -51,14 +51,16 @@ shows, and ``manimx.json`` is saved shortly after (see editing.py):
     POST /api/audio/remove   {"indices": [...]}
     POST /api/audio/edit     {"index", and any of "start", "track", "cut",
                              "volume"}, or {"clips": [...]} of those
-    POST /api/transcript/transcribe  {"file", "text"}: time the words of a
-                             sound file with Whisper ("text" null: the
-                             words Whisper hears); answers when done
-    POST /api/transcript     {"file", "text"}: change the transcript's
-                             text (its words keep their times), or
-                             {"file", "remove": true}
-    POST /api/transcript/words  {"file", "words": [{"index", "start",
-                             "end"}]}: time words by hand
+    GET  /api/scripts        the project's scripts: text, parts, word
+                             times, takes, where each part is placed
+    POST /api/script         {"name", "text"}: write a script (new or
+                             changed; its words keep their times), or
+                             {"name", "delete": true}
+    POST /api/script/words   {"script", "part", "words": [{"index",
+                             "start", "end"}]}: time words by hand
+    POST /api/script/take    {"script", "part", "file", "offset"}: a
+                             recorded take of a part (uploaded first);
+                             Whisper times its words, answers when done
     POST /api/asset?name=    the body is a sound file (dropped or recorded),
                              saved to assets/audio/; answers its "file"
     GET  /api/waveform?index=&from=&to=&n=  an audio clip's peaks
@@ -146,8 +148,8 @@ EDIT_ROUTES = (
     "/api/audio/add",
     "/api/audio/remove",
     "/api/audio/edit",
-    "/api/transcript",
-    "/api/transcript/words",
+    "/api/script",
+    "/api/script/words",
     "/api/event",
     "/api/setting",
     "/api/undo",
@@ -418,6 +420,7 @@ class _Handler(BaseHTTPRequestHandler):
             "/api/changes": self._changes,
             "/api/settings": self._settings,
             "/api/scenes": self._scenes,
+            "/api/scripts": self._scripts,
             "/api/audio": self._audio,
             "/api/render": self._render_status,
             "/api/render/video": self._render_video,
@@ -442,8 +445,8 @@ class _Handler(BaseHTTPRequestHandler):
         if route in ("/api/render", "/api/render/cancel") and editor is not None:
             self._render(editor, route)
             return
-        if route == "/api/transcript/transcribe" and editor is not None:
-            self._transcribe(editor)
+        if route == "/api/script/take" and editor is not None:
+            self._take(editor)
             return
         if route not in EDIT_ROUTES:
             self._json({"error": f"not found: {self.path}"}, HTTPStatus.NOT_FOUND)
@@ -482,16 +485,19 @@ class _Handler(BaseHTTPRequestHandler):
         except (_BadRequest, EditError) as error:
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
 
-    def _transcribe(self, editor: ProjectEditor) -> None:
-        """POST /api/transcript/transcribe {"file", "text"}: Whisper times the words (seconds)."""
+    def _take(self, editor: ProjectEditor) -> None:
+        """POST /api/script/take {"script", "part", "file", "offset"}: a
+        recorded take of a script part; Whisper times its words (seconds)."""
         try:
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(length) or b"{}")
-            file, text = body.get("file") if isinstance(body, dict) else None, body.get("text") if isinstance(body, dict) else None
-            if not isinstance(file, str) or not (text is None or isinstance(text, str)):
-                raise _BadRequest('transcribing takes {"file": "...", "text": "..." or null}')
-            editor.transcribe(file, text or None)
-            self._json({"ok": True, "version": self.preview.version, "history": editor.history()})
+            if not isinstance(body, dict):
+                raise _BadRequest("the body must be a JSON object")
+            script, part, file, offset = body.get("script"), body.get("part"), body.get("file"), body.get("offset", 0.0)
+            if not (isinstance(script, str) and isinstance(part, int) and isinstance(file, str) and isinstance(offset, (int, float))):
+                raise _BadRequest('a take is {"script", "part", "file", "offset"}')
+            problem = editor.record_take(script, part, file, float(offset))
+            self._json({"ok": True, "version": self.preview.version, "history": editor.history(), "problem": problem})
         except (_BadRequest, EditError, json.JSONDecodeError) as error:
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
 
@@ -582,6 +588,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"error": "this preview has no project"}, HTTPStatus.NOT_FOUND)
             return
         self._json(self.preview.editor.scenes())
+
+    def _scripts(self, query: dict[str, list[str]]) -> None:
+        if self.preview.editor is None:
+            self._json({"error": "this preview has no project"}, HTTPStatus.NOT_FOUND)
+            return
+        self._json(self.preview.editor.scripts())
 
     def _audio(self, query: dict[str, list[str]]) -> None:
         sound = self.preview.audio()

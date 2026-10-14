@@ -20,7 +20,7 @@
       <button id="render-button" type="button" hidden title="Render the video at full quality (saved to the project's renders folder)">Render</button>
       <button id="settings-button" type="button" hidden title="The project's settings (saved to manimx.json)">Settings</button>
       <button id="indices" type="button" aria-pressed="false" title="Show the index of every path in its group (for MorphMatching pairs)">Indices</button>
-      <button id="captions" type="button" aria-pressed="true" title="Show the subtitles of the transcripts over the frame (C)">Subtitles</button>
+      <button id="captions" type="button" aria-pressed="true" title="Show what the scripts say over the frame (C)">Subtitles</button>
       <output id="time" aria-live="off">0.00 s</output>
     </div>
   </header>
@@ -109,7 +109,7 @@
       <div id="overlay"><div id="after-end" title="Past the end: nothing plays here yet"></div><div id="playhead"></div></div>
     </div>
   </section>
-  <p class="hint footer">Drag on the ruler to scrub. Drag a clip to move it (up or down to another track), its handles to cut it, empty track space to select several; Delete removes the selection. Drag an event to time it. S splits at the playhead, Ctrl+D duplicates, Ctrl+C / X / V copy, cut and paste at the playhead; drop sound files on an audio track, ● records a voice-over, its panel transcribes it (each word is an event, its block on the bar is dragged to time it); drags snap to edges, the playhead and events (Alt: freely). Ctrl+Z undoes, Ctrl+Shift+Z redoes. Space plays, ← → step frames, Ctrl+wheel zooms.</p>
+  <p class="hint footer">Drag on the ruler to scrub. Drag a clip to move it (up or down to another track), its handles to cut it, empty track space to select several; Delete removes the selection. Drag an event to time it. S splits at the playhead, Ctrl+D duplicates, Ctrl+C / X / V copy, cut and paste at the playhead; drop sound files on an audio track, ● records a voice-over; drags snap to edges, the playhead and events (Alt: freely). Ctrl+Z undoes, Ctrl+Shift+Z redoes. Space plays, ← → step frames, Ctrl+wheel zooms.</p>
 
   <div id="marquee" hidden></div>
   <dialog id="render-dialog" aria-label="Render the video">

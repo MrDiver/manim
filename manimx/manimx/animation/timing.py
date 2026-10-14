@@ -18,8 +18,8 @@ in between:
   it are skipped and their emits do not fire.
 
 Events come from :meth:`Timeline.fire` (a fixed time, an editor, a
-presenter's click), from the words of the transcripts of the audio clips
-(``voice.square``: when "square" is said, see manimx/voice/transcript.py)
+presenter's click), from the words of the scripts on the audio tracks
+(``voice.square``: when "square" is said, see manimx/voice/script.py)
 or from scenes' ``emit`` calls, whose global time depends on their own
 segment's time map. Everything is resolved together by iterating to a
 fixed point.
@@ -48,7 +48,8 @@ from .scene import PreparedScene, Segment
 from .time_map import MonotoneMap
 
 if TYPE_CHECKING:
-    from ..voice.transcript import Subtitle, Transcript
+    from ..voice.script import Script
+    from ..voice.transcript import Subtitle
 
 NEVER = float("inf")
 """Start time of a segment whose event has not fired (yet)."""
@@ -298,23 +299,37 @@ class Clip:
 class AudioClip:
     """A sound placed on the timeline's audio tracks, outside any scene
     (a voice-over, music, a recording): it plays from ``start`` at its own
-    speed, ``cut_in`` to ``cut_out`` seconds of the sound."""
+    speed, ``cut_in`` to ``cut_out`` seconds of the sound.
 
-    sound: Sound
+    A part of a script (``script`` and ``part``, see manimx/voice/script.py)
+    is an audio clip too: before it is recorded it has no sound and lasts
+    ``planned`` seconds; once recorded, its take is the sound and the part
+    starts ``offset`` seconds into it. Either way its words are events."""
+
+    sound: Sound | None
     start: float = 0.0
     track: int = 0
     cut_in: float | None = None
     cut_out: float | None = None
     volume: float = 1.0
     name: str = ""
-    transcript: Transcript | None = None
-    """What is said in the sound: its words are events (``{name}.{word}``)."""
+    script: Script | None = None
+    part: int = 0
+    offset: float = 0.0
+    """Where the script part starts in the sound (after the countdown of its take)."""
+    planned: float = 0.0
+    """How long a script part without a sound lasts."""
+
+    @property
+    def source_length(self) -> float:
+        """Seconds of the sound (or of the planned part)."""
+        return self.sound.duration if self.sound is not None else self.planned
 
     @property
     def length(self) -> float:
         """Seconds the clip plays."""
         cut_in = self.cut_in or 0.0
-        cut_out = self.sound.duration if self.cut_out is None else min(self.cut_out, self.sound.duration)
+        cut_out = self.source_length if self.cut_out is None else min(self.cut_out, self.source_length)
         return max(0.0, cut_out - cut_in)
 
     @property
@@ -329,30 +344,38 @@ class AudioClip:
         return self.start + seconds - cut_in
 
     def events(self) -> dict[str, float]:
-        """The global times of its transcript's words that it plays."""
-        if self.transcript is None:
+        """The global times of its script part's words that it plays."""
+        if self.script is None:
             return {}
-        placed = ((event, self.global_time(seconds)) for event, seconds in self.transcript.events(self.name).items())
-        return {event: time for event, time in placed if time is not None}
+        events = {}
+        names = self.script.event_names()[self.part]
+        for word, word_names in zip(self.script.parts[self.part].words, names, strict=True):
+            time = self.global_time(self.offset + word.start)
+            if time is not None:
+                events.update(dict.fromkeys(word_names, time))
+        return events
 
     def subtitles(self) -> list[Subtitle]:
-        """Its transcript's subtitles that it plays, in global time (a
+        """Its script part's subtitles that it plays, in global time (a
         subtitle partly cut away keeps the part that plays)."""
         from ..voice.transcript import Subtitle
 
-        if self.transcript is None:
+        if self.script is None:
             return []
         cut_in = self.cut_in or 0.0
         shown = []
-        for subtitle in self.transcript.subtitles():
-            start, end = max(subtitle.start, cut_in), min(subtitle.end, cut_in + self.length)
+        for subtitle in self.script.subtitles(self.part):
+            start = max(self.offset + subtitle.start, cut_in)
+            end = min(self.offset + subtitle.end, cut_in + self.length)
             if start < end:
                 shown.append(Subtitle(self.start + start - cut_in, self.start + end - cut_in, subtitle.text))
         return shown
 
-    def placed(self) -> tuple[float, float, Sound, float]:
-        """``(global time, skip, sound, volume)``, as :func:`mix` takes it."""
+    def placed(self) -> tuple[float, float, Sound, float] | None:
+        """``(global time, skip, sound, volume)``, as :func:`mix` takes it (None without a sound)."""
         sound = self.sound
+        if sound is None:
+            return None
         if self.cut_out is not None:
             sound = Sound(sound.samples[: round(self.cut_out * sound.sample_rate)], sound.sample_rate)
         return (self.start, self.cut_in or 0.0, sound, self.volume)
@@ -365,7 +388,7 @@ class Timeline:
 
     clips: list[Clip] = field(default_factory=list)
     audio_clips: list[AudioClip] = field(default_factory=list)
-    """Sounds on the audio tracks. Their transcripts' words are events:
+    """Sounds on the audio tracks. The words of script parts are events:
     call :meth:`audio_changed` after changing the list or a clip in it."""
     events: dict[str, float] = field(default_factory=dict)
     """Events with a time set directly (fixed, or fired by a presenter)."""
@@ -420,7 +443,7 @@ class Timeline:
         self._dirty = True
 
     def word_events(self) -> dict[str, float]:
-        """The events of every audio clip's transcript (the first audio
+        """The events of every script part's words (the first audio
         clip with an event decides its time)."""
         events: dict[str, float] = {}
         for audio in self.audio_clips:
@@ -484,7 +507,7 @@ class Timeline:
         """Every clip's sounds and the audio clips mixed on the global timeline, stereo float32
         for ``[start, end)`` (default: the whole timeline)."""
         placed = [entry for clip in self.clips for entry in clip.placed_sounds()]
-        placed += [audio.placed() for audio in self.audio_clips]
+        placed += [entry for entry in (audio.placed() for audio in self.audio_clips) if entry is not None]
         return mix(placed, start, self.duration if end is None else end, sample_rate)
 
     def segments(self) -> Iterable[tuple[Clip, int, float, float]]:

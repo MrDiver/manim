@@ -108,7 +108,8 @@
     "events": {},
     "audio": [
       {
-        "file": "assets/audio/voice.m4a",
+        "script": "voice",
+        "part": 0,
         "start": 42.0
       }
     ]

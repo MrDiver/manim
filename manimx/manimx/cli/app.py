@@ -21,6 +21,7 @@ import manimx
 
 from ..animation.timing import NEVER, Timeline
 from ..project import PROJECT_FILE, Project, ProjectError
+from ..voice.script import SCRIPTS_FOLDER
 from ..settings import OutputSettings, Settings, SettingsError, set_value
 from . import scaffold, templates, ui
 
@@ -398,41 +399,51 @@ def still(
 
 
 @app.command()
-def transcribe(
-    sound: Annotated[Path, typer.Argument(help="A sound file of the project, e.g. assets/audio/voice.m4a.")],
-    text: Annotated[
-        Path | None, typer.Option("--text", "-t", help="What is said, as a text file ([name] lines start sections); default: what Whisper hears.", show_default=False)
-    ] = None,
+def take(
+    script: Annotated[str, typer.Argument(help="The script, e.g. narration (scripts/narration.txt).")],
+    sound: Annotated[Path, typer.Argument(help="The recording, a sound file of the project, e.g. assets/audio/narration-1.m4a.")],
+    part: Annotated[int, typer.Option("--part", "-p", help="Which part of the script it records (1 is the first).")] = 1,
+    offset: Annotated[float, typer.Option(help="Where in the recording the part starts, in seconds.")] = 0.0,
     model: Annotated[str | None, typer.Option(help="Whisper model: base, small, medium, large-v3, ... (default: voice.model).", show_default=False)] = None,
     language: Annotated[str | None, typer.Option(help="The language spoken, e.g. en or de (default: voice.language, or Whisper finds it).", show_default=False)] = None,
 ) -> None:
-    """Time the words of a recording with Whisper, so scenes sync to them.
+    """Use a recording as a part of a script, its words timed by Whisper.
 
-    Writes the transcript next to the sound (voice.m4a: voice.transcript.json).
-    Every word is then an event: voice.square, voice.square.2 (said again),
-    voice.middle.square (after a [middle] line).
+    The script's words are events scenes sync to (narration.square, or
+    narration.square.2 when said again). Without the script, it is written
+    from what Whisper hears, as one part.
     """
     from ..animation.audio import Sound
-    from ..voice.alignment import transcribe as transcribe_sound
-    from ..voice.transcript import transcript_path
+    from ..voice.alignment import time_take, transcribe
+    from ..voice.script import Part, Script, Take, valid_name
 
     project = Project.find()
     path = sound.resolve()
-    if not path.is_file():
-        raise ProjectError(f"no sound file {sound}")
-    written = text.read_text(encoding="utf-8") if text is not None else None
-    with ui.console.status("Transcribing with Whisper… (the first time, it downloads its model)", spinner="dots"):
-        voice = project.settings.voice
-        transcript = transcribe_sound(Sound.load(path), written, model or voice.model, language or voice.language or None)
-    target = transcript_path(path)
-    transcript.save(target)
-    name = path.stem
-    words = transcript.tokens
-    ui.success(f"[bold]{_shown(target)}[/]  [dim]{len(words)} words[/]")
-    if words:
-        ui.console.print(f"Events: [bold]{name}.{words[0].key}[/] … [bold]{name}.{words[-1].key}[/]  (scenes: self.cue(...) or self.wait_for(...))")
-    if not any(entry.file == path.relative_to(project.root).as_posix() for entry in project.audio if path.is_relative_to(project.root)):
-        ui.console.print("[dim]The sound is on no audio track yet: drop it on one in manimx ui, or add it to timeline.audio.[/]")
+    if not path.is_file() or not path.is_relative_to(project.root):
+        raise ProjectError(f"no sound file {sound} in the project")
+    if not valid_name(script):
+        raise ProjectError(f"{script!r} is no script name", hint="letters, digits, - and _, starting with a letter")
+    file = path.relative_to(project.root).as_posix()
+    voice = project.settings.voice
+    model, language = model or voice.model, language or voice.language or None
+    with ui.console.status("Listening with Whisper… (the first time, it downloads its model)", spinner="dots"):
+        if script in project.script_names():
+            written = project.script(script)
+            if not 1 <= part <= len(written.parts):
+                raise ProjectError(f"{script} has {len(written.parts)} parts, not a part {part}")
+            old = written.parts[part - 1]
+            words = time_take(Sound.load(path), old.text, offset, model, language)
+            result = written.with_part(part - 1, Part(old.text, words, Take(file, offset)))
+        else:
+            heard = transcribe(Sound.load(path), None, model, language)
+            result = Script(script, heard.text, (Part(heard.text, heard.words, Take(file, offset)),))
+    project.save_script(result)
+    names = result.event_names()[part - 1 if len(result.parts) > 1 else 0]
+    ui.success(f"[bold]{SCRIPTS_FOLDER}/{script}.txt[/]  [dim]part {part}: {len(names)} words timed[/]")
+    if names:
+        ui.console.print(f"Events: [bold]{names[0][0]}[/] … [bold]{names[-1][0]}[/]  (scenes: self.cue(...) or self.wait_for(...))")
+    if not any(entry.script == script for entry in project.audio):
+        ui.console.print("[dim]Put its parts on an audio track: drag them from Scripts in manimx ui.[/]")
 
 
 # --------------------------------------------------------------------------

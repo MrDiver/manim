@@ -1,5 +1,5 @@
-"""Voice: transcripts, their words as events, alignment, subtitles, and
-scenes synced to words (manimx/voice/, timing.py, project.py).
+"""Voice: scripts in parts, their words as events, alignment, subtitles,
+and scenes synced to words (manimx/voice/, timing.py, project.py).
 """
 
 import importlib.util
@@ -15,14 +15,17 @@ from manimx.drivers import FrameSource, ImageSequence, RenderSettings, VideoFile
 from manimx.examples.navigation import config
 from manimx.project import ClipEntry, Project
 from manimx.voice import (
+    Part,
+    Script,
     Subtitle,
+    Take,
     Transcript,
     Word,
     align,
     srt,
-    transcript_path,
     trim_silence,
 )
+from manimx.voice.script import split_parts
 from manimx.voice.transcript import tokens
 
 TEXT = "Every circle, every square.\n[middle]\nTime has run out for the square\nand now the circle."
@@ -31,6 +34,17 @@ TEXT = "Every circle, every square.\n[middle]\nTime has run out for the square\n
 def timed(text: str, start: float = 1.0, step: float = 0.5) -> Transcript:
     """``text`` with a word every ``step`` seconds from ``start``, each 0.4 s long."""
     return Transcript(text, tuple(Word(token.text, start + index * step, start + index * step + 0.4) for index, token in enumerate(tokens(text))))
+
+
+def script(text: str = TEXT, take: Take | None = None) -> Script:
+    """The script ``voice``: ``text`` as one part, timed by :func:`timed`."""
+    return Script("voice", text, (Part(text, timed(text).words, take),))
+
+
+def events(script: Script, part: int = 0) -> dict[str, float]:
+    """Each event of ``script``'s part ``part`` at its word's start (from the part's start)."""
+    words = script.parts[part].words
+    return {name: word.start for word, names in zip(words, script.event_names()[part], strict=True) for name in names}
 
 
 def test_words_have_keys_sections_and_lines() -> None:
@@ -44,14 +58,24 @@ def test_words_have_keys_sections_and_lines() -> None:
 
 
 def test_every_word_is_an_event() -> None:
-    transcript = timed(TEXT)
-    events = transcript.events("voice")
-    assert events["voice.every"] == 1.0 and events["voice.every.2"] == 2.0
-    assert events["voice.square"] == 2.5 and events["voice.square.2"] == 6.0  # said again
-    assert events["voice.middle.square"] == 6.0  # the first after [middle]
-    assert events["voice.[middle]"] == 3.0 and events["voice.middle.time"] == 3.0
-    assert events["voice.circle.2"] == events["voice.middle.circle"] == 8.0
-    assert transcript.event_names("voice")[:4] == ["voice.every", "voice.circle", "voice.every.2", "voice.square"]
+    said = events(script())
+    assert said["voice.every"] == 1.0 and said["voice.every.2"] == 2.0
+    assert said["voice.square"] == 2.5 and said["voice.square.2"] == 6.0  # said again
+    assert said["voice.middle.square"] == 6.0  # the first after [middle]
+    assert said["voice.[middle]"] == 3.0 and said["voice.middle.time"] == 3.0
+    assert said["voice.circle.2"] == said["voice.middle.circle"] == 8.0
+    assert [names[0] for names in script().event_names()[0][:4]] == ["voice.every", "voice.circle", "voice.every.2", "voice.square"]
+
+
+def test_scripts_are_split_into_parts_and_count_names_over_all_of_them() -> None:
+    text = "Every circle.\n---\n[middle]\nAnother circle\n  ---  \nthe end"
+    assert split_parts(text) == ["Every circle.", "[middle]\nAnother circle", "the end"]
+    written = Script.new("voice", text)
+    assert [len(part.words) for part in written.parts] == [2, 2, 2]
+    names = written.event_names()
+    assert names[1][1] == ["voice.circle.2", "voice.middle.circle"]  # counted over the whole script
+    assert names[2][0] == ["voice.the", "voice.middle.the"]  # the section goes on in the next part
+    assert written.parts[1].title == "Another circle" and written.parts[0].planned_length == pytest.approx(written.parts[0].words[-1].end + 0.5)
 
 
 def test_subtitles_are_lines_split_at_pauses() -> None:
@@ -79,20 +103,20 @@ def test_the_text_takes_the_times_of_the_words_it_matches() -> None:
     ]  # "um" is not in the text: left out
 
 
-def test_a_transcript_file_edited_by_hand_keeps_its_times(tmp_path) -> None:
-    path = transcript_path(tmp_path / "voice.m4a")
-    assert path.name == "voice.transcript.json"
-    timed(TEXT).save(path)
-    assert Transcript.load(path).words == timed(TEXT).words
-    data = json.loads(path.read_text())
-    data["text"] = data["text"].replace("Time has run out", "Time ran out")
-    path.write_text(json.dumps(data))
-    edited = Transcript.load(path)
-    assert [word.text for word in edited.words][4:7] == ["Time", "ran", "out"]
-    assert edited.events("voice")["voice.square.2"] == timed(TEXT).events("voice")["voice.square.2"]
-    path.write_text("[]")
-    with pytest.raises(ValueError, match="is not a transcript"):
-        Transcript.load(path)
+def test_a_script_edited_by_hand_keeps_its_times_and_takes(tmp_path) -> None:
+    written = script(take=Take("assets/voice.wav", 0.5))
+    written.save(tmp_path)
+    assert (tmp_path / "voice.txt").read_text() == TEXT + "\n"
+    loaded = Script.load(tmp_path, "voice")
+    assert loaded.parts == written.parts
+    (tmp_path / "voice.txt").write_text(TEXT.replace("Time has run out", "Time ran out") + "\n---\nA new part.")
+    edited = Script.load(tmp_path, "voice")
+    assert [word.text for word in edited.parts[0].words][4:7] == ["Time", "ran", "out"]
+    assert events(edited)["voice.square.2"] == events(written)["voice.square.2"]
+    assert edited.parts[0].take == Take("assets/voice.wav", 0.5) and edited.parts[1].take is None  # a new part: planned
+    (tmp_path / "voice.json").write_text("[]")
+    with pytest.raises(ValueError, match="is not a script's timing"):
+        Script.load(tmp_path, "voice")
     with pytest.raises(ValueError, match="2 words but 1 have times"):
         Transcript("two words", (Word("two", 0, 1),))
 
@@ -117,7 +141,7 @@ class Synced(Scene):
 
 def test_scenes_follow_the_words_of_audio_clips() -> None:
     sound = Sound(np.zeros(10 * 8000, dtype=np.float32), 8000)
-    voice = AudioClip(sound, start=2.0, name="voice", transcript=timed(TEXT))
+    voice = AudioClip(sound, start=2.0, name="voice", script=script())
     timeline = Timeline(audio_clips=[voice])
     clip = timeline.add(Synced().prepare())
     assert timeline.event_times()["voice.square"] == 4.5  # 2 s + 2.5 s into the sound
@@ -135,6 +159,20 @@ def test_scenes_follow_the_words_of_audio_clips() -> None:
     assert clip.compiled_time(4.0) == pytest.approx(0.5)
 
 
+def test_a_part_not_recorded_yet_is_silent_but_its_words_are_events() -> None:
+    planned = AudioClip(None, start=2.0, name="voice 1", script=script(), planned=9.0)
+    timeline = Timeline(audio_clips=[planned])
+    clip = timeline.add(Synced().prepare())
+    assert planned.length == 9.0 and planned.placed() is None
+    assert clip.compiled_time(4.5) == pytest.approx(0.5)
+    assert not timeline.audio(0.0, 1.0, 8000).any()
+    # Recorded, with a 3 s countdown before the part: the words count from there.
+    taken = AudioClip(Sound(np.zeros(20 * 8000, dtype=np.float32), 8000), start=2.0, cut_in=3.0, name="voice 1", script=script(), offset=3.0)
+    timeline.audio_clips[0] = taken
+    timeline.audio_changed()
+    assert timeline.event_times()["voice.square"] == pytest.approx(4.5)
+
+
 def test_projects_read_transcripts_and_cue_bindings(tmp_path) -> None:
     root = tmp_path / "project"
     (root / "scenes").mkdir(parents=True)
@@ -146,12 +184,15 @@ def test_projects_read_transcripts_and_cue_bindings(tmp_path) -> None:
     from manimx.animation import write_wav
 
     write_wav(root / "assets" / "voice.wav", np.zeros(8 * 8000, dtype=np.float32), 8000)
-    timed(TEXT).save(root / "assets" / "voice.transcript.json")
+    script(take=Take("assets/voice.wav", 0.0)).save(root / "scripts")
     data = {
         "format": 3,
         "name": "voiced",
         "scenes": {"Synced": {"module": "scenes.synced"}},
-        "timeline": {"clips": [{"scene": "Synced", "start": 0.0, "cues": {"square": "voice.middle.square"}}], "audio": [{"file": "assets/voice.wav", "start": 1.0}]},
+        "timeline": {
+            "clips": [{"scene": "Synced", "start": 0.0, "cues": {"square": "voice.middle.square"}}],
+            "audio": [{"script": "voice", "part": 0, "start": 1.0}],
+        },
     }
     (root / "manimx.json").write_text(json.dumps(data))
     project = Project.load(root)
@@ -159,8 +200,17 @@ def test_projects_read_transcripts_and_cue_bindings(tmp_path) -> None:
     timeline = project.build_timeline()
     assert timeline.clips[0].compiled_time(7.0) == pytest.approx(0.5)  # 1 s + the second "square" at 6 s
     assert project.to_json()["timeline"]["clips"][0]["cues"] == {"square": "voice.middle.square"}
-    project.save_transcript("assets/voice.wav", None)
-    assert project.transcript("assets/voice.wav") is None and not (root / "assets" / "voice.transcript.json").exists()
+    assert project.to_json()["timeline"]["audio"] == [{"script": "voice", "part": 0, "start": 1.0}]
+    assert project.script_names() == ["voice"] and timeline.audio_clips[0].name == "voice 1"
+    project.delete_script("voice")
+    assert project.script_names() == [] and not (root / "scripts" / "voice.json").exists()
+    with pytest.raises(Exception, match="no script named 'voice'"):
+        project.build_timeline()
+    data["timeline"]["audio"] = [{"script": "voice", "file": "assets/voice.wav"}]
+    (root / "manimx.json").write_text(json.dumps(data))
+    with pytest.raises(Exception, match="either a file"):
+        Project.load(root)
+    data["timeline"]["audio"] = []
     data["timeline"]["clips"][0]["cues"] = {"square": 3}
     (root / "manimx.json").write_text(json.dumps(data))
     with pytest.raises(Exception, match="cues map cue names to event names"):
@@ -191,16 +241,17 @@ def test_the_example_voice_scene_follows_its_recording() -> None:
     spec.loader.exec_module(module)
     Voice = module.Voice
 
-    transcript = Transcript.load(root / "assets" / "audio" / "voice.transcript.json")
-    assert transcript.text.startswith("Everything in this animation is timed by my voice.")
+    voice = Script.load(root / "scripts", "voice")
+    part = voice.parts[0]
+    assert part.text.startswith("Everything in this animation is timed by my voice.") and part.take == Take("assets/audio/voice.m4a", 0.0)
     prepared = Voice().prepare()
-    assert len(prepared.segments[0].cues) == len(transcript.words) == 46
+    assert len(prepared.segments[0].cues) == len(part.words) == 46
     # Spoken 10 % slower and a second later: every word still lands on its cue.
-    slower = Transcript(transcript.text, tuple(Word(word.text, 1.1 * word.start, 1.1 * word.end) for word in transcript.words))
+    slower = voice.with_part(0, Part(part.text, tuple(Word(word.text, 1.1 * word.start, 1.1 * word.end) for word in part.words), part.take))
     sound = Sound.load(root / "assets" / "audio" / "voice.m4a")
-    timeline = Timeline(audio_clips=[AudioClip(sound, start=1.0, name="voice", transcript=slower)])
+    timeline = Timeline(audio_clips=[AudioClip(sound, start=1.0, name="voice 1", script=slower)])
     clip = timeline.add(prepared)
-    for word in (transcript.words[10], transcript.words[30]):
+    for word in (part.words[10], part.words[30]):
         assert clip.compiled_time(1.0 + 1.1 * word.start) == pytest.approx(word.start, abs=1e-6)
 
 
@@ -248,4 +299,14 @@ def test_a_fake_transcript_reads_the_text_evenly() -> None:
         ("Stop", 2.0, 2.4),  # the line ends: a longer pause after it
         ("there", 3.0, 3.5),
     ]
-    assert fake.events("voice")["voice.stop"] == 2.0
+    assert events(Script("voice", fake.text, (Part(fake.text, fake.words),)))["voice.stop"] == 2.0
+
+
+def test_a_take_is_timed_from_where_its_part_starts(monkeypatch) -> None:
+    from manimx.voice import alignment, time_take
+
+    heard = [Word("three", 0.5, 0.8), Word("two", 1.5, 1.8), Word("Hello", 3.2, 3.6), Word("there", 3.7, 4.1)]
+    monkeypatch.setattr(alignment, "recognize", lambda sound, model, language: heard)
+    monkeypatch.setattr(alignment, "trim_silence", lambda words, sound: list(words))
+    words = time_take(Sound(np.zeros(8000 * 5, dtype=np.float32), 8000), "Hello there!", offset=3.0)
+    assert [(word.text, round(word.start, 3), round(word.end, 3)) for word in words] == [("Hello", 0.2, 0.6), ("there!", 0.7, 1.1)]

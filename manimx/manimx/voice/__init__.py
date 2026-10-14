@@ -1,10 +1,12 @@
-"""Voice: transcripts of recordings, their words as events and subtitles.
+"""Voice: scripts, their recorded takes, their words as events and subtitles.
 
-transcript.py holds the data (text, timed words, event names,
-subtitles); alignment.py times the words with Whisper.
+script.py holds the scripts (text in parts, word times, takes);
+transcript.py the timed words of a text and its subtitles; alignment.py
+times the words of a recording with Whisper.
 """
 
-from .alignment import align, recognize, transcribe, trim_silence
-from .transcript import Subtitle, Transcript, Word, srt, transcript_path
+from .alignment import align, recognize, time_take, transcribe, trim_silence
+from .script import Part, Script, Take
+from .transcript import Subtitle, Transcript, Word, srt
 
-__all__ = ["Subtitle", "Transcript", "Word", "align", "recognize", "srt", "transcribe", "transcript_path", "trim_silence"]
+__all__ = ["Part", "Script", "Subtitle", "Take", "Transcript", "Word", "align", "recognize", "srt", "time_take", "transcribe", "trim_silence"]

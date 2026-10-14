@@ -86,6 +86,16 @@ def transcribe(sound: Sound, text: str | None = None, model: str = DEFAULT_MODEL
     return align(text, heard)
 
 
+def time_take(sound: Sound, text: str, offset: float = 0.0, model: str = DEFAULT_MODEL, language: str | None = None) -> tuple[Word, ...]:
+    """The words of ``text`` timed from a take of it: the sound recorded
+    for a script part, which starts ``offset`` seconds in (after the
+    countdown). Times count from that start; what is said before it
+    (counting along) is left out."""
+    heard = [word for word in trim_silence(recognize(sound, model, language), sound) if word.end > offset]
+    shifted = [Word(word.text, max(0.0, word.start - offset), word.end - offset) for word in heard]
+    return align(text, shifted).words
+
+
 def align(text: str, timed: Sequence[Word]) -> Transcript:
     """``text`` with the times of the words of ``timed`` it matches (see the module docs)."""
     wanted = tokens(text)

@@ -38,7 +38,7 @@
 // background. Ctrl+wheel zooms around the pointer, the keys and buttons
 // around the playhead; a moved playhead is scrolled into view.
 //
-// Subtitles: the words of the audio clips' transcripts, a line at a time,
+// Subtitles: the words of the scripts' parts on the timeline, a line at a time,
 // over the frame (the Subtitles button or C hides them); a render puts them
 // into the video and an .srt file next to it.
 //

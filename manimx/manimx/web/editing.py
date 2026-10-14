@@ -33,12 +33,13 @@ Design decisions:
 * **Clips that follow the previous one** (no ``start`` in the file) are
   placed again after every edit, so moving or cutting a clip carries the
   clips that follow it along.
-* **Transcripts are files of their own** (``voice.transcript.json`` next
-  to ``voice.m4a``), written at once when edited: they are not part of
-  ``manimx.json``. Their words are events, so an edit moves the clips
-  synced to them in the next frame, like timing an event by hand.
-  Transcribing (Whisper) takes seconds, so it runs without holding the
-  editor; its result is one edit, undone like any other.
+* **Scripts are files of their own** (``scripts/narration.txt`` and its
+  times in ``narration.json``), written at once when edited: they are
+  not part of ``manimx.json``. Their words are events, so an edit moves
+  the clips synced to them in the next frame, like timing an event by
+  hand. Timing a recorded take (Whisper) takes seconds, so it runs
+  without holding the editor; its result is one edit, undone like any
+  other.
 * **Every edit can be undone.** Edits are commands (commands.py), run by
   :meth:`ProjectEditor.run`, which keeps each one's inverse; the history
   is cleared when someone else's ``manimx.json`` is read, since its clips
@@ -60,9 +61,10 @@ import numpy as np
 from ..animation import PreparedScene, Timeline
 from ..animation.timing import NEVER
 from ..drivers.offline import RenderSettings
-from ..project import PROJECT_FILE, AudioEntry, ClipEntry, Project
+from ..project import PROJECT_FILE, AudioEntry, ClipEntry, Project, ProjectError
 from ..settings import SettingsError, entries, get, set_value
-from ..voice.transcript import TRANSCRIPT_SUFFIX, Transcript, Word
+from ..voice.script import SCRIPTS_FOLDER, Part, Script, Take
+from ..voice.transcript import Word
 from .commands import (
     AddAudio,
     AddClip,
@@ -78,9 +80,9 @@ from .commands import (
     RemoveClips,
     RemovedClip,
     SetEvent,
+    SetScript,
+    SetScriptText,
     SetSetting,
-    SetTranscript,
-    SetTranscriptText,
     SplitClips,
     UICommand,
     parse,
@@ -148,8 +150,8 @@ class ProjectEditor:
             return
         if python:
             self._prepare_again(python)
-        if any(path.name.endswith(TRANSCRIPT_SUFFIX) for path in paths):
-            self._read_transcripts()
+        if any(path.parent == self.root / SCRIPTS_FOLDER for path in paths):
+            self._read_scripts()
 
     def _rebuild(self, changed: set[Path] | None) -> None:
         """Read manimx.json and build the timeline again; scenes are reused
@@ -336,11 +338,13 @@ class ProjectEditor:
                     taken += [(copy.start, copy.start + length) for copy in copies if copy.layer == entry.layer]
                     copies.append(AddClip(entry.scene, _free_start(taken, clip.end, length), entry.layer, entry.cut, entry.speed))
                 return self._apply(Batch(tuple(copies), command.label))
-            case AddAudio(file, start, track, cut, volume, index):
+            case AddAudio(file, start, track, cut, volume, index, script, part):
                 position = len(project.audio) if index is None else index
                 if not 0 <= position <= len(project.audio):
                     raise EditError(f"no place {index!r} for an audio clip")
-                entry = AudioEntry(file, start, track, cut, volume)
+                if script is not None and any(e.script == script and e.part == part for e in project.audio):
+                    raise EditError(f"part {part + 1} of {script} is on the timeline already: move it there")
+                entry = AudioEntry(file, start, track, cut, volume, script, part)
                 try:
                     clip = project.audio_clip(entry)
                 except Exception as error:  # not a sound file, not in the project, ...
@@ -358,7 +362,7 @@ class ProjectEditor:
                 for index in unique:
                     if not 0 <= index < len(project.audio):
                         raise EditError(f"there is no audio clip {index!r}")
-                restore = tuple(AddAudio(e.file, e.start, e.track, e.cut, e.volume, i) for i, e in ((i, project.audio[i]) for i in unique))
+                restore = tuple(AddAudio(e.file, e.start, e.track, e.cut, e.volume, i, e.script, e.part) for i, e in ((i, project.audio[i]) for i in unique))
 
                 def remove_audio() -> None:
                     for index in reversed(unique):
@@ -393,32 +397,32 @@ class ProjectEditor:
                 inverse = SetEvent(name, project.events.get(name))
                 self._change(lambda: self._set_event(name, time))
                 return inverse
-            case SetTranscript(file, transcript):
-                inverse = SetTranscript(file, self._transcript(file))
-                self._change(lambda: self._set_transcript(file, transcript))
-                return inverse
-            case SetTranscriptText(file, text):
-                old = self._transcript(file)
-                if old is None:
-                    raise EditError(f"{file} has no transcript yet: transcribe it first")
-                from ..voice.alignment import align
-
-                new = align(text, old.words)
-                self._change(lambda: self._set_transcript(file, new))
-                return SetTranscript(file, old)
-            case MoveWords(file, words):
-                old = self._transcript(file)
-                if old is None:
-                    raise EditError(f"{file} has no transcript")
-                moved = list(old.words)
+            case SetScript(name, script):
+                old = self._script(name)
+                if script is None:
+                    self._check_unplaced(name, 0)
+                else:
+                    self._check_unplaced(name, len(script.parts))
+                self._change(lambda: self._set_script(name, script))
+                return SetScript(name, old)
+            case SetScriptText(name, text):
+                old = self._script(name)
+                new = Script.new(name, text, old)
+                self._check_unplaced(name, len(new.parts))
+                self._change(lambda: self._set_script(name, new))
+                return SetScript(name, old)
+            case MoveWords(name, part, words):
+                old = self._script(name)
+                if old is None or not 0 <= part < len(old.parts):
+                    raise EditError(f"there is no part {part + 1} of a script {name}")
+                moved = list(old.parts[part].words)
                 for index, start, end in words:
                     if not 0 <= index < len(moved):
-                        raise EditError(f"the transcript of {file} has no word {index}")
+                        raise EditError(f"part {part + 1} of {name} has no word {index}")
                     moved[index] = Word(moved[index].text, start, end)
-                inverse = MoveWords(file, tuple((index, old.words[index].start, old.words[index].end) for index, _, _ in words))
-                new = Transcript(old.text, tuple(moved))
-                self._change(lambda: self._set_transcript(file, new))
-                return inverse
+                new = old.with_part(part, Part(old.parts[part].text, tuple(moved), old.parts[part].take))
+                self._change(lambda: self._set_script(name, new))
+                return SetScript(name, old)
             case SetSetting(path, value):
                 try:
                     old = get(project.settings, path)
@@ -479,54 +483,111 @@ class ProjectEditor:
         self.timeline.audio_changed()
         self._place_followers()
 
-    # -- transcripts ----------------------------------------------------------------
+    # -- scripts ----------------------------------------------------------------------
 
-    def transcribe(self, file: str, text: str | None = None) -> None:
-        """Time the words of the sound file ``file`` with Whisper (the
-        project's ``voice`` settings): ``text``, or (None) the words Whisper
-        hears; one edit, undone like others. Runs for seconds, without
-        holding the editor."""
-        from ..voice.alignment import transcribe
+    def scripts(self) -> list[dict[str, Any]]:
+        """Every script as the page shows it: text, and per part its title,
+        words, take and where it is on the timeline (an audio clip index)."""
+        project = self._project()
+        result = []
+        for name in project.script_names():
+            try:
+                script = project.script(name)
+            except ProjectError as error:
+                result.append({"name": name, "error": str(error)})
+                continue
+            placed = {entry.part: index for index, entry in enumerate(project.audio) if entry.script == name}
+            result.append(
+                {
+                    "name": name,
+                    "text": script.text,
+                    "parts": [
+                        {
+                            "title": part.title,
+                            "words": [{"text": w.text, "start": w.start, "end": w.end} for w in part.words],
+                            "take": None if part.take is None else {"file": part.take.file, "offset": part.take.offset},
+                            "length": part.planned_length,
+                            "clip": placed.get(index),
+                        }
+                        for index, part in enumerate(script.parts)
+                    ],
+                }
+            )
+        return result
+
+    def record_take(self, name: str, part: int, file: str, offset: float) -> str | None:
+        """Make the sound file ``file`` (inside the project) part ``part``
+        of script ``name``'s take, the part starting ``offset`` seconds in
+        (after the countdown), and time its words with Whisper (the
+        project's ``voice`` settings); one edit, undone like others. Runs
+        for seconds, without holding the editor. Returns why the words
+        could not be timed (they keep their planned times), or None."""
+        from ..voice.alignment import time_take
 
         project = self._project()
-        if not any(entry.file == file for entry in project.audio):
-            raise EditError(f"{file} is on no audio track")
+        script = self._script(name)
+        if script is None or not 0 <= part < len(script.parts):
+            raise EditError(f"there is no part {part + 1} of a script {name}")
+        try:
+            sound = project.sound(file)
+        except Exception as error:
+            raise EditError(describe(error, self.root)) from None
+        old = script.parts[part]
+        problem = None
         try:
             voice = project.settings.voice
-            transcript = transcribe(project.sound(file), text, voice.model, voice.language or None)
+            words = time_take(sound, old.text, offset, voice.model, voice.language or None)
         except Exception as error:  # no faster-whisper, a model that does not download, ...
-            raise EditError(f"cannot transcribe {file}: {error}") from None
-        self.run(SetTranscript(file, transcript))
+            words, problem = old.words, f"the words keep their planned times: {error}"
+        self.run(SetScript(name, script.with_part(part, Part(old.text, words, Take(file, offset)))))
+        return problem
 
-    def _transcript(self, file: str) -> Transcript | None:
+    def _script(self, name: str) -> Script | None:
+        project = self._project()
+        if name not in project.script_names():
+            return None
         try:
-            return self._project().transcript(file)
-        except Exception as error:  # a broken transcript file
+            return project.script(name)
+        except Exception as error:  # a broken times file
             raise EditError(describe(error, self.root)) from None
 
-    def _set_transcript(self, file: str, transcript: Transcript | None) -> None:
+    def _check_unplaced(self, name: str, parts: int) -> None:
+        """Refuse an edit that would leave a placed part without its script."""
+        for entry in self._project().audio:
+            if entry.script == name and entry.part >= parts:
+                raise EditError(f"part {entry.part + 1} of {name} is on the timeline: remove it there first")
+
+    def _set_script(self, name: str, script: Script | None) -> None:
         project = self._project()
-        project.save_transcript(file, transcript)
-        for entry, clip in zip(project.audio, self.timeline.audio_clips, strict=True):
-            if entry.file == file:
-                clip.transcript = transcript
+        if script is None:
+            project.delete_script(name)
+        else:
+            project.save_script(script)
+        self._update_script_clips(name)
+
+    def _update_script_clips(self, name: str | None = None) -> None:
+        """The audio clips of script parts (of ``name``, or all) made again from their scripts."""
+        project = self._project()
+        for index, entry in enumerate(project.audio):
+            if entry.script is not None and (name is None or entry.script == name):
+                self.timeline.audio_clips[index] = project.audio_clip(entry)
         self._audio_changed()
 
-    def _read_transcripts(self) -> None:
-        """Transcript files changed on disk (not by this editor): read them again."""
+    def _read_scripts(self) -> None:
+        """Script files changed on disk (not by this editor): read them again."""
         with self._lock:
-            project = self.project
-            if project is None:
+            if self.project is None:
                 return
             try:
-                transcripts = [project.transcript(entry.file) for entry in project.audio]
+                clips = [self.project.audio_clip(entry) if entry.script is not None else None for entry in self.project.audio]
             except Exception as error:
                 self._report(error)
                 return
 
             def update() -> None:
-                for clip, transcript in zip(self.timeline.audio_clips, transcripts, strict=True):
-                    clip.transcript = transcript
+                for index, clip in enumerate(clips):
+                    if clip is not None:
+                        self.timeline.audio_clips[index] = clip
                 self._audio_changed()
 
             self._change(update)
@@ -556,14 +617,17 @@ class ProjectEditor:
         return [
             {
                 "name": clip.name,
-                "file": entry.file,
+                "file": entry.file if entry.script is None else _take_file(clip),
                 "start": clip.start,
                 "end": clip.end,
                 "track": entry.track,
                 "cut": None if entry.cut is None else list(entry.cut),
                 "volume": entry.volume,
-                "length": clip.sound.duration,
-                "transcript": None if clip.transcript is None else clip.transcript.to_json(),
+                "length": clip.source_length,
+                "script": entry.script,
+                "part": entry.part,
+                "offset": clip.offset,
+                "recorded": clip.sound is not None,
             }
             for entry, clip in zip(project.audio, self.timeline.audio_clips, strict=True)
         ]
@@ -575,6 +639,8 @@ class ProjectEditor:
         if not 0 <= index < len(clips):
             raise EditError(f"there is no audio clip {index!r}")
         sound = clips[index].sound
+        if sound is None:  # a script part not recorded yet
+            return [[0.0, 0.0]] * max(1, min(int(buckets), 4000))
         samples = sound.samples.mean(axis=1)
         first = max(0, round(start * sound.sample_rate))
         last = min(len(samples), max(first, round(end * sound.sample_rate)))
@@ -721,6 +787,12 @@ class ProjectEditor:
             self._unsaved = False
             self.project.save()
             self.saved_mtime = _mtime(self.root / PROJECT_FILE)
+
+
+def _take_file(clip: Any) -> str | None:
+    """The file of a script part's take (None before it is recorded)."""
+    take = clip.script.parts[clip.part].take if clip.script is not None else None
+    return None if take is None else take.file
 
 
 def _free_start(taken: list[tuple[float, float]], after: float, length: float) -> float:

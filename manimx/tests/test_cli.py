@@ -283,20 +283,25 @@ def test_projects_with_the_same_package_name_load_in_turns() -> None:
         assert Path(sys.modules["scenes"].__file__).resolve().is_relative_to(folder.resolve())
 
 
-def test_transcribe_times_the_words_of_a_recording(project, capsys, monkeypatch) -> None:
+def test_take_uses_a_recording_as_a_part_of_a_script(project, capsys, monkeypatch) -> None:
     import numpy as np
     from manimx.animation import write_wav
-    from manimx.voice import Transcript, Word, alignment
+    from manimx.voice import Script, Transcript, Word, alignment
 
     def fake_transcribe(sound, text=None, model="small", language=None):  # Whisper is not run in tests
         return alignment.align(text or "hello there", [Word("hello", 0.2, 0.5), Word("there", 0.6, 0.9)])
 
     monkeypatch.setattr(alignment, "transcribe", fake_transcribe)
+    monkeypatch.setattr(alignment, "time_take", lambda sound, text, offset, model, language: Transcript.fake(text).words)
     (project / "assets" / "audio").mkdir(parents=True, exist_ok=True)
     write_wav(project / "assets" / "audio" / "voice.wav", np.zeros(8000, dtype=np.float32), 8000)
-    (project / "script.txt").write_text("Hello there!")
-    assert main(["transcribe", "assets/audio/voice.wav", "--text", "script.txt"]) == 0
+    assert main(["take", "voice", "assets/audio/voice.wav"]) == 0  # no script yet: written from what is heard
     out = capsys.readouterr().out
-    assert "voice.transcript.json" in out and "voice.hello" in out and "on no audio track yet" in out
-    assert Transcript.load(project / "assets" / "audio" / "voice.transcript.json").text == "Hello there!"
-    assert main(["transcribe", "assets/audio/missing.wav"]) == 1
+    assert "scripts/voice.txt" in out and "voice.hello" in out and "drag them from Scripts" in out
+    voice = Script.load(project / "scripts", "voice")
+    assert voice.text == "hello there" and voice.parts[0].take.file == "assets/audio/voice.wav"
+    (project / "scripts" / "voice.txt").write_text("hello there\n---\nand more")
+    assert main(["take", "voice", "assets/audio/voice.wav", "--part", "2", "--offset", "0.5"]) == 0
+    assert Script.load(project / "scripts", "voice").parts[1].take.offset == 0.5
+    assert main(["take", "voice", "assets/audio/voice.wav", "--part", "3"]) == 1
+    assert main(["take", "voice", "assets/audio/missing.wav"]) == 1

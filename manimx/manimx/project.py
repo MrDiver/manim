@@ -22,11 +22,13 @@ parallel with another one on a higher ``layer``. Below the clips, the
 timeline's ``audio`` lists sound files on audio tracks (voice-overs,
 music, recordings made in the preview), mixed into the video's sound.
 
-A sound file's transcript lies next to it (``assets/audio/voice.m4a``:
-``voice.transcript.json``, see manimx/voice/): its words are events
-scenes wait for or sync their cues to, and a clip's ``cues`` bind a
-scene's cue to another event than the one of its own name
-(``{"square": "voice.middle.square"}``).
+What is said is written in scripts (``scripts/narration.txt``, see
+manimx/voice/script.py), split into parts by ``---`` lines; a part goes
+onto an audio track as ``{"script": "narration", "part": 0, "start": 3}``
+and plays its recorded take, or nothing before it is recorded. Its words
+are events scenes wait for or sync their cues to, and a clip's ``cues``
+bind a scene's cue to another event than the one of its own name
+(``{"square": "narration.middle.square"}``).
 """
 
 from __future__ import annotations
@@ -53,7 +55,7 @@ from .settings import (
 from .settings import from_json as settings_from_json
 from .settings import schema as settings_schema
 from .settings import to_json as settings_to_json
-from .voice.transcript import Transcript, transcript_path
+from .voice.script import SCRIPTS_FOLDER, Script, script_names
 
 PROJECT_FILE = "manimx.json"
 SCHEMA_FILE = ".manimx/project.schema.json"
@@ -104,16 +106,19 @@ class ClipEntry:
 
 @dataclass
 class AudioEntry:
-    """A sound file on the timeline's audio tracks (a voice-over, music, a
-    recording made in the preview)."""
+    """A sound on the timeline's audio tracks: a sound file (music, a
+    recording) or a part of a script (its take, once recorded)."""
 
-    file: str
-    """Path inside the project, e.g. assets/audio/voice.wav."""
+    file: str | None
+    """Path inside the project, e.g. assets/audio/music.wav (None for a script part)."""
     start: float = 0.0
     track: int = 0
     cut: tuple[float | None, float | None] | None = None
-    """In and out points in the file's seconds."""
+    """In and out points in the file's seconds (a script part's: from the part's start)."""
     volume: float = 1.0
+    script: str | None = None
+    """The script whose part this is."""
+    part: int = 0
 
 
 @dataclass(eq=False)
@@ -124,12 +129,12 @@ class Project:
     scenes: dict[str, SceneEntry] = field(default_factory=dict)
     timeline: list[ClipEntry] = field(default_factory=list)
     events: dict[str, float] = field(default_factory=dict)
-    """Event times set by hand (clicks, transcript words come later)."""
+    """Event times set by hand (a click; the words of scripts are events of their own)."""
     audio: list[AudioEntry] = field(default_factory=list)
     _sounds: dict[Path, tuple[int, Sound]] = field(default_factory=dict, init=False, repr=False)
     """Sound files read, with their modification time: read again when changed."""
-    _transcripts: dict[Path, tuple[int, Transcript]] = field(default_factory=dict, init=False, repr=False)
-    """Transcripts read, with their modification time."""
+    _scripts: dict[str, tuple[tuple[int | None, int | None], Script]] = field(default_factory=dict, init=False, repr=False)
+    """Scripts read, with the modification times of their two files."""
 
     @property
     def output(self) -> OutputSettings:
@@ -187,7 +192,7 @@ class Project:
             events = {name: float(time) for name, time in timeline.get("events", {}).items()}
             audio = []
             for index, entry in enumerate(timeline.get("audio", [])):
-                _check_keys(entry, ["file", "start", "track", "cut", "volume"], f"timeline.audio[{index}]")
+                _check_keys(entry, ["file", "script", "part", "start", "track", "cut", "volume"], f"timeline.audio[{index}]")
                 audio.append(_audio_entry(entry))
         except (KeyError, TypeError, ValueError, AttributeError) as error:
             raise ProjectError(f"invalid {PROJECT_FILE}: {error}") from error
@@ -337,35 +342,58 @@ class Project:
         return known[1]
 
     def audio_clip(self, entry: AudioEntry) -> AudioClip:
-        """The timeline's audio clip for ``entry``, with its file's transcript."""
+        """The timeline's audio clip for ``entry``: its sound file, or its script part."""
         cut_in, cut_out = entry.cut or (None, None)
-        sound = self.sound(entry.file)
-        return AudioClip(sound, entry.start, entry.track, cut_in, cut_out, entry.volume, Path(entry.file).stem, self.transcript(entry.file))
+        if entry.script is None:
+            if entry.file is None:
+                raise ProjectError("an audio clip needs a file or a script part")
+            return AudioClip(self.sound(entry.file), entry.start, entry.track, cut_in, cut_out, entry.volume, Path(entry.file).stem)
+        script = self.script(entry.script)
+        if not 0 <= entry.part < len(script.parts):
+            raise ProjectError(f"the script {entry.script!r} has no part {entry.part + 1}")
+        part = script.parts[entry.part]
+        sound, offset = (None, 0.0) if part.take is None else (self.sound(part.take.file), part.take.offset)
+        # The entry's cut counts from the part's start, the clip's from the sound's.
+        cut_in = offset + (cut_in or 0.0)
+        cut_out = None if cut_out is None else offset + cut_out
+        return AudioClip(
+            sound, entry.start, entry.track, cut_in, cut_out, entry.volume, f"{script.name} {entry.part + 1}",
+            script=script, part=entry.part, offset=offset, planned=part.planned_length,
+        )  # fmt: skip
 
-    def transcript(self, file: str) -> Transcript | None:
-        """The transcript of the sound file ``file`` (inside the project), None without one."""
-        path = transcript_path(self.root / file)
-        try:
-            mtime = path.stat().st_mtime_ns
-        except OSError:
-            return None
-        known = self._transcripts.get(path)
-        if known is None or known[0] != mtime:
+    @property
+    def scripts_folder(self) -> Path:
+        return self.root / SCRIPTS_FOLDER
+
+    def script_names(self) -> list[str]:
+        """The project's scripts, by name."""
+        return script_names(self.scripts_folder)
+
+    def script(self, name: str) -> Script:
+        """The script ``name`` (scripts/<name>.txt), read once while its files are unchanged."""
+        folder = self.scripts_folder
+        stamps = tuple(_mtime(folder / f"{name}.{suffix}") for suffix in ("txt", "json"))
+        if stamps[0] is None:
+            raise ProjectError(f"the project has no script named {name!r}", hint=f"write it in {SCRIPTS_FOLDER}/{name}.txt")
+        known = self._scripts.get(name)
+        if known is None or known[0] != stamps:
             try:
-                known = self._transcripts[path] = (mtime, Transcript.load(path))
+                known = self._scripts[name] = (stamps, Script.load(folder, name))  # type: ignore[assignment]
             except (OSError, ValueError) as error:
                 raise ProjectError(str(error)) from None
         return known[1]
 
-    def save_transcript(self, file: str, transcript: Transcript | None) -> None:
-        """Write (or with None remove) the transcript of the sound file ``file``."""
-        path = transcript_path(self.root / file)
-        if transcript is None:
-            path.unlink(missing_ok=True)
-            self._transcripts.pop(path, None)
-            return
-        transcript.save(path)
-        self._transcripts[path] = (path.stat().st_mtime_ns, transcript)
+    def save_script(self, script: Script) -> None:
+        """Write ``script``'s text and times."""
+        script.save(self.scripts_folder)
+        folder = self.scripts_folder
+        self._scripts[script.name] = (tuple(_mtime(folder / f"{script.name}.{suffix}") for suffix in ("txt", "json")), script)  # type: ignore[assignment]
+
+    def delete_script(self, name: str) -> None:
+        """Remove the script ``name``'s files (its takes stay in assets/audio/)."""
+        for suffix in ("txt", "json"):
+            (self.scripts_folder / f"{name}.{suffix}").unlink(missing_ok=True)
+        self._scripts.pop(name, None)
 
     def source(self, scene: str | None = None) -> ProjectSource:
         """What the render driver renders: the timeline, or one scene."""
@@ -426,6 +454,13 @@ class ProjectSource:
     def __call__(self) -> Timeline | PreparedScene:
         project = Project.load(self.root)
         return project.build_timeline() if self.scene is None else project.prepare(self.scene)
+
+
+def _mtime(path: Path) -> int | None:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
 
 
 def _unique(name: str, used: set[str]) -> str:
@@ -548,18 +583,19 @@ def project_schema() -> dict[str, Any]:
                     },
                     "events": {
                         "type": "object",
-                        "description": "Times (seconds) of events scenes wait for with wait_for() (the words of transcripts are events too).",
+                        "description": "Times (seconds) of events scenes wait for with wait_for() (the words of scripts are events too).",
                         "additionalProperties": {"type": "number"},
                     },
                     "audio": {
                         "type": "array",
-                        "description": "Sound files on the audio tracks (voice-overs, music, recordings).",
+                        "description": "Sounds on the audio tracks: sound files (music, recordings) and parts of scripts.",
                         "items": {
                             "type": "object",
-                            "required": ["file"],
                             "additionalProperties": False,
                             "properties": {
-                                "file": {"type": "string", "description": "Path inside the project, e.g. assets/audio/voice.wav."},
+                                "file": {"type": "string", "description": "Path inside the project, e.g. assets/audio/music.wav."},
+                                "script": {"type": "string", "description": "A script (scripts/<name>.txt) whose part this is, instead of a file."},
+                                "part": {"type": "integer", "minimum": 0, "description": "Which part of the script (0 is the first)."},
                                 "start": {"type": "number", "description": "Start in seconds."},
                                 "track": {"type": "integer", "description": "Audio track (0 is the first)."},
                                 "cut": {
@@ -607,19 +643,23 @@ def _speed(value: Any) -> float:
 
 def _audio_entry(data: dict[str, Any]) -> AudioEntry:
     cut = data.get("cut")
-    if not isinstance(data["file"], str):
-        raise ValueError("an audio clip's file must be a path")
+    file, script = data.get("file"), data.get("script")
+    if (file is None) == (script is None) or not isinstance(file or script, str):
+        raise ValueError("an audio clip has either a file (a path) or a script (a name)")
     return AudioEntry(
-        file=data["file"],
+        file=file,
         start=float(data.get("start", 0.0)),
         track=int(data.get("track", 0)),
         cut=None if cut is None else (cut[0], cut[1]),
         volume=float(data.get("volume", 1.0)),
+        script=script,
+        part=int(data.get("part", 0)),
     )
 
 
 def _audio_json(entry: AudioEntry) -> dict[str, Any]:
-    data: dict[str, Any] = {"file": entry.file, "start": entry.start}
+    data: dict[str, Any] = {"file": entry.file} if entry.script is None else {"script": entry.script, "part": entry.part}
+    data["start"] = entry.start
     if entry.track:
         data["track"] = entry.track
     if entry.cut is not None:

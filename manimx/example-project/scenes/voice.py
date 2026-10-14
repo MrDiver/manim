@@ -3,12 +3,12 @@
 A remake of reanimate's voice example
 (https://reanimate.readthedocs.io/en/latest/voice/, "Setting up
 triggers"), with its recording: assets/audio/voice.m4a, on the
-timeline's audio track. ``manimx transcribe assets/audio/voice.m4a
---text script.txt`` (or Transcribe in ``manimx ui``) timed its words into
-voice.transcript.json, and every word is an event: ``voice.circle``,
-``voice.circle.2`` the second time it is said.
+timeline's audio track as the take of the script scripts/voice.txt
+(``manimx take voice assets/audio/voice.m4a`` timed its words), and
+every word of the script is an event: ``voice.circle``, ``voice.circle.2``
+the second time it is said.
 
-The scene is written along the transcript as it is now: it waits until
+The scene is written along the script's times as they are now: it waits until
 each word's time and puts a ``cue`` there. The cues keep it in sync when
 the recording changes: record again, slower or faster, transcribe again,
 and the clip's time bends so every cue lands on its word, without
@@ -42,12 +42,12 @@ from manimx.userland import (
 )
 from manimx.userland.markers import bounds
 from manimx.userland.rate_functions import ease_out_quad
-from manimx.voice import Transcript
+from manimx.voice import Script
 
 PAPER = "#fafafa"
 INK = "#000000"
 WORDS = '#set text(size: 66pt, font: "New Computer Modern", fill: black)'
-TRANSCRIPT = Transcript.load(Path(__file__).parents[1] / "assets" / "audio" / "voice.transcript.json")
+SCRIPT = Script.load(Path(__file__).parents[1] / "scripts", "voice")
 UNIT = 8 / 9
 """Scene units per unit of reanimate's 16 by 9 screen (ours is 8 high)."""
 WIDTH, HEIGHT = 16 * UNIT, 9 * UNIT
@@ -86,8 +86,9 @@ def word_box(text: str) -> Group:
 
 class Voice(Scene):
     def construct(self) -> None:
-        names = TRANSCRIPT.event_names("voice")
-        words = dict(zip(names, TRANSCRIPT.words, strict=True))
+        spoken = SCRIPT.parts[0].words
+        names = [word_names[0] for word_names in SCRIPT.event_names()[0]]
+        words = dict(zip(names, spoken, strict=True))
         self.add(Rectangle(15, 8.5, color=PAPER, fill_opacity=1, stroke_width=0))
 
         circle = Circle(RADIUS, color=INK, fill_opacity=1, stroke_width=0, name="circle")
@@ -156,4 +157,4 @@ class Voice(Scene):
         for time, action in sorted(moments, key=lambda moment: moment[0]):  # stable: as listed at equal times
             self.wait_until(time)
             action()
-        self.wait_until(TRANSCRIPT.words[-1].start + 2.0)
+        self.wait_until(spoken[-1].start + 2.0)

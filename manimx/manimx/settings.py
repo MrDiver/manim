@@ -192,7 +192,7 @@ class PerformanceSettings:
 
 @dataclass
 class VoiceSettings:
-    """How recordings are transcribed (manimx transcribe, the preview's Transcribe)."""
+    """How recorded takes are timed (manimx take, recording in the preview)."""
 
     model: str = setting(
         "small",

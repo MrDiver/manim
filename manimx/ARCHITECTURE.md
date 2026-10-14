@@ -89,7 +89,7 @@ flowchart LR
 | `manimx.userland` | everything a project could write on top of the core: shapes (`Circle`, `Dot`, `Square`, `Rectangle`, `RegularPolygon`, `Triangle`, `Polyline`, `ParametricCurve3D`, `Box`, `Sphere`, `Torus`, `ParametricSurface`), animations (`FadeIn`, `FadeOut`, `Rotate`, `Indicate`, `GrowFromCenter`, `ShrinkToCenter`, `Morph`, `Create`, `Uncreate`, `DrawBorderThenFill`, `Write`), `rate_functions`, `constants` (`UP`, `PI`, ...), `geometry` (every point and mesh generator, `align_paths()`), `load_gltf()` | animation, robjects |
 | `manimx.renderer` | what a renderer is given next to the tree: `RenderConfig`, `renderer.Camera`, `ViewState`, `CameraViewState`; `RenderSamples`, `Bloom`, `ToneMap`, `ShaderEffect` | robjects |
 | `manimx.drivers` | `render()`, `CoreFramePipeline`, `StillRenderer`, `render_image()`, `RenderSettings`, `FrameSource`, `load_source()`; `FrameSink` (→ `VideoFile`, `ImageSequence`, `FrameList`) | renderer, animation, `_core` |
-| `manimx.voice` | `Transcript`, `Word`, `Subtitle`, `srt()`, `transcript_path()`; `align()`, `transcribe()`, `recognize()` (Whisper), `trim_silence()` | animation (`Sound`); faster-whisper only to transcribe |
+| `manimx.voice` | `Script`, `Part`, `Take`; `Transcript`, `Word`, `Subtitle`, `srt()`; `align()`, `time_take()`, `transcribe()`, `recognize()` (Whisper), `trim_silence()` | animation (`Sound`); faster-whisper only to time takes |
 | `manimx.project` | `Project`, `SceneEntry`, `ClipEntry`, `ProjectSource` | animation, drivers, settings, voice |
 | `manimx.settings` | `Settings` and its sections (`OutputSettings`, `EffectsSettings`, `LightingSettings`, `PerformanceSettings`), `setting()` | renderer (config, effects) |
 | `manimx.cli` | the Typer `app` (`manimx` command), `scaffold`, `ui` | project, drivers, web |
@@ -425,9 +425,9 @@ classDiagram
         resolve()
     }
     class AudioClip {
-        sound, start, track
-        cut_in, cut_out, volume, name
-        transcript: Transcript
+        sound (None: a planned part)
+        start, track, cut_in, cut_out, volume, name
+        script: Script, part, offset, planned
     }
     class Clip {
         scene: PreparedScene
@@ -463,7 +463,7 @@ classDiagram
   one compiled time axis, separated by `SEGMENT_GAP`, which is never shown.
   `Segment.play_offset` counts the time without those gaps.
 - **Event names:** they get their times from `Timeline.events`
-  (`Timeline.fire()`), from the words of the audio clips' transcripts
+  (`Timeline.fire()`), from the words of the script parts on the audio tracks
   (`Timeline.word_events()`, see below) or from an `Emit` in any `Clip`.
   `Timeline._resolve()` iterates to a fixed point: a `Segment` starts at the
   time of its `waits_for` event, or when the previous one ends if that is
@@ -484,17 +484,22 @@ classDiagram
   `Clip.bind_cue()`, `Clip.bind_cues()`, `Clip.set_scale()` and
   `Timeline.audio_changed()` mark the `Timeline` dirty, and the next query
   resolves it once.
-- **Voice (`manimx/voice/`):** a sound file's `Transcript`
-  (`voice.transcript.json` next to `voice.m4a`) is the author's text and
-  one `Word` (text, start, end) per word of it. `alignment.transcribe()`
-  times the words with Whisper (faster-whisper, optional) and
-  `alignment.align()` matches the text to the recognized words (difflib),
-  so the author's text wins over what Whisper heard. Each word of an
-  `AudioClip`'s transcript is an event at its global time (`voice.square`,
-  `voice.square.2`, `voice.middle.square` after a `[middle]` line), so a
-  `Cue` named after it lands on the spoken word; a clip's `cues` in
-  `manimx.json` (`Clip.bind_cues()`) bind a cue to another event.
-  `Timeline.subtitles()` gives the transcripts' lines; renders mux them
+- **Voice (`manimx/voice/`):** a `Script` (`scripts/narration.txt`, its
+  times in `narration.json`) is the author's text in `Part`s (split by
+  `---` lines), each part a `Transcript`: its text and one `Word` (text,
+  start, end, from the part's start) per word. A part goes onto an audio
+  track as an `AudioClip` with `script` and `part`: before it is
+  recorded it has no sound and lasts `planned` seconds, its words timed
+  as if read out (`Transcript.fake()`); once recorded, its `Take` (a file
+  and the `offset` where the part starts in it) is the sound, its words
+  timed by `alignment.time_take()` (Whisper, faster-whisper, optional;
+  `align()` matches the author's text to the recognized words). Each word
+  is an event at its global time, named over the whole script
+  (`narration.square`, `narration.square.2`, `narration.middle.square`
+  after a `[middle]` line), so a `Cue` named after it lands on the word,
+  planned or spoken; a clip's `cues` in `manimx.json`
+  (`Clip.bind_cues()`) bind a cue to another event.
+  `Timeline.subtitles()` gives the parts' lines; renders mux them
   (`FrameFormat.subtitles`, an mp4's `mov_text` track) and write an `.srt`.
 
 ## 6. Cameras and camera views
@@ -790,7 +795,7 @@ flowchart LR
 
 - **`wait_for`, `emit` and `cue` take names; times come from the
   `Timeline`.** A `Scene` stays reusable: `Timeline.fire()`, an `Emit` in
-  another `Clip`, or the words of a transcript bind the times. A scene
+  another `Clip`, or the words of a script bind the times. A scene
   synced to a voice with cues follows a new recording without changes.
 - **`MonotoneMap` with PCHIP.** It passes exactly through each `Cue`, never
   runs backwards, and changes speed smoothly.

@@ -50,8 +50,8 @@ manimx/            the Python package
                    value types nodes take: materials, meshes, styles
   renderer/        the settings Python gives the renderer, and its shaders
   drivers/         rendering videos and stills: frames in flight, workers
-  voice/           transcripts: a recording's words timed (Whisper), as
-                   events scenes sync to, and subtitles
+  voice/           scripts: what is said, in parts recorded as takes; their
+                   words timed (Whisper) as events scenes sync to, subtitles
   project.py       a project: manimx.json, its scenes and timeline
   cli/             the manimx command
   web/             the browser preview (manimx ui)

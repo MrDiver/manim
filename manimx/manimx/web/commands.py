@@ -42,7 +42,7 @@ from ..project import ClipEntry
 
 if TYPE_CHECKING:
     from ..animation.timing import Clip
-    from ..voice.transcript import Transcript
+    from ..voice.script import Script
 
 CLIP_FIELDS = ("start", "layer", "cut", "speed", "cues")
 
@@ -139,19 +139,23 @@ class DuplicateClips(UICommand):
 
 @dataclass(frozen=True)
 class AddAudio(UICommand):
-    """Put a sound file of the project on an audio track, at position
-    ``index`` of the audio clip list (None: last)."""
+    """Put a sound file of the project, or a part of a script, on an
+    audio track, at position ``index`` of the audio clip list (None: last)."""
 
-    file: str
+    file: str | None
     start: float
     track: int = 0
     cut: tuple[float | None, float | None] | None = None
     volume: float = 1.0
     index: int | None = None
+    script: str | None = None
+    part: int = 0
 
     @property
     def label(self) -> str:
-        return f"add {self.file.rsplit('/', 1)[-1]}"
+        if self.script is not None:
+            return f"place part {self.part + 1} of {self.script}"
+        return f"add {(self.file or '').rsplit('/', 1)[-1]}"
 
 
 @dataclass(frozen=True)
@@ -229,35 +233,38 @@ class SetEvent(UICommand):
 
 
 @dataclass(frozen=True)
-class SetTranscript(UICommand):
-    """Give the sound file ``file`` this transcript (None: none)."""
+class SetScript(UICommand):
+    """Make the script ``name`` this one (None: delete it)."""
 
-    file: str
-    transcript: Transcript | None
+    name: str
+    script: Script | None
 
     @property
     def label(self) -> str:
-        return f"{'change' if self.transcript is not None else 'remove'} the transcript of {self.file.rsplit('/', 1)[-1]}"
+        return f"{'change' if self.script is not None else 'delete'} the script {self.name}"
 
 
 @dataclass(frozen=True)
-class SetTranscriptText(UICommand):
-    """Change the text of ``file``'s transcript: its words keep the times
-    of the words they match (see manimx/voice/alignment.py)."""
+class SetScriptText(UICommand):
+    """Write the script ``name``'s text (a new script if there is none):
+    its words keep the times of the words they match, new words are timed
+    as if read out (see manimx/voice/script.py)."""
 
-    file: str
+    name: str
     text: str
 
     @property
     def label(self) -> str:
-        return f"edit the transcript of {self.file.rsplit('/', 1)[-1]}"
+        return f"edit the script {self.name}"
 
 
 @dataclass(frozen=True)
 class MoveWords(UICommand):
-    """Set the times of words of ``file``'s transcript: ``(index, start, end)`` each."""
+    """Set the times of words of a script part: ``(index, start, end)``
+    each, in seconds from the part's start."""
 
-    file: str
+    script: str
+    part: int
     words: tuple[tuple[int, float, float], ...]
 
     @property
@@ -301,7 +308,7 @@ def parse(route: str, body: dict[str, Any]) -> UICommand:
             return SetSetting(tuple(path), body.get("value"))
         case "/api/audio/add", {"clips": list(clips)}:
             return Batch(tuple(_add_audio(clip) for clip in clips), f"paste {_count(len(clips), 'an audio clip', 'audio clips')}")
-        case "/api/audio/add", {"file": str()}:
+        case "/api/audio/add", {"file": str()} | {"script": str()}:
             return _add_audio(body)
         case "/api/audio/remove", {"indices": list(indices)}:
             return RemoveAudio(tuple(_index(index) for index in indices))
@@ -309,13 +316,13 @@ def parse(route: str, body: dict[str, Any]) -> UICommand:
             return EditAudio(tuple(_audio_edit(edit) for edit in edits))
         case "/api/audio/edit", {"index": _}:
             return EditAudio((_audio_edit(body),))
-        case "/api/transcript", {"file": str(file), "text": str(text)}:
-            return SetTranscriptText(file, text)
-        case "/api/transcript", {"file": str(file), "remove": True}:
-            return SetTranscript(file, None)
-        case "/api/transcript/words", {"file": str(file), "words": list(words)}:
-            return MoveWords(file, tuple(_word_time(word) for word in words))
-        case "/api/transcript" | "/api/transcript/words", _:
+        case "/api/script", {"name": str(name), "text": str(text)}:
+            return SetScriptText(_script_name(name), text)
+        case "/api/script", {"name": str(name), "delete": True}:
+            return SetScript(name, None)
+        case "/api/script/words", {"script": str(script), "part": part, "words": list(words)}:
+            return MoveWords(script, _index(part), tuple(_word_time(word) for word in words))
+        case "/api/script" | "/api/script/words", _:
             raise EditError(f"{route} does not take {body}")
         case "/api/audio/add" | "/api/audio/remove" | "/api/audio/edit", _:
             raise EditError(f"{route} does not take {body}")
@@ -376,11 +383,15 @@ def audio_updates(changes: dict[str, Any]) -> dict[str, Any]:
 
 
 def _add_audio(body: Any) -> AddAudio:
-    """``{"file", "start", "track", "cut", "volume"}`` (all but the file optional)."""
-    if not isinstance(body, dict) or not isinstance(body.get("file"), str):
-        raise EditError("an audio clip needs a file")
+    """``{"file" or "script" and "part", "start", "track", "cut", "volume"}``."""
+    if not isinstance(body, dict) or not (isinstance(body.get("file"), str) or isinstance(body.get("script"), str)):
+        raise EditError("an audio clip needs a file or a script part")
     updates = audio_updates({key: body[key] for key in AUDIO_FIELDS if key in body})
-    return AddAudio(body["file"], updates.get("start", 0.0), updates.get("track", 0), updates.get("cut"), updates.get("volume", 1.0))
+    script = body.get("script")
+    return AddAudio(
+        None if script is not None else body["file"], updates.get("start", 0.0), updates.get("track", 0), updates.get("cut"),
+        updates.get("volume", 1.0), script=script, part=_index(body.get("part", 0)) if script is not None else 0,
+    )  # fmt: skip
 
 
 def _audio_edit(edit: Any) -> ClipEdit:
@@ -388,6 +399,14 @@ def _audio_edit(edit: Any) -> ClipEdit:
         raise EditError("an audio clip edit is an object")
     changes = {key: value for key, value in edit.items() if key != "index"}
     return ClipEdit(_index(edit.get("index")), tuple(audio_updates(changes).items()))
+
+
+def _script_name(name: str) -> str:
+    from ..voice.script import valid_name
+
+    if not valid_name(name):
+        raise EditError("a script's name starts with a letter and has only letters, digits, - and _ (it starts its events' names)")
+    return name
 
 
 def _word_time(word: Any) -> tuple[int, float, float]:

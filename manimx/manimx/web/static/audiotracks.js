@@ -14,14 +14,7 @@
 // drag moves it (up or down to another audio track), its ends cut it,
 // drags snap (Alt: freely), Delete removes, every edit is undone with
 // Ctrl+Z. The inspector shows the selected audio clip's start and volume.
-//
-// Transcripts (manimx/voice/): the inspector's Transcribe has Whisper time
-// the words of the sound, of the text typed there or (empty) of what it
-// hears; Apply text changes the text, and the words keep their times.
-// Each word is an event (voice.square, voice.square.2, voice.middle.square
-// after a [middle] line), which scenes wait for or sync cues to. The words
-// are blocks over the waveform: dragging one times it by hand, and the
-// frame at the word shows meanwhile.
+
 
 import { button, field, liveSender, numberInput, onFrame, paragraph, post, say, showSnap, snapTo, timeAtUnclamped } from "./editing.js";
 
@@ -188,7 +181,6 @@ function audioBar(clip, index) {
   name.textContent = clip.name;
   bar.append(name);
   drawWaveform(canvas, clip, index, (page.percent(clip.end - clip.start) / 100) * page.elements.ruler.offsetWidth);
-  if (clip.transcript) bar.append(wordBlocks(clip));
   if (page.state.timeline.editable) {
     bar.classList.add("editable");
     for (const edge of ["in", "out"]) {
@@ -227,57 +219,6 @@ async function drawWaveform(canvas, clip, index, pixels) {
     const top = 32 - high * 32 * clip.volume;
     context.fillRect(x, top, 1, Math.max(1, (high - low) * 32 * clip.volume));
   });
-}
-
-/** The words of `clip`'s transcript it plays, as blocks over its waveform. */
-function wordBlocks(clip) {
-  const layer = document.createElement("div");
-  layer.className = "words";
-  const cutIn = clip.cut?.[0] ?? 0;
-  const length = clip.end - clip.start;
-  const place = (block, word) => {
-    block.style.left = `${((word.start - cutIn) / length) * 100}%`;
-    block.style.width = `${(Math.max(word.end - word.start, 0.02) / length) * 100}%`;
-  };
-  clip.transcript.words.forEach((word, index) => {
-    if (word.end < cutIn || word.start > cutIn + length) return;
-    const block = document.createElement("div");
-    block.className = "word";
-    block.textContent = word.text;
-    block.title = `${word.text}: ${(clip.start + word.start - cutIn).toFixed(2)} s${page.state.timeline.editable ? " (drag to time it)" : ""}`;
-    place(block, word);
-    if (page.state.timeline.editable) block.addEventListener("pointerdown", (event) => dragWord(event, block, clip, index, place));
-    layer.append(block);
-  });
-  return layer;
-}
-
-/** Drag word `index` of `clip`'s transcript in time (the frame at its start shows meanwhile). */
-function dragWord(event, block, clip, index, place) {
-  event.stopPropagation();
-  block.setPointerCapture(event.pointerId);
-  const word = clip.transcript.words[index];
-  const cutIn = clip.cut?.[0] ?? 0;
-  const secondsPerPixel = page.state.span / page.elements.ruler.getBoundingClientRect().width;
-  const moved = { start: word.start, end: word.end };
-  const send = liveSender("/api/transcript/words", () => page.showTime(clip.start + moved.start - cutIn));
-  page.state.dragging = true;
-  const round = (value) => Math.round(value * 1000) / 1000;
-  const onMove = (move) => {
-    const delta = Math.max(-word.start, (move.clientX - event.clientX) * secondsPerPixel);
-    moved.start = round(word.start + delta);
-    moved.end = round(word.end + delta);
-    place(block, moved);
-    send({ file: clip.file, words: [{ index, ...moved }] });
-  };
-  const onUp = async () => {
-    block.removeEventListener("pointermove", onMove);
-    block.removeEventListener("pointerup", onUp);
-    await send.idle();
-    page.state.dragging = false;
-  };
-  block.addEventListener("pointermove", onMove);
-  block.addEventListener("pointerup", onUp);
 }
 
 function markSelected() {
@@ -407,50 +348,5 @@ function drawPanel() {
       selected.clear();
       post("/api/audio/remove", { indices: [index] });
     }),
-    transcriptPanel(clip),
   );
-}
-
-/** The transcript of the selected audio clip's file: its text, transcribing and the words' events. */
-function transcriptPanel(clip) {
-  const section = document.createElement("section");
-  section.className = "transcript";
-  const heading = document.createElement("h3");
-  heading.textContent = "Transcript";
-  const text = document.createElement("textarea");
-  text.rows = 8;
-  text.spellcheck = true;
-  text.value = clip.transcript?.text ?? "";
-  text.placeholder = "What is said (empty: Whisper writes it down). A line [name] starts a section.";
-  const transcribe = button(clip.transcript ? "Transcribe again" : "Transcribe", async () => {
-    transcribe.disabled = true;
-    say("Transcribing with Whisper… (the first time, it downloads its model)");
-    await post("/api/transcript/transcribe", { file: clip.file, text: text.value.trim() || null });
-    transcribe.disabled = false;
-  });
-  transcribe.title = "Whisper times the words of the text (or, empty, of what it hears); its model is a setting (voice.model)";
-  const row = document.createElement("div");
-  row.className = "actions";
-  row.append(transcribe);
-  if (!page.state.timeline.transcriber) {
-    transcribe.disabled = true;
-    transcribe.title = "Whisper is not installed in this project";
-  }
-  if (clip.transcript) {
-    const apply = button("Apply text", () => post("/api/transcript", { file: clip.file, text: text.value }));
-    apply.title = "Use the edited text: its words keep the times of the words they match, new ones fit in between";
-    row.append(apply, button("Remove", () => post("/api/transcript", { file: clip.file, remove: true })));
-  }
-  section.append(heading, text, row);
-  if (!page.state.timeline.transcriber) section.append(paragraph("Transcribing needs Whisper: run uv add 'manimx[voice]' in the project, then restart manimx ui."));
-  if (clip.transcript) {
-    const first = clip.transcript.words[0]?.text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "") ?? "word";
-    section.append(
-      paragraph(
-        `${clip.transcript.words.length} words. Each is an event scenes wait for or sync cues to: ${clip.name}.${first} ` +
-          `(a word said again: ${clip.name}.${first}.2; after a [part] line also ${clip.name}.part.${first}). Drag a word's block to time it.`,
-      ),
-    );
-  }
-  return section;
 }
