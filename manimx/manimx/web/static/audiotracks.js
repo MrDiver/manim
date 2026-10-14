@@ -367,13 +367,19 @@ function dragWord(event, block, clip, index, word, place) {
   const words = scriptPart(clip.script, clip.part).words;
   const indices = event.shiftKey ? words.map((other, i) => (other.sentence === word.sentence ? i : -1)).filter((i) => i >= 0) : [index];
   const blocks = new Map(indices.map((i) => [i, block.parentElement.querySelector(`.word[data-part="${CSS.escape(partKey(clip))}"][data-index="${i}"]`)]));
-  const earliest = Math.min(...indices.map((i) => words[i].start));
+  // Words keep their order: a word passing its neighbour would make the
+  // scenes' cues on them run time backwards (those cues would be skipped).
+  const first = Math.min(...indices);
+  const last = Math.max(...indices);
+  const gap = 0.01;
+  const lowest = (first > 0 ? words[first - 1].start + gap : 0) - words[first].start;
+  const highest = last < words.length - 1 ? words[last + 1].start - gap - words[last].start : Infinity;
   let delta = 0;
   const send = liveSender("/api/script/words", () => page.showTime(clip.start + word.start + delta - cutIn));
   page.state.dragging = true;
   const round = (value) => Math.round(value * 1000) / 1000;
   const onMove = (move) => {
-    delta = Math.max(-earliest, (move.clientX - event.clientX) * secondsPerPixel);
+    delta = Math.min(highest, Math.max(lowest, (move.clientX - event.clientX) * secondsPerPixel));
     const moved = indices.map((i) => ({ index: i, start: round(words[i].start + delta), end: round(words[i].end + delta) }));
     for (const item of moved) if (blocks.get(item.index)) place(blocks.get(item.index), item);
     send({ script: clip.script, part: clip.part, words: moved });

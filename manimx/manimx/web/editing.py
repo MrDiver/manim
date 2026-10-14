@@ -438,6 +438,9 @@ class ProjectEditor:
                     if not 0 <= index < len(moved):
                         raise EditError(f"part {part + 1} of {name} has no word {index}")
                     moved[index] = Word(moved[index].text, start, end)
+                if any(later.start <= earlier.start for earlier, later in zip(moved, moved[1:], strict=False)):
+                    # A cue on a word passing another would run time backwards and be skipped.
+                    raise EditError("words keep their order: a word cannot be moved past its neighbour")
                 new = old.with_part(part, Part(old.parts[part].text, tuple(moved), old.parts[part].take))
                 self._change(lambda: self._set_script(name, new))
                 return SetScript(name, old)

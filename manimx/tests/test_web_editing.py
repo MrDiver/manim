@@ -579,6 +579,8 @@ def test_scripts_are_written_placed_recorded_and_synced_live(root, renderer, mon
         assert request(server, "/api/script/words", {"script": "narration", "part": 1, "words": [{"index": 1, "start": 2.0, "end": 2.3}], "gesture": "g"})[0] == 200
         assert first.compiled_time(3.0) == pytest.approx(1.0)  # the word moved by hand, the scene with it
         assert editor.history()["undo"] == "time a word"
+        status, answer = request(server, "/api/script/words", {"script": "narration", "part": 1, "words": [{"index": 0, "start": 2.5, "end": 2.6}]})
+        assert status == 400 and "past its neighbour" in answer["error"]  # its cues would be skipped
         assert len(editor.waveform(0, 0.0, 1.0, 4)) == 4  # silent, but drawn
 
         # Recorded: the take replaces the plan, Whisper times its words from the part's start.
