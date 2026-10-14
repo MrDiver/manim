@@ -44,14 +44,17 @@ class RenderJob:
         self._process: subprocess.Popen | None = None
         self._state: dict[str, Any] = {"state": "idle"}
 
-    def start(self, start: float = 0.0, end: float | None = None) -> None:
-        """Render seconds ``start`` to ``end`` (None: the end) in the background."""
+    def start(self, start: float = 0.0, end: float | None = None, stems: bool = False) -> None:
+        """Render seconds ``start`` to ``end`` (None: the end) in the background;
+        with ``stems``, the sound for editing (``manimx render --stems``)."""
         with self._lock:
             if self._process is not None and self._process.poll() is None:
                 raise EditError("a render is running already")
             command = [sys.executable, "-m", "manimx", "render", "--progress-lines", "--start", str(float(start))]
             if end is not None:
                 command += ["--end", str(float(end))]
+            if stems:
+                command.append("--stems")
             self._process = subprocess.Popen(
                 command,
                 cwd=self.root,

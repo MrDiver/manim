@@ -156,6 +156,17 @@ def test_render_into_a_window(project, tmp_path, monkeypatch, capsys) -> None:
 
 
 @needs_ffmpeg
+def test_render_the_sound_for_editing(project, capsys) -> None:
+    assert main(["render", *TINY, "--end", "1", "--stems"]) == 0
+    renders = project / "renders"
+    assert (renders / "demo.mp4").stat().st_size > 0 and (renders / "demo.otio").is_file()
+    assert '<SOURCE VIDEO\n        FILE "demo.mp4"' in (renders / "demo.rpp").read_text()
+    assert "demo.rpp" in capsys.readouterr().out
+    assert main(["render", "Intro", *TINY, "--stems"]) == 1  # one scene has no tracks
+    assert main(["render", *TINY, "--png", "--stems"]) == 1
+
+
+@needs_ffmpeg
 def test_render_with_worker_processes(project) -> None:
     assert main(["render", *TINY, "--start", "4", "--end", "5", "-w", "2", "-o", "workers.mp4"]) == 0
     assert (project / "workers.mp4").stat().st_size > 0

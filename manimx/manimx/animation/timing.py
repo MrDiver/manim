@@ -407,6 +407,9 @@ class Track:
 
 _DEFAULT_TRACK = Track()
 
+TRACK_NAMES = {"scenes": "Video", "scripts": "Script", "audio": "Audio"}
+"""What a track of each kind is called until it is named."""
+
 
 @dataclass(eq=False)
 class Timeline:
@@ -541,23 +544,56 @@ class Timeline:
     def audio(self, start: float = 0.0, end: float | None = None, sample_rate: int = DEFAULT_SAMPLE_RATE) -> np.ndarray:
         """Every clip's sounds and the audio clips mixed on the global timeline, stereo float32
         for ``[start, end)`` (default: the whole timeline)."""
-        soloing = any(track.solo for tracks in (self.scene_tracks, self.audio_tracks, self.script_tracks) for track in tracks.values())
+        soloing = any(track.solo for _, track in self.tracks())
 
         def heard(track: Track) -> float:
             """How loud a track is heard: 0 when muted, or when others solo."""
             return 0.0 if track.muted or (soloing and not track.solo) else track.volume
 
         placed = []
+        for (kind, index), entries in self.sounds_by_track().items():
+            loudness = heard(self.track(kind, index))
+            placed += [(entry[0], entry[1], entry[2], entry[3] * loudness, *entry[4:]) for entry in entries]
+        return mix([entry for entry in placed if entry[3] > 0.0], start, self.duration if end is None else end, sample_rate)
+
+    def stems(self, start: float = 0.0, end: float | None = None, sample_rate: int = DEFAULT_SAMPLE_RATE) -> dict[tuple[str, int], np.ndarray]:
+        """Per track that sounds, ``(kind, index)`` to its sounds mixed like
+        :meth:`audio` mixes them, but with the track's own volume, mute and
+        solo left out: for an audio program to set (see manimx.drivers.session)."""
+        end = self.duration if end is None else end
+        order = list(TRACK_NAMES)  # as the preview shows them: video, script, then audio tracks
+        tracks = sorted(self.sounds_by_track().items(), key=lambda item: (order.index(item[0][0]), item[0][1]))
+        return {key: mix(entries, start, end, sample_rate) for key, entries in tracks}
+
+    def sounds_by_track(self) -> dict[tuple[str, int], list[tuple]]:
+        """``(kind, index)`` (kind "scenes", "scripts" or "audio") to the
+        sounds on that track, as :func:`~manimx.animation.audio.mix` entries
+        with their clips' volume and fades but not the track's."""
+        by_track: dict[tuple[str, int], list[tuple]] = {}
         for clip in self.clips:
-            loudness = heard(self.scene_tracks.get(clip.layer, _DEFAULT_TRACK))
-            placed += [(time, skip, sound, volume * loudness) for time, skip, sound, volume in clip.placed_sounds()]
+            sounds = clip.placed_sounds()
+            if sounds:
+                by_track.setdefault(("scenes", clip.layer), []).extend(sounds)
         for audio in self.audio_clips:
             entry = audio.placed()
             if entry is not None:
-                time, skip, sound, volume, fade_in, fade_out = entry
-                tracks = self.audio_tracks if audio.script is None else self.script_tracks
-                placed.append((time, skip, sound, volume * heard(tracks.get(audio.track, _DEFAULT_TRACK)), fade_in, fade_out))
-        return mix([entry for entry in placed if entry[3] > 0.0], start, self.duration if end is None else end, sample_rate)
+                by_track.setdefault(("audio" if audio.script is None else "scripts", audio.track), []).append(entry)
+        return by_track
+
+    def track(self, kind: str, index: int) -> Track:
+        """How track ``index`` of ``kind`` ("scenes", "scripts" or "audio") plays."""
+        tracks = {"scenes": self.scene_tracks, "scripts": self.script_tracks, "audio": self.audio_tracks}[kind]
+        return tracks.get(index, _DEFAULT_TRACK)
+
+    def tracks(self) -> Iterable[tuple[tuple[str, int], Track]]:
+        """Every track with settings of its own, as ``((kind, index), track)``."""
+        for kind, tracks in (("scenes", self.scene_tracks), ("scripts", self.script_tracks), ("audio", self.audio_tracks)):
+            for index, track in tracks.items():
+                yield (kind, index), track
+
+    def track_name(self, kind: str, index: int) -> str:
+        """A track's name: its own, or Video n, Script n, Audio n as the preview shows it."""
+        return self.track(kind, index).name or f"{TRACK_NAMES[kind]} {index + 1}"
 
     def segments(self) -> Iterable[tuple[Clip, int, float, float]]:
         """``(clip, segment index, global start, global end)`` of every

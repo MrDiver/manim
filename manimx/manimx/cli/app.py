@@ -268,6 +268,13 @@ def render(
     start: Annotated[float, typer.Option(help="First second to render.")] = 0.0,
     end: Annotated[float | None, typer.Option(help="Last second to render.", show_default=False)] = None,
     audio: Annotated[bool | None, typer.Option("--audio/--no-audio", help="Include sounds (default: output.audio).", show_default=False)] = None,
+    stems: Annotated[
+        bool,
+        typer.Option(
+            "--stems",
+            help="Sound for editing: the video without sound, a WAV per track and a Reaper (.rpp) and OpenTimelineIO (.otio) session using them.",
+        ),
+    ] = False,
     encoder: Annotated[
         str | None, typer.Option(help="H.264 encoder: auto (the GPU's if one works), nvenc, amf, qsv, vaapi, videotoolbox or x264.", show_default=False)
     ] = None,
@@ -286,6 +293,8 @@ def render(
         raise ProjectError("--no-write without --window renders nothing", hint="add --window")
     if not write and (png or output is not None or open_):
         raise ProjectError("--png, --output and --open need a written file", hint="add --write")
+    if stems and (scene is not None or png or not write):
+        raise ProjectError("--stems needs the timeline rendered to a video", hint="leave out the scene, --png and --no-write")
     project = Project.find()
     chosen = copy.deepcopy(project.settings)
     if preview:
@@ -296,7 +305,7 @@ def render(
     _override(chosen, ("output", "width"), width)
     _override(chosen, ("output", "height"), height)
     _override(chosen, ("output", "fps"), fps)
-    _override(chosen, ("output", "audio"), audio)
+    _override(chosen, ("output", "audio"), False if stems else audio)  # with stems, the sound is in them
     _override(chosen, ("output", "encoder"), encoder)
     _override(chosen, ("effects", "motion_blur", "shutter_angle"), shutter_angle)
     _override(chosen, ("output", "samples"), samples)
@@ -320,6 +329,7 @@ def render(
     else:
         with ui.console.status(f"Preparing [bold]{scene}[/]…", spinner="dots"):
             source = project.prepare(scene)
+    timeline = source
     if workers > 1:
         source = project.source(scene)  # workers load the project themselves
 
@@ -346,6 +356,13 @@ def render(
             )
     elapsed = time.perf_counter() - began
     seconds = stats.frames / options.fps
+    session = None
+    if stems:
+        from ..drivers.session import export_session
+
+        session = export_session(timeline, target, start, end, options.sample_rate, options.fps)
+        if progress_lines:
+            _line({"session": str(session.rpp), "stems": len(session.stems)})
     if not write:
         pace = "real time" if elapsed <= seconds * 1.05 else f"{seconds / elapsed:.2f}× real time"
         ui.success(f"[bold]{stats.frames} frames[/]  [dim]{seconds:.1f} s shown in {elapsed:.1f} s ({pace})[/]")
@@ -355,6 +372,9 @@ def render(
         f"[bold]{_shown(target)}[/]  [dim]{stats.frames} frames · {seconds:.1f} s · "
         f"{size / 1e6:.1f} MB · {elapsed:.1f} s ({stats.frames / elapsed:.0f} fps)[/]"
     )
+    if session is not None:
+        names = ", ".join(stem.name for stem in session.stems) or "no track sounds"
+        ui.success(f"[bold]{_shown(session.rpp)}[/], [bold]{_shown(session.otio)}[/]  [dim]stems: {names}[/]")
     if open_:
         _open(target)
 

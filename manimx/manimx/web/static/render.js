@@ -7,6 +7,11 @@
 // meanwhile. The dialog shows the progress (frames, frames per second,
 // time left) while it runs, Cancel stops it, and the finished video plays
 // in the dialog.
+//
+// "Sound for editing" renders the video without sound and, next to it, a
+// WAV per track and a Reaper (.rpp) and OpenTimelineIO (.otio) session
+// using them (manimx/drivers/session.py): open one in Reaper, Kdenlive or
+// another program to mix and master the sound there.
 
 const POLL = 400; // ms between progress requests
 
@@ -15,6 +20,7 @@ const body = document.getElementById("render-body");
 const openButton = document.getElementById("render-button");
 let page = null;
 let polling = null;
+let stems = false; // "Sound for editing" is ticked
 
 export function initRender(shared) {
   page = shared;
@@ -86,6 +92,9 @@ function draw(status) {
   if (status.state === "done") {
     const seconds = status.finished && status.started ? ` in ${(status.finished - status.started).toFixed(1)} s` : "";
     line(`Rendered ${status.total} frames${seconds} with ${status.encoder}: ${status.file}`);
+    if (status.session) {
+      line(`Sound for editing: ${status.stems} track${status.stems === 1 ? "" : "s"} as WAV files, and ${status.session} (Reaper) with an .otio beside it (Kdenlive, Resolve, …). The video has no sound of its own.`, "hint");
+    }
     const video = document.createElement("video");
     video.controls = true;
     video.src = `/api/render/video?at=${status.finished}`;
@@ -120,9 +129,19 @@ function rangeForm() {
   go.addEventListener("click", () => {
     const from = Number(start.value) || 0;
     const to = Number(end.value);
-    send("/api/render", { start: from, end: Number.isFinite(to) && to < duration ? to : null });
+    send("/api/render", { start: from, end: Number.isFinite(to) && to < duration ? to : null, stems });
   });
-  form.append(label("From", start, "s"), label("To", end, "s"), fromPlayhead, go);
+  const separate = document.createElement("input");
+  separate.type = "checkbox";
+  separate.checked = stems;
+  separate.addEventListener("change", () => {
+    stems = separate.checked;
+  });
+  const choice = document.createElement("label");
+  choice.className = "render-stems";
+  choice.title = "Mix the sound in an audio program: the video comes without sound, each track's sound as a WAV file, and a session for Reaper (.rpp) and for Kdenlive or Resolve (.otio) with all of them in place";
+  choice.append(separate, " Sound for editing (Reaper, Kdenlive): a WAV per track");
+  form.append(label("From", start, "s"), label("To", end, "s"), fromPlayhead, choice, go);
   return form;
 }
 

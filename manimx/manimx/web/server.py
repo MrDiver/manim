@@ -71,7 +71,7 @@ shows, and ``manimx.json`` is saved shortly after (see editing.py):
                              saved to assets/audio/; answers its "file"
     GET  /api/waveform?index=&from=&to=&n=  an audio clip's peaks
     GET  /api/clip/waveform?clip=&n=  a scene clip's own sounds' peaks
-    POST /api/render         {"start", "end"}: render the video (saved
+    POST /api/render         {"start", "end", "stems"}: render the video (saved
                              first; full quality, the chosen encoder) in
                              a process of its own; /api/render/cancel
     GET  /api/render         the render's state and progress (rendering.py)
@@ -637,7 +637,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._json(self.preview.editor.settings())
 
     def _render(self, editor: ProjectEditor, route: str) -> None:
-        """POST /api/render {"start", "end"} starts a render, /api/render/cancel stops it."""
+        """POST /api/render {"start", "end", "stems"} starts a render, /api/render/cancel stops it."""
         job = self.preview.render_job
         assert job is not None
         try:
@@ -650,7 +650,7 @@ class _Handler(BaseHTTPRequestHandler):
                 if not isinstance(start, (int, float)) or not (end is None or isinstance(end, (int, float))):
                     raise _BadRequest("start and end are seconds")
                 editor.save()  # the render reads manimx.json
-                job.start(float(start), None if end is None else float(end))
+                job.start(float(start), None if end is None else float(end), stems=body.get("stems") is True)
             self._json(job.status())
         except (_BadRequest, EditError, json.JSONDecodeError) as error:
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)

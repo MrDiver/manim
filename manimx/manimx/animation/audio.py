@@ -121,18 +121,24 @@ def mix(
     return output
 
 
-def write_wav(path: str | Path | BinaryIO, samples: np.ndarray, sample_rate: int = DEFAULT_SAMPLE_RATE) -> None:
-    """Write samples as 16-bit PCM WAV (clipped to [-1, 1]) to a file path
-    or an open binary file."""
+def write_wav(path: str | Path | BinaryIO, samples: np.ndarray, sample_rate: int = DEFAULT_SAMPLE_RATE, bits: int = 16) -> None:
+    """Write samples as 16- or 24-bit PCM WAV (clipped to [-1, 1]) to a
+    file path or an open binary file."""
+    if bits not in (16, 24):
+        raise ValueError(f"WAV files are written with 16 or 24 bits, not {bits}")
     samples = np.asarray(samples, dtype=np.float32)
     if samples.ndim == 1:
         samples = samples[:, None]
-    pcm = (np.clip(samples, -1.0, 1.0) * 32767).round().astype("<i2")
+    if bits == 16:
+        pcm = (np.clip(samples, -1.0, 1.0) * 32767).round().astype("<i2").tobytes()
+    else:  # the low three bytes of each little-endian 32-bit value
+        wide = (np.clip(samples, -1.0, 1.0) * (2**23 - 1)).round().astype("<i4")
+        pcm = wide.reshape(-1, 1).view(np.uint8)[:, :3].tobytes()
     with wave.open(path if hasattr(path, "write") else str(path), "wb") as file:
         file.setnchannels(samples.shape[1])
-        file.setsampwidth(2)
+        file.setsampwidth(bits // 8)
         file.setframerate(sample_rate)
-        file.writeframes(pcm.tobytes())
+        file.writeframes(pcm)
 
 
 def _read_wav(path: Path) -> Sound:
