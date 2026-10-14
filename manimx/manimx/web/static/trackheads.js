@@ -8,7 +8,7 @@
 // change is an edit like any other (POST /api/track, undone with Ctrl+Z)
 // and saved to manimx.json.
 
-import { liveSender, post } from "./editing.js";
+import { liveSlider, post } from "./editing.js";
 
 let page = null;
 
@@ -86,37 +86,8 @@ export function trackHead(row, kind, index) {
   if (kind === "audio") label.append(volumeSlider(settings.volume, "/api/track", (volume) => ({ kind, index, volume })));
 }
 
-/** A volume slider, 0 to 200 % (the middle, 100 %, is the sound as it is),
- * sending `route` with `body(volume)` live while it is dragged (one undo step). */
+/** A volume slider, 0 to 200 % (100 % is the sound as it is), sending
+ * `route` with `body(volume)` live while it is dragged. */
 export function volumeSlider(volume, route, body) {
-  const slider = document.createElement("input");
-  slider.type = "range";
-  slider.className = "volume";
-  slider.min = "0";
-  slider.max = "2";
-  slider.step = "0.01";
-  slider.value = String(volume);
-  const describe = () => (slider.title = `Volume ${Math.round(Number(slider.value) * 100)} % (double-click: 100 %)`);
-  describe();
-  let send = null;
-  const sender = () => (send ??= liveSender(route, () => {}));
-  slider.addEventListener("pointerdown", () => {
-    send = liveSender(route, () => {});
-    page.state.dragging = true; // the timeline is not redrawn under the slider meanwhile
-  });
-  slider.addEventListener("input", () => {
-    describe();
-    sender()(body(Number(slider.value)));
-  });
-  slider.addEventListener("change", async () => {
-    await send?.idle();
-    send = null; // released: the next drag is a step of its own
-    page.state.dragging = false;
-  });
-  slider.addEventListener("dblclick", () => {
-    slider.value = "1";
-    describe();
-    post(route, body(1));
-  });
-  return slider;
+  return liveSlider({ value: volume, min: 0, max: 2, step: 0.01, format: (v) => `${Math.round(v * 100)} %`, route, body, reset: 1 });
 }

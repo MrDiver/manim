@@ -339,13 +339,13 @@ class ProjectEditor:
                     taken += [(copy.start, copy.start + length) for copy in copies if copy.layer == entry.layer]
                     copies.append(AddClip(entry.scene, _free_start(taken, clip.end, length), entry.layer, entry.cut, entry.speed))
                 return self._apply(Batch(tuple(copies), command.label))
-            case AddAudio(file, start, track, cut, volume, index, script, part):
+            case AddAudio(file, start, track, cut, volume, index, script, part, fade_in, fade_out):
                 position = len(project.audio) if index is None else index
                 if not 0 <= position <= len(project.audio):
                     raise EditError(f"no place {index!r} for an audio clip")
                 if script is not None and any(e.script == script and e.part == part for e in project.audio):
                     raise EditError(f"part {part + 1} of {script} is on the timeline already: move it there")
-                entry = AudioEntry(file, start, track, cut, volume, script, part)
+                entry = AudioEntry(file, start, track, cut, volume, script, part, fade_in, fade_out)
                 try:
                     clip = project.audio_clip(entry)
                 except Exception as error:  # not a sound file, not in the project, ...
@@ -363,7 +363,7 @@ class ProjectEditor:
                 for index in unique:
                     if not 0 <= index < len(project.audio):
                         raise EditError(f"there is no audio clip {index!r}")
-                restore = tuple(AddAudio(e.file, e.start, e.track, e.cut, e.volume, i, e.script, e.part) for i, e in ((i, project.audio[i]) for i in unique))
+                restore = tuple(AddAudio(e.file, e.start, e.track, e.cut, e.volume, i, e.script, e.part, e.fade_in, e.fade_out) for i, e in ((i, project.audio[i]) for i in unique))
 
                 def remove_audio() -> None:
                     for index in reversed(unique):
@@ -489,9 +489,7 @@ class ProjectEditor:
         project = self._project()
         for edit in edits:
             entry = project.audio[edit.index] = dataclasses.replace(project.audio[edit.index], **dict(edit.updates))
-            clip = self.timeline.audio_clips[edit.index]
-            clip.start, clip.track, clip.volume = entry.start, entry.track, entry.volume
-            clip.cut_in, clip.cut_out = entry.cut or (None, None)
+            self.timeline.audio_clips[edit.index] = project.audio_clip(entry)  # its sound and script are read once
         self._audio_changed()
 
     def _audio_changed(self) -> None:
@@ -639,6 +637,8 @@ class ProjectEditor:
                 "track": entry.track,
                 "cut": None if entry.cut is None else list(entry.cut),
                 "volume": entry.volume,
+                "fade_in": entry.fade_in,
+                "fade_out": entry.fade_out,
                 "length": clip.source_length - clip.offset,  # like the cut, from the script part's start
                 "script": entry.script,
                 "part": entry.part,

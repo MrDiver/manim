@@ -319,6 +319,10 @@ class AudioClip:
     """Where the script part starts in the sound (after the countdown of its take)."""
     planned: float = 0.0
     """How long a script part without a sound lasts."""
+    fade_in: float = 0.0
+    """Seconds over which it rises from silence at its start."""
+    fade_out: float = 0.0
+    """Seconds over which it falls to silence at its end."""
 
     @property
     def source_length(self) -> float:
@@ -371,14 +375,15 @@ class AudioClip:
                 shown.append(Subtitle(self.start + start - cut_in, self.start + end - cut_in, subtitle.text))
         return shown
 
-    def placed(self) -> tuple[float, float, Sound, float] | None:
-        """``(global time, skip, sound, volume)``, as :func:`mix` takes it (None without a sound)."""
+    def placed(self) -> tuple[float, float, Sound, float, float, float] | None:
+        """``(global time, skip, sound, volume, fade in, fade out)``, as
+        :func:`mix` takes it (None without a sound)."""
         sound = self.sound
         if sound is None:
             return None
         if self.cut_out is not None:
             sound = Sound(sound.samples[: round(self.cut_out * sound.sample_rate)], sound.sample_rate)
-        return (self.start, self.cut_in or 0.0, sound, self.volume)
+        return (self.start, self.cut_in or 0.0, sound, self.volume, self.fade_in, self.fade_out)
 
 
 @dataclass
@@ -546,8 +551,8 @@ class Timeline:
         for audio in self.audio_clips:
             entry = audio.placed()
             if entry is not None:
-                time, skip, sound, volume = entry
-                placed.append((time, skip, sound, volume * heard(self.audio_tracks.get(audio.track, _DEFAULT_TRACK))))
+                time, skip, sound, volume, fade_in, fade_out = entry
+                placed.append((time, skip, sound, volume * heard(self.audio_tracks.get(audio.track, _DEFAULT_TRACK)), fade_in, fade_out))
         return mix([entry for entry in placed if entry[3] > 0.0], start, self.duration if end is None else end, sample_rate)
 
     def segments(self) -> Iterable[tuple[Clip, int, float, float]]:

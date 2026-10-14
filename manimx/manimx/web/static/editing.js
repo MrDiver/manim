@@ -741,6 +741,49 @@ export function numberInput(value, minimum, maximum, step, change, empty = null)
   return input;
 }
 
+/** A slider sending `route` with `body(value)` live while it is dragged
+ * (one undo step per drag; the timeline is not redrawn under it meanwhile).
+ * `format(value)` labels it; a double-click resets it to `reset`. */
+export function liveSlider({ value, min, max, step, format, route, body, reset = null }) {
+  const slider = document.createElement("input");
+  slider.type = "range";
+  slider.min = String(min);
+  slider.max = String(max);
+  slider.step = String(step);
+  slider.value = String(value);
+  const shown = document.createElement("output");
+  shown.className = "slider-value";
+  const describe = () => {
+    shown.textContent = format(Number(slider.value));
+    slider.title = `${shown.textContent}${reset !== null ? ` (double-click: ${format(reset)})` : ""}`;
+  };
+  describe();
+  let send = null;
+  slider.addEventListener("pointerdown", () => {
+    send = liveSender(route, () => {});
+    page.state.dragging = true;
+  });
+  slider.addEventListener("input", () => {
+    describe();
+    (send ??= liveSender(route, () => {}))(body(Number(slider.value)));
+  });
+  slider.addEventListener("change", async () => {
+    await send?.idle();
+    send = null;
+    page.state.dragging = false;
+  });
+  if (reset !== null)
+    slider.addEventListener("dblclick", () => {
+      slider.value = String(reset);
+      describe();
+      post(route, body(reset));
+    });
+  const box = document.createElement("span");
+  box.className = "slider";
+  box.append(slider, shown);
+  return box;
+}
+
 export function field(label, controls, unit = "", hint = "") {
   const row = document.createElement("label");
   row.className = "field";

@@ -82,24 +82,42 @@ class SoundEvent:
 
 
 def mix(
-    placed: Iterable[tuple[float, float, Sound, float]], start: float, end: float, sample_rate: int = DEFAULT_SAMPLE_RATE
+    placed: Iterable[tuple[float, float, Sound, float] | tuple[float, float, Sound, float, float, float]],
+    start: float,
+    end: float,
+    sample_rate: int = DEFAULT_SAMPLE_RATE,
 ) -> np.ndarray:
     """Mix ``(time, skip, sound, volume)`` entries into stereo float32 samples
     for times ``[start, end)``; the first ``skip`` seconds of a sound are
     left out (it was cut): its sample at ``skip`` plays at ``time``,
-    nothing of it before. The result is not clipped."""
+    nothing of it before. An entry may add ``(fade_in, fade_out)``: seconds
+    over which it rises from silence at its start and falls to silence at
+    its end (straight in loudness). The result is not clipped."""
     count = max(0, round((end - start) * sample_rate))
     output = np.zeros((count, 2), dtype=np.float32)
     converted: dict[Sound, np.ndarray] = {}  # one sound often plays many times
-    for time, skip, sound, volume in placed:
+    for entry in placed:
+        time, skip, sound, volume = entry[:4]
+        fade_in, fade_out = entry[4:6] if len(entry) == 6 else (0.0, 0.0)
         samples = converted.get(sound)
         if samples is None:
             samples = converted[sound] = sound.as_stereo(sample_rate)
         begin = round((time - start) * sample_rate)  # where sample `offset` plays
         offset = round(skip * sample_rate)
         lo, hi = max(begin, 0), min(begin + len(samples) - offset, count)
-        if lo < hi:
-            output[lo:hi] += volume * samples[offset + lo - begin : offset + hi - begin]
+        if lo >= hi:
+            continue
+        part = volume * samples[offset + lo - begin : offset + hi - begin]
+        if fade_in > 0.0 or fade_out > 0.0:
+            played = np.arange(lo - begin, hi - begin, dtype=np.float32)  # samples since the entry starts
+            length = len(samples) - offset
+            gain = np.ones(len(played), dtype=np.float32)
+            if fade_in > 0.0:
+                gain = np.minimum(gain, played / (fade_in * sample_rate))
+            if fade_out > 0.0:
+                gain = np.minimum(gain, (length - played) / (fade_out * sample_rate))
+            part = part * np.clip(gain, 0.0, 1.0)[:, None]
+        output[lo:hi] += part
     return output
 
 

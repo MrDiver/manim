@@ -150,6 +150,8 @@ class AddAudio(UICommand):
     index: int | None = None
     script: str | None = None
     part: int = 0
+    fade_in: float = 0.0
+    fade_out: float = 0.0
 
     @property
     def label(self) -> str:
@@ -178,7 +180,7 @@ class EditAudio(UICommand):
     @property
     def label(self) -> str:
         fields = {key for edit in self.edits for key, _ in edit.updates}
-        verb = "cut" if "cut" in fields else "move" if fields & {"start", "track"} else "change the volume of"
+        verb = "cut" if "cut" in fields else "move" if fields & {"start", "track"} else "fade" if fields & {"fade_in", "fade_out"} else "change the volume of"
         return f"{verb} {_count(len(self.edits), 'an audio clip', 'audio clips')}"
 
 
@@ -378,7 +380,7 @@ def clip_updates(changes: dict[str, Any]) -> dict[str, Any]:
     return updates
 
 
-AUDIO_FIELDS = ("start", "track", "cut", "volume")
+AUDIO_FIELDS = ("start", "track", "cut", "volume", "fade_in", "fade_out")
 
 
 def audio_updates(changes: dict[str, Any]) -> dict[str, Any]:
@@ -399,6 +401,8 @@ def audio_updates(changes: dict[str, Any]) -> dict[str, Any]:
                 updates[key] = _cut(value)
             case "volume":
                 updates[key] = _number(value, "volume", minimum=0.0)
+            case "fade_in" | "fade_out":
+                updates[key] = _number(value, key.replace("_", " "), minimum=0.0)
     return updates
 
 
@@ -411,6 +415,7 @@ def _add_audio(body: Any) -> AddAudio:
     return AddAudio(
         None if script is not None else body["file"], updates.get("start", 0.0), updates.get("track", 0), updates.get("cut"),
         updates.get("volume", 1.0), script=script, part=_index(body.get("part", 0)) if script is not None else 0,
+        fade_in=updates.get("fade_in", 0.0), fade_out=updates.get("fade_out", 0.0),
     )  # fmt: skip
 
 

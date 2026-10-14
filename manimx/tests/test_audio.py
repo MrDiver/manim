@@ -189,3 +189,15 @@ def test_cuts_skip_sounds_or_enter_them_midway() -> None:
     late = Timeline()
     late.add(prepared(two_clicks)).cut(start=0.6)  # the first segment is skipped entirely
     assert onsets(late.audio(sample_rate=RATE)) == [0.1]
+
+
+def test_sounds_fade_in_and_out() -> None:
+    from manimx.animation import AudioClip
+
+    rate = 1000
+    tone = Sound(np.ones(4 * rate, dtype=np.float32), rate)
+    clip = AudioClip(tone, start=1.0, cut_in=1.0, fade_in=1.0, fade_out=0.5)
+    mixed = mix([clip.placed()], 0.0, 5.0, rate)[:, 0]
+    assert mixed[999] == 0.0 and mixed[1500] == pytest.approx(0.5, abs=0.01)  # halfway up
+    assert mixed[2500] == pytest.approx(1.0)
+    assert mixed[3750] == pytest.approx(0.5, abs=0.01) and mixed[3999] < 0.01  # down at its end (3 s played)

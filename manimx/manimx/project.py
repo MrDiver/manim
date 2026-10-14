@@ -119,6 +119,10 @@ class AudioEntry:
     script: str | None = None
     """The script whose part this is."""
     part: int = 0
+    fade_in: float = 0.0
+    """Seconds over which it rises from silence at its start."""
+    fade_out: float = 0.0
+    """Seconds over which it falls to silence at its end."""
 
 
 @dataclass(eq=False)
@@ -196,7 +200,7 @@ class Project:
             events = {name: float(time) for name, time in timeline.get("events", {}).items()}
             audio = []
             for index, entry in enumerate(timeline.get("audio", [])):
-                _check_keys(entry, ["file", "script", "part", "start", "track", "cut", "volume"], f"timeline.audio[{index}]")
+                _check_keys(entry, ["file", "script", "part", "start", "track", "cut", "volume", "fade_in", "fade_out"], f"timeline.audio[{index}]")
                 audio.append(_audio_entry(entry))
             tracks = timeline.get("tracks", {})
             _check_keys(tracks, ["scenes", "audio"], "timeline.tracks")
@@ -362,7 +366,10 @@ class Project:
         if entry.script is None:
             if entry.file is None:
                 raise ProjectError("an audio clip needs a file or a script part")
-            return AudioClip(self.sound(entry.file), entry.start, entry.track, cut_in, cut_out, entry.volume, Path(entry.file).stem)
+            return AudioClip(
+                self.sound(entry.file), entry.start, entry.track, cut_in, cut_out, entry.volume, Path(entry.file).stem,
+                fade_in=entry.fade_in, fade_out=entry.fade_out,
+            )  # fmt: skip
         script = self.script(entry.script)
         if not 0 <= entry.part < len(script.parts):
             raise ProjectError(f"the script {entry.script!r} has no part {entry.part + 1}")
@@ -373,7 +380,7 @@ class Project:
         cut_out = None if cut_out is None else offset + cut_out
         return AudioClip(
             sound, entry.start, entry.track, cut_in, cut_out, entry.volume, f"{script.name} {entry.part + 1}",
-            script=script, part=entry.part, offset=offset, planned=part.planned_length,
+            script=script, part=entry.part, offset=offset, planned=part.planned_length, fade_in=entry.fade_in, fade_out=entry.fade_out,
         )  # fmt: skip
 
     @property
@@ -644,6 +651,8 @@ def project_schema() -> dict[str, Any]:
                                     "description": "In and out points in the file's seconds.",
                                 },
                                 "volume": {"type": "number", "minimum": 0, "description": "Loudness factor (default 1)."},
+                                "fade_in": {"type": "number", "minimum": 0, "description": "Seconds over which it rises from silence at its start."},
+                                "fade_out": {"type": "number", "minimum": 0, "description": "Seconds over which it falls to silence at its end."},
                             },
                         },
                     },
@@ -717,6 +726,8 @@ def _audio_entry(data: dict[str, Any]) -> AudioEntry:
         volume=float(data.get("volume", 1.0)),
         script=script,
         part=int(data.get("part", 0)),
+        fade_in=max(0.0, float(data.get("fade_in", 0.0))),
+        fade_out=max(0.0, float(data.get("fade_out", 0.0))),
     )
 
 
@@ -729,6 +740,10 @@ def _audio_json(entry: AudioEntry) -> dict[str, Any]:
         data["cut"] = list(entry.cut)
     if entry.volume != 1.0:
         data["volume"] = entry.volume
+    if entry.fade_in:
+        data["fade_in"] = entry.fade_in
+    if entry.fade_out:
+        data["fade_out"] = entry.fade_out
     return data
 
 

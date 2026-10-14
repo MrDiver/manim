@@ -1265,13 +1265,118 @@ button.danger:hover {
   color: #e0c341;
 }
 
-input.volume {
-  width: 56px;
+.row.hidden-track .lane {
+  opacity: 0.35;
+}
+
+/* On an audio clip: its volume line (100 % in the middle) and its fades. */
+.volume-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  height: 9px;
+  margin-top: -4px;
+  cursor: ns-resize;
+}
+
+.volume-line::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  border-top: 1.5px solid rgb(255 214 102 / 0.85);
+}
+
+.audio-body:not(:hover, .selected) .volume-line::after {
+  border-top-color: rgb(255 214 102 / 0.35);
+}
+
+.fade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.fade.in {
+  left: 0;
+  background: linear-gradient(to top right, rgb(0 0 0 / 0.55) 50%, transparent 50%);
+}
+
+.fade.out {
+  right: 0;
+  background: linear-gradient(to top left, rgb(0 0 0 / 0.55) 50%, transparent 50%);
+}
+
+.fade-handle {
+  position: absolute;
+  top: 1px;
+  width: 9px;
+  height: 9px;
+  background: #ffd666;
+  border-radius: 2px;
+  opacity: 0;
+  pointer-events: auto;
+  cursor: ew-resize;
+}
+
+.fade.in .fade-handle {
+  right: -5px;
+}
+
+.fade.out .fade-handle {
+  left: -5px;
+}
+
+.audio-body:hover .fade-handle,
+.audio-body.selected .fade-handle {
+  opacity: 1;
+}
+
+/* A slider with its value beside it (editing.js liveSlider). */
+.slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.slider input[type="range"] {
+  flex: 1;
+  min-width: 60px;
   accent-color: var(--accent);
 }
 
-.row.hidden-track .lane {
-  opacity: 0.35;
+.slider-value {
+  min-width: 46px;
+  font: 12px var(--mono);
+  color: var(--muted);
+}
+
+.track-head .slider {
+  flex: none;
+}
+
+.track-head .slider input[type="range"] {
+  width: 56px;
+  min-width: 0;
+}
+
+.track-head .slider-value {
+  display: none;
+}
+
+#inspector details {
+  margin: 10px 0;
+}
+
+#inspector summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 /* A script part not recorded yet: dashed, silent. */

@@ -21,7 +21,7 @@
 // to it follow at once). A locked track's clips do not move.
 
 import { PART_TYPE, SOUND_TYPE, scriptPart } from "./bin.js";
-import { button, field, liveSender, numberInput, onFrame, paragraph, post, say, showSnap, snapTo, timeAtUnclamped } from "./editing.js";
+import { button, field, liveSender, liveSlider, numberInput, onFrame, paragraph, post, say, showSnap, snapTo, timeAtUnclamped } from "./editing.js";
 import { isLocked, trackHead } from "./trackheads.js";
 
 const SNAP_PIXELS = 8;
@@ -211,6 +211,7 @@ function audioBar(clip, index) {
   bar.append(name);
   if (clip.recorded) drawWaveform(canvas, clip, index, (page.percent(clip.end - clip.start) / 100) * page.elements.ruler.offsetWidth);
   if (clip.script) bar.append(wordBlocks(clip));
+  bar.append(...fades(clip), volumeLine(clip, index));
   if (page.state.timeline.editable && !isLocked("audio", clip.track)) {
     bar.classList.add("editable");
     for (const edge of ["in", "out"]) {
@@ -223,6 +224,86 @@ function audioBar(clip, index) {
     bar.addEventListener("pointerdown", (event) => startDrag(event, "move", index));
   }
   return bar;
+}
+
+/** The volume line across a clip: 100 % in the middle, drag it up or down. */
+function volumeLine(clip, index) {
+  const line = document.createElement("div");
+  line.className = "volume-line";
+  const place = (volume) => {
+    line.style.top = `${(1 - volume / 2) * 100}%`;
+    line.title = `Volume ${Math.round(volume * 100)} %: drag up or down (double-click: 100 %)`;
+  };
+  place(clip.volume);
+  if (!page.state.timeline.editable || isLocked("audio", clip.track)) return line;
+  line.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+    line.setPointerCapture(event.pointerId);
+    const height = line.parentElement.getBoundingClientRect().height;
+    const send = liveSender("/api/audio/edit", () => {});
+    page.state.dragging = true;
+    const onMove = (move) => {
+      const volume = Math.round(Math.min(2, Math.max(0, clip.volume - ((move.clientY - event.clientY) / height) * 2)) * 100) / 100;
+      place(volume);
+      say(`Volume ${Math.round(volume * 100)} %`);
+      send({ index, volume });
+    };
+    const onUp = async () => {
+      line.removeEventListener("pointermove", onMove);
+      line.removeEventListener("pointerup", onUp);
+      await send.idle();
+      page.state.dragging = false;
+    };
+    line.addEventListener("pointermove", onMove);
+    line.addEventListener("pointerup", onUp);
+  });
+  line.addEventListener("dblclick", (event) => {
+    event.stopPropagation();
+    post("/api/audio/edit", { index, volume: 1 });
+  });
+  return line;
+}
+
+/** A clip's fades: shaded ramps at its ends, each with a handle at the top to drag. */
+function fades(clip) {
+  const index = page.state.timeline.audio.indexOf(clip);
+  const length = clip.end - clip.start;
+  return ["fade_in", "fade_out"].map((key) => {
+    const ramp = document.createElement("div");
+    ramp.className = `fade ${key === "fade_in" ? "in" : "out"}`;
+    const show = (seconds) => {
+      ramp.style.width = `${(seconds / length) * 100}%`;
+      ramp.title = `${key === "fade_in" ? "Fade in" : "Fade out"}: ${seconds.toFixed(2)} s (drag the corner)`;
+    };
+    show(clip[key]);
+    const handle = document.createElement("div");
+    handle.className = "fade-handle";
+    handle.title = key === "fade_in" ? "Drag to fade in" : "Drag to fade out";
+    ramp.append(handle);
+    if (!page.state.timeline.editable || isLocked("audio", clip.track)) return ramp;
+    handle.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+      handle.setPointerCapture(event.pointerId);
+      const secondsPerPixel = page.state.span / page.elements.ruler.getBoundingClientRect().width;
+      const send = liveSender("/api/audio/edit", () => {});
+      page.state.dragging = true;
+      const onMove = (move) => {
+        const delta = (move.clientX - event.clientX) * secondsPerPixel * (key === "fade_in" ? 1 : -1);
+        const seconds = Math.round(Math.min(length / 2, Math.max(0, clip[key] + delta)) * 100) / 100;
+        show(seconds);
+        send({ index, [key]: seconds });
+      };
+      const onUp = async () => {
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onUp);
+        await send.idle();
+        page.state.dragging = false;
+      };
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onUp);
+    });
+    return ramp;
+  });
 }
 
 /** The words of a script part's clip it plays, as blocks on its bar. */
@@ -413,20 +494,37 @@ function drawPanel() {
   const heading = document.createElement("h2");
   panel.append(heading);
   if (selected.size > 1) {
-    heading.textContent = `${selected.size} audio clips`;
+    heading.textContent = `${selected.size} sounds`;
     panel.append(paragraph("Drag one of them to move them all; Delete removes them."));
     return;
   }
   const index = [...selected][0];
   const clip = audio[index];
   const edit = (changes) => post("/api/audio/edit", { index, ...changes });
-  heading.textContent = `Audio ${clip.name}`;
+  const live = (key) => (value) => ({ index, [key]: value });
+  heading.textContent = clip.script ? `${clip.script}, part ${clip.part + 1}` : clip.name;
+  const what = clip.script
+    ? clip.recorded
+      ? "Recorded. Its words are moments scenes sync to."
+      : "Not recorded yet: silent, its words timed as if read out. Select it and press ● to record it."
+    : clip.file;
+  const longest = Math.max(0.1, Math.min(10, (clip.end - clip.start) / 2));
+  const seconds = (value) => `${value.toFixed(1)} s`;
+  const exact = document.createElement("details");
+  const summary = document.createElement("summary");
+  summary.textContent = "Exact place";
+  exact.append(
+    summary,
+    field("Starts at", numberInput(clip.start, 0, null, 1 / page.state.timeline.fps, (value) => edit({ start: value })), "s"),
+    field("Track", numberInput(clip.track + 1, 1, null, 1, (value) => edit({ track: Math.round(value) - 1 })), "", "Audio 1 is the first"),
+  );
   panel.append(
-    paragraph(clip.file),
-    field("Start", numberInput(clip.start, 0, null, 1 / page.state.timeline.fps, (value) => edit({ start: value })), "s"),
-    field("Track", numberInput(clip.track + 1, 1, null, 1, (value) => edit({ track: Math.round(value) - 1 })), ""),
-    field("Volume", numberInput(clip.volume, 0, 4, 0.05, (value) => edit({ volume: value })), "×", "1 is the file's own loudness"),
-    button("Remove (Delete)", () => {
+    paragraph(what),
+    field("Volume", liveSlider({ value: clip.volume, min: 0, max: 2, step: 0.01, format: (v) => `${Math.round(v * 100)} %`, route: "/api/audio/edit", body: live("volume"), reset: 1 }), "", "Or drag the line on the clip up and down"),
+    field("Fade in", liveSlider({ value: Math.min(clip.fade_in, longest), min: 0, max: longest, step: 0.05, format: seconds, route: "/api/audio/edit", body: live("fade_in"), reset: 0 }), "", "Rises from silence at its start"),
+    field("Fade out", liveSlider({ value: Math.min(clip.fade_out, longest), min: 0, max: longest, step: 0.05, format: seconds, route: "/api/audio/edit", body: live("fade_out"), reset: 0 }), "", "Falls to silence at its end"),
+    exact,
+    button("Remove from the timeline (Delete)", () => {
       selected.clear();
       post("/api/audio/remove", { indices: [index] });
     }),

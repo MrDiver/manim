@@ -375,7 +375,7 @@ def test_audio_clips_are_uploaded_placed_mixed_and_saved(root, editor) -> None:
     assert not mixed[: 5 * 8000 - 10].any() and not mixed[6 * 8000 + 10 :].any()
     assert 0.2 < np.abs(mixed[5 * 8000 : 6 * 8000]).max() <= 0.26  # half the tone's loudness
     assert editor.audio_clips()[0] | {"length": 0} == {
-        "name": "my-voice", "file": file, "start": 5.0, "end": 6.0, "track": 1, "cut": [0.5, 1.5], "volume": 0.5, "length": 0,
+        "name": "my-voice", "file": file, "start": 5.0, "end": 6.0, "track": 1, "cut": [0.5, 1.5], "volume": 0.5, "fade_in": 0.0, "fade_out": 0.0, "length": 0,
         "script": None, "part": 0, "offset": 0.0, "recorded": True,
     }
     peaks = editor.waveform(0, 0.0, 2.0, 4)
@@ -561,7 +561,7 @@ def test_scripts_are_written_placed_recorded_and_synced_live(root, renderer, mon
         timeline = request(server, "/api/timeline")[1]
         assert timeline["audio"][0] | {"length": 0} == {
             "name": "narration 2", "file": None, "start": 1.0, "end": pytest.approx(1.0 + timeline["audio"][0]["length"]), "track": 0,
-            "cut": None, "volume": 1.0, "length": 0, "script": "narration", "part": 1, "offset": 0.0, "recorded": False,
+            "cut": None, "volume": 1.0, "fade_in": 0.0, "fade_out": 0.0, "length": 0, "script": "narration", "part": 1, "offset": 0.0, "recorded": False,
         }  # fmt: skip
         assert editor.timeline.event_times()["narration.go.2"] == 1.0  # its first word starts the part
         first = editor.timeline.clips[0]
