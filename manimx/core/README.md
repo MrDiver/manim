@@ -60,7 +60,8 @@ evaluation/   signals at a time ──snapshot──▶  robjects/  ◀──rea
 | `render/pipeline.rs` | `RenderPipeline`: sub-frames and views through the stages, held frames, stage timing | |
 | `render/settings.rs` | `ViewSettings`: camera, camera views, lighting and shadow settings | `RenderConfig`, `Camera` (renderer/config.py) |
 | `render/pack/packer.rs` | `Packer`: one view's tree in, a `Packet` of draws and changed records out | |
-| `render/pack/flatten.rs` | the tree's drawable leaves with world matrices, clip scopes and lights | |
+| `render/pack/world.rs` | `RenderWorld`: a scene kept from frame to frame, updated in place from each new tree; what changed, revisions | |
+| `render/pack/flatten.rs` | `FlatScene`: the drawable leaves with world matrices, clip scopes and lights | |
 | `render/pack/vectors.rs` | retained records of `RShape2D` and `RCurve3D` | |
 | `render/pack/meshes.rs` | records of `RShape3D` and `RParticles` | |
 | `render/pack/lights.rs`, `shadows.rs` | light records and the default light; shadow views, scene bounds, which shadow layers changed | |
@@ -243,8 +244,8 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    A["RNode tree + ViewSettings"] --> B["flatten():<br/>world matrices, painter's order,<br/>clip scopes, lights"]
-    B --> C["vectors.rs: patch per-node slots<br/>in the arenas + this frame's draw lists"]
+    A["RNode tree + ViewSettings"] --> B["world.rs: the scene's render world<br/>updated in place (rebuilt on a new structure):<br/>world matrices, painter's order,<br/>clip scopes, lights; what changed"]
+    B --> C["vectors.rs: patch the slots of what changed<br/>in the arenas; cull every leaf by its world box;<br/>this frame's draw lists"]
     B --> D["meshes.rs, lights.rs:<br/>mesh objects, materials, lights<br/>(skipped without meshes)"]
     D --> E["shadows.rs: one view per directional or spot light,<br/>six per point light; which layers changed"]
     C & D & E --> K["Packet"]
@@ -366,14 +367,15 @@ A `RenderPipeline` lives as long as its `CoreFramePipeline`, and keeps:
 
 | What | Kept by | Key | Dropped |
 |---|---|---|---|
-| a path's fill triangles, stroke links, colors | `PathCache` (pack/vectors.rs) | node uid + versions of the values they come from | when the node is not drawn for 1024 packs |
-| a mesh's interleaved vertices, a material's entry | `MeshPacker` (pack/meshes.rs) | node uid + mesh or material versions | when the node is not drawn for 1024 packs |
+| a scene's flattened tree, and per leaf its world box and draws | `RenderWorld` (pack/world.rs) and `VectorItems` (pack/vectors.rs), per scene in the `Packer` | the uid of the tree's root | when the scene is not packed for 1024 packs |
+| a path's fill triangles, stroke links, colors | `PathCache` (pack/vectors.rs) | node uid + versions of the values they come from | when the node is in no kept scene (checked every 1024 packs) |
+| a mesh's interleaved vertices, a material's entry | `MeshPacker` (pack/meshes.rs) | node uid + mesh or material versions | when the node is in no kept scene (checked every 1024 packs) |
 | vector records on the GPU | the arenas of `VectorPacker`'s pages (pack/vectors.rs, pack/arena.rs), each page at most the GPU's largest storage binding | (node uid, drawn as a mask) | when the node leaves the scene; a page packed again when its garbage outweighs its live records |
 | mesh vertices and indices on the GPU | the arenas of `MeshPacker` | node uid + mesh version | when the mesh is not placed in a frame with meshes; packed again when garbage outweighs live data |
 | shadow map layers | `ShadowLayers` (pack/shadows.rs) decides, the shadow pass keeps the depth | the layer's Frame record and its scope's casters (fingerprint, world matrix) | rendered again when the key changes or the maps are made again |
 | textures and their mip levels | `MeshGeometry` (draw/geometry/textures.rs) | texture uid and color space | when no frame uses them |
 | render targets | `RenderTargets` (draw/targets.rs) | size, MSAA, mask layers | on a size change |
-| the last frame | `RenderPipeline` | every view's tree fingerprint (uids, transforms, plain values, versions) and settings without the time | when a frame with another key is rendered |
+| the last frame | `RenderPipeline` | every view's render world revision and settings without the time | when a frame with another key is rendered |
 
 Every render object has its node's uid and every costly value a version
 that is new exactly when the value is (`RNode.version()`,

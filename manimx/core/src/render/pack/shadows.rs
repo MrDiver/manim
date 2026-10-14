@@ -270,7 +270,7 @@ impl Bounds {
             if !scene.in_scope(item.clip, scope) {
                 continue;
             }
-            let node = item.node;
+            let node = &item.node;
             let corners = match &node.kind {
                 Kind::Shape3D(_) | Kind::Particles { .. } => {
                     let Some(geometry) = meshes.geometry.get(&node.uid) else {

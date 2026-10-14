@@ -15,10 +15,12 @@
 //!
 //! From one frame to the next usually only a few transforms change, so the
 //! records stay in arenas that mirror the GPU buffers, with one slot per
-//! node (its uid, and whether it is drawn as a mask). Each frame compares
-//! the tree with the slots by uid and by the versions of the values:
+//! node (its uid, and whether it is drawn as a mask). The render world
+//! (world.rs) says which leaves changed; only those are looked at again,
+//! the others reuse their draws (`VectorItems`). A changed leaf is
+//! compared with its slot by the versions of its values:
 //!
-//! - same node, same placement: nothing is written;
+//! - same placement: nothing is written;
 //! - new world matrix, layer, clip or alpha: its object entry;
 //! - new fill colors or stroke style: its color or point records, in place;
 //! - new points: its records go to a new range (the old one becomes
@@ -52,8 +54,8 @@
 //!
 //! Culling: a path whose box (`Points::bounds`, computed once per points,
 //! placed by its world matrix and widened by how far its stroke can
-//! reach) lies wholly beyond one side of the view is not drawn
-//! (`Culling`). It keeps the records it has, so a shape moving back into
+//! reach, kept until the leaf changes) lies wholly beyond one side of the
+//! view is not drawn (`Culling`). It keeps the records it has, so a shape moving back into
 //! view, or showing in another view this packer packs (a camera view's
 //! picture), costs nothing more; a shape never in view gets no records at
 //! all. Where the view has meshes, shadow casters and masks are drawn out
@@ -69,6 +71,7 @@ use crate::render::pack::flatten::{DrawItem, FlatScene, NO_CLIP};
 use crate::render::pack::records::{self, DrawIndirect, Instance, Object, StrokeCurve};
 use crate::render::pack::shapes::strokes::{stroke_records, StrokeStyle};
 use crate::render::pack::shapes::tessellation::tessellate_fill;
+use crate::render::pack::world::{Changes, Place, RenderWorld};
 use crate::robjects::{Fill, Kind, Path, Points, Texture};
 
 /// Where one path's records live, and what they were built from (`_Slot`).
@@ -127,7 +130,6 @@ pub struct PathCache {
     fill_vertices: Option<(u64, Vec<u8>)>,
     fill_colors: Option<(Vec<u64>, FillColors)>,
     stroke: Option<(Vec<u64>, StrokeRecords)>,
-    pub last_used: u64,
 }
 
 struct StrokeRecords {
@@ -284,6 +286,94 @@ pub struct VectorPacker {
     budget: usize,
     slots: HashMap<(u64, i32), Slot>,
     pub paths: HashMap<u64, PathCache>,
+    /// Increases when a page is packed again from scratch: the slots of
+    /// its nodes are gone, so every world's draws are out of date.
+    epoch: u64,
+}
+
+/// What the vector packer keeps per leaf of one render world, in the
+/// world's order: so a leaf that did not change costs a culling test and
+/// copying its draws.
+#[derive(Default)]
+pub struct VectorItems {
+    items: Vec<ItemState>,
+    /// Per clip scope, its mask's leaves.
+    masks: Vec<Vec<ItemState>>,
+    /// The slot keys of every leaf, to free those of leaves that leave.
+    keys: Vec<(u64, i32)>,
+    /// The packer's epoch the draws are from.
+    epoch: u64,
+}
+
+impl VectorItems {
+    /// Everything out of date, for the leaves of `flat`.
+    fn restart(&mut self, flat: &FlatScene, epoch: u64) {
+        self.items = flat.items.iter().map(|_| ItemState::default()).collect();
+        self.masks = flat
+            .clips
+            .iter()
+            .map(|scope| scope.mask.iter().map(|_| ItemState::default()).collect())
+            .collect();
+        self.keys = item_keys(flat).collect();
+        self.epoch = epoch;
+    }
+}
+
+/// One leaf's box, center and draws, and whether they are out of date.
+struct ItemState {
+    /// The world matrix or the values changed: the box and center are
+    /// computed again before culling.
+    moved: bool,
+    /// The records are written again before it is next drawn.
+    stale: bool,
+    /// Its box in world space, widened by how far its stroke reaches
+    /// (None: no points).
+    bounds: Option<(DVec3, DVec3)>,
+    /// Its center in world space (transparent draws sort by it).
+    center: DVec3,
+    /// Fill and stroke.
+    draws: [Option<Draw>; 2],
+}
+
+impl Default for ItemState {
+    fn default() -> ItemState {
+        ItemState {
+            moved: true,
+            stale: true,
+            bounds: None,
+            center: DVec3::ZERO,
+            draws: [None, None],
+        }
+    }
+}
+
+impl ItemState {
+    fn changed(&mut self) {
+        self.moved = true;
+        self.stale = true;
+    }
+}
+
+/// The slot key of every drawable leaf of `flat`.
+fn item_keys(flat: &FlatScene) -> impl Iterator<Item = (u64, i32)> + '_ {
+    let items = flat.items.iter().map(|item| (item.node.uid, NO_CLIP));
+    let masks = flat.clips.iter().enumerate().flat_map(|(scope, clip)| {
+        clip.mask
+            .iter()
+            .map(move |item| (item.node.uid, scope as i32))
+    });
+    items.chain(masks)
+}
+
+/// How one view sees the world: what packing needs besides the world.
+pub struct VectorFrame<'a> {
+    /// World to view space: transparent draws sort by depth along the
+    /// view direction.
+    pub view: DMat4,
+    pub culling: Culling,
+    pub camera_views: &'a CameraViews,
+    /// Leave the camera views' shapes out (while a picture is rendered).
+    pub hide_camera_views: bool,
 }
 
 impl VectorPacker {
@@ -293,12 +383,17 @@ impl VectorPacker {
             budget,
             slots: HashMap::new(),
             paths: HashMap::new(),
+            epoch: 0,
         }
     }
 
     /// The first page with room for `need`, a new one if none has.
     fn page_with_room(&mut self, need: &Records) -> usize {
-        match self.pages.iter().position(|page| page.fits(need, self.budget)) {
+        match self
+            .pages
+            .iter()
+            .position(|page| page.fits(need, self.budget))
+        {
             Some(index) => index,
             None => {
                 self.pages.push(Page::new());
@@ -307,15 +402,15 @@ impl VectorPacker {
         }
     }
 
-    /// Update the records for the flattened `scene` and return the
-    /// frame's draws (of what `culling` does not leave out).
+    /// Update the records of what changed in `world` (`changes`, taken
+    /// from it), and return the frame's draws of what `culling` does not
+    /// leave out. `items` is what this packer keeps per leaf of the world.
     pub fn pack(
         &mut self,
-        flat: &FlatScene,
-        view: DMat4,
-        culling: &Culling,
-        camera_views: &CameraViews,
-        generation: u64,
+        world: &RenderWorld,
+        items: &mut VectorItems,
+        changes: &Changes,
+        frame: &VectorFrame,
     ) -> VectorDraws {
         for index in 0..self.pages.len() {
             if self.pages[index].too_much_garbage() {
@@ -323,50 +418,40 @@ impl VectorPacker {
                 // pages have room (keeps the per-path cache).
                 self.slots.retain(|_, slot| slot.page != index);
                 self.pages[index] = Page::new();
+                self.epoch += 1;
+            }
+        }
+        let flat = &world.flat;
+        if changes.all {
+            self.forget(items, flat);
+        }
+        if changes.all || items.epoch != self.epoch {
+            items.restart(flat, self.epoch);
+        }
+        for place in &changes.places {
+            match *place {
+                Place::Item(index) => items.items[index].changed(),
+                Place::Mask(scope, index) => items.masks[scope][index].changed(),
+                Place::Light(_) | Place::Nowhere => {}
             }
         }
         let mut draws = Vec::new();
-        let mut seen = HashSet::new();
         let mut images = Vec::new();
-        let context = PathContext {
-            view,
-            culling,
-            camera_views,
-            generation,
-        };
-        for item in &flat.items {
-            self.add(
-                &context,
-                item,
-                NO_CLIP,
-                false,
-                &mut draws,
-                &mut seen,
-                &mut images,
-            );
+        for (item, state) in flat.items.iter().zip(&mut items.items) {
+            self.add(frame, item, state, NO_CLIP, false, &mut draws, &mut images);
         }
         for (index, scope) in flat.clips.iter().enumerate() {
-            for item in &scope.mask {
+            for (item, state) in scope.mask.iter().zip(&mut items.masks[index]) {
                 self.add(
-                    &context,
+                    frame,
                     item,
+                    state,
                     index as i32,
                     scope.one_sided,
                     &mut draws,
-                    &mut seen,
                     &mut images,
                 );
             }
-        }
-        let gone: Vec<(u64, i32)> = self
-            .slots
-            .keys()
-            .filter(|key| !seen.contains(*key))
-            .copied()
-            .collect();
-        for key in gone {
-            let slot = self.slots.remove(&key).unwrap();
-            self.free(&slot);
         }
         VectorDraws {
             images,
@@ -374,42 +459,104 @@ impl VectorPacker {
         }
     }
 
+    /// Free the records of the leaves `items` held that `flat` no longer has.
+    fn forget(&mut self, items: &VectorItems, flat: &FlatScene) {
+        let kept: HashSet<(u64, i32)> = item_keys(flat).collect();
+        for key in &items.keys {
+            if !kept.contains(key) {
+                if let Some(slot) = self.slots.remove(key) {
+                    self.free(&slot);
+                }
+            }
+        }
+    }
+
+    /// Free the records of every leaf of a world that is gone.
+    pub fn drop_world(&mut self, items: &VectorItems) {
+        for key in &items.keys {
+            if let Some(slot) = self.slots.remove(key) {
+                self.free(&slot);
+            }
+        }
+    }
+
+    /// Add `item`'s draws to the frame's, if it shows: its records are
+    /// written again when it changed (`state.stale`), and its draws reused
+    /// otherwise.
     #[allow(clippy::too_many_arguments)]
     fn add(
         &mut self,
-        context: &PathContext,
+        frame: &VectorFrame,
         item: &DrawItem,
+        state: &mut ItemState,
         mask_of: i32,
         front_only: bool,
         draws: &mut Vec<Draw>,
-        seen: &mut HashSet<(u64, i32)>,
         images: &mut Vec<Arc<Texture>>,
     ) {
-        let node = item.node;
+        let node = &item.node;
         let (path, fill) = match &node.kind {
             Kind::Shape2D { path, fill } => (path, Some(fill.as_ref())),
             Kind::Curve3D { path } => (path, None),
             _ => return,
         };
-        let curve_count = path.points.count() / 4;
-        if curve_count == 0 {
+        if frame.hide_camera_views && frame.camera_views.contains_key(&node.uid) {
             return;
         }
-        let key = (node.uid, mask_of);
+        if state.moved {
+            state.bounds = world_box(path, &item.world);
+            let cache = self.paths.entry(node.uid).or_default();
+            state.center = item
+                .world
+                .transform_point3(path_center(cache, &path.points));
+            state.moved = false;
+        }
         // Out of view: no draw. A node with records keeps them (it may come
         // back, or show in another view this packer packs); one without
         // gets none. Casters and masks matter out of view where meshes
         // are: a caster's shadow and a mask's cut can fall into it.
         let casts_shadow = path.cast_shadows && mask_of == NO_CLIP;
-        let culling = context.culling;
+        let culling = &frame.culling;
         let matters_outside = culling.keep_casters && (casts_shadow || mask_of != NO_CLIP);
-        if !matters_outside && culling.hides(path, &item.world) {
-            if self.slots.contains_key(&key) {
-                seen.insert(key);
-            }
+        if !matters_outside && !state.bounds.is_some_and(|bounds| culling.shows(bounds)) {
             return;
         }
-        seen.insert(key);
+        // A picture's or an image's layer is the frame's: written every frame.
+        let volatile = frame.camera_views.contains_key(&node.uid)
+            || fill.is_some_and(|fill| fill.image.is_some());
+        if state.stale || volatile {
+            state.draws = self.records(frame, item, path, fill, mask_of, front_only, images);
+            state.stale = false;
+        }
+        let distance = -frame.view.transform_point3(state.center).z;
+        for draw in state.draws.iter().flatten() {
+            draws.push(Draw {
+                camera_distance: distance,
+                ..*draw
+            });
+        }
+    }
+
+    /// Write `item`'s records where they are out of date and return its
+    /// draws (fill, stroke).
+    #[allow(clippy::too_many_arguments)]
+    fn records(
+        &mut self,
+        frame: &VectorFrame,
+        item: &DrawItem,
+        path: &Path,
+        fill: Option<&Fill>,
+        mask_of: i32,
+        front_only: bool,
+        images: &mut Vec<Arc<Texture>>,
+    ) -> [Option<Draw>; 2] {
+        let node = &item.node;
+        let curve_count = path.points.count() / 4;
+        if curve_count == 0 {
+            return [None, None];
+        }
+        let key = (node.uid, mask_of);
+        let casts_shadow = path.cast_shadows && mask_of == NO_CLIP;
         if !self.slots.contains_key(&key) {
             let page = self.page_with_room(&[1, 0, 0, 0, 0, 0]);
             let object = self.pages[page].object_slot();
@@ -424,8 +571,7 @@ impl VectorPacker {
             slot.colors_key = None;
             slot.points_version = points_version;
         }
-        let cache = self.paths.entry(node.uid).or_default();
-        cache.last_used = context.generation;
+        self.paths.entry(node.uid).or_default();
         if item.alpha > 0.0 {
             // The records about to be placed must fit the slot's page.
             let need = self.records_needed(node.uid, path, fill, &slot);
@@ -446,7 +592,7 @@ impl VectorPacker {
             0
         });
         let image = fill.and_then(|fill| fill.image.as_ref());
-        let view = match (context.camera_views.get(&node.uid), image) {
+        let view = match (frame.camera_views.get(&node.uid), image) {
             (Some(view), _) => *view,
             (None, Some(image)) => image_view(images, image, &path.points),
             (None, None) => NOT_A_VIEW,
@@ -465,46 +611,32 @@ impl VectorPacker {
         }
         if item.alpha <= 0.0 {
             self.slots.insert(key, slot);
-            return; // invisible: the slot stays, nothing is drawn
+            return [None, None]; // invisible: the slot stays, nothing is drawn
         }
 
-        let cache = self.paths.get_mut(&node.uid).unwrap();
-        let center = path_center(cache, &path.points);
-        let world_center = item.world.transform_point3(center);
-        let distance = -context.view.transform_point3(world_center).z;
         let clipped = item.clip != NO_CLIP;
-        let fill = fill.and_then(|fill| {
-            self.fill(
-                context,
-                node.uid,
-                &path.points,
-                fill,
-                &mut slot,
-                distance,
-                layer,
-            )
-        });
-        let stroke = self.stroke(node.uid, path, &mut slot, distance, layer + 1, curve_count);
-        for mut draw in [fill, stroke].into_iter().flatten() {
+        let fill =
+            fill.and_then(|fill| self.fill(frame, node.uid, &path.points, fill, &mut slot, layer));
+        let stroke = self.stroke(node.uid, path, &mut slot, layer + 1, curve_count);
+        let mut draws = [fill, stroke];
+        for draw in draws.iter_mut().flatten() {
             draw.opaque &= !clipped && item.alpha >= 1.0;
             draw.mask_of = mask_of;
             draw.casts_shadow = casts_shadow;
             draw.clip = item.clip;
             draw.page = slot.page;
-            draws.push(draw);
         }
         self.slots.insert(key, slot);
+        draws
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn fill(
         &mut self,
-        context: &PathContext,
+        frame: &VectorFrame,
         uid: u64,
         points: &Points,
         fill: &Fill,
         slot: &mut Slot,
-        distance: f64,
         layer: usize,
     ) -> Option<Draw> {
         let points_version = slot.points_version;
@@ -514,7 +646,7 @@ impl VectorPacker {
         // A picture or an image may be see-through anywhere.
         let (visible, opaque) = (
             colors.visible,
-            colors.opaque && !context.camera_views.contains_key(&uid) && fill.image.is_none(),
+            colors.opaque && !frame.camera_views.contains_key(&uid) && fill.image.is_none(),
         );
         if !visible {
             return None;
@@ -564,7 +696,7 @@ impl VectorPacker {
             },
             page: slot.page,
             opaque,
-            camera_distance: distance,
+            camera_distance: 0.0,
             layer,
             mask_of: NO_CLIP,
             casts_shadow: false,
@@ -577,7 +709,6 @@ impl VectorPacker {
         uid: u64,
         path: &Path,
         slot: &mut Slot,
-        distance: f64,
         layer: usize,
         curve_count: usize,
     ) -> Option<Draw> {
@@ -637,7 +768,7 @@ impl VectorPacker {
             },
             page: slot.page,
             opaque,
-            camera_distance: distance,
+            camera_distance: 0.0,
             layer,
             mask_of: NO_CLIP,
             casts_shadow: false,
@@ -647,7 +778,13 @@ impl VectorPacker {
 
     /// The records placing `path`'s stale ranges would add (an upper
     /// bound: a range of the same size is written over in place).
-    fn records_needed(&mut self, uid: u64, path: &Path, fill: Option<&Fill>, slot: &Slot) -> Records {
+    fn records_needed(
+        &mut self,
+        uid: u64,
+        path: &Path,
+        fill: Option<&Fill>,
+        slot: &Slot,
+    ) -> Records {
         let version = slot.points_version;
         let cache = self.paths.get_mut(&uid).unwrap();
         let mut need = [0; 6];
@@ -672,7 +809,13 @@ impl VectorPacker {
 
     /// Free `slot` and start the node over on a page with room for all of
     /// its records.
-    fn move_to_page_with_room(&mut self, slot: Slot, uid: u64, path: &Path, fill: Option<&Fill>) -> Slot {
+    fn move_to_page_with_room(
+        &mut self,
+        slot: Slot,
+        uid: u64,
+        path: &Path,
+        fill: Option<&Fill>,
+    ) -> Slot {
         self.free(&slot);
         let mut fresh = Slot::new(slot.page, slot.object);
         fresh.points_version = slot.points_version;
@@ -775,41 +918,60 @@ const VIEW_MARGIN: f64 = 0.01;
 
 /// What a view shows, to leave out the shapes it cannot (culling).
 pub struct Culling {
-    /// World to clip space (WebGPU's: depth from 0 to 1).
-    pub view_projection: DMat4,
+    /// The six sides of the view (widened by `VIEW_MARGIN`) as planes in
+    /// world space: a point `p` is on the inner side of each where
+    /// `plane · (p, 1) >= 0` (Gribb and Hartmann, "Fast Extraction of
+    /// Viewing Frustum Planes from the World-View-Projection Matrix",
+    /// 2001: https://www.gamedevs.org/uploads/fast-extraction-viewing-frustum-planes-from-world-view-projection-matrix.pdf).
+    planes: [DVec4; 6],
     /// Keep shadow casters and masks out of view: with meshes about, a
     /// shadow or a cut can fall into it from outside.
     pub keep_casters: bool,
 }
 
 impl Culling {
-    /// Whether nothing of `path` placed by `world` can show: the box of
-    /// its points (`Points::bounds`) in world space, widened by how far
-    /// its stroke reaches, lies wholly beyond one side of the view.
-    fn hides(&self, path: &Path, world: &DMat4) -> bool {
-        let Some((low, high)) = path.points.bounds() else {
-            return true;
-        };
-        let (mut world_low, mut world_high) = (DVec3::INFINITY, DVec3::NEG_INFINITY);
-        for corner in corners(low, high) {
-            let point = world.transform_point3(corner);
-            world_low = world_low.min(point);
-            world_high = world_high.max(point);
-        }
-        let widest = path.stroke.widths.iter().copied().fold(0.0, f64::max);
-        let reach = DVec3::splat(STROKE_REACH * widest);
-        let clip: Vec<DVec4> = corners(world_low - reach, world_high + reach)
-            .map(|corner| self.view_projection * corner.extend(1.0))
-            .collect();
+    /// The culling of the view whose world to clip space matrix (WebGPU's:
+    /// depth from 0 to 1) is `view_projection`.
+    pub fn new(view_projection: DMat4, keep_casters: bool) -> Culling {
+        let row = |index: usize| view_projection.row(index);
         let edge = 1.0 + VIEW_MARGIN;
-        let beyond = |side: fn(&DVec4, f64) -> bool| clip.iter().all(|point| side(point, edge));
-        beyond(|p, e| p.x < -e * p.w)
-            || beyond(|p, e| p.x > e * p.w)
-            || beyond(|p, e| p.y < -e * p.w)
-            || beyond(|p, e| p.y > e * p.w)
-            || beyond(|p, _| p.z < 0.0)
-            || beyond(|p, _| p.z > p.w)
+        Culling {
+            planes: [
+                row(0) + edge * row(3), // x >= -edge w
+                edge * row(3) - row(0), // x <= edge w
+                row(1) + edge * row(3),
+                edge * row(3) - row(1),
+                row(2),          // z >= 0
+                row(3) - row(2), // z <= w
+            ],
+            keep_casters,
+        }
     }
+
+    /// Whether some of the world space box `(low, high)` may show: it does
+    /// not lie wholly beyond any one side of the view. Per side, the
+    /// corner farthest along its inward normal decides.
+    fn shows(&self, (low, high): (DVec3, DVec3)) -> bool {
+        self.planes.iter().all(|plane| {
+            let corner = DVec3::select(plane.truncate().cmpge(DVec3::ZERO), high, low);
+            plane.truncate().dot(corner) + plane.w >= 0.0
+        })
+    }
+}
+
+/// The box of `path` (`Points::bounds`) placed by `world`, in world
+/// space, widened by how far its stroke can reach; None without points.
+fn world_box(path: &Path, world: &DMat4) -> Option<(DVec3, DVec3)> {
+    let (low, high) = path.points.bounds()?;
+    let (mut world_low, mut world_high) = (DVec3::INFINITY, DVec3::NEG_INFINITY);
+    for corner in corners(low, high) {
+        let point = world.transform_point3(corner);
+        world_low = world_low.min(point);
+        world_high = world_high.max(point);
+    }
+    let widest = path.stroke.widths.iter().copied().fold(0.0, f64::max);
+    let reach = DVec3::splat(STROKE_REACH * widest);
+    Some((world_low - reach, world_high + reach))
 }
 
 /// The eight corners of the box from `low` to `high`.
@@ -839,16 +1001,6 @@ fn image_view(images: &mut Vec<Arc<Texture>>, image: &Arc<Texture>, points: &Poi
         .fold(DVec2::ZERO, DVec2::max);
     let scale = |half: f64| if half > 0.0 { (0.5 / half) as f32 } else { 0.0 };
     (records::image_view(layer), [scale(reach.x), scale(reach.y)])
-}
-
-/// What building one path's records needs, besides the packer itself.
-struct PathContext<'a> {
-    /// World to view space: transparent draws sort by depth along the
-    /// view direction.
-    view: DMat4,
-    culling: &'a Culling,
-    camera_views: &'a CameraViews,
-    generation: u64,
 }
 
 /// The mean of a path's points in 3D (its distance to the camera sorts

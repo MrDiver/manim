@@ -637,8 +637,12 @@ flowchart LR
   it as a Python `RGroup` without copying it.
 - **`RenderPipeline`** (core/src/render/, its Python class in
   core/src/python/render_pipeline.rs) takes per view a tree and a
-  `RenderConfig`. The `Packer` flattens the tree (world matrices, alphas,
-  clip scopes, lights) and packs the records of a `Packet`: retained
+  `RenderConfig`. The `Packer` keeps a render world per scene
+  (`pack/world.rs`): the flattened tree (world matrices, alphas, clip
+  scopes, lights), updated in place from each new tree and rebuilt only
+  when its structure changes, so a frame repacks only the leaves that
+  changed and culls the rest by their world boxes. It packs the records
+  of a `Packet`: retained
   vector records (`vectors.rs`), meshes, materials and particles
   (`meshes.rs`), lights, shadow views, bounds and changed shadow layers.
   Records built from a value alone (triangulated fills, stroke curves,
@@ -647,9 +651,8 @@ flowchart LR
   shaders, composites (bloom, shader effects, tone mapping, finalize)
   and reads back through a ring of staging buffers. `CoreFramePipeline`
   (drivers/core_pipeline.py) drives it. A frame whose views have the
-  fingerprints of the frame before (every tree's uids, transforms,
-  values and versions, and the settings) is held. One wgpu device per
-  process.
+  render world revisions and settings of the frame before is held. One
+  wgpu device per process.
 
 **Equal results.** The evaluator computes in the same order as
 `PreparedScene.evaluate()`; tests/test_plan.py compares every signal

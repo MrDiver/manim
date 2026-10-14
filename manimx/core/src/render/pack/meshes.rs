@@ -265,7 +265,7 @@ impl MeshPacker {
         // its material entry while its alpha is the same.
         let mut material_slots: HashMap<(u64, u64), u32> = HashMap::new();
         for item in &scene.items {
-            let node = item.node;
+            let node = &item.node;
             let (surface, instances) = match &node.kind {
                 Kind::Shape3D(surface) => (surface, None),
                 Kind::Particles { surface, instances } => (surface, Some(instances)),

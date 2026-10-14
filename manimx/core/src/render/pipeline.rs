@@ -11,8 +11,8 @@
 //! up to `in_flight` frames are on the GPU.
 //!
 //! A frame that shows exactly what the frame before showed is not
-//! rendered: equal trees (`RNode::fingerprint`) seen with equal settings
-//! give equal pictures.
+//! rendered: equal scenes (equal revisions of their render worlds,
+//! pack/world.rs) seen with equal settings give equal pictures.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -126,7 +126,7 @@ impl RenderPipeline {
     }
 
     fn render_frame(&mut self, index: u64, sub_frames: &[SubFrame]) -> Result<bool> {
-        let key = self.frame_key(sub_frames);
+        let key = self.frame_key(sub_frames)?;
         if key.is_some() && key == self.last_key {
             return Ok(true);
         }
@@ -263,15 +263,12 @@ impl RenderPipeline {
     }
 
     /// Equal keys promise equal frames: per sub-frame its weight and per
-    /// view the tree's and the settings' fingerprints. None with a shader
+    /// view the revision of its scene's render world (brought up to the
+    /// view's tree here) and the settings' fingerprint. None with a shader
     /// effect or a surface shader in a view, which may read the time.
-    fn frame_key(&self, sub_frames: &[SubFrame]) -> Option<Vec<u64>> {
+    fn frame_key(&mut self, sub_frames: &[SubFrame]) -> Result<Option<Vec<u64>>> {
         if self.compositor.has_shader_effects() {
-            return None;
-        }
-        let views = || sub_frames.iter().flat_map(|sub_frame| &sub_frame.views);
-        if views().any(|view| view.root.uses_time()) {
-            return None;
+            return Ok(None);
         }
         let mut key = Vec::new();
         for sub_frame in sub_frames {
@@ -280,11 +277,15 @@ impl RenderPipeline {
                 sub_frame.views.len() as u64,
             ]);
             for view in &sub_frame.views {
-                view.root.fingerprint(&mut key);
+                let (revision, uses_time) = self.packer.sync(&view.root)?;
+                if uses_time {
+                    return Ok(None);
+                }
+                key.extend([view.root.uid, revision]);
                 view.settings.fingerprint(&mut key);
             }
         }
-        Some(key)
+        Ok(Some(key))
     }
 
     /// Draw an empty scene and composite it into `target`.
@@ -360,7 +361,7 @@ impl RenderPipeline {
     fn composite_tree(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
-        root: &RNode,
+        root: &Arc<RNode>,
         settings: &ViewSettings,
         target: CompositeTarget,
     ) -> Result<()> {

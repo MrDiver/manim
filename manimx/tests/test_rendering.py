@@ -147,6 +147,38 @@ def test_shapes_on_many_pages_draw_as_on_one(scene_class: type[Scene]) -> None:
         assert np.array_equal(a, b)
 
 
+class Changing(Scene):
+    """Everything the render world updates in place or rebuilds: a group
+    moving what it holds, a fade, a shape scaled to nothing and back, a
+    clipping group whose mask moves, and shapes added and removed."""
+
+    def construct(self) -> None:
+        dots = Group(*(Circle(radius=0.3, color="#58C4DD", fill_opacity=1.0).move_to((x, 0.0, 0.0)) for x in (-2.0, 0.0, 2.0)))
+        square = Square(side_length=1.0, color="#FC6255", fill_opacity=0.6).move_to((0.0, -2.0, 0.0))
+        window = ClippingGroup(Circle(radius=1.0, fill_opacity=1.0), Group(Square(side_length=3.0, color="#83C167", fill_opacity=1.0)))
+        window.move_to((3.0, 2.0, 0.0))
+        self.add(dots, square, window)
+        self.play(dots.animate.shift((0.0, 1.0, 0.0)), square.animate.set_alpha(0.2), window.mask.animate.shift((0.8, 0.0, 0.0)))
+        self.play(square.animate.set_scale(0.0))
+        late = Square(side_length=0.5, color="#FFFF00", fill_opacity=1.0).move_to((-3.0, -2.0, 0.0))
+        self.add(late)
+        self.play(square.animate.set_scale(1.0), late.animate.shift((1.0, 0.0, 0.0)))
+        self.remove(dots)
+        self.wait(0.5)
+
+
+@pytest.mark.parametrize("scene_class", [Changing, EveryAnimation, EveryNode])
+def test_frames_one_after_another_draw_as_each_alone(scene_class: type[Scene]) -> None:
+    """The renderer keeps each scene from frame to frame and updates only
+    what changed (pack/world.rs): every frame of a sequence is the same as
+    that frame rendered by a renderer that never saw the others."""
+    scene = scene_class().prepare()
+    times = scene.duration * np.linspace(0.0, 1.0, 13)
+    together = render(scene.frame_at, times)
+    for t, image in zip(times, together, strict=True):
+        assert np.array_equal(image, render(scene.frame_at, [t])[0]), f"at {t:.2f}"
+
+
 class Field(Scene):
     """Squares with thick outlines on a grid far wider than the view, or
     (``near``) only those within two units of it; the camera turned a
