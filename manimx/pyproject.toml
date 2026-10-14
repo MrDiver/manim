@@ -51,6 +51,22 @@ default-groups = ["test"]
 # Rebuild the core when its sources change.
 cache-keys = [{ file = "pyproject.toml" }, { file = "core/Cargo.toml" }, { file = "core/src/**/*.rs" }]
 
+[tool.ruff]
+# manimx's own settings. Without them the repository root's (Manim's)
+# apply: they fix files on every check and ask for a style manimx does
+# not follow.
+target-version = "py311"
+line-length = 200
+fix = false
+
+[tool.ruff.lint]
+# Errors only (pyflakes and syntax): unused or undefined names, imports.
+select = ["F", "E9"]
+
+[tool.ruff.lint.per-file-ignores]
+# Re-exports Manim's color names with star imports.
+"manimx/utils/color/__init__.py" = ["F401", "F403", "F405"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = [
