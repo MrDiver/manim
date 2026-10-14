@@ -2,7 +2,8 @@
 //
 // A track has a name (Video 1, Audio 2 until renamed: double-click it)
 // and its switches: scene tracks hide (the eye: not drawn), mute (the
-// speaker: its scenes' sounds) and lock; script tracks (the parts of
+// speaker: its scenes' sounds; how loud they are is the slider on the
+// sound row under the track) and lock; script tracks (the parts of
 // scripts, and their recordings) and audio tracks mute (M), solo (S:
 // only soloed tracks are heard), lock, and a volume slider. Locked tracks
 // cannot be edited by mistake: their clips do not move or cut. Every

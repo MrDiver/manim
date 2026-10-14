@@ -51,7 +51,7 @@ import { drawAudioTracks, initAudio } from "./audiotracks.js";
 import { initBin, refreshBin } from "./bin.js";
 import { initScriptView, scriptViewLoaded } from "./scriptview.js";
 import { drawPrompter, initRecording } from "./recording.js";
-import { initTrackHeads, trackHead } from "./trackheads.js";
+import { initTrackHeads, track, trackHead, volumeSlider } from "./trackheads.js";
 import { FrameCache } from "./frames.js";
 import { initRender, renderAvailable } from "./render.js";
 import { initThumbs, thumbnails } from "./thumbs.js";
@@ -292,7 +292,12 @@ function drawSceneSounds(onTrack, layer) {
   if (!sounding.length) return;
   const { row, lane } = addRow(`sounds:${layer}`, 1, "sound", "scene-sounds", false);
   row.title = "What the scenes on this track play (play_sound); mute them with the track's speaker";
-  const muted = Boolean(state.timeline.tracks?.scenes?.[layer]?.muted);
+  const { muted, volume } = track("scenes", layer);
+  if (state.timeline.editable) {
+    const slider = volumeSlider(volume, "/api/track", (value) => ({ kind: "scenes", index: layer, volume: value }));
+    slider.title = "How loud this track's scenes play their sounds";
+    row.querySelector(".label").append(slider);
+  }
   for (const { clip, index } of sounding) {
     const end = clip.end ?? state.span;
     const bar = document.createElement("div");

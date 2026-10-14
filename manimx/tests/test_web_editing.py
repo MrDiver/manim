@@ -647,6 +647,8 @@ def test_sound_edits_keep_the_frames(root, renderer) -> None:
         assert status == 200 and answer["picture"] == picture  # a sound draws nothing
         answer = request(server, "/api/audio/edit", {"index": 0, "start": 0.5, "volume": 0.5, "fade_in": 0.2})[1]
         assert answer["picture"] == picture and answer["version"] > picture
+        answer = request(server, "/api/track", {"kind": "scenes", "index": 0, "volume": 0.5})[1]
+        assert answer["picture"] == picture  # how loud a scene track's sounds are draws nothing
         answer = request(server, "/api/clip", {"index": 0, "start": 1.0})[1]
         assert answer["picture"] == picture + 1  # a scene clip moved: new frames
         with urllib.request.urlopen(server.url + "api/frame?f=3&w=32") as response:

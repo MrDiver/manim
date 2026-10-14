@@ -447,7 +447,7 @@ button.small {
 .label {
   position: sticky;
   left: 0;
-  z-index: 3;
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1414,16 +1414,23 @@ button.danger:hover {
   color: var(--muted);
 }
 
-.track-head .slider {
+.track-head .slider,
+.row.scene-sounds .slider {
   flex: none;
 }
 
-.track-head .slider input[type="range"] {
+.row.scene-sounds .slider {
+  margin-left: auto;
+}
+
+.track-head .slider input[type="range"],
+.row.scene-sounds .slider input[type="range"] {
   width: 56px;
   min-width: 0;
 }
 
-.track-head .slider-value {
+.track-head .slider-value,
+.row.scene-sounds .slider-value {
   display: none;
 }
 
