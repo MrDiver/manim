@@ -51,8 +51,10 @@ global timeline only changes the mapping to compiled time.
 from __future__ import annotations
 
 import bisect
+import gc
 import math
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -72,6 +74,7 @@ from .animations import (
 from .audio import DEFAULT_SAMPLE_RATE, Sound, SoundEvent, mix
 from .authoring import _active
 from .nodes.camera import Camera
+from .nodes.group import Group
 from .nodes.node import Node
 from .signals.signal import RootSignal, Signal, TimeSignals
 from .signals.signal_tracks import Change, Placement, RateFunction, SignalTrack, linear, refresh
@@ -122,6 +125,25 @@ class Segment:
         return self.offset + self.duration
 
 
+@contextmanager
+def _no_cycle_collection() -> Iterator[None]:
+    """Pause Python's cycle collector while a scene is prepared.
+
+    construct() makes millions of objects for a large scene (100 000 dice:
+    half a million nodes and their signals), and the collector walks all
+    that are alive each time enough new ones pile up: 60% of preparing
+    went there. Nothing made while preparing is garbage until it ends, so
+    the pause loses nothing; the collector runs as usual afterwards.
+    """
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if enabled:
+            gc.enable()
+
+
 @dataclass(eq=False)
 class Running:
     """Animations begun with :meth:`Scene.start`, until :meth:`Scene.stop`."""
@@ -160,23 +182,27 @@ class Scene:
     def prepare(self) -> PreparedScene:
         """Run :meth:`construct` once and return the evaluable scene."""
         if self._prepared is None:
-            compiler = SceneCompiler(self.time)
-            # Camera changes are recorded at their time, like changes of
-            # nodes in the scene, without the camera being added.
-            compiler.timeline_signals.update(signal.id for signal in self._camera.signals())
-            self._compiler = compiler
-            token = _active.set(compiler)
-            try:
-                self.construct()
-            finally:
-                _active.reset(token)
-                self._compiler = None
-            prepared = compiler.finish(self.time, self._camera)
-            nodes = {node.uid: node for root in prepared.roots for node in root.family()}
-            if any([node.after_prepare(prepared) for node in nodes.values()]):
-                prepared.refresh()
-            self._prepared = prepared
+            with _no_cycle_collection():
+                self._prepared = self._prepare()
         return self._prepared
+
+    def _prepare(self) -> PreparedScene:
+        compiler = SceneCompiler(self.time)
+        # Camera changes are recorded at their time, like changes of
+        # nodes in the scene, without the camera being added.
+        compiler.timeline_signals.update(signal.id for signal in self._camera.signals())
+        self._compiler = compiler
+        token = _active.set(compiler)
+        try:
+            self.construct()
+        finally:
+            _active.reset(token)
+            self._compiler = None
+        prepared = compiler.finish(self.time, self._camera)
+        nodes = {node.uid: node for root in prepared.roots for node in root.family()}
+        if any([node.after_prepare(prepared) for node in nodes.values()]):
+            prepared.refresh()
+        return prepared
 
     # -- authoring API (only inside construct) --------------------------------
 
@@ -279,6 +305,9 @@ class SceneCompiler:
         self.order = 0
         self.tracks: dict[int, SignalTrack] = {}
         self.roots: list[Node] = []
+        self._root_uids: set[int] = set()  # roots by uid: a list test per add made adding n nodes O(n^2)
+        self._held_by: dict[int, dict[int, Node]] = {}  # member uid -> the roots holding it, by uid
+        self._watched: set[int] = set()  # groups whose new children are indexed in _held_by
         self.present: set[int] = set()
         self.timeline_signals: set[int] = set()
         self.placements: list[Placement] = []
@@ -313,16 +342,36 @@ class SceneCompiler:
         for node in nodes:
             if node.uid in self.present:
                 continue
+            self._hold(node, node)
             for member in node.family():
                 self.timeline_signals.update(signal.id for signal in member.signals())
                 # A member already in the scene on its own is drawn through
                 # this node from now on; until now it stays on its own.
                 if member is not node and member.uid in self.present:
                     self.remove([member])
-            if node not in self.roots:
+            if node.uid not in self._root_uids:
+                self._root_uids.add(node.uid)
                 self.roots.append(node)
             self.present.add(node.uid)
             self.record_instant(node.present, Change.ABSOLUTE, True)
+
+    def _hold(self, root: Node, part: Node) -> None:
+        """Index ``part``'s family as held by ``root``; groups among them
+        keep the index up to date when they gain children later."""
+        for member in part.family():
+            if member is not root:
+                self._held_by.setdefault(member.uid, {})[root.uid] = root
+            if isinstance(member, Group) and member.uid not in self._watched:
+                self._watched.add(member.uid)
+                member.on_structure_change(self._grown)
+
+    def _grown(self, group: Group) -> None:
+        """``group`` gained children: the roots holding it hold them too."""
+        roots = list(self._held_by.get(group.uid, {}).values())
+        if group.uid in self._root_uids:
+            roots.append(group)
+        for root in roots:
+            self._hold(root, group)
 
     def remove(self, nodes: Sequence[Node]) -> None:
         for node in nodes:
@@ -508,9 +557,11 @@ class SceneCompiler:
 
     def _is_inside_present(self, node: Node) -> bool:
         """Present itself, or part of a present group."""
-        return node.uid in self.present or any(
-            node in root.family() and root.uid in self.present for root in self.roots
-        )
+        if node.uid in self.present:
+            return True
+        # The roots holding it (_hold): looking through every root instead
+        # made animating n new nodes O(n^2).
+        return any(root.uid in self.present and node in root.family() for root in self._held_by.get(node.uid, {}).values())
 
 
 @dataclass(eq=False)
