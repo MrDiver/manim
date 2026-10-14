@@ -15,10 +15,13 @@
 // drags snap (Alt: freely), Delete removes, every edit is undone with
 // Ctrl+Z. The inspector shows the selected audio clip's start and volume.
 //
-// Script parts (bin.js) are dropped onto audio tracks too. Before a part
-// is recorded its bar is dashed and silent; its words are blocks on it,
-// timed as if read out, and dragging a word times it by hand (scenes synced
-// to it follow at once). A locked track's clips do not move.
+// Script parts (bin.js) are dropped onto script tracks. Before a part is
+// recorded its bar is dashed and silent, its words timed as if read out.
+// A part's clip moves only as a whole, words and all: its words are
+// timed in a row of their own under the track, opened with the clip's
+// arrow, where dragging a word times it by hand (Shift: its sentence;
+// scenes synced to it follow at once). The inspector times a recorded
+// part's words again with Whisper. A locked track's clips do not move.
 
 import { PART_TYPE, SOUND_TYPE, scriptPart } from "./bin.js";
 import { button, field, liveSender, liveSlider, numberInput, onFrame, paragraph, post, say, showSnap, snapTo, timeAtUnclamped } from "./editing.js";
@@ -67,6 +70,9 @@ export function initAudio(shared) {
   });
 }
 
+/** The key that keeps a part's clip open (its words row shown). */
+const partKey = (clip) => `part:${clip.script}:${clip.part}`;
+
 /** Kind of track a clip is on: script parts on script tracks, sounds on audio tracks. */
 const kindOf = (clip) => (clip.script ? "scripts" : "audio");
 
@@ -85,7 +91,14 @@ export function drawAudioTracks() {
       const { row, lane } = page.addRow(`${kind}:${track}`, 0, "", `track ${rowKind}`, false);
       trackHead(row, kind, track);
       soundLane(lane, kind, track);
-      for (const { clip, index } of clips) if (clip.track === track) lane.append(audioBar(clip, index));
+      const onTrack = clips.filter(({ clip }) => clip.track === track);
+      for (const { clip, index } of onTrack) lane.append(audioBar(clip, index));
+      const open = onTrack.filter(({ clip }) => clip.script && page.state.open.has(partKey(clip)));
+      if (open.length) {
+        const words = page.addRow(`words:${track}`, 1, "words", "words-row", false);
+        words.row.title = "The words of the open parts above: drag one to time it, Shift+drag moves its sentence";
+        for (const { clip } of open) wordBlocks(words.lane, clip);
+      }
     }
     if (editable) {
       const free = tracks.length ? tracks[tracks.length - 1] + 1 : 0;
@@ -243,12 +256,24 @@ function audioBar(clip, index) {
   const canvas = document.createElement("canvas");
   canvas.className = "waveform";
   bar.append(canvas);
+  if (clip.script) {
+    const expand = document.createElement("button");
+    expand.type = "button";
+    expand.className = "expand";
+    expand.setAttribute("aria-expanded", String(page.state.open.has(partKey(clip))));
+    expand.title = "Show its words below the track, to time them";
+    expand.addEventListener("pointerdown", (event) => event.stopPropagation());
+    expand.addEventListener("click", (event) => {
+      event.stopPropagation();
+      page.toggle(partKey(clip));
+    });
+    bar.append(expand);
+  }
   const name = document.createElement("span");
   name.className = "clip-name";
   name.textContent = clip.name;
   bar.append(name);
   if (clip.recorded) drawWaveform(canvas, clip, index, (page.percent(clip.end - clip.start) / 100) * page.elements.ruler.offsetWidth);
-  if (clip.script) bar.append(wordBlocks(clip));
   bar.append(...fades(clip));
   if (page.state.timeline.editable && !isLocked(kindOf(clip), clip.track)) {
     bar.classList.add("editable");
@@ -307,30 +332,29 @@ function fades(clip) {
   });
 }
 
-/** The words of a script part's clip it plays, as blocks on its bar. */
-function wordBlocks(clip) {
-  const layer = document.createElement("div");
-  layer.className = "words";
+/** The words a script part's clip plays, as blocks on `lane` (the words row under its track). */
+function wordBlocks(lane, clip) {
   const part = scriptPart(clip.script, clip.part);
-  if (!part) return layer;
+  if (!part) return;
   const cutIn = clip.cut?.[0] ?? 0;
   const length = clip.end - clip.start;
   const place = (block, word) => {
-    block.style.left = `${((word.start - cutIn) / length) * 100}%`;
-    block.style.width = `${(Math.max(word.end - word.start, 0.02) / length) * 100}%`;
+    block.style.left = `${page.percent(clip.start + word.start - cutIn)}%`;
+    block.style.width = `${page.percent(Math.max(word.end - word.start, 0.02))}%`;
   };
+  const editable = page.state.timeline.editable && !isLocked(kindOf(clip), clip.track);
   part.words.forEach((word, index) => {
     if (word.end < cutIn || word.start > cutIn + length) return;
     const block = document.createElement("div");
     block.className = "word";
+    block.dataset.part = partKey(clip);
     block.dataset.index = index;
     block.textContent = word.text;
-    block.title = `${word.text} at ${(clip.start + word.start - cutIn).toFixed(2)} s${page.state.timeline.editable ? ": drag to time it, Shift+drag moves its sentence" : ""}`;
+    block.title = `${word.text} at ${(clip.start + word.start - cutIn).toFixed(2)} s${editable ? ": drag to time it, Shift+drag moves its sentence" : ""}`;
     place(block, word);
-    if (page.state.timeline.editable && !isLocked(kindOf(clip), clip.track)) block.addEventListener("pointerdown", (event) => dragWord(event, block, clip, index, word, place));
-    layer.append(block);
+    if (editable) block.addEventListener("pointerdown", (event) => dragWord(event, block, clip, index, word, place));
+    lane.append(block);
   });
-  return layer;
 }
 
 /** Drag a word in time, with Shift its whole sentence (the frame at the word shows meanwhile). */
@@ -342,7 +366,7 @@ function dragWord(event, block, clip, index, word, place) {
   const secondsPerPixel = page.state.span / page.elements.ruler.getBoundingClientRect().width;
   const words = scriptPart(clip.script, clip.part).words;
   const indices = event.shiftKey ? words.map((other, i) => (other.sentence === word.sentence ? i : -1)).filter((i) => i >= 0) : [index];
-  const blocks = new Map(indices.map((i) => [i, block.parentElement.querySelector(`.word[data-index="${i}"]`)]));
+  const blocks = new Map(indices.map((i) => [i, block.parentElement.querySelector(`.word[data-part="${CSS.escape(partKey(clip))}"][data-index="${i}"]`)]));
   const earliest = Math.min(...indices.map((i) => words[i].start));
   let delta = 0;
   const send = liveSender("/api/script/words", () => page.showTime(clip.start + word.start + delta - cutIn));
@@ -522,7 +546,7 @@ function drawPanel() {
   heading.textContent = clip.script ? `${clip.script}, part ${clip.part + 1}` : clip.name;
   const what = clip.script
     ? clip.recorded
-      ? "Recorded. Its words are moments scenes sync to."
+      ? "Recorded. Its words are moments scenes sync to; open the clip's arrow to time them by hand."
       : "Not recorded yet: silent, its words timed as if read out. Select it and press ● to record it."
     : clip.file;
   const longest = Math.max(0.1, Math.min(10, (clip.end - clip.start) / 2));
@@ -541,9 +565,35 @@ function drawPanel() {
     field("Fade in", liveSlider({ value: Math.min(clip.fade_in, longest), min: 0, max: longest, step: 0.05, format: seconds, route: "/api/audio/edit", body: live("fade_in"), reset: 0 }), "", "Rises from silence at its start"),
     field("Fade out", liveSlider({ value: Math.min(clip.fade_out, longest), min: 0, max: longest, step: 0.05, format: seconds, route: "/api/audio/edit", body: live("fade_out"), reset: 0 }), "", "Falls to silence at its end"),
     exact,
+    ...(clip.script && clip.recorded ? [retimeButton(clip)] : []),
     button("Remove from the timeline (Delete)", () => {
       selected.clear();
       post("/api/audio/remove", { indices: [index] });
     }),
   );
+}
+
+/** "Time the words again": Whisper listens to the part's take once more,
+ * replacing the words' times (moved by hand or not); Ctrl+Z puts them back. */
+function retimeButton(clip) {
+  const element = button("Time the words again (Whisper)", async () => {
+    element.disabled = true;
+    say(`Listening to part ${clip.part + 1} of ${clip.script} again (Whisper)…`);
+    try {
+      const answer = await fetch("/api/script/take", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ script: clip.script, part: clip.part, file: clip.file, offset: clip.offset }),
+      }).then((response) => response.json());
+      if (answer.error) say(answer.error, true);
+      else {
+        page.setVersion(answer.picture);
+        say(answer.problem ?? "Its words are timed to the recording again. Ctrl+Z undoes it.", Boolean(answer.problem));
+      }
+    } finally {
+      element.disabled = false;
+    }
+  });
+  element.title = "Let Whisper time this part's words to its recording again, replacing the times they have now";
+  return element;
 }

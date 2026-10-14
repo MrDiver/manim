@@ -1072,31 +1072,30 @@ button.toggle[aria-expanded="true"]::before,
   }
 }
 
-/* Transcripts: the words over the waveform, dragged to time them. */
-.words {
-  position: absolute;
-  inset: 16px 0 2px;
-  pointer-events: none;
+/* A script part's words, in the row under its track (opened with the
+   clip's arrow): dragged to time them. */
+.row.words-row {
+  height: 28px;
 }
 
 .word {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: 3px;
+  bottom: 3px;
   min-width: 2px;
   overflow: hidden;
-  padding: 0 2px;
-  background: rgb(120 220 160 / 0.22);
-  border-left: 2px solid rgb(120 220 160 / 0.9);
-  color: #e8fff2;
-  font: 500 10px/14px var(--mono);
+  padding: 0 3px;
+  background: rgb(140 190 255 / 0.18);
+  border-left: 2px solid rgb(140 190 255 / 0.9);
+  border-radius: 0 4px 4px 0;
+  color: #eaf3ff;
+  font: 500 11px/20px system-ui, sans-serif;
   white-space: nowrap;
-  pointer-events: auto;
   cursor: ew-resize;
 }
 
 .word:hover {
-  background: rgb(120 220 160 / 0.45);
+  background: rgb(140 190 255 / 0.4);
 }
 
 .transcript textarea {
@@ -1454,24 +1453,9 @@ button.danger:hover {
   font-size: 12px;
 }
 
-/* Script tracks: the parts of scripts, their words readable on them. */
-.row.script-track:not(.new-track) {
-  height: 52px;
-}
-
+/* Script tracks: the parts of scripts. */
 .row.script-track .audio-body {
   background: #23364b;
-}
-
-.row.script-track .word {
-  background: rgb(140 190 255 / 0.18);
-  border-left-color: rgb(140 190 255 / 0.9);
-  color: #eaf3ff;
-  font: 500 12px/26px system-ui, sans-serif;
-}
-
-.row.script-track .words {
-  inset: 18px 0 4px;
 }
 
 /* A script part not recorded yet: dashed, silent. */

@@ -1025,7 +1025,7 @@ async function start() {
   initScriptView({ state, setVersion });
   initRecording({ state, loadFlag, saveFlag, seek, play, pause, setVersion });
   initRender({ state });
-  initAudio({ state, elements, percent, addRow, play, pause, redraw: drawTimeline, showTime: (time) => show(snap(time)) });
+  initAudio({ state, elements, percent, addRow, toggle, play, pause, setVersion, redraw: drawTimeline, showTime: (time) => show(snap(time)) });
   initEditing({
     state,
     elements,

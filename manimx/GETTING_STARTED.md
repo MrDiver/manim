@@ -405,7 +405,9 @@ mouse action.
     them), and its arrow opens the scene's nodes and animations. A
     scene that plays sounds gets a *sound* row under its track, with a
     volume slider.
-  - **Script** tracks hold parts of scripts, each word a block.
+  - **Script** tracks hold parts of scripts. A part moves as a whole;
+    its arrow opens a *words* row under the track, where its words are
+    timed.
   - **Audio** tracks hold music, effects and free recordings.
 
 Every track's header names it (double-click to rename) and has its
@@ -428,8 +430,9 @@ splits at the playhead.
    due. Press ● again to stop, Escape to throw the take away. Wear
    headphones, so the timeline's sound stays out of the microphone.
 4. Whisper times the take's words, and the scenes synced to them follow
-   your voice. A word dragged on the track moves it (Shift: its
-   sentence).
+   your voice. To fix a word, open the part's arrow and drag the word
+   in the words row (Shift: its sentence); **Time the words again** in
+   the inspector lets Whisper redo them all.
 
 The teleprompter (T) and the subtitles (C) can also be shown while just
 playing. The settings `voice.countdown` and `voice.lead` set how long
