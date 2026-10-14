@@ -366,7 +366,7 @@ impl RenderPipeline {
     ) -> Result<()> {
         let size = (self.settings.width, self.settings.height);
         let start = Instant::now();
-        let packet = self.packer.pack_frame(root, &settings.pack_settings())?;
+        let packet = self.packer.pack_frame(root, &settings.pack_settings(size))?;
         self.clock.add("pack", start);
         let light_count = packet
             .meshes

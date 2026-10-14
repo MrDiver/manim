@@ -49,11 +49,20 @@
 //! one that has room. The draw lists keep their order (transparent draws
 //! back to front across pages) and say which page each run of draws is on
 //! (`DrawList`). Garbage is repacked per page.
+//!
+//! Culling: a path whose box (`Points::bounds`, computed once per points,
+//! placed by its world matrix and widened by how far its stroke can
+//! reach) lies wholly beyond one side of the view is not drawn
+//! (`Culling`). It keeps the records it has, so a shape moving back into
+//! view, or showing in another view this packer packs (a camera view's
+//! picture), costs nothing more; a shape never in view gets no records at
+//! all. Where the view has meshes, shadow casters and masks are drawn out
+//! of view too: a shadow or a cut can fall into it from outside.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use glam::{DMat4, DVec2, DVec3};
+use glam::{DMat4, DVec2, DVec3, DVec4};
 
 use crate::render::pack::arena::Arena;
 use crate::render::pack::flatten::{DrawItem, FlatScene, NO_CLIP};
@@ -299,11 +308,12 @@ impl VectorPacker {
     }
 
     /// Update the records for the flattened `scene` and return the
-    /// frame's draws.
+    /// frame's draws (of what `culling` does not leave out).
     pub fn pack(
         &mut self,
         flat: &FlatScene,
         view: DMat4,
+        culling: &Culling,
         camera_views: &CameraViews,
         generation: u64,
     ) -> VectorDraws {
@@ -320,6 +330,7 @@ impl VectorPacker {
         let mut images = Vec::new();
         let context = PathContext {
             view,
+            culling,
             camera_views,
             generation,
         };
@@ -385,6 +396,19 @@ impl VectorPacker {
             return;
         }
         let key = (node.uid, mask_of);
+        // Out of view: no draw. A node with records keeps them (it may come
+        // back, or show in another view this packer packs); one without
+        // gets none. Casters and masks matter out of view where meshes
+        // are: a caster's shadow and a mask's cut can fall into it.
+        let casts_shadow = path.cast_shadows && mask_of == NO_CLIP;
+        let culling = context.culling;
+        let matters_outside = culling.keep_casters && (casts_shadow || mask_of != NO_CLIP);
+        if !matters_outside && culling.hides(path, &item.world) {
+            if self.slots.contains_key(&key) {
+                seen.insert(key);
+            }
+            return;
+        }
         seen.insert(key);
         if !self.slots.contains_key(&key) {
             let page = self.page_with_room(&[1, 0, 0, 0, 0, 0]);
@@ -449,7 +473,6 @@ impl VectorPacker {
         let world_center = item.world.transform_point3(center);
         let distance = -context.view.transform_point3(world_center).z;
         let clipped = item.clip != NO_CLIP;
-        let casts_shadow = path.cast_shadows && mask_of == NO_CLIP;
         let fill = fill.and_then(|fill| {
             self.fill(
                 context,
@@ -743,6 +766,63 @@ pub type CameraViews = HashMap<u64, CameraView>;
 
 const NOT_A_VIEW: CameraView = (records::NO_VIEW, [0.0, 0.0]);
 
+/// How far past its points a stroke can reach, in stroke widths: a miter
+/// joint up to vector.wgsl's MITER_LIMIT (10) half widths.
+const STROKE_REACH: f64 = 5.0;
+/// Room around the view, as a fraction of it: what the jitter of
+/// RenderSamples and antialiasing move into it from just outside.
+const VIEW_MARGIN: f64 = 0.01;
+
+/// What a view shows, to leave out the shapes it cannot (culling).
+pub struct Culling {
+    /// World to clip space (WebGPU's: depth from 0 to 1).
+    pub view_projection: DMat4,
+    /// Keep shadow casters and masks out of view: with meshes about, a
+    /// shadow or a cut can fall into it from outside.
+    pub keep_casters: bool,
+}
+
+impl Culling {
+    /// Whether nothing of `path` placed by `world` can show: the box of
+    /// its points (`Points::bounds`) in world space, widened by how far
+    /// its stroke reaches, lies wholly beyond one side of the view.
+    fn hides(&self, path: &Path, world: &DMat4) -> bool {
+        let Some((low, high)) = path.points.bounds() else {
+            return true;
+        };
+        let (mut world_low, mut world_high) = (DVec3::INFINITY, DVec3::NEG_INFINITY);
+        for corner in corners(low, high) {
+            let point = world.transform_point3(corner);
+            world_low = world_low.min(point);
+            world_high = world_high.max(point);
+        }
+        let widest = path.stroke.widths.iter().copied().fold(0.0, f64::max);
+        let reach = DVec3::splat(STROKE_REACH * widest);
+        let clip: Vec<DVec4> = corners(world_low - reach, world_high + reach)
+            .map(|corner| self.view_projection * corner.extend(1.0))
+            .collect();
+        let edge = 1.0 + VIEW_MARGIN;
+        let beyond = |side: fn(&DVec4, f64) -> bool| clip.iter().all(|point| side(point, edge));
+        beyond(|p, e| p.x < -e * p.w)
+            || beyond(|p, e| p.x > e * p.w)
+            || beyond(|p, e| p.y < -e * p.w)
+            || beyond(|p, e| p.y > e * p.w)
+            || beyond(|p, _| p.z < 0.0)
+            || beyond(|p, _| p.z > p.w)
+    }
+}
+
+/// The eight corners of the box from `low` to `high`.
+fn corners(low: DVec3, high: DVec3) -> impl Iterator<Item = DVec3> {
+    (0..8).map(move |i| {
+        DVec3::new(
+            if i & 1 == 0 { low.x } else { high.x },
+            if i & 2 == 0 { low.y } else { high.y },
+            if i & 4 == 0 { low.z } else { high.z },
+        )
+    })
+}
+
 /// The view of a fill showing `image`: its layer (added to `images` on its
 /// first use in the frame) and `1 / size` of the local box around the
 /// origin that the image covers, as wide as the path reaches either way.
@@ -766,6 +846,7 @@ struct PathContext<'a> {
     /// World to view space: transparent draws sort by depth along the
     /// view direction.
     view: DMat4,
+    culling: &'a Culling,
     camera_views: &'a CameraViews,
     generation: u64,
 }

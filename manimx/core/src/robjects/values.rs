@@ -5,7 +5,7 @@
 //! linear light. Every value is immutable once made; the versioned ones
 //! get their version when they are made (see mod.rs).
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use glam::DVec3;
 
@@ -23,6 +23,8 @@ pub struct Points {
     pub version: u64,
     pub data: Vec<f64>,
     pub dimension: usize,
+    /// `bounds()`, computed on first use: the points never change.
+    bounds: OnceLock<Option<(DVec3, DVec3)>>,
 }
 
 impl Points {
@@ -31,7 +33,22 @@ impl Points {
             version: next_version(),
             data,
             dimension,
+            bounds: OnceLock::new(),
         }
+    }
+
+    /// The smallest box (lowest, highest corner) around every point, in
+    /// the path's own space; None without points. A cubic curve lies
+    /// inside the hull of its four points, so the curves lie inside it too
+    /// (culling, render/pack/vectors.rs).
+    pub fn bounds(&self) -> Option<(DVec3, DVec3)> {
+        *self.bounds.get_or_init(|| {
+            let mut points = (0..self.count()).map(|index| self.point(index));
+            let first = points.next()?;
+            Some(points.fold((first, first), |(low, high), point| {
+                (low.min(point), high.max(point))
+            }))
+        })
     }
 
     pub fn count(&self) -> usize {

@@ -17,7 +17,9 @@ use crate::render::pack::lights;
 use crate::render::pack::meshes::{MeshOutput, MeshPacker};
 use crate::render::pack::records::Light;
 use crate::render::pack::shadows::{self, Bounds, FrameSettings, ShadowLayers, ShadowViews};
-use crate::render::pack::vectors::{CameraViews, VectorDraws, VectorPacker, DEFAULT_PAGE_BYTES};
+use crate::render::pack::vectors::{
+    CameraViews, Culling, VectorDraws, VectorPacker, DEFAULT_PAGE_BYTES,
+};
 use crate::robjects::{Kind, RNode};
 
 /// Packs after which per-node data unused since is dropped.
@@ -46,6 +48,8 @@ pub struct PackSettings {
     pub default_lights: bool,
     /// The camera's world matrix.
     pub camera: DMat4,
+    /// World to clip space: what the picture shows (culling, vectors.rs).
+    pub view_projection: DMat4,
     /// The view's camera views: their pictures' layers by node uid.
     pub camera_views: CameraViews,
     /// Leave the camera views' shapes out (while a picture is rendered).
@@ -98,20 +102,26 @@ impl Packer {
         {
             self.last_used.insert(item.node.uid, self.generation);
         }
-        let draws = self.vectors.pack(
-            &flat,
-            settings.camera.inverse(),
-            &settings.camera_views,
-            self.generation,
-        );
-        let scope_parents = flat.clips.iter().map(|scope| scope.parent).collect();
-
         // No mesh in the view: no lights, shadows or 3D passes (any Shape3D
         // counts, even one without triangles).
         let has_meshes = flat
             .items
             .iter()
             .any(|item| matches!(item.node.kind, Kind::Shape3D(_) | Kind::Particles { .. }));
+        let draws = self.vectors.pack(
+            &flat,
+            settings.camera.inverse(),
+            &Culling {
+                view_projection: settings.view_projection,
+                // Shapes cast shadows only onto meshes: without any, a
+                // caster out of view casts nothing into it.
+                keep_casters: has_meshes,
+            },
+            &settings.camera_views,
+            self.generation,
+        );
+        let scope_parents = flat.clips.iter().map(|scope| scope.parent).collect();
+
         if !has_meshes {
             return Ok(Packet {
                 draws,

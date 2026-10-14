@@ -147,6 +147,36 @@ def test_shapes_on_many_pages_draw_as_on_one(scene_class: type[Scene]) -> None:
         assert np.array_equal(a, b)
 
 
+class Field(Scene):
+    """Squares with thick outlines on a grid far wider than the view, or
+    (``near``) only those within two units of it; the camera turned a
+    little, so the view is not aligned with the grid."""
+
+    near = False
+
+    def construct(self) -> None:
+        for x in range(-30, 31):
+            for y in range(-20, 21):
+                if self.near and (abs(x) > 9 or abs(y) > 6):
+                    continue
+                self.add(Square(side_length=0.6, color="#58C4DD", fill_opacity=0.8, stroke_width=12).move_to((x, y, 0.0)))
+        self.camera.rotate(0.2)
+        self.wait()
+
+
+def test_shapes_out_of_view_are_left_out_without_changing_the_picture() -> None:
+    """Culling: shapes wholly out of view are not drawn. Squares just
+    outside whose outline reaches into the view still are, so the field
+    looks exactly like the field cut down to the squares near the view."""
+
+    class Near(Field):
+        near = True
+
+    (field,) = render(Field().prepare().frame_at, [0.5])
+    (near,) = render(Near().prepare().frame_at, [0.5])
+    assert np.array_equal(field, near)
+
+
 def test_several_views_draw_over_each_other_and_no_view_shows_the_background() -> None:
     timeline = Timeline()
     timeline.add(EveryNode().prepare(), start=0.0)

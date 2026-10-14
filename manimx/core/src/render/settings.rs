@@ -135,9 +135,9 @@ impl ViewSettings {
         }
     }
 
-    /// How the packer packs this view: camera view `i` is layer `i` of the
-    /// camera view texture.
-    pub fn pack_settings(&self) -> PackSettings {
+    /// How the packer packs this view, a picture of `size` pixels: camera
+    /// view `i` is layer `i` of the camera view texture.
+    pub fn pack_settings(&self, size: (u32, u32)) -> PackSettings {
         let camera_views: CameraViews = self
             .camera_views
             .iter()
@@ -151,6 +151,8 @@ impl ViewSettings {
             frame: self.frame_settings(),
             default_lights: self.default_lights,
             camera: self.camera.transform.matrix(),
+            view_projection: self.camera.projection_matrix(self.aspect_ratio(size))
+                * self.camera.view_matrix(),
             camera_views,
             hide_camera_views: self.hide_camera_views,
         }
