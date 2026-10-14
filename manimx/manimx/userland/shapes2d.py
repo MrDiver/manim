@@ -45,6 +45,7 @@ from .geometry import (
     rectangle_points,
     regular_polygon_points,
     rounded_rectangle_points,
+    shared_points,
     star_points,
 )
 
@@ -66,7 +67,7 @@ class Circle(Shape2D):
     def __init__(self, radius: float = 1.0, name: str | None = None, **style: Any) -> None:
         super().__init__((), name, **style)
         self.radius = parameter(self, "radius", _positive("radius", radius))
-        self._derive_points(arc_points, self.radius)
+        self._derive_points(_circle_points, self.radius)
 
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()
@@ -93,7 +94,7 @@ class Rectangle(Shape2D):
         super().__init__((), name, **style)
         self.width = parameter(self, "width", _positive("width", width))
         self.height = parameter(self, "height", _positive("height", height))
-        self._derive_points(rectangle_points, self.width, self.height)
+        self._derive_points(_rectangle_points, self.width, self.height)
 
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()
@@ -124,7 +125,7 @@ class Square(Shape2D):
     def __init__(self, side_length: float = 2.0, name: str | None = None, **style: Any) -> None:
         super().__init__((), name, **style)
         self.side_length = parameter(self, "side_length", _positive("side_length", side_length))
-        self._derive_points(_square_points, self.side_length)
+        self._derive_points(_shared_square_points, self.side_length)
 
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()
@@ -143,7 +144,7 @@ class RegularPolygon(Shape2D):
         super().__init__((), name, **style)
         self.n = parameter(self, "n", _corners(n), DISCRETE)
         self.radius = parameter(self, "radius", _positive("radius", radius))
-        self._derive_points(regular_polygon_points, self.n, self.radius)
+        self._derive_points(_regular_polygon_points, self.n, self.radius)
 
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()
@@ -191,7 +192,7 @@ class RoundedRectangle(Rectangle):
     def __init__(self, width: float = 4.0, height: float = 2.0, corner_radius: float = 0.5, name: str | None = None, **style: Any) -> None:
         super().__init__(width, height, name, **style)
         self.corner_radius = parameter(self, "corner_radius", _not_negative("corner_radius", corner_radius))
-        self._derive_points(rounded_rectangle_points, self.width, self.height, self.corner_radius)
+        self._derive_points(_rounded_rectangle_points, self.width, self.height, self.corner_radius)
 
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()
@@ -209,7 +210,7 @@ class Ellipse(Shape2D):
         super().__init__((), name, **style)
         self.width = parameter(self, "width", _positive("width", width))
         self.height = parameter(self, "height", _positive("height", height))
-        self._derive_points(ellipse_points, self.width, self.height)
+        self._derive_points(_ellipse_points, self.width, self.height)
 
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()
@@ -234,7 +235,7 @@ class Arc(Shape2D):
         self.radius = parameter(self, "radius", _positive("radius", radius))
         self.start_angle = parameter(self, "start_angle", start_angle)
         self.angle = parameter(self, "angle", angle)
-        self._derive_points(_arc, self.radius, self.start_angle, self.angle)
+        self._derive_points(_shared_arc, self.radius, self.start_angle, self.angle)
 
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()
@@ -261,7 +262,7 @@ class AnnularSector(Arc):
     def __init__(self, inner_radius: float = 0.5, radius: float = 1.0, start_angle: float = 0.0, angle: float = math.pi / 2, name: str | None = None, **style: Any) -> None:
         super().__init__(radius, start_angle, angle, name, **style)
         self.inner_radius = parameter(self, "inner_radius", _not_negative("inner_radius", inner_radius))
-        self._derive_points(annular_sector_points, self.inner_radius, self.radius, self.start_angle, self.angle)
+        self._derive_points(_annular_sector_points, self.inner_radius, self.radius, self.start_angle, self.angle)
 
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()
@@ -287,7 +288,7 @@ class Annulus(Shape2D):
         super().__init__((), name, **style)
         self.inner_radius = parameter(self, "inner_radius", _positive("inner_radius", inner_radius))
         self.outer_radius = parameter(self, "outer_radius", _positive("outer_radius", outer_radius))
-        self._derive_points(annulus_points, self.inner_radius, self.outer_radius)
+        self._derive_points(_annulus_points, self.inner_radius, self.outer_radius)
 
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()
@@ -323,7 +324,7 @@ class Star(Shape2D):
         default_inner = star_points(int(n), float(outer_radius))[4]  # the first inner corner
         self.inner_radius = parameter(self, "inner_radius", _positive("inner_radius", inner_radius if inner_radius is not None else float(np.linalg.norm(default_inner))))
         self.start_angle = parameter(self, "start_angle", start_angle)
-        self._derive_points(star_points, self.n, self.outer_radius, self.inner_radius, self.start_angle)
+        self._derive_points(_star_points, self.n, self.outer_radius, self.inner_radius, self.start_angle)
 
     def signals(self) -> Iterator[Signal]:
         yield from super().signals()
@@ -546,3 +547,17 @@ def _corner_array(corners: Sequence[Sequence[float]]) -> np.ndarray:
 
 
 __all__ = ["AnnularSector", "Annulus", "Arc", "Brace", "Circle", "CubicBezier", "Dot", "Ellipse", "Polygon", "Polyline", "Rectangle", "RegularPolygon", "RoundedRectangle", "Sector", "Square", "Star", "Triangle", "parameter"]
+
+
+# The point generators the shapes above derive their points with, shared:
+# shapes of equal parameters share one read-only array (shared_points).
+_circle_points = shared_points(arc_points)
+_rectangle_points = shared_points(rectangle_points)
+_shared_square_points = shared_points(_square_points)
+_regular_polygon_points = shared_points(regular_polygon_points)
+_rounded_rectangle_points = shared_points(rounded_rectangle_points)
+_ellipse_points = shared_points(ellipse_points)
+_shared_arc = shared_points(_arc)
+_annular_sector_points = shared_points(annular_sector_points)
+_annulus_points = shared_points(annulus_points)
+_star_points = shared_points(star_points)

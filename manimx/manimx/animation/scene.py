@@ -127,19 +127,29 @@ class Segment:
 
 @contextmanager
 def _no_cycle_collection() -> Iterator[None]:
-    """Pause Python's cycle collector while a scene is prepared.
+    """Keep Python's cycle collector off a scene while and after it is prepared.
 
     construct() makes millions of objects for a large scene (100 000 dice:
     half a million nodes and their signals), and the collector walks all
-    that are alive each time enough new ones pile up: 60% of preparing
-    went there. Nothing made while preparing is garbage until it ends, so
-    the pause loses nothing; the collector runs as usual afterwards.
+    objects alive each time enough new ones pile up: 60% of preparing went
+    there, and as much of building the scene's plan and rendering after it.
+    A prepared scene is long-lived data, like a cache, that the collector
+    need not look through again and again. So it is paused while preparing
+    (nothing made then is garbage before it ends), and what is alive
+    afterwards is frozen (``gc.freeze``): moved to a generation the
+    collector skips, at no cost.
+
+    Each prepare unfreezes first: scenes a reload replaced (``manimx ui``)
+    become collectable again, and what is still alive is frozen anew.
+    https://docs.python.org/3/library/gc.html#gc.freeze
     """
     enabled = gc.isenabled()
     gc.disable()
+    gc.unfreeze()
     try:
         yield
     finally:
+        gc.freeze()
         if enabled:
             gc.enable()
 

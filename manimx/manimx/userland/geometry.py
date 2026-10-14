@@ -15,6 +15,7 @@ wherever a curve's start differs from the previous curve's end.
 
 from __future__ import annotations
 
+import functools
 import math
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -27,6 +28,30 @@ from ..animation.signals.paths import (
     partial_curve,
 )
 from ..robjects import MeshData
+
+
+def shared_points(function: Callable[..., np.ndarray]) -> Callable[..., np.ndarray]:
+    """``function`` (a pure point generator of plain numbers, such as
+    arc_points) remembering its results: equal arguments give the very
+    same array, made read-only since every shape built from them shares
+    it. What the shape classes derive their points with: 100 000 dice
+    compute their rounded body and their pips once, not 100 000 times.
+    Arguments that cannot be remembered (arrays) compute as usual."""
+    remembered = functools.lru_cache(maxsize=4096)(lambda *arguments: _read_only(function(*arguments)))
+
+    @functools.wraps(function)
+    def points(*arguments: Any) -> np.ndarray:
+        try:
+            return remembered(*arguments)
+        except TypeError:  # an argument that is not hashable
+            return function(*arguments)
+
+    return points
+
+
+def _read_only(points: np.ndarray) -> np.ndarray:
+    points.setflags(write=False)
+    return points
 
 
 def arc_points(
@@ -409,6 +434,7 @@ def _grid_indices(rows: int, columns: int, flip: bool = False) -> np.ndarray:
 
 
 __all__ = [
+    "shared_points",
     "annular_sector_points",
     "annulus_points",
     "arc_between_points",
