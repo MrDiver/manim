@@ -248,7 +248,12 @@ again, faster or slower, transcribe again, and the scene follows without
 changes. A clip's `"cues": {"square": "voice.middle.square"}` in
 `manimx.json` (or its panel in `manimx ui`) syncs a cue to another event.
 Renders put the transcript's subtitles into the video and an `.srt` file
-next to it. The example project's Voice scene is reanimate's voice
+next to it.
+
+Before anything is recorded, `Transcript.fake(script)` times the script
+as if read out evenly (each word by its letters, pauses after sentences
+and lines): write the scene along it, and the clip plays at that pace
+until the recording is transcribed and the cues find their words. The example project's Voice scene is reanimate's voice
 example remade this way.
 
 ## 8. The project file

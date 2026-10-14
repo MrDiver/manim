@@ -237,3 +237,15 @@ def test_transcribing_needs_faster_whisper(monkeypatch) -> None:
     monkeypatch.setattr(builtins, "__import__", without_whisper)
     with pytest.raises(RuntimeError, match="uv add 'manimx\\[voice\\]'"):
         recognize(Sound(np.zeros(800, dtype=np.float32), 8000))
+
+
+def test_a_fake_transcript_reads_the_text_evenly() -> None:
+    fake = Transcript.fake("Go now. Stop\nthere", start=1.0, letters_per_second=10.0)
+    spans = [(word.text, round(word.start, 3), round(word.end, 3)) for word in fake.words]
+    assert spans == [
+        ("Go", 1.0, 1.2),
+        ("now.", 1.3, 1.6),  # a sentence ends: a pause after it
+        ("Stop", 2.0, 2.4),  # the line ends: a longer pause after it
+        ("there", 3.0, 3.5),
+    ]
+    assert fake.events("voice")["voice.stop"] == 2.0

@@ -121,6 +121,32 @@ class Transcript:
         if count != len(self.words):
             raise ValueError(f"the transcript's text has {count} words but {len(self.words)} have times")
 
+    @classmethod
+    def fake(
+        cls, text: str, start: float = 0.0, letters_per_second: float = 14.0, sentence_pause: float = 0.3, line_pause: float = 0.5
+    ) -> Transcript:
+        """``text`` as if read out evenly, before anything is recorded
+        (reanimate's fakeTranscript): each word takes time by its letters,
+        one more for the space after it (14 a second: about 120 words a
+        minute), with a pause after each sentence and each line.
+
+        A scene written along it has cues whose words have no events yet:
+        they bend nothing, and the clip plays at this pace until the
+        recording is transcribed, then its cues land on the spoken words."""
+        words = []
+        time = start
+        tokens_ = tokens(text)
+        for index, token in enumerate(tokens_):
+            end = time + len(token.key) / letters_per_second
+            words.append(Word(token.text, time, end))
+            time = end + 1 / letters_per_second
+            following = tokens_[index + 1] if index + 1 < len(tokens_) else None
+            if following is not None and following.line != token.line:
+                time += line_pause
+            elif token.text.endswith((".", "!", "?")):
+                time += sentence_pause
+        return cls(text, tuple(words))
+
     @property
     def tokens(self) -> list[Token]:
         return tokens(self.text)
