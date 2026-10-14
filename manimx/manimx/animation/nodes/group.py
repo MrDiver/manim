@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator
 
-from .node import Node, PositionMixin, RotationMixin, ScalableMixin, find, find_all
+from .node import Node, PositionMixin, RotationMixin, ScalableMixin, adopt, find, find_all
 
 
 class Group(PositionMixin, RotationMixin, ScalableMixin, Node):
@@ -14,11 +14,16 @@ class Group(PositionMixin, RotationMixin, ScalableMixin, Node):
 
     def __init__(self, *children: Node, name: str | None = None, tags: Iterable[str] = ()) -> None:
         super().__init__(name, tags=tags)
-        self.children = list(children)
+        self.children: list[Node] = []
         self._structure_listeners: list[Callable[[Group], None]] = []
+        self.add(*children)
 
     def add(self, *children: Node) -> Group:
-        self.children.extend(children)
+        """Put ``children`` at the end of the group; each must not be in a
+        group yet (a node has one parent, see ``adopt``)."""
+        for child in children:
+            adopt(self, child)
+            self.children.append(child)
         for listener in list(self._structure_listeners):
             listener(self)
         return self

@@ -14,6 +14,7 @@ from .node import (
     PositionMixin,
     RotationMixin,
     ScalableMixin,
+    adopt,
     animatable,
     find,
     find_all,
@@ -32,6 +33,10 @@ class ClippingGroup(PositionMixin, RotationMixin, ScalableMixin, Node):
         self, mask: Node, content: Node, name: str | None = None, one_sided: bool = False, tags: Iterable[str] = ()
     ) -> None:
         super().__init__(name, tags=tags)
+        if mask is content:
+            raise ValueError(f"{mask!r} cannot be both the mask and the content")
+        adopt(self, mask)
+        adopt(self, content)
         self.mask = mask
         self.content = content
         self.one_sided = RootSignal(one_sided, DISCRETE, name=f"{self.name}.one_sided")

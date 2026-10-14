@@ -48,6 +48,20 @@ def position(prepared, t, name):
     return objects(prepared, t)[name].transform.position
 
 
+def test_a_node_is_in_one_group_only() -> None:
+    dot = Dot()
+    group = Group(dot)
+    assert dot.parent_uid == group.uid
+    with pytest.raises(ValueError, match="one group only"):
+        Group(dot)
+    with pytest.raises(ValueError, match="one group only"):
+        group.add(dot)  # not twice in the same group either
+    outer = Group(group)
+    with pytest.raises(ValueError, match="holds"):
+        group.add(outer)  # a group cannot go below itself
+    assert group.children == [dot] and outer.parent_uid is None
+
+
 def test_play_places_animations_and_moves_the_cursor() -> None:
     def construct(scene):
         square = Square(name="square")

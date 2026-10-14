@@ -12,7 +12,10 @@ caches survive any number of snapshots.
 
 The scene tree is parallel to the render tree: every node class
 snapshots to exactly one render class. Only :class:`Group` and
-:class:`ClippingGroup` have children; everything else is a leaf.
+:class:`ClippingGroup` have children; everything else is a leaf. A node
+has at most one parent (:func:`adopt`), so it sits in exactly one place
+of the tree: its uid names that place, and the renderer's retained scene
+is addressed by it.
 
 The transform is split by meaning. :class:`PositionMixin`,
 :class:`RotationMixin` and :class:`ScalableMixin` each add one part (its
@@ -54,6 +57,17 @@ if TYPE_CHECKING:
 ChangeList = list[tuple[RootSignal, Change, Any]]
 
 REL, ABS = Change.RELATIVE, Change.ABSOLUTE
+
+
+def adopt(parent: Node, child: Node) -> None:
+    """Make ``parent`` the parent of ``child``. A node has one parent: one
+    already in a group (or this one) cannot join another, and a group
+    cannot go into itself or into anything below it."""
+    if child.parent_uid is not None:
+        raise ValueError(f"{child!r} is already in a group: a node can be in one group only")
+    if any(member is parent for member in child.family()):
+        raise ValueError(f"{child!r} cannot go into {parent!r}: it holds {parent!r}")
+    child.parent_uid = parent.uid
 
 
 def animatable(changes: Callable[..., ChangeList]) -> Callable[..., Any]:
@@ -105,6 +119,9 @@ class Node:
         self.tags = _tag_set(tags)
         self.alpha = RootSignal(1.0, SCALAR, name=f"{self.name}.alpha")
         self.present = RootSignal(False, DISCRETE, name=f"{self.name}.present")
+        self.parent_uid: int | None = None
+        """The uid of the group holding this node, if any (see :func:`adopt`).
+        An id, not the group: nodes refer down the tree only."""
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.name!r})"

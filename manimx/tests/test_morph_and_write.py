@@ -199,13 +199,18 @@ def test_write_draws_the_outline_then_fills_with_manims_timing() -> None:
     windows = [window for _, window in write._windows()]
     assert windows[1][0] == pytest.approx(0.2 / (19 * 0.2 + 1))  # lagged by 0.2, as Manim
     assert Write(Square()).run_time == 1.0
+
     # A group's parts are written side by side: a long part (a bracket)
     # gets as much time as the others together.
-    entries = Group(*(Square(0.5).shift(RIGHT * i) for i in range(4)))
-    bracket = Square(2.0)
-    parts = dict((path.uid, window) for path, window in Write(Group(entries, bracket))._windows())
+    def formula() -> tuple[Group, Square]:
+        bracket = Square(2.0)
+        return Group(Group(*(Square(0.5).shift(RIGHT * i) for i in range(4))), bracket), bracket
+
+    group, bracket = formula()
+    parts = dict((path.uid, window) for path, window in Write(group)._windows())
     assert parts[bracket.uid] == pytest.approx((0.2 / 1.2, 1.0))
-    flat = dict((path.uid, window) for path, window in Write(Group(entries, bracket), lag_ratio=0.5)._windows())
+    group, bracket = formula()
+    flat = dict((path.uid, window) for path, window in Write(group, lag_ratio=0.5)._windows())
     assert flat[bracket.uid][0] == pytest.approx(2.0 / 3.0)
 
     square = Square(fill_opacity=1.0, stroke_width=0.0, stroke_opacity=0.0)  # like a glyph: no stroke
