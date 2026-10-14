@@ -240,7 +240,7 @@ function audioBar(clip, index) {
   bar.append(name);
   if (clip.recorded) drawWaveform(canvas, clip, index, (page.percent(clip.end - clip.start) / 100) * page.elements.ruler.offsetWidth);
   if (clip.script) bar.append(wordBlocks(clip));
-  bar.append(...fades(clip), volumeLine(clip, index));
+  bar.append(...fades(clip));
   if (page.state.timeline.editable && !isLocked("audio", clip.track)) {
     bar.classList.add("editable");
     for (const edge of ["in", "out"]) {
@@ -253,45 +253,6 @@ function audioBar(clip, index) {
     bar.addEventListener("pointerdown", (event) => startDrag(event, "move", index));
   }
   return bar;
-}
-
-/** The volume line across a clip: 100 % in the middle, drag it up or down. */
-function volumeLine(clip, index) {
-  const line = document.createElement("div");
-  line.className = "volume-line";
-  const place = (volume) => {
-    line.style.top = `${(1 - volume / 2) * 100}%`;
-    line.title = `Volume ${Math.round(volume * 100)} %: drag up or down (double-click: 100 %)`;
-  };
-  place(clip.volume);
-  if (!page.state.timeline.editable || isLocked("audio", clip.track)) return line;
-  line.addEventListener("pointerdown", (event) => {
-    event.stopPropagation();
-    selectOnly(index);
-    line.setPointerCapture(event.pointerId);
-    const height = line.parentElement.getBoundingClientRect().height;
-    const send = liveSender("/api/audio/edit", () => {});
-    page.state.dragging = true;
-    const onMove = (move) => {
-      const volume = Math.round(Math.min(2, Math.max(0, clip.volume - ((move.clientY - event.clientY) / height) * 2)) * 100) / 100;
-      place(volume);
-      say(`Volume ${Math.round(volume * 100)} %`);
-      send({ index, volume });
-    };
-    const onUp = async () => {
-      line.removeEventListener("pointermove", onMove);
-      line.removeEventListener("pointerup", onUp);
-      await send.idle();
-      page.state.dragging = false;
-    };
-    line.addEventListener("pointermove", onMove);
-    line.addEventListener("pointerup", onUp);
-  });
-  line.addEventListener("dblclick", (event) => {
-    event.stopPropagation();
-    post("/api/audio/edit", { index, volume: 1 });
-  });
-  return line;
 }
 
 /** A clip's fades: shaded ramps at its ends, each with a handle at the top to drag. */
@@ -566,7 +527,7 @@ function drawPanel() {
   );
   panel.append(
     paragraph(what),
-    field("Volume", liveSlider({ value: clip.volume, min: 0, max: 2, step: 0.01, format: (v) => `${Math.round(v * 100)} %`, route: "/api/audio/edit", body: live("volume"), reset: 1 }), "", "Or drag the line on the clip up and down"),
+    field("Volume", liveSlider({ value: clip.volume, min: 0, max: 2, step: 0.01, format: (v) => `${Math.round(v * 100)} %`, route: "/api/audio/edit", body: live("volume"), reset: 1 }), "", "Of this sound; the track's slider sets the whole track"),
     field("Fade in", liveSlider({ value: Math.min(clip.fade_in, longest), min: 0, max: longest, step: 0.05, format: seconds, route: "/api/audio/edit", body: live("fade_in"), reset: 0 }), "", "Rises from silence at its start"),
     field("Fade out", liveSlider({ value: Math.min(clip.fade_out, longest), min: 0, max: longest, step: 0.05, format: seconds, route: "/api/audio/edit", body: live("fade_out"), reset: 0 }), "", "Falls to silence at its end"),
     exact,

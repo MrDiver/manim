@@ -209,7 +209,7 @@ def test_the_page_waits_for_changes(server) -> None:
     version = server.version
     assert server.wait_for_change(version, timeout=0.01) == (version, None)  # nothing happened
     status, _, body = get(server, f"/api/changes?since={version - 1}")
-    assert status == 200 and json.loads(body) == {"version": version, "error": None}
+    assert status == 200 and json.loads(body) == {"version": version, "picture": server.picture, "error": None}
 
     waiting = []
     thread = threading.Thread(target=lambda: waiting.append(server.wait_for_change(version)))
