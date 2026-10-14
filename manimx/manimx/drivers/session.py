@@ -28,6 +28,9 @@ Design decisions:
   free.
 * **24-bit WAV.** Every audio program reads it; float WAV is not read
   everywhere, and 16 bits would lose the quiet ends of fades.
+* **Files as absolute paths,** not file:// URLs: Kdenlive takes a
+  target_url as a path, so a URL (with %20 for spaces) is not found.
+  Absolute, because programs differ in what a relative path is relative to.
 * **Written by hand.** OpenTimelineIO is JSON, so no library is needed
   for the little of it used here:
   https://opentimelineio.readthedocs.io/en/latest/tutorials/file-format-specification.html
@@ -123,7 +126,7 @@ def _otio(video: Path, stems: list[Stem], length: float, fps: float, markers: li
             "source_range": span(0.0, length),
             "media_reference": {
                 "OTIO_SCHEMA": "ExternalReference.1",
-                "target_url": file.resolve().as_uri(),
+                "target_url": file.resolve().as_posix(),  # a path: Kdenlive does not read file:// URLs
                 "available_range": span(0.0, length),
                 "metadata": {},
             },

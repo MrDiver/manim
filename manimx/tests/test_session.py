@@ -41,7 +41,7 @@ def test_stems_have_the_track_volume_and_every_track(tmp_path) -> None:
     tracks = otio["tracks"]["children"]
     assert [(track["name"], track["kind"]) for track in tracks] == [("Video", "Video"), ("Audio 1", "Audio"), ("Audio 1", "Audio"), ("Music/FX (muted)", "Audio")]
     clip = tracks[3]["children"][0]
-    assert clip["media_reference"]["target_url"].endswith("/renders/demo-stems/Music_FX%20%28muted%29.wav")
+    assert clip["media_reference"]["target_url"] == str((video.parent / "demo-stems" / "Music_FX (muted).wav").resolve())
     assert clip["source_range"]["duration"] == {"OTIO_SCHEMA": "RationalTime.1", "rate": 10, "value": 30.0}
 
 
