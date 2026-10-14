@@ -165,7 +165,7 @@ function drawParts(script) {
     facts.textContent = [
       `${part.length.toFixed(1)} s`,
       part.take ? "recorded" : "not recorded yet",
-      placed ? `on ${trackName("audio", placed.track)} at ${formatTime(placed.start)}` : "not on the timeline",
+      placed ? `on ${trackName("scripts", placed.track)} at ${formatTime(placed.start)}` : "not on the timeline",
     ].join(" · ");
     row.append(title, facts);
     if (!placed) row.append(button("Place at the playhead", () => place(script.name, index, part.length)));
@@ -173,12 +173,12 @@ function drawParts(script) {
   });
 }
 
-/** Put a part on the first audio track with room for it at the playhead. */
+/** Put a part on the first script track with room for it at the playhead. */
 function place(script, part, length) {
   const start = page.state.time;
-  const audio = page.state.timeline.audio ?? [];
+  const parts = (page.state.timeline.audio ?? []).filter((clip) => clip.script);
   let track = 0;
-  while (audio.some((clip) => clip.track === track && clip.start < start + length && clip.end > start)) track += 1;
+  while (parts.some((clip) => clip.track === track && clip.start < start + length && clip.end > start)) track += 1;
   post("/api/audio/add", { script, part, start, track });
 }
 

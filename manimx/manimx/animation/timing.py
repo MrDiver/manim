@@ -390,7 +390,8 @@ class AudioClip:
 class Track:
     """How a track of the timeline plays: its name, and whether it is
     shown, heard and how loud. Scene tracks are the clips' layers, audio
-    tracks the audio clips' tracks; both mute and solo (a scene track's
+    tracks the sound files' tracks, script tracks those of the script
+    parts (their recorded takes); all mute and solo (a scene track's
     sounds are its scenes' play_sound calls)."""
 
     name: str = ""
@@ -422,6 +423,8 @@ class Timeline:
     """Per layer, how its track plays (missing: as a default Track)."""
     audio_tracks: dict[int, Track] = field(default_factory=dict)
     """Per audio track, how it plays (missing: as a default Track)."""
+    script_tracks: dict[int, Track] = field(default_factory=dict)
+    """Per script track (the tracks script parts are placed on), how it plays."""
     live: bool = False
     """Live mode: unfired events hold instead of being an error."""
     uid: int = field(default_factory=new_uid, init=False, repr=False)
@@ -538,7 +541,7 @@ class Timeline:
     def audio(self, start: float = 0.0, end: float | None = None, sample_rate: int = DEFAULT_SAMPLE_RATE) -> np.ndarray:
         """Every clip's sounds and the audio clips mixed on the global timeline, stereo float32
         for ``[start, end)`` (default: the whole timeline)."""
-        soloing = any(track.solo for track in (*self.scene_tracks.values(), *self.audio_tracks.values()))
+        soloing = any(track.solo for tracks in (self.scene_tracks, self.audio_tracks, self.script_tracks) for track in tracks.values())
 
         def heard(track: Track) -> float:
             """How loud a track is heard: 0 when muted, or when others solo."""
@@ -552,7 +555,8 @@ class Timeline:
             entry = audio.placed()
             if entry is not None:
                 time, skip, sound, volume, fade_in, fade_out = entry
-                placed.append((time, skip, sound, volume * heard(self.audio_tracks.get(audio.track, _DEFAULT_TRACK)), fade_in, fade_out))
+                tracks = self.audio_tracks if audio.script is None else self.script_tracks
+                placed.append((time, skip, sound, volume * heard(tracks.get(audio.track, _DEFAULT_TRACK)), fade_in, fade_out))
         return mix([entry for entry in placed if entry[3] > 0.0], start, self.duration if end is None else end, sample_rate)
 
     def segments(self) -> Iterable[tuple[Clip, int, float, float]]:

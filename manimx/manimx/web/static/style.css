@@ -1414,8 +1414,29 @@ button.danger:hover {
   font-size: 12px;
 }
 
+/* Script tracks: the parts of scripts, their words readable on them. */
+.row.script-track:not(.new-track) {
+  height: 52px;
+}
+
+.row.script-track .audio-body {
+  background: #23364b;
+}
+
+.row.script-track .word {
+  background: rgb(140 190 255 / 0.18);
+  border-left-color: rgb(140 190 255 / 0.9);
+  color: #eaf3ff;
+  font: 500 12px/26px system-ui, sans-serif;
+}
+
+.row.script-track .words {
+  inset: 18px 0 4px;
+}
+
 /* A script part not recorded yet: dashed, silent. */
-.audio-body.planned {
+.audio-body.planned,
+.row.script-track .audio-body.planned {
   background: repeating-linear-gradient(135deg, #22303e 0 8px, #1d2834 8px 16px);
   outline: 1px dashed #5d7fa3;
   outline-offset: -1px;

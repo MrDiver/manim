@@ -276,7 +276,7 @@ class MoveWords(UICommand):
 
 @dataclass(frozen=True)
 class EditTrack(UICommand):
-    """Change a track: ``kind`` "scenes" or "audio", its ``index``, and
+    """Change a track: ``kind`` "scenes", "audio" or "scripts", its ``index``, and
     any of name, hidden, locked, muted, solo and volume."""
 
     kind: str
@@ -340,7 +340,7 @@ def parse(route: str, body: dict[str, Any]) -> UICommand:
             return SetScript(name, None)
         case "/api/script/words", {"script": str(script), "part": part, "words": list(words)}:
             return MoveWords(script, _index(part), tuple(_word_time(word) for word in words))
-        case "/api/track", {"kind": "scenes" | "audio" as kind, "index": index}:
+        case "/api/track", {"kind": "scenes" | "audio" | "scripts" as kind, "index": index}:
             return EditTrack(kind, _layer(index), tuple(track_updates({key: value for key, value in body.items() if key not in ("kind", "index")}).items()))
         case "/api/track", _:
             raise EditError(f"{route} does not take {body}")

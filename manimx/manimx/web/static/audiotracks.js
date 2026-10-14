@@ -67,38 +67,47 @@ export function initAudio(shared) {
   });
 }
 
-/** Called by app.js after the scenes' tracks: the audio tracks' rows. */
+/** Kind of track a clip is on: script parts on script tracks, sounds on audio tracks. */
+const kindOf = (clip) => (clip.script ? "scripts" : "audio");
+
+/** Called by app.js after the scenes' tracks: the script tracks, then the audio tracks. */
 export function drawAudioTracks() {
   const { audio = [], editable } = page.state.timeline;
   for (const index of [...selected]) if (!audio[index]) selected.delete(index);
   recordButton.hidden = !editable;
-  if (!editable && !audio.length) return;
-  const named = Object.keys(page.state.timeline.tracks?.audio ?? {}).map(Number);
-  const tracks = [...new Set([...audio.map((clip) => clip.track), ...named])].sort((a, b) => a - b);
-  const free = tracks.length ? tracks[tracks.length - 1] + 1 : 0;
-  for (const track of tracks) {
-    const { row, lane } = page.addRow(`audio:${track}`, 0, "", "track audio-track", false);
-    trackHead(row, "audio", track);
-    audioLane(lane, track);
-    audio.forEach((clip, index) => {
-      if (clip.track === track) lane.append(audioBar(clip, index));
-    });
-  }
-  if (editable) {
-    const { row, lane } = page.addRow(`audio:${free}`, 0, "New audio track", "track audio-track new-track", false);
-    row.title = "Drop a script part or a sound here to put it on a new audio track";
-    audioLane(lane, free);
+  for (const kind of ["scripts", "audio"]) {
+    const clips = audio.map((clip, index) => ({ clip, index })).filter(({ clip }) => kindOf(clip) === kind);
+    if (!editable && !clips.length) continue;
+    const named = Object.keys(page.state.timeline.tracks?.[kind] ?? {}).map(Number);
+    const tracks = [...new Set([...clips.map(({ clip }) => clip.track), ...named])].sort((a, b) => a - b);
+    const rowKind = kind === "scripts" ? "script-track" : "audio-track";
+    for (const track of tracks) {
+      const { row, lane } = page.addRow(`${kind}:${track}`, 0, "", `track ${rowKind}`, false);
+      trackHead(row, kind, track);
+      soundLane(lane, kind, track);
+      for (const { clip, index } of clips) if (clip.track === track) lane.append(audioBar(clip, index));
+    }
+    if (editable) {
+      const free = tracks.length ? tracks[tracks.length - 1] + 1 : 0;
+      const label = kind === "scripts" ? "New script track" : "New audio track";
+      const { row, lane } = page.addRow(`${kind}:${free}`, 0, label, `track ${rowKind} new-track`, false);
+      row.title = kind === "scripts" ? "Drag a script part here (from Scripts, left) to put it on a new script track" : "Drop a sound here to put it on a new audio track";
+      soundLane(lane, kind, free);
+    }
   }
   drawPanel();
 }
 
 // -- dropping and recording -------------------------------------------------------
 
-function audioLane(lane, track) {
-  lane.dataset.audioTrack = track;
+/** A script track's or audio track's lane: script parts are dropped on
+ * script tracks, sounds (from the bin or the desktop) on audio tracks. */
+function soundLane(lane, kind, track) {
+  lane.dataset.kind = kind;
+  lane.dataset.track = track;
   if (!page.state.timeline.editable) return;
   const row = lane.parentElement;
-  const types = ["Files", PART_TYPE, SOUND_TYPE];
+  const types = kind === "scripts" ? [PART_TYPE] : ["Files", SOUND_TYPE];
   lane.addEventListener("dragover", (event) => {
     if (!types.some((type) => event.dataTransfer.types.includes(type))) return;
     event.preventDefault();
@@ -241,7 +250,7 @@ function audioBar(clip, index) {
   if (clip.recorded) drawWaveform(canvas, clip, index, (page.percent(clip.end - clip.start) / 100) * page.elements.ruler.offsetWidth);
   if (clip.script) bar.append(wordBlocks(clip));
   bar.append(...fades(clip));
-  if (page.state.timeline.editable && !isLocked("audio", clip.track)) {
+  if (page.state.timeline.editable && !isLocked(kindOf(clip), clip.track)) {
     bar.classList.add("editable");
     for (const edge of ["in", "out"]) {
       const handle = document.createElement("div");
@@ -271,7 +280,7 @@ function fades(clip) {
     handle.className = "fade-handle";
     handle.title = key === "fade_in" ? "Drag to fade in" : "Drag to fade out";
     ramp.append(handle);
-    if (!page.state.timeline.editable || isLocked("audio", clip.track)) return ramp;
+    if (!page.state.timeline.editable || isLocked(kindOf(clip), clip.track)) return ramp;
     handle.addEventListener("pointerdown", (event) => {
       event.stopPropagation();
       selectOnly(index);
@@ -318,7 +327,7 @@ function wordBlocks(clip) {
     block.textContent = word.text;
     block.title = `${word.text} at ${(clip.start + word.start - cutIn).toFixed(2)} s${page.state.timeline.editable ? ": drag to time it, Shift+drag moves its sentence" : ""}`;
     place(block, word);
-    if (page.state.timeline.editable && !isLocked("audio", clip.track)) block.addEventListener("pointerdown", (event) => dragWord(event, block, clip, index, word, place));
+    if (page.state.timeline.editable && !isLocked(kindOf(clip), clip.track)) block.addEventListener("pointerdown", (event) => dragWord(event, block, clip, index, word, place));
     layer.append(block);
   });
   return layer;
@@ -395,10 +404,10 @@ function markSelected() {
   for (const bar of document.querySelectorAll(".audio-body")) bar.classList.toggle("selected", selected.has(Number(bar.dataset.audio)));
 }
 
-/** The audio track under the vertical position `clientY`, or null. */
-function trackAt(clientX, clientY) {
-  const lane = document.elementFromPoint(clientX, clientY)?.closest(".row.audio-track")?.querySelector(".lane");
-  return lane ? Number(lane.dataset.audioTrack) : null;
+/** The track of `kind` under the pointer, or null. */
+function trackAt(kind, clientX, clientY) {
+  const lane = document.elementFromPoint(clientX, clientY)?.closest(".row")?.querySelector(`.lane[data-kind="${kind}"]`);
+  return lane ? Number(lane.dataset.track) : null;
 }
 
 /** Drag `edge` ("move", "in" or "out") of audio clip `index` (moving: every selected one). */
@@ -418,7 +427,8 @@ function startDrag(event, edge, index) {
   if (additive) return;
   const { audio, clips } = page.state.timeline;
   const clip = audio[index];
-  const moving = edge === "move" ? [...selected] : [index];
+  // Moving: every selected clip on the same kind of track (scripts move with scripts, sounds with sounds).
+  const moving = edge === "move" ? [...selected].filter((i) => kindOf(audio[i]) === kindOf(audio[index])) : [index];
   const bars = new Map(moving.map((i) => [i, document.querySelector(`.audio-body[data-audio="${i}"]`)]));
   const start = new Map(moving.map((i) => [i, { left: parseFloat(bars.get(i).style.left), width: parseFloat(bars.get(i).style.width) }]));
   const secondsPerPixel = page.state.span / page.elements.ruler.getBoundingClientRect().width;
@@ -450,7 +460,7 @@ function startDrag(event, edge, index) {
     showSnap(snap ? snap.target : null);
     let tracks = grab.tracks;
     if (edge === "move") {
-      const over = trackAt(move.clientX, move.clientY);
+      const over = trackAt(kindOf(clip), move.clientX, move.clientY);
       if (over !== null) tracks = Math.max(over - clip.track, -Math.min(...moving.map((i) => audio[i].track)));
     }
     if (delta === grab.delta && tracks === grab.tracks) return;
@@ -463,7 +473,7 @@ function startDrag(event, edge, index) {
       if (edge !== "out") bar.style.left = `${left + shift}%`;
       if (edge === "in") bar.style.width = `${width - shift}%`;
       if (edge === "out") bar.style.width = `${width + shift}%`;
-      const lane = document.querySelector(`.lane[data-audio-track="${audio[i].track + tracks}"]`);
+      const lane = document.querySelector(`.lane[data-kind="${kindOf(audio[i])}"][data-track="${audio[i].track + tracks}"]`);
       if (lane && bar.parentElement !== lane) lane.append(bar);
     }
     const round = (value) => Math.round(value * 1e6) / 1e6;

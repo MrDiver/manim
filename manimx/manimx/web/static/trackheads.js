@@ -2,7 +2,8 @@
 //
 // A track has a name (Video 1, Audio 2 until renamed: double-click it)
 // and its switches: scene tracks hide (the eye: not drawn), mute (the
-// speaker: its scenes' sounds) and lock; audio tracks mute (M), solo (S:
+// speaker: its scenes' sounds) and lock; script tracks (the parts of
+// scripts, and their recordings) and audio tracks mute (M), solo (S:
 // only soloed tracks are heard), lock, and a volume slider. Locked tracks
 // cannot be edited by mistake: their clips do not move or cut. Every
 // change is an edit like any other (POST /api/track, undone with Ctrl+Z)
@@ -25,7 +26,7 @@ export const isLocked = (kind, index) => track(kind, index).locked;
 
 /** The name a track shows: its own, or Video n / Audio n. */
 export function trackName(kind, index) {
-  return track(kind, index).name || `${kind === "scenes" ? "Video" : "Audio"} ${index + 1}`;
+  return track(kind, index).name || `${{ scenes: "Video", audio: "Audio", scripts: "Script" }[kind]} ${index + 1}`;
 }
 
 /** Fill a track row's label with its name and switches. */
@@ -83,7 +84,7 @@ export function trackHead(row, kind, index) {
   }
   switches.append(toggle("locked", "🔒", "Locked: its clips cannot be moved or cut (click to unlock)", "Lock this track against changes"));
   label.append(switches);
-  if (kind === "audio") label.append(volumeSlider(settings.volume, "/api/track", (volume) => ({ kind, index, volume })));
+  if (kind !== "scenes") label.append(volumeSlider(settings.volume, "/api/track", (volume) => ({ kind, index, volume })));
 }
 
 /** A volume slider, 0 to 200 % (100 % is the sound as it is), sending

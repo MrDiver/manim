@@ -113,6 +113,7 @@ class AudioEntry:
     """Path inside the project, e.g. assets/audio/music.wav (None for a script part)."""
     start: float = 0.0
     track: int = 0
+    """The audio track (a script part: the script track) it is on."""
     cut: tuple[float | None, float | None] | None = None
     """In and out points in the file's seconds (a script part's: from the part's start)."""
     volume: float = 1.0
@@ -139,6 +140,8 @@ class Project:
     """Names, visibility, mute, solo and volume of the scene tracks (layers) that have them."""
     audio_tracks: dict[int, Track] = field(default_factory=dict)
     """The same of the audio tracks."""
+    script_tracks: dict[int, Track] = field(default_factory=dict)
+    """The same of the script tracks."""
     _sounds: dict[Path, tuple[int, Sound]] = field(default_factory=dict, init=False, repr=False)
     """Sound files read, with their modification time: read again when changed."""
     _scripts: dict[str, tuple[tuple[int | None, int | None], Script]] = field(default_factory=dict, init=False, repr=False)
@@ -203,14 +206,15 @@ class Project:
                 _check_keys(entry, ["file", "script", "part", "start", "track", "cut", "volume", "fade_in", "fade_out"], f"timeline.audio[{index}]")
                 audio.append(_audio_entry(entry))
             tracks = timeline.get("tracks", {})
-            _check_keys(tracks, ["scenes", "audio"], "timeline.tracks")
+            _check_keys(tracks, ["scenes", "audio", "scripts"], "timeline.tracks")
             scene_tracks = {int(index): _track(data, f"timeline.tracks.scenes.{index}") for index, data in tracks.get("scenes", {}).items()}
             audio_tracks = {int(index): _track(data, f"timeline.tracks.audio.{index}") for index, data in tracks.get("audio", {}).items()}
+            script_tracks = {int(index): _track(data, f"timeline.tracks.scripts.{index}") for index, data in tracks.get("scripts", {}).items()}
         except (KeyError, TypeError, ValueError, AttributeError) as error:
             raise ProjectError(f"invalid {PROJECT_FILE}: {error}") from error
         return cls(
             root=root, name=data["name"], settings=settings, scenes=scenes, timeline=clips, events=events, audio=audio,
-            scene_tracks=scene_tracks, audio_tracks=audio_tracks,
+            scene_tracks=scene_tracks, audio_tracks=audio_tracks, script_tracks=script_tracks,
         )  # fmt: skip
 
     def to_json(self) -> dict[str, Any]:
@@ -224,7 +228,7 @@ class Project:
                 "clips": [_clip_json(entry) for entry in self.timeline],
                 "events": dict(self.events),
                 **({"audio": [_audio_json(entry) for entry in self.audio]} if self.audio else {}),
-                **({"tracks": _tracks_json(self.scene_tracks, self.audio_tracks)} if _tracks_json(self.scene_tracks, self.audio_tracks) else {}),
+                **({"tracks": tracks} if (tracks := _tracks_json(self.scene_tracks, self.audio_tracks, self.script_tracks)) else {}),
             },
         }
 
@@ -321,7 +325,7 @@ class Project:
         # The audio first: its words are events, which decide where clips end.
         timeline = Timeline(
             audio_clips=[self.audio_clip(entry) for entry in self.audio], events=dict(self.events),
-            scene_tracks=dict(self.scene_tracks), audio_tracks=dict(self.audio_tracks),
+            scene_tracks=dict(self.scene_tracks), audio_tracks=dict(self.audio_tracks), script_tracks=dict(self.script_tracks),
         )  # fmt: skip
         previous_end = 0.0
         used: set[str] = set()
@@ -628,7 +632,7 @@ def project_schema() -> dict[str, Any]:
                                     },
                                 },
                             }
-                            for key in ("scenes", "audio")
+                            for key in ("scenes", "audio", "scripts")
                         },
                     },
                     "audio": {
@@ -701,11 +705,11 @@ def _track(data: Any, where: str) -> Track:
     return track
 
 
-def _tracks_json(scenes: dict[int, Track], audio: dict[int, Track]) -> dict[str, Any]:
+def _tracks_json(scenes: dict[int, Track], audio: dict[int, Track], scripts: dict[int, Track]) -> dict[str, Any]:
     """The tracks that differ from the default, with only what differs."""
     default = Track()
     result = {}
-    for key, tracks in (("scenes", scenes), ("audio", audio)):
+    for key, tracks in (("scenes", scenes), ("audio", audio), ("scripts", scripts)):
         changed = {str(index): {name: getattr(track, name) for name in TRACK_FIELDS if getattr(track, name) != getattr(default, name)} for index, track in sorted(tracks.items())}
         changed = {index: data for index, data in changed.items() if data}
         if changed:

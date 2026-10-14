@@ -5,7 +5,7 @@
 // Scripts: every script of the project (scripts/<name>.txt), and below it
 // its parts, the stretches between "---" lines: what is recorded in one
 // go. A part shows its first words, how long it lasts and whether it is
-// recorded; drag it onto an audio track to place it (already placed: it
+// recorded; drag it onto a script track to place it (already placed: it
 // moves there). Clicking a script opens it in the Script tab; "+ New"
 // starts a new one there.
 //
@@ -79,7 +79,7 @@ function drawScripts() {
   if (!scripts.length) {
     const empty = document.createElement("p");
     empty.className = "hint";
-    empty.textContent = "No script yet. Write what is said, then drag its parts onto an audio track.";
+    empty.textContent = "No script yet. Write what is said, then drag its parts onto a script track.";
     elements.scripts.append(empty);
     return;
   }
@@ -119,7 +119,7 @@ function partItem(script, part, index) {
   meta.textContent = `${part.take ? "●" : "○"} ${part.length.toFixed(1)} s`;
   meta.title = part.take ? "Recorded" : "Not recorded yet: timed as if read out";
   item.append(title, meta);
-  item.title = part.clip !== null ? "On the timeline: drag to move it" : "Drag onto an audio track to place it";
+  item.title = part.clip !== null ? "On the timeline: drag to move it" : "Drag onto a script track to place it";
   item.addEventListener("dragstart", (event) => {
     event.dataTransfer.setData(PART_TYPE, JSON.stringify({ script: script.name, part: index }));
     event.dataTransfer.effectAllowed = "copyMove";

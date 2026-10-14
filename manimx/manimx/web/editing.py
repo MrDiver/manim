@@ -95,6 +95,8 @@ if TYPE_CHECKING:
 AUDIO_FOLDER = "assets/audio"
 """Where sound files dropped or recorded in the page are saved."""
 AUDIO_SUFFIXES = {"wav", "mp3", "ogg", "oga", "opus", "flac", "m4a", "aac", "webm"}
+TRACK_KINDS = {"scenes": "scene_tracks", "audio": "audio_tracks", "scripts": "script_tracks"}
+"""The page's name of a kind of track: the attribute holding their settings."""
 HISTORY_LENGTH = 200
 """Edits kept to undo."""
 
@@ -399,12 +401,12 @@ class ProjectEditor:
                 self._change(lambda: self._set_event(name, time))
                 return inverse
             case EditTrack(kind, index, updates):
-                tracks = project.scene_tracks if kind == "scenes" else project.audio_tracks
+                tracks = getattr(project, TRACK_KINDS[kind])
                 old = tracks.get(index, Track())
                 new = dataclasses.replace(old, **dict(updates))
 
                 def edit_track() -> None:
-                    for target in (tracks, self.timeline.scene_tracks if kind == "scenes" else self.timeline.audio_tracks):
+                    for target in (tracks, getattr(self.timeline, TRACK_KINDS[kind])):
                         if new == Track():
                             target.pop(index, None)
                         else:
@@ -711,7 +713,7 @@ class ProjectEditor:
         project = self._project()
         return {
             kind: {str(index): dataclasses.asdict(track) for index, track in tracks.items()}
-            for kind, tracks in (("scenes", project.scene_tracks), ("audio", project.audio_tracks))
+            for kind, tracks in (("scenes", project.scene_tracks), ("audio", project.audio_tracks), ("scripts", project.script_tracks))
         }
 
     def voice(self) -> dict[str, float]:
