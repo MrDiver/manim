@@ -1,12 +1,12 @@
 """The renderer interface: the ``RenderConfig`` and ``Camera`` a renderer is
 given next to the render object tree (``RNode`` and its subclasses in
-``manim._native``), and the drawing methods used by Manager."""
+``manim._native``), and the drawing methods used by Manager.
+"""
 
 from __future__ import annotations
 
 import enum
 import math
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -16,8 +16,8 @@ from manim.utils.color import BLACK, ManimColor, ParsableManimColor
 from manim.utils.transform import Transform
 
 if TYPE_CHECKING:
-    from manim.mobject.mobject import Mobject
     from manim._native import RNode
+    from manim.mobject.mobject import Mobject
     from manim.scene.scene import Scene
     from manim.typing import RGBAPixelArray
 
@@ -105,7 +105,7 @@ class ShadowMethod(enum.Enum):
 
 @dataclass(frozen=True, slots=True)
 class RenderConfig:
-    """What a renderer is given next to the render snapshots of one frame."""
+    """What a renderer is given next to the render object tree of one frame."""
 
     # Not ported yet: every field typed ``... | None = None`` with a
     # ``# manimx:`` comment below. They are optional only until a renderer
@@ -187,7 +187,8 @@ class RenderConfig:
 class CameraViewState:
     """What one camera view shows in a frame: the picture of ``camera``,
     drawn on the shape with ``uid``, which is ``width`` by ``height`` world
-    units, centered on its local origin."""
+    units, centered on its local origin.
+    """
 
     uid: int
     camera: Camera
@@ -200,20 +201,18 @@ class CameraViewState:
 
 
 class Renderer(Protocol):
-    """Draw the render snapshots of one frame into an image.
+    """Draw the render object tree of one frame into an image.
 
-    A renderer is a long-lived service. It is given the snapshots and a
-    :class:`RenderConfig`, whose ``camera`` is the snapshot of the scene's
-    camera at that time, and nothing else: it never reads a Scene, a
-    Mobject or the animation clock. It may keep what it built between
+    A renderer is a long-lived service. It is given the root of the tree
+    and a :class:`RenderConfig`, whose ``camera`` is the snapshot of the
+    scene's camera at that time, and nothing else: it never reads a Scene,
+    a Mobject or the animation clock. It may keep what it built between
     frames, keyed by ``RNode.uid`` and the versions of its values
     (``RNode.version(field)``).
     """
 
-    def render(
-        self, nodes: Sequence[RNode], config: RenderConfig, /
-    ) -> RGBAPixelArray:
-        """Draw ``nodes`` in order with ``config``; rows top to bottom."""
+    def render(self, root: RNode, config: RenderConfig, /) -> RGBAPixelArray:
+        """Draw the tree under ``root`` with ``config``; rows top to bottom."""
         ...
 
 
