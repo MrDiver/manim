@@ -4,13 +4,17 @@
 //!
 //! 1. `robjects`: the render object tree, plain values; the interface
 //!    between the scene side and every renderer.
+//!
+//! `python` holds the Python classes of these stages.
 
 use pyo3::prelude::*;
 
+mod python;
 mod robjects;
 
 #[pymodule]
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("VERSION", env!("CARGO_PKG_VERSION"))?;
+    python::robjects::register(module)?;
     Ok(())
 }
