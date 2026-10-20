@@ -20,6 +20,7 @@ use pyo3::prelude::*;
 mod cache;
 mod error;
 mod flat;
+mod gpu;
 mod python;
 mod render;
 mod resolve;
