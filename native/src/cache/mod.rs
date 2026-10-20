@@ -45,6 +45,12 @@ impl<K: Eq + Hash, T: PartialEq, V> Memo<K, T, V> {
         }
     }
 
+    /// The value kept for `key`, whatever it was built from: for readers
+    /// that run after the owner brought the entry up to date this frame.
+    pub fn get(&self, key: &K) -> Option<&V> {
+        self.entries.get(key).map(|(_, value)| value)
+    }
+
     /// Keep only the entries whose key `keep` accepts.
     pub fn retain(&mut self, mut keep: impl FnMut(&K) -> bool) {
         self.entries.retain(|key, _| keep(key));
