@@ -1,7 +1,8 @@
-//! The flat scene: a render object tree resolved into world space.
+//! The flat scene: a render object tree resolved into world space, and
+//! its changes from one tree to the next.
 //!
 //! ```text
-//! RNode tree (robjects/) ──flatten──▶ FlatScene ──▶ a renderer
+//! RNode tree (robjects/) ──resolve/──▶ Update ──▶ a renderer
 //! ```
 //!
 //! A tree says where each node is relative to its parent; drawing wants
@@ -10,6 +11,14 @@
 //! masks of its clip scopes, and its lights. Nothing in it is relative to
 //! anything else: no groups, no parents of nodes, only the nesting of clip
 //! scopes.
+//!
+//! A renderer never gets a tree, and never a whole scene twice: it gets
+//! `Update`s, the changes of one scene since the update before. The first
+//! update of a scene starts with `Change::Reset`; later ones say which
+//! leaves changed in place (`Change::Set`) or were added after everything
+//! else (`Change::Append`). What a renderer keeps of a scene, and how it
+//! draws it, is its own business; it keeps a scene until it is told to
+//! forget it.
 //!
 //! This module depends on the render objects alone. It knows nothing of
 //! how a scene is made or how a renderer draws it.
@@ -22,6 +31,43 @@ use crate::robjects::RNode;
 
 /// Clip index of something not inside any clipping group.
 pub const NO_CLIP: i32 = -1;
+
+/// The changes of one scene, in order.
+pub struct Update {
+    /// The scene: the uid of its tree's root.
+    pub scene: u64,
+    /// Increases exactly when the scene changes, across all scenes: equal
+    /// revisions promise an equal scene.
+    pub revision: u64,
+    pub changes: Vec<Change>,
+}
+
+pub enum Change {
+    /// The whole scene; whatever was there before is gone.
+    Reset(FlatScene),
+    /// Leaves added after everything else: `items` and `lights` go at the
+    /// ends of their lists, `clips` are new clip scopes after the others.
+    /// Their orders and clip indices already count everything before.
+    Append(FlatScene),
+    /// A leaf's new value, world matrix or alpha, in its place.
+    Set {
+        place: Place,
+        node: Arc<RNode>,
+        world: DMat4,
+        alpha: f64,
+    },
+}
+
+/// Where a leaf is in a `FlatScene`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    /// `items[index]`.
+    Item(usize),
+    /// `clips[scope].mask[index]`.
+    Mask(usize, usize),
+    /// `lights[index]`.
+    Light(usize),
+}
 
 /// One drawable leaf with everything resolved from its ancestors.
 #[derive(Clone)]

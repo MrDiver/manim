@@ -4,8 +4,10 @@
 //!
 //! 1. `robjects`: the render object tree, plain values; the interface
 //!    between the scene side and every renderer.
-//! 2. `flat`: a tree resolved into world space (`FlatScene`), what a
-//!    renderer draws from.
+//! 2. `resolve`: trees turned into scenes in world space, sent as the
+//!    changes since the last tree (`Resolver`).
+//! 3. `flat`: a scene in world space and its changes (`FlatScene`,
+//!    `Update`): all a renderer is given besides its settings.
 //!
 //! `python` holds the Python classes of these stages.
 
@@ -13,6 +15,7 @@ use pyo3::prelude::*;
 
 mod flat;
 mod python;
+mod resolve;
 mod robjects;
 
 #[pymodule]
