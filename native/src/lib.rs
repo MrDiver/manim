@@ -12,10 +12,12 @@
 //!    settings rendered into layers; it knows nothing of mobjects,
 //!    trees, frames or Python.
 //!
+//! `cache` holds `Memo`, the one shape every cache of the renderer has;
 //! `python` holds the Python classes of these stages.
 
 use pyo3::prelude::*;
 
+mod cache;
 mod flat;
 mod python;
 mod render;
