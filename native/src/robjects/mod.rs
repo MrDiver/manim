@@ -166,4 +166,85 @@ impl RNode {
             _ => Vec::new(),
         }
     }
+
+    /// Equal fingerprints promise equal trees: every node's uid,
+    /// transform, alpha, plain values and the versions of its versioned
+    /// ones, in tree order.
+    pub fn fingerprint(&self, into: &mut Vec<u64>) {
+        let float = |value: f64| value.to_bits();
+        into.push(self.uid);
+        into.extend(self.transform.position.to_array().map(float));
+        into.extend(self.transform.rotation.to_array().map(float));
+        into.extend(self.transform.scale.to_array().map(float));
+        into.push(float(self.alpha));
+        match &self.kind {
+            Kind::Group { children } => {
+                into.extend([0, children.len() as u64]);
+                for child in children {
+                    child.fingerprint(into);
+                }
+            }
+            Kind::ClippingGroup {
+                mask,
+                content,
+                one_sided,
+            } => {
+                into.extend([1, *one_sided as u64]);
+                for part in [mask, content] {
+                    match part {
+                        Some(node) => node.fingerprint(into),
+                        None => into.push(u64::MAX),
+                    }
+                }
+            }
+            Kind::Shape2D { path, fill } => {
+                into.extend([2, fill.version]);
+                path.fingerprint(into);
+            }
+            Kind::Curve3D { path } => {
+                into.push(3);
+                path.fingerprint(into);
+            }
+            Kind::Shape3D(surface) => {
+                into.push(4);
+                surface.fingerprint(into);
+            }
+            Kind::Particles { surface, instances } => {
+                into.extend([5, instances.version]);
+                surface.fingerprint(into);
+            }
+            Kind::Light(light) => {
+                into.extend([6, light.kind as u64]);
+                into.extend(light.color.map(float));
+                into.extend([
+                    float(light.intensity),
+                    float(light.size),
+                    light.cast_shadows as u64,
+                    light.range.map_or(u64::MAX, float),
+                ]);
+                let (inner, outer) = light.cone.unwrap_or((-1.0, -1.0));
+                into.extend([float(inner), float(outer)]);
+            }
+        }
+    }
+}
+
+impl Path {
+    fn fingerprint(&self, into: &mut Vec<u64>) {
+        into.extend([
+            self.points.version,
+            self.stroke.version,
+            self.cast_shadows as u64,
+        ]);
+    }
+}
+
+impl Surface {
+    fn fingerprint(&self, into: &mut Vec<u64>) {
+        into.extend([
+            self.mesh.version,
+            self.material.version,
+            self.cast_shadows as u64,
+        ]);
+    }
 }
