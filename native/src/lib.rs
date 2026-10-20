@@ -18,6 +18,7 @@
 use pyo3::prelude::*;
 
 mod cache;
+mod composite;
 mod error;
 mod flat;
 mod gpu;
