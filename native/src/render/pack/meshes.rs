@@ -187,7 +187,10 @@ impl MeshPacker {
     /// `version` (its geometry built before), placed in the arenas.
     fn place(&mut self, uid: u64, version: u64) -> (usize, usize) {
         self.seen.insert(uid);
-        let geometry = self.geometry.get(&uid).expect("built before placing");
+        let geometry = self
+            .geometry
+            .get(&uid, &version)
+            .expect("built before placing");
         if let Some(slot) = self.slots.get(&uid) {
             if slot.0 == version {
                 return (slot.3, slot.1);
@@ -310,7 +313,10 @@ impl MeshPacker {
                 }
             };
             let (first_index, base_vertex) = self.place(node.uid, surface.mesh.version);
-            let geometry = self.geometry.get(&node.uid).expect("built above");
+            let geometry = self
+                .geometry
+                .get(&node.uid, &surface.mesh.version)
+                .expect("built above");
             let draw = DrawIndexed {
                 index_count: geometry.index_count,
                 instance_count: count as u32,
