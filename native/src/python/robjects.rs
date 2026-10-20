@@ -169,7 +169,7 @@ fn given<'a, 'py>(value: Option<&'a Bound<'py, PyAny>>) -> Option<&'a Bound<'py,
 }
 
 /// A `manim.utils.transform.Transform` (identity for None).
-fn transform_from_py(transform: Option<&Bound<'_, PyAny>>) -> PyResult<Transform> {
+pub fn transform_from_py(transform: Option<&Bound<'_, PyAny>>) -> PyResult<Transform> {
     let Some(transform) = given(transform) else {
         return Ok(Transform::IDENTITY);
     };

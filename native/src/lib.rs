@@ -31,5 +31,6 @@ mod robjects;
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("VERSION", env!("CARGO_PKG_VERSION"))?;
     python::robjects::register(module)?;
+    module.add_class::<python::renderer::WgpuRenderer>()?;
     Ok(())
 }

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 
-from manim.utils.color import BLACK, ManimColor, ParsableManimColor
+from manim.utils.color import BLACK, WHITE, ManimColor, ParsableManimColor
 from manim.utils.transform import Transform
 
 if TYPE_CHECKING:
@@ -107,60 +107,51 @@ class ShadowMethod(enum.Enum):
 class RenderConfig:
     """What a renderer is given next to the render object tree of one frame."""
 
-    # Not ported yet: every field typed ``... | None = None`` with a
-    # ``# manimx:`` comment below. They are optional only until a renderer
-    # implements them; as each is ported, give it back its manimx type and
-    # default (the comment) and drop it from this list: gpu, msaa_samples,
-    # time, layer_depth_step, ambient_color, ambient_intensity, exposure,
-    # default_lights, shadows, shadow_resolution, shadow_softness,
-    # shadow_samples, shadow_method, shadow_share, shadow_index, jitter,
-    # camera_views, hide_camera_views. ``view_aspect`` is optional in
-    # manimx itself.
     pixel_width: int = 1920
     pixel_height: int = 1080
     background_color: ParsableManimColor = BLACK
     background_opacity: float = 1.0
     camera: Camera = field(default_factory=Camera)
-    gpu: str | None = None  # manimx: "high-performance"
+    gpu: str = "high-performance"
     """Which GPU renders: ``"high-performance"`` a dedicated one,
     ``"low-power"`` an integrated one (when the dedicated one is busy, or
     to save power); the only one when there is just one."""
-    msaa_samples: int | None = None  # manimx: 4
-    time: float | None = None  # manimx: 0.0
+    msaa_samples: int = 4
+    time: float = 0.0
     """Seconds, exposed to shaders as ``frame.time``."""
-    layer_depth_step: float | None = None  # manimx: 2e-7
+    layer_depth_step: float = 2e-7
     """Depth offset between consecutive 2D layers."""
-    ambient_color: ParsableManimColor | None = None  # manimx: WHITE
-    ambient_intensity: float | None = None  # manimx: 0.15
+    ambient_color: ParsableManimColor = WHITE
+    ambient_intensity: float = 0.15
     """Constant ambient light on meshes, on top of the scene's lights."""
-    exposure: float | None = None  # manimx: 1.0
+    exposure: float = 1.0
     """Multiplies lit mesh colors before tone mapping."""
-    default_lights: bool | None = None  # manimx: True
+    default_lights: bool = True
     """Light meshes with a key light when the scene contains no lights."""
-    shadows: bool | None = None  # manimx: True
+    shadows: bool = True
     """Master switch for all shadows (lights and objects have their own)."""
-    shadow_resolution: int | None = None  # manimx: 2048
+    shadow_resolution: int = 2048
     """Width and height of every shadow map in texels."""
-    shadow_softness: float | None = None  # manimx: 1.0
+    shadow_softness: float = 1.0
     """Multiplies every light's ``size``: 0 gives hard shadows everywhere."""
-    shadow_samples: int | None = None  # manimx: 16
+    shadow_samples: int = 16
     """Taps per shadow lookup; more give smoother penumbras."""
-    shadow_method: ShadowMethod | None = None  # manimx: "pcss" (here ShadowMethod.PCSS)
-    shadow_share: int | None = None  # manimx: 1
+    shadow_method: ShadowMethod = ShadowMethod.PCSS
+    shadow_share: int = 1
     """How many renders a frame averages. Each takes a share of
     ``shadow_samples`` taps, rotated differently per render, so the
     average still gets them all."""
-    shadow_index: int | None = None  # manimx: 0
+    shadow_index: int = 0
     """Which of the ``shadow_share`` renders this is: it turns the tap
     pattern (the same in every frame, so unchanged frames stay equal)."""
-    jitter: tuple[float, float] | None = None  # manimx: (0.0, 0.0)
+    jitter: tuple[float, float] = (0.0, 0.0)
     """Moves the picture by this many pixels (right, up), for the renders
     of a frame to cover each pixel."""
-    camera_views: tuple[CameraViewState, ...] | None = None  # manimx: ()
+    camera_views: tuple[CameraViewState, ...] = ()
     """The camera views of the frame (see :class:`CameraViewState`): the
     shape with the uid of entry ``i`` shows layer ``i`` of the renderer's
     camera view texture."""
-    hide_camera_views: bool | None = None  # manimx: False
+    hide_camera_views: bool = False
     """Leave the shapes of :attr:`camera_views` out: set while a camera
     view itself is rendered, so views never show views."""
     view_aspect: float | None = None
@@ -181,6 +172,12 @@ class RenderConfig:
     def background_rgba(self) -> tuple[float, float, float, float]:
         r, g, b = ManimColor.parse(self.background_color).to_rgb()
         return (float(r), float(g), float(b), self.background_opacity)
+
+    @property
+    def ambient_rgb(self) -> tuple[float, float, float]:
+        """The ambient color as sRGB floats, as a renderer reads it."""
+        r, g, b = ManimColor.parse(self.ambient_color).to_rgb()
+        return (float(r), float(g), float(b))
 
 
 @dataclass(frozen=True, slots=True)
