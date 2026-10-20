@@ -8,6 +8,9 @@
 //!    changes since the last tree (`Resolver`).
 //! 3. `flat`: a scene in world space and its changes (`FlatScene`,
 //!    `Update`): all a renderer is given besides its settings.
+//! 4. `render`: the wgpu renderer, one scene seen with one view's
+//!    settings rendered into layers; it knows nothing of mobjects,
+//!    trees, frames or Python.
 //!
 //! `python` holds the Python classes of these stages.
 
@@ -15,6 +18,7 @@ use pyo3::prelude::*;
 
 mod flat;
 mod python;
+mod render;
 mod resolve;
 mod robjects;
 

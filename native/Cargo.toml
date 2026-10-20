@@ -13,3 +13,4 @@ crate-type = ["cdylib", "rlib"]
 pyo3 = { version = "0.30.1", features = ["abi3-py311"] }
 glam = "0.34.1"
 numpy = "0.30.0"
+bytemuck = { version = "1.25.2", features = ["derive"] }
