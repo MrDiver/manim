@@ -1,6 +1,6 @@
 """The renderer interface: the ``RenderConfig`` and ``Camera`` a renderer is
-given next to the render snapshots (:mod:`manim.renderer.snapshot`), and
-the drawing methods used by Manager."""
+given next to the render object tree (``RNode`` and its subclasses in
+``manim._native``), and the drawing methods used by Manager."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from manim.utils.transform import Transform
 
 if TYPE_CHECKING:
     from manim.mobject.mobject import Mobject
-    from manim.renderer.snapshot import RNode
+    from manim._native import RNode
     from manim.scene.scene import Scene
     from manim.typing import RGBAPixelArray
 
@@ -206,7 +206,8 @@ class Renderer(Protocol):
     :class:`RenderConfig`, whose ``camera`` is the snapshot of the scene's
     camera at that time, and nothing else: it never reads a Scene, a
     Mobject or the animation clock. It may keep what it built between
-    frames, keyed by :attr:`.RNode.uid` and :attr:`.RNode.versions`.
+    frames, keyed by ``RNode.uid`` and the versions of its values
+    (``RNode.version(field)``).
     """
 
     def render(
