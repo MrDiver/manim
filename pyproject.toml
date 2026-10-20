@@ -101,15 +101,21 @@ dev = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.12.1,<0.13.0"]
-build-backend = "uv_build"
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
 
 [tool.uv]
 required-version = ">=0.10.0"
+# Rebuild the native part when its sources change.
+cache-keys = [{ file = "pyproject.toml" }, { file = "native/Cargo.toml" }, { file = "native/src/**/*.rs" }]
 
-[tool.uv.build-backend]
-module-root = ""
-module-name = "manim"
+[tool.maturin]
+# The Python package manim plus the Rust crate in native/ as the
+# extension module manim._native.
+python-source = "."
+module-name = "manim._native"
+manifest-path = "native/Cargo.toml"
+features = ["pyo3/extension-module"]
 
 [tool.pytest.ini_options]
 markers = "slow: Mark the test as slow. Can be skipped with --skip_slow"
