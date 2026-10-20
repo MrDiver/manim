@@ -91,8 +91,8 @@ impl Fill {
 }
 
 /// A stroke: colors, opacities and widths are one value or a list spread
-/// over the points; `joints` (`JointType` values) one value or a list
-/// spread over the curves; one `cap` (a `CapStyle` value). Widths are in
+/// over the points; `joints` (`LineJointType` values) one value or a list
+/// spread over the curves; one `cap` (a `CapStyleType` value). Widths are in
 /// Manim's units: 4 is 0.04 world units (`STROKE_WIDTH_SCALE`).
 pub struct Stroke {
     pub version: u64,

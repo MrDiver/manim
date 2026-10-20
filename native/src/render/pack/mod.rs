@@ -2,4 +2,6 @@
 //! the records the GPU reads, through the store it keeps of each scene
 //! (store.rs). Nothing here touches the GPU.
 
+pub mod color;
+pub mod shapes;
 pub mod store;
