@@ -8,6 +8,7 @@ pub mod casters;
 pub mod color;
 pub mod lights;
 pub mod meshes;
+pub mod packer;
 pub mod shadows;
 pub mod shapes;
 pub mod store;
