@@ -4,11 +4,14 @@
 //!
 //! 1. `robjects`: the render object tree, plain values; the interface
 //!    between the scene side and every renderer.
+//! 2. `flat`: a tree resolved into world space (`FlatScene`), what a
+//!    renderer draws from.
 //!
 //! `python` holds the Python classes of these stages.
 
 use pyo3::prelude::*;
 
+mod flat;
 mod python;
 mod robjects;
 
