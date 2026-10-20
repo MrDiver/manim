@@ -87,16 +87,6 @@ impl ShadowPass {
         }
     }
 
-    /// Width and height of every shadow map.
-    pub fn resolution(&self) -> u32 {
-        self.resolution
-    }
-
-    /// How many layers the last render's shadow views use.
-    pub fn layer_count(&self) -> u32 {
-        self.scopes.len() as u32
-    }
-
     /// Upload the views. Returns whether bind groups that refer to the
     /// maps, the views or the frames must be made again.
     pub fn prepare(&mut self, gpu: &Gpu, shadows: &ShadowViews, resolution: u32) -> bool {

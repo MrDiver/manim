@@ -51,11 +51,6 @@ pub struct TexturePool {
 }
 
 impl TexturePool {
-    /// The texture named `name`, if one was made.
-    pub fn find(&self, name: &str) -> Option<&wgpu::Texture> {
-        self.textures.get(name)
-    }
-
     pub fn get(
         &mut self,
         device: &wgpu::Device,
