@@ -28,7 +28,7 @@
 #include "surface_shader.wgsl"
 #include "lighting.wgsl"
 
-// Mirrors `MeshObject` in core/src/packing/records.rs.
+// Mirrors `MeshObject` in native/src/render/packet/records.rs.
 struct MeshObject {
     model: mat4x4<f32>,
     normal_matrix: mat4x4<f32>, // inverse transpose of the model's 3x3 part
@@ -38,7 +38,8 @@ struct MeshObject {
     _pad1: u32,
 };
 
-// Interleaved as `MESH_VERTEX_SIZE` in core/src/packing/records.rs says (built by core_callbacks.py).
+// Interleaved as `MeshVertex` in native/src/render/packet/records.rs (built by
+// native/src/render/pack/meshes.rs).
 struct MeshVertex {
     position: vec3<f32>,
     u: f32,

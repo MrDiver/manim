@@ -7,7 +7,7 @@ const TONE_MAP_AGX: u32 = 3u;
 const TONE_MAP_REINHARD: u32 = 4u;
 
 /// Map linear HDR radiance into [0, 1] with the operator selected by
-/// `curve` (one of the TONE_MAP_* values, see ToneMap in effects.py).
+/// `curve` (one of the TONE_MAP_* values).
 fn tone_map(color: vec3<f32>, curve: u32) -> vec3<f32> {
     switch curve {
         case TONE_MAP_PBR_NEUTRAL: { return tone_map_pbr_neutral(color); }

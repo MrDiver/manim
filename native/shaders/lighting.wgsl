@@ -10,7 +10,7 @@ const LIGHT_DIRECTIONAL: u32 = 0u;
 const LIGHT_POINT: u32 = 1u;
 const LIGHT_SPOT: u32 = 2u;
 
-// Mirrors `Light` in core/src/packing/records.rs.
+// Mirrors `Light` in native/src/render/packet/records.rs.
 struct Light {
     position: vec3<f32>,        // world (point, spot)
     kind: u32,

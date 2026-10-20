@@ -6,7 +6,7 @@
 
 #include "surface.wgsl"
 
-// Mirrors `Material` in core/src/packing/records.rs.
+// Mirrors `Material` in native/src/render/packet/records.rs.
 struct Material {
     base_color: vec4<f32>,      // linear RGBA factor
     emissive: vec4<f32>,        // linear RGB factor (strength applied), w unused

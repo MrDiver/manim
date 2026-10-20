@@ -35,7 +35,7 @@
 // `shadow_transmittance` and `shadow_translucent_depth` declared by the
 // including shader (deferred_lighting.wgsl, mesh.wgsl).
 
-// Mirrors `ShadowView` in core/src/packing/records.rs.
+// Mirrors `ShadowView` in native/src/render/packet/records.rs.
 struct ShadowView {
     view_projection: mat4x4<f32>,
     params: vec4<f32>,          // near, far, frustum width, perspective (1) / orthographic (0)
@@ -229,7 +229,7 @@ fn vogel(index: u32, count: u32, rotation: f32) -> vec2<f32> {
     return radius * vec2<f32>(cos(angle), sin(angle));
 }
 
-/// Cube face of a direction, in the order of `CUBE_FACES` in core/src/packing/shadows.rs.
+/// Cube face of a direction, in the order of `CUBE_FACES` in native/src/render/pack/shadows.rs.
 fn cube_face(direction: vec3<f32>) -> u32 {
     let a = abs(direction);
     if a.x >= a.y && a.x >= a.z {

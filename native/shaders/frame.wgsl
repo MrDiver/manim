@@ -1,5 +1,5 @@
 // Per-frame values shared by every pipeline. Mirrors `Frame` in
-// core/src/packing/records.rs (and frame.py); always bound at group 0, binding 0.
+// native/src/render/packet/records.rs; always bound at group 0, binding 0.
 
 struct Frame {
     view: mat4x4<f32>,

@@ -42,7 +42,7 @@
 // -2 - i.
 
 // ---------------------------------------------------------------------------
-// Bindings (layouts mirror the record structs in core/src/packing/records.rs)
+// Bindings (layouts mirror the record structs in native/src/render/packet/records.rs)
 // ---------------------------------------------------------------------------
 
 #include "frame.wgsl"
@@ -321,7 +321,7 @@ fn tinted_image(tint: vec4<f32>, in: VertexOutput, gradients: vec4<f32>) -> vec4
 }
 
 // ---------------------------------------------------------------------------
-// Fill: pre-tessellated triangles (see core/src/geometry/tessellation.rs)
+// Fill: pre-tessellated triangles (see native/src/render/pack/shapes/tessellation.rs)
 // ---------------------------------------------------------------------------
 
 /// The fill color at a vertex: the cubic Bezier of its source curve's four
@@ -380,10 +380,10 @@ const SEGMENTS: u32 = 24u;
 const FAN_TRIANGLES: u32 = 8u;
 const RIBBON_VERTICES: u32 = SEGMENTS * 6u;
 const FAN_VERTICES: u32 = FAN_TRIANGLES * 3u;
-// Keep in sync with STROKE_VERTEX_COUNT in core/src/packing/records.rs.
+// Keep in sync with STROKE_VERTEX_COUNT in native/src/render/packet/records.rs.
 const STROKE_VERTEX_COUNT: u32 = RIBBON_VERTICES + 2u * FAN_VERTICES;
 
-// Values of manimx.robjects.style.JointType / CapStyle.
+// Values of manim's LineJointType / CapStyleType.
 const JOINT_AUTO: u32 = 0u;
 const JOINT_ROUND: u32 = 1u;
 const JOINT_BEVEL: u32 = 2u;
