@@ -7,4 +7,5 @@
 //! `Uploads` (packet/), and keeps only GPU buffers, pipelines and
 //! textures.
 
+pub mod pack;
 pub mod packet;
