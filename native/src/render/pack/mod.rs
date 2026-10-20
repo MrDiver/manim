@@ -4,6 +4,8 @@
 
 pub mod arena;
 pub mod bvh;
+pub mod casters;
 pub mod color;
 pub mod shapes;
 pub mod store;
+pub mod vectors;
