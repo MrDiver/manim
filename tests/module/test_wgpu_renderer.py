@@ -4,6 +4,7 @@ groups, and the frame held when nothing changed.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 
 import numpy as np
@@ -180,3 +181,28 @@ def test_both_gpu_memory_choices_render_and_others_are_refused():
         assert np.abs(frame[pixel(-3.5, 0.0)][:3] - [88, 196, 221]).max() <= 1
     with pytest.raises(ValueError, match="compact"):
         native.WgpuRenderer().render(scene(), RenderConfig(gpu_memory="huge"))
+
+
+def test_the_renderer_reads_every_render_config_field():
+    """A field the renderer never reads is a setting that does nothing."""
+
+    class Recorder:
+        """A RenderConfig that notes each field read, also through its
+        properties (``background_rgba`` reads ``background_color``).
+        """
+
+        def __init__(self, config: RenderConfig):
+            object.__setattr__(self, "config", config)
+            object.__setattr__(self, "read", set())
+
+        def __getattr__(self, name: str):
+            attribute = getattr(type(self.config), name, None)
+            if isinstance(attribute, property):
+                return attribute.fget(self)
+            self.read.add(name)
+            return getattr(self.config, name)
+
+    recorder = Recorder(RenderConfig(pixel_width=WIDTH, pixel_height=HEIGHT))
+    native.WgpuRenderer().render(scene(), recorder)
+    fields = {field.name for field in dataclasses.fields(RenderConfig)}
+    assert fields - recorder.read == set()
