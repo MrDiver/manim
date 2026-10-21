@@ -8,6 +8,7 @@
 pub mod geometry;
 pub mod passes;
 pub mod targets;
+pub mod uploads;
 
 use crate::error::Result;
 use crate::gpu::buffer::GrowableBuffer;
@@ -18,8 +19,9 @@ use crate::render::draw::passes::lighting::LightingPass;
 use crate::render::draw::passes::shadow::ShadowPass;
 use crate::render::draw::passes::{gbuffer, mask, translucent, vector};
 use crate::render::draw::targets::RenderTargets;
+use crate::render::draw::uploads::{Records, Uploads};
 use crate::render::packet::records::Frame;
-use crate::render::packet::{Packet, Records, Uploads};
+use crate::render::packet::Packet;
 
 /// The pictures of a view's camera views, made before the view (by the
 /// compositor): a 2D array texture, one layer per camera view, which the

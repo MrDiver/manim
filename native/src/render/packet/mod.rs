@@ -9,11 +9,12 @@
 //! - `Packet`: the frame's draw lists (vector draws, mesh objects,
 //!   materials and draws, lights, shadow views) and the clip scopes'
 //!   nesting.
-//! - `Uploads`: the record buffers the draws read, each with the record
-//!   ranges written since the last upload (None: all of them), so the
-//!   drawer patches its GPU buffers or rewrites them whole.
 //! - records.rs: the GPU records themselves, field for field as the WGSL
 //!   structs declare them.
+//!
+//! `Uploads`, the record buffers the draws read, each with the record
+//! ranges written since the last upload, are the drawer's
+//! (draw/uploads.rs): it uploads them, the packer fills them.
 //!
 //! The drawer keeps nothing but GPU buffers, pipelines and textures; how
 //! the records came about (scenes, caches, culling) is the packer's.
@@ -36,14 +37,6 @@ pub const NO_CLIP: i32 = -1;
 /// by clip scope (unclipped first) and the runs `(clip scope, count)` of
 /// equal clip scopes among them.
 pub type ShadowList<T> = (i32, Vec<T>, Vec<(i32, u32)>);
-
-/// Records to upload: their bytes, the bytes of one record, and the record
-/// ranges written since the last upload (None: upload all of them).
-pub struct Records<'a> {
-    pub bytes: &'a [u8],
-    pub record_size: usize,
-    pub written: Option<Vec<(usize, usize)>>,
-}
 
 /// What the passes draw for one view.
 pub struct Packet {
@@ -133,13 +126,4 @@ pub struct ShadowViews {
     pub scopes: Vec<i32>,
     /// Per layer, whether it may differ from the previous frame's.
     pub changed: Vec<bool>,
-}
-
-/// The record buffers a packet's draws read.
-pub struct Uploads<'a> {
-    /// Per page of vector records: objects, instances, fill vertices,
-    /// fill colors, stroke points, stroke curves.
-    pub vector_pages: Vec<[Records<'a>; 6]>,
-    /// The mesh vertices and indices, when the packet has meshes.
-    pub meshes: Option<[Records<'a>; 2]>,
 }

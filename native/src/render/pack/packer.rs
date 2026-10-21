@@ -16,6 +16,7 @@ use glam::DMat4;
 
 use crate::error::{Error, Result};
 use crate::flat::{Change, DrawItem, FlatScene, Update};
+use crate::render::draw::uploads::{Records, Uploads};
 use crate::render::pack::arena::Arena;
 use crate::render::pack::lights;
 use crate::render::pack::meshes::MeshPacker;
@@ -25,7 +26,7 @@ use crate::render::pack::vectors::{
     CameraViews, Culling, VectorFrame, VectorItems, VectorPacker, DEFAULT_PAGE_BYTES,
 };
 use crate::render::packet::records::Light;
-use crate::render::packet::{MeshPacket, Packet, Records, Uploads};
+use crate::render::packet::{MeshPacket, Packet};
 
 /// Packs after which the per-node data of nodes in no scene are dropped.
 const CACHE_MAX_AGE: u64 = 1024;

@@ -19,9 +19,10 @@ use crate::error::Result;
 use crate::gpu::buffer::GrowableBuffer;
 use crate::gpu::device::{shadow_depth_stencil, Gpu, ShadowStencil, COLOR_FORMAT, DEPTH_FORMAT};
 use crate::render::draw::geometry::images::ImageTexture;
+use crate::render::draw::uploads::Records;
 use crate::render::draw::{write_records, Pictures};
 use crate::render::packet::records::Frame;
-use crate::render::packet::{DrawList, Records, ShadowDraws};
+use crate::render::packet::{DrawList, ShadowDraws};
 
 /// Bytes of one indirect draw (`DrawIndirectArgs`).
 const DRAW_SIZE: u64 = 16;

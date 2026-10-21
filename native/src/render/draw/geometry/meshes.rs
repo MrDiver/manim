@@ -20,9 +20,10 @@ use crate::gpu::device::{
 };
 use crate::render::draw::geometry::textures::mip_levels;
 use crate::render::draw::geometry::vectors::shadow_runs;
+use crate::render::draw::uploads::Records;
 use crate::render::draw::write_records;
 use crate::render::packet::records::{DrawIndexed, Frame};
-use crate::render::packet::{DrawGroup, Records, ShadowList};
+use crate::render::packet::{DrawGroup, ShadowList};
 use crate::robjects::SurfaceShader;
 
 /// Color space of each texture slot, in `PbrMaterial.textures` order: base
