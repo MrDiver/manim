@@ -2,7 +2,8 @@
 quaternion) and scale, and the 4x4 matrix they make.
 
 A plain value shared by the scene side and the renderer side: it depends
-on neither, and holds no logic beyond reading out its own matrix."""
+on neither, and holds no logic beyond reading out its own matrix.
+"""
 
 from __future__ import annotations
 
