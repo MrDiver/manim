@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from manim import *
+from manim.renderer.protocol import CapabilityException
 from manim.utils.testing.frames_comparison import frames_comparison
 
 from ..helpers.path_utils import get_svg_resource
@@ -253,6 +256,11 @@ def test_path_multiple_moves(scene):
     scene.add(svg_obj)
 
 
+@pytest.mark.xfail(
+    raises=CapabilityException,
+    strict=True,
+    reason="the wgpu renderer cannot draw images yet",
+)
 @frames_comparison
 def test_ImageMobject(scene):
     file_path = get_svg_resource("tree_img_640x351.png")
@@ -263,6 +271,11 @@ def test_ImageMobject(scene):
     scene.wait(1)
 
 
+@pytest.mark.xfail(
+    raises=CapabilityException,
+    strict=True,
+    reason="the wgpu renderer cannot draw images yet",
+)
 @frames_comparison
 def test_ImageInterpolation(scene):
     img = ImageMobject(

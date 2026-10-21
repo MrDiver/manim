@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import pytest
+
 from manim import *
+from manim.renderer.protocol import CapabilityException
 from manim.utils.testing.frames_comparison import frames_comparison
 
 __module_test__ = "mobjects"
 
 
+@pytest.mark.xfail(
+    raises=CapabilityException,
+    strict=True,
+    reason="the wgpu renderer cannot draw point clouds yet",
+)
 @frames_comparison(base_scene=ThreeDScene)
 def test_PointCloudDot(scene):
     p = PointCloudDot()

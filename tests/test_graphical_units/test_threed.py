@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import pytest
+
 from manim import *
+from manim.renderer.protocol import CapabilityException
 from manim.utils.testing.frames_comparison import frames_comparison
 
 __module_test__ = "threed"
 
 
+@pytest.mark.xfail(
+    raises=CapabilityException,
+    strict=True,
+    reason="the wgpu renderer cannot draw mobjects fixed in frame yet",
+)
 @frames_comparison(base_scene=ThreeDScene)
 def test_AddFixedInFrameMobjects(scene):
     scene.set_camera_orientation(phi=75 * DEGREES, theta=-45 * DEGREES)

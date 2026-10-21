@@ -9,7 +9,7 @@ when scenes produce render object trees themselves.
 
 What the native renderer cannot draw yet raises :class:`.CapabilityException`
 instead of being left out: images, point clouds, background images,
-meshes with a colour per vertex, mobjects fixed in frame or in
+colours that vary across a mesh triangle, mobjects fixed in frame or in
 orientation, and filled paths that do not lie in a plane.
 """
 
@@ -61,6 +61,9 @@ BACKGROUND_STROKE_UID = 1 << 61
 """Added to a mobject's uid for its background stroke."""
 FACE_OUTLINES_UID = 1 << 60
 """Added to a mesh's uid for the outlines of its faces."""
+MESH_PART_SHIFT = 32
+"""Part ``i`` of a mesh drawn in several colours has the mesh's uid plus
+``i << MESH_PART_SHIFT`` (mobject uids stay far below it)."""
 PLANE_TOLERANCE = 1e-6
 """How far points may lie off a plane, relative to their spread, and still
 be drawn as a 2D shape in it."""
@@ -330,6 +333,10 @@ def _nodes(mobject: Mobject) -> list[native.RNode]:
 
 def _path_nodes(vmobject: VMobject) -> list[native.RNode]:
     points = np.asarray(vmobject.points, dtype=float)
+    # Cairo drew only whole curves (four points each).
+    points = points[: len(points) // 4 * 4]
+    if len(points) == 0:
+        return []
     attributes: dict[str, Any] = vmobject.__dict__
     fill_rgbas = attributes.get("fill_rgbas", _NO_COLOR)
     stroke = _stroke(
@@ -436,31 +443,50 @@ _NO_COLOR.flags.writeable = False
 
 
 def _mesh_nodes(mesh: MeshMobject) -> list[native.RNode]:
+    """One RShape3D per colour of the mesh (a material has one colour), and
+    the outlines of its faces.
+    """
     rgbas = np.asarray(mesh.rgbas, dtype=float)
-    if len(rgbas) > 1:
-        raise CapabilityException(
-            "The wgpu renderer cannot draw meshes with a colour per vertex yet."
-        )
     points = np.asarray(mesh.points, dtype=float)
     triangles = np.asarray(mesh.triangles, dtype=np.int64)
+    normals = _vertex_normals(points, triangles)
     has_texture = mesh.texture.size > 0 and len(mesh.uvs) == len(points)
-    data = native.MeshData(
-        points,
-        triangles.ravel(),
-        _vertex_normals(points, triangles),
-        uvs=np.asarray(mesh.uvs, dtype=float) if has_texture else None,
+    uvs = np.asarray(mesh.uvs, dtype=float) if has_texture else None
+    texture = native.Texture(mesh.texture) if has_texture else None
+    parts = (
+        [(rgbas[0], triangles)]
+        if len(rgbas) == 1
+        else _triangles_by_colour(rgbas, triangles)
     )
-    material = native.PbrMaterial(
-        base_color=rgbas[0, :3],
-        opacity=float(rgbas[0, 3]),
-        base_color_texture=native.Texture(mesh.texture) if has_texture else None,
-    )
-    nodes: list[native.RNode] = [
-        native.RShape3D(uid=mesh.uid, mesh=data, material=material)
-    ]
+    nodes: list[native.RNode] = []
+    for index, (rgba, part) in enumerate(parts):
+        data = native.MeshData(points, part.ravel(), normals, uvs=uvs)
+        material = native.PbrMaterial(
+            base_color=rgba[:3],
+            opacity=float(rgba[3]),
+            base_color_texture=texture,
+        )
+        uid = mesh.uid + (index << MESH_PART_SHIFT)
+        nodes.append(native.RShape3D(uid=uid, mesh=data, material=material))
     if mesh.stroke_width > 0:
-        nodes.append(_face_outlines(mesh, points))
+        nodes += _face_outlines(mesh, points)
     return nodes
+
+
+def _triangles_by_colour(
+    rgbas: np.ndarray, triangles: np.ndarray
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """The triangles of a mesh with a colour per vertex, grouped by colour;
+    each triangle's three vertices must have the same colour (as on the
+    faces of a checkerboard surface).
+    """
+    corner_colours = rgbas[triangles]
+    if not np.all(corner_colours == corner_colours[:, :1]):
+        raise CapabilityException(
+            "The wgpu renderer cannot draw colours that vary across a triangle yet."
+        )
+    colours, which = np.unique(corner_colours[:, 0], axis=0, return_inverse=True)
+    return [(colour, triangles[which == i]) for i, colour in enumerate(colours)]
 
 
 def _vertex_normals(points: np.ndarray, triangles: np.ndarray) -> np.ndarray:
@@ -477,8 +503,11 @@ def _vertex_normals(points: np.ndarray, triangles: np.ndarray) -> np.ndarray:
     return normals
 
 
-def _face_outlines(mesh: MeshMobject, points: np.ndarray) -> native.RCurve3D:
-    """The outlines of the mesh's faces, each a closed path of straight curves."""
+def _face_outlines(mesh: MeshMobject, points: np.ndarray) -> list[native.RCurve3D]:
+    """The outlines of the mesh's faces, each a closed path of straight
+    curves: one RCurve3D per outline colour (one for all faces, or one per
+    face).
+    """
     faces = np.asarray(mesh.get_faces(), dtype=np.int64)
     starts = points[faces]
     ends = points[np.roll(faces, -1, axis=1)]
@@ -487,20 +516,21 @@ def _face_outlines(mesh: MeshMobject, points: np.ndarray) -> native.RCurve3D:
         axis=2,
     )
     stroke_rgbas = np.asarray(mesh.stroke_rgbas, dtype=float)
-    if len(stroke_rgbas) > 1:
-        raise CapabilityException(
-            "The wgpu renderer cannot draw face outlines with a colour per face yet."
+    if len(stroke_rgbas) == 1:
+        parts = [(stroke_rgbas[0], curves)]
+    else:
+        colours, which = np.unique(stroke_rgbas, axis=0, return_inverse=True)
+        parts = [(colour, curves[which == i]) for i, colour in enumerate(colours)]
+    return [
+        native.RCurve3D(
+            uid=mesh.uid + FACE_OUTLINES_UID + (index << MESH_PART_SHIFT),
+            points=part.reshape(-1, 3),
+            stroke=native.Stroke(
+                color=rgba[:3], opacity=rgba[3], width=float(mesh.stroke_width)
+            ),
         )
-    stroke = native.Stroke(
-        color=stroke_rgbas[:, :3],
-        opacity=stroke_rgbas[:, 3],
-        width=float(mesh.stroke_width),
-    )
-    return native.RCurve3D(
-        uid=mesh.uid + FACE_OUTLINES_UID,
-        points=curves.reshape(-1, 3),
-        stroke=stroke,
-    )
+        for index, (rgba, part) in enumerate(parts)
+    ]
 
 
 # -- camera views ---------------------------------------------------------------
