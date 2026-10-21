@@ -298,6 +298,11 @@ impl Resolver {
         parent_changed: bool,
     ) -> Result<bool> {
         let mirror = &self.mirror[index];
+        // The same object as last time under an unchanged parent: nothing
+        // below it changed, so it is skipped whole. That holds because
+        // render objects cannot change once made (the Python classes are
+        // frozen), and the mirror keeps every node it saw alive, so a
+        // freed node's address is never reused by a new one.
         if !parent_changed && Arc::ptr_eq(&mirror.source, node) {
             return Ok(true);
         }
