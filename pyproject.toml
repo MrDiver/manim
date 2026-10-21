@@ -98,8 +98,15 @@ build-backend = "maturin"
 
 [tool.uv]
 required-version = ">=0.10.0"
-# Rebuild the native part when its sources change.
-cache-keys = [{ file = "pyproject.toml" }, { file = "native/Cargo.toml" }, { file = "native/src/**/*.rs" }]
+# Rebuild the native part when its sources change: its Rust code, its
+# shaders (compiled into the library) and its locked dependencies.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "native/Cargo.toml" },
+    { file = "native/Cargo.lock" },
+    { file = "native/src/**/*.rs" },
+    { file = "native/shaders/**/*.wgsl" },
+]
 
 [tool.maturin]
 # The Python package manim plus the Rust crate in native/ as the
