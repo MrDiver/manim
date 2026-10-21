@@ -546,16 +546,13 @@ class Manager(Generic[SceneT]):
                     self.time,
                     self._timeline_source,
                 )
-            self._check_evaluation_scene()
             self.setup()
-            self._check_evaluation_scene()
             try:
                 self.construct()
             except EndSceneEarlyException:
                 if self._timeline_recorder is not None:
                     self._timeline_recorder.termination = "scene-end-request"
             self.tear_down()
-            self._check_evaluation_scene()
             self._finish_resource_scope()
             if self._timeline_recorder is not None:
                 self._timeline = self._timeline_recorder.finish(self.time)
@@ -565,12 +562,6 @@ class Manager(Generic[SceneT]):
         finally:
             self._evaluating = False
             self._timeline_recorder = None
-
-    def _check_evaluation_scene(self) -> None:
-        if self._evaluating and self.scene.meshes:
-            raise RuntimeError(
-                "GPU-backed meshes are unsupported in no-raster evaluation."
-            )
 
     def _finish_resource_scope(self) -> None:
         self._close_log_handler()
@@ -731,7 +722,6 @@ class Manager(Generic[SceneT]):
         self._validate_execution()
         scene = self.scene
         renderer: _AnimationRenderer = self.renderer
-        self._check_evaluation_scene()
         writing = not self._evaluating and self._frame_request is None
         self.skip_animations = (
             self._execution.original_skipping_status if writing else False
@@ -750,7 +740,6 @@ class Manager(Generic[SceneT]):
         elif not self._evaluating:
             renderer._start_animation()
         scene.begin_animations()
-        self._check_evaluation_scene()
         # A shortcut play produces no frames, so it needs no drawing, readback, static
         # frame preparation, or presentation. Its state updates do not depend on them.
         rendering = not self._evaluating and not self.skip_animations
@@ -865,7 +854,6 @@ class Manager(Generic[SceneT]):
         try:
             for sample_index, t in enumerate(scene.time_progression):
                 scene.update_to_time(t)
-                self._check_evaluation_scene()
                 draw = (
                     not self._evaluating
                     and not self.skip_animations

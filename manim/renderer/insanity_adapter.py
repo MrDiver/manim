@@ -182,12 +182,19 @@ class InsanityAdapter(_RendererExecutionView):
         return self._frame.copy()
 
     def _get_scene_image(self, scene: Scene) -> Image.Image:
-        """Draw the scene's current mobjects without changing the last frame."""
-        self._ensure_open()
-        pixels = self._draw(
-            self.camera, list_update(scene.mobjects, scene.foreground_mobjects)
-        )
-        return Image.fromarray(pixels)
+        """Draw the scene's current mobjects with a temporary renderer, so
+        snapshots work before the scene renders and after it closed.
+        """
+        self._ensure_raster_allowed()
+        renderer = InsanityAdapter(camera=self.camera)
+        renderer._pixel_size = self._pixel_size
+        try:
+            renderer.render_mobjects(
+                list_update(scene.mobjects, scene.foreground_mobjects)
+            )
+            return renderer.get_image()
+        finally:
+            renderer.close()
 
     def get_image(self) -> Image.Image:
         """Return the last drawn image as a PIL image."""

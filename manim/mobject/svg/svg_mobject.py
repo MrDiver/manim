@@ -10,7 +10,7 @@ from xml.etree import ElementTree as ET
 import numpy as np
 import svgelements as se
 
-from manim import config, logger
+from manim import logger
 from manim.utils.color import ManimColor, ParsableManimColor
 
 from ...constants import RIGHT
@@ -189,7 +189,6 @@ class SVGMobject(VMobject):
             self.svg_default,
             self.path_string_config,
             self.file_name,
-            config.renderer,
         )
 
     def generate_mobject(self) -> Self:
