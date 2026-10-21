@@ -33,7 +33,9 @@ Update ──apply──▶ Packer ──Packet + Uploads──▶ Drawer ──
   [docs/stroke_aa.md](../../docs/stroke_aa.md).
 - **Crossing translucent shapes** in 3D can be sorted wrongly by their
   centers; the one drawn first then hides the other through depth
-  (`ConvexHull3D` shows it). Open decision.
+  (`ConvexHull3D` shows it). This is chosen: without depth writes,
+  translucent meshes (drawn after the vectors) would cover translucent
+  shapes in front of them instead.
 - **Pixels depend on lyon's patch releases:** lyon_tessellation and
   lyon_geom triangulate slightly differently between patch versions
   (up to 4/255 seen in gradient fills), so the graphical references
