@@ -406,8 +406,8 @@ def test_transparent_by_background_opacity(config, dry_run):
     with scene._get_manager():
         scene.render()
         frame = scene.renderer.get_frame()
-    # 0.5 * 255 rounds to 128.
-    np.testing.assert_allclose(frame[0, 0], [0, 0, 0, 128])
+    # 0.5 * 255 = 127.5 lies halfway: GPUs round it to 127 or 128.
+    np.testing.assert_allclose(frame[0, 0], [0, 0, 0, 128], atol=1)
     assert config.transparent is True
 
 

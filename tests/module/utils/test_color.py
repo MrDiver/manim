@@ -34,9 +34,9 @@ def test_background_color():
     S.camera.background_color = "#bbffbb"
     S.camera.background_opacity = 0.5
     S.renderer.update_frame(S)
-    # 0.5 * 255 rounds to 128.
-    np.testing.assert_array_equal(
-        S.renderer.get_frame()[0, 0], np.array([187, 255, 187, 128])
+    # 0.5 * 255 = 127.5 lies halfway: GPUs round it to 127 or 128.
+    np.testing.assert_allclose(
+        S.renderer.get_frame()[0, 0], np.array([187, 255, 187, 128]), atol=1
     )
 
 
