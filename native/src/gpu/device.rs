@@ -95,7 +95,6 @@ const MULTISAMPLED_FORMATS: [wgpu::TextureFormat; 8] = [
 pub struct Gpu {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
-    pub timestamps: bool,
     /// The samples per pixel this device can render with, ascending: 1
     /// and 4 everywhere (WebGPU guarantees them), 2, 8 and 16 where the
     /// GPU has them for every multisampled format.
@@ -147,7 +146,7 @@ impl Gpu {
 
     /// A device of the GPU `preference` chooses, with
     /// `indirect-first-instance` (draws select their instance records with
-    /// it), and timestamp queries when the adapter has them.
+    /// it).
     pub fn create(preference: wgpu::PowerPreference, memory: Memory) -> Result<Gpu> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -164,12 +163,7 @@ impl Gpu {
                 "GPU adapter lacks indirect-first-instance or depth32float-stencil8".into(),
             ));
         }
-        let timestamps = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
-        let mut features = if timestamps {
-            required | wgpu::Features::TIMESTAMP_QUERY
-        } else {
-            required
-        };
+        let mut features = required;
         // Sample counts beyond WebGPU's 1 and 4 (where the GPU has them)
         // need the adapter's own format features.
         let adapter_formats = wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
@@ -214,7 +208,6 @@ impl Gpu {
         Ok(Gpu {
             device,
             queue,
-            timestamps,
             sample_counts,
         })
     }

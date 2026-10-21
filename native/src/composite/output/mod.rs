@@ -10,12 +10,10 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
 
 use crate::error::{Error, Result};
 use crate::gpu::device::{Gpu, COLOR_FORMAT};
 use crate::gpu::fullscreen::{Blend, Fullscreen, TexturePool};
-use crate::gpu::profiler::{GpuProfiler, StageClock};
 
 /// Bytes per row of texture-to-buffer copies must be multiples of this.
 const ROW_ALIGNMENT: u32 = 256;
@@ -113,11 +111,9 @@ impl Output {
         mut encoder: wgpu::CommandEncoder,
         frame: &wgpu::Texture,
         index: u64,
-        profiler: &mut GpuProfiler,
-        clock: &mut StageClock,
     ) -> Result<()> {
         if self.free.is_empty() {
-            self.finish_oldest(gpu, clock)?;
+            self.finish_oldest(gpu)?;
         }
         let staging = self.free.pop().unwrap();
         let frame_view = frame.create_view(&Default::default());
@@ -157,8 +153,6 @@ impl Output {
                 &resources,
                 Blend::Replace,
                 true,
-                profiler,
-                "finalize",
             )?;
             encoder.copy_texture_to_buffer(
                 plane.as_image_copy(),
@@ -174,9 +168,7 @@ impl Output {
             );
             offset += (self.row_bytes * plane.height()) as u64;
         }
-        let start = Instant::now();
         let submission = gpu.queue.submit([encoder.finish()]);
-        clock.add("submit", start);
         let mapped = Arc::new(AtomicBool::new(false));
         let signal = mapped.clone();
         staging
@@ -197,31 +189,25 @@ impl Output {
 
     /// Frames finished so far, `(index, pixels)` in submission order;
     /// with `wait`, waits for every frame on its way.
-    pub fn finished(
-        &mut self,
-        gpu: &Gpu,
-        wait: bool,
-        clock: &mut StageClock,
-    ) -> Result<Vec<(u64, Vec<u8>)>> {
+    pub fn finished(&mut self, gpu: &Gpu, wait: bool) -> Result<Vec<(u64, Vec<u8>)>> {
         let _ = gpu.device.poll(wgpu::PollType::Poll);
         while let Some(front) = self.pending.front() {
             if !wait && !front.mapped.load(Ordering::Acquire) {
                 break;
             }
-            self.finish_oldest(gpu, clock)?;
+            self.finish_oldest(gpu)?;
         }
         Ok(self.ready.drain(..).collect())
     }
 
     /// Read the oldest frame on its way back into `ready`, without the
     /// row padding (waits for it).
-    fn finish_oldest(&mut self, gpu: &Gpu, clock: &mut StageClock) -> Result<()> {
+    fn finish_oldest(&mut self, gpu: &Gpu) -> Result<()> {
         let frame = self
             .pending
             .pop_front()
             .ok_or_else(|| Error::Invalid("no frame in flight".into()))?;
         // Wait for this frame's copy only; later frames keep running.
-        let start = Instant::now();
         while !frame.mapped.load(Ordering::Acquire) {
             let wait = wgpu::PollType::Wait {
                 submission_index: Some(frame.submission.clone()),
@@ -231,8 +217,6 @@ impl Output {
                 .poll(wait)
                 .map_err(|error| Error::Gpu(error.to_string()))?;
         }
-        clock.add("read-back wait", start);
-        let start = Instant::now();
         let (row_length, rows) = self.pixel_format.layout(self.size);
         let (row_length, rows) = (row_length as usize, rows as usize);
         let row_bytes = self.row_bytes as usize;
@@ -257,7 +241,6 @@ impl Output {
         frame.staging.unmap();
         self.free.push(frame.staging);
         self.ready.push_back((frame.index, image));
-        clock.add("read-back copy", start);
         Ok(())
     }
 }

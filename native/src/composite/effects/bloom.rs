@@ -16,7 +16,6 @@ use bytemuck::{Pod, Zeroable};
 use crate::error::Result;
 use crate::gpu::device::{Gpu, HDR_FORMAT};
 use crate::gpu::fullscreen::{Blend, Fullscreen, TexturePool, UniformSlots};
-use crate::gpu::profiler::GpuProfiler;
 
 /// The settings of bloom.
 #[derive(Clone, Copy)]
@@ -62,7 +61,6 @@ impl BloomPasses {
         textures: &mut TexturePool,
         lit: &wgpu::Texture,
         bloom: &Bloom,
-        profiler: &mut GpuProfiler,
     ) -> Result<wgpu::Texture> {
         let (width, height) = (lit.width(), lit.height());
         // The chain starts at half resolution; stop before mips get tiny.
@@ -138,8 +136,6 @@ impl BloomPasses {
                 &resources,
                 blend,
                 clear,
-                profiler,
-                "bloom",
             )
         };
         // The bright part, at half resolution.

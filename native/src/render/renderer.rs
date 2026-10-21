@@ -10,12 +10,9 @@
 //! The layers are the renderer's own textures, valid until its next
 //! render; the compositor (composite/) turns them into frames.
 
-use std::time::Instant;
-
 use crate::error::Result;
 use crate::flat::Update;
 use crate::gpu::device::Gpu;
-use crate::gpu::profiler::{GpuProfiler, StageClock};
 use crate::render::draw::Pictures;
 use crate::render::draw::{Drawer, TargetSettings};
 use crate::render::pack::packer::Packer;
@@ -70,7 +67,6 @@ impl Renderer {
     /// Render `scene` seen with `settings` into the layers, its camera
     /// views' shapes showing `pictures`. The passes are recorded into
     /// `encoder`, which the caller submits.
-    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         gpu: &Gpu,
@@ -78,24 +74,17 @@ impl Renderer {
         scene: u64,
         settings: &ViewSettings,
         pictures: Pictures,
-        profiler: &mut GpuProfiler,
-        clock: &mut StageClock,
     ) -> Result<Layers> {
         let size = (self.settings.width, self.settings.height);
-        let start = Instant::now();
         let packet = self
             .packer
             .pack_frame(scene, &settings.pack_settings(size))?;
-        clock.add("pack", start);
         let light_count = packet
             .meshes
             .as_ref()
             .map_or(0, |meshes| meshes.lights.len() as u32);
         let frame = settings.camera_frame(size, light_count);
-        let start = Instant::now();
-        let layers = self.draw(gpu, encoder, &packet, &frame, pictures, profiler);
-        clock.add("draw (upload, record)", start);
-        layers
+        self.draw(gpu, encoder, &packet, &frame, pictures)
     }
 
     /// The layers of nothing: an empty scene.
@@ -104,7 +93,6 @@ impl Renderer {
         gpu: &Gpu,
         encoder: &mut wgpu::CommandEncoder,
         pictures: Pictures,
-        profiler: &mut GpuProfiler,
     ) -> Result<Layers> {
         let packet = Packet {
             draws: VectorDraws::default(),
@@ -112,7 +100,7 @@ impl Renderer {
             meshes: None,
         };
         let frame: Frame = bytemuck::Zeroable::zeroed();
-        self.draw(gpu, encoder, &packet, &frame, pictures, profiler)
+        self.draw(gpu, encoder, &packet, &frame, pictures)
     }
 
     fn draw(
@@ -122,7 +110,6 @@ impl Renderer {
         packet: &Packet,
         frame: &Frame,
         pictures: Pictures,
-        profiler: &mut GpuProfiler,
     ) -> Result<Layers> {
         let uploads = self.packer.uploads(packet.meshes.is_some());
         let targets = self.drawer.draw(
@@ -133,7 +120,6 @@ impl Renderer {
             frame,
             self.settings,
             encoder,
-            profiler,
         )?;
         Ok(Layers {
             lit: targets.lit.clone(),

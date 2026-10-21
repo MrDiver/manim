@@ -17,7 +17,6 @@
 //! equal pictures.
 
 use std::sync::Arc;
-use std::time::Instant;
 
 use crate::composite::effects::depth_of_field::DepthOfField;
 use crate::composite::effects::Effect;
@@ -28,7 +27,6 @@ use crate::error::{Error, Result};
 use crate::flat::Update;
 use crate::gpu::device::{Gpu, Memory, HDR_FORMAT};
 use crate::gpu::fullscreen::Blend;
-use crate::gpu::profiler::{GpuProfiler, StageClock};
 use crate::render::draw::TargetSettings;
 use crate::render::renderer::{Layers, Renderer};
 use crate::render::settings::ViewSettings;
@@ -92,8 +90,6 @@ pub struct PipelineOptions {
     /// The image effects, in chain order.
     pub effects: Vec<Effect>,
     pub in_flight: usize,
-    /// Measure GPU time per pass.
-    pub profile: bool,
     pub pixel_format: PixelFormat,
     /// The largest page of vector records, in bytes per buffer
     /// (pack/vectors.rs); None: the most the device binds at once.
@@ -119,10 +115,6 @@ pub struct RenderPipeline {
     /// The `Frame` uniform of the last render (frame-stage effects read
     /// it).
     last_frame: Option<wgpu::Buffer>,
-    /// GPU time per pass (with `PipelineOptions::profile`).
-    profiler: GpuProfiler,
-    /// CPU time per stage.
-    clock: StageClock,
     /// The key of the last rendered frame (None: never held).
     last_key: Option<Vec<u64>>,
 }
@@ -153,12 +145,10 @@ impl RenderPipeline {
             compositor: Compositor::new(&gpu, options.effects),
             pictures: CameraViewTexture::new(&gpu.device),
             output: Output::new(&gpu, size, options.pixel_format, options.in_flight)?,
-            profiler: GpuProfiler::new(&gpu.device, options.profile && gpu.timestamps),
             gpu,
             settings,
             background: [0.0; 4],
             last_frame: None,
-            clock: StageClock::default(),
             last_key: None,
         })
     }
@@ -172,11 +162,8 @@ impl RenderPipeline {
         background: [f32; 4],
         sub_frames: Vec<SubFrame>,
     ) -> Result<bool> {
-        let start = Instant::now();
         self.background = background;
-        let held = self.render_frame(index, sub_frames);
-        self.clock.add("render (all)", start);
-        held
+        self.render_frame(index, sub_frames)
     }
 
     /// Drop everything kept for `scene` (it is sent whole again if it
@@ -263,7 +250,6 @@ impl RenderPipeline {
                 &accumulator_view,
                 weight,
                 first,
-                &mut self.profiler,
             )?;
             self.submit(encoder);
         }
@@ -276,14 +262,7 @@ impl RenderPipeline {
         let frame =
             self.compositor
                 .frame_effects(&self.gpu, &mut encoder, &accumulator, &frame_uniform)?;
-        self.output.send(
-            &self.gpu,
-            encoder,
-            &frame,
-            index,
-            &mut self.profiler,
-            &mut self.clock,
-        )?;
+        self.output.send(&self.gpu, encoder, &frame, index)?;
         self.last_key = self.frame_key(&sub_frames);
         Ok(false)
     }
@@ -291,16 +270,7 @@ impl RenderPipeline {
     /// Frames finished so far, `(index, pixels)` in submission order;
     /// with `wait`, waits for every frame on the GPU.
     pub fn finished(&mut self, wait: bool) -> Result<Vec<(u64, Vec<u8>)>> {
-        self.output.finished(&self.gpu, wait, &mut self.clock)
-    }
-
-    /// GPU milliseconds per pass name since the last call (with `profile`).
-    pub fn gpu_timings(&mut self) -> Vec<(String, f64)> {
-        self.profiler
-            .read(&self.gpu.device, &self.gpu.queue)
-            .into_iter()
-            .map(|(name, ms)| (name.to_string(), ms))
-            .collect()
+        self.output.finished(&self.gpu, wait)
     }
 
     /// Equal keys promise equal frames: the background, per sub-frame its
@@ -359,12 +329,9 @@ impl RenderPipeline {
         }
         // The empty scene's layers: a cleared vector layer and the frame
         // uniform the effects read.
-        let empty = self.renderer.render_empty(
-            &self.gpu,
-            encoder,
-            self.pictures.pictures(),
-            &mut self.profiler,
-        )?;
+        let empty = self
+            .renderer
+            .render_empty(&self.gpu, encoder, self.pictures.pictures())?;
         let lit = self.compositor.textures.get(
             &self.gpu.device,
             "picture",
@@ -383,13 +350,9 @@ impl RenderPipeline {
             },
             lit.size(),
         );
-        let lit = self.compositor.lit_effects(
-            &self.gpu,
-            encoder,
-            &lit,
-            &empty.frame,
-            &mut self.profiler,
-        )?;
+        let lit = self
+            .compositor
+            .lit_effects(&self.gpu, encoder, &lit, &empty.frame)?;
         self.compositor.composite(
             &self.gpu,
             encoder,
@@ -397,7 +360,6 @@ impl RenderPipeline {
             &empty.vector,
             target,
             self.background,
-            &mut self.profiler,
             None,
         )?;
         self.last_frame = Some(empty.frame);
@@ -410,12 +372,9 @@ impl RenderPipeline {
         encoder: &mut wgpu::CommandEncoder,
         target: CompositeTarget,
     ) -> Result<()> {
-        let layers = self.renderer.render_empty(
-            &self.gpu,
-            encoder,
-            self.pictures.pictures(),
-            &mut self.profiler,
-        )?;
+        let layers = self
+            .renderer
+            .render_empty(&self.gpu, encoder, self.pictures.pictures())?;
         self.compositor.composite(
             &self.gpu,
             encoder,
@@ -423,7 +382,6 @@ impl RenderPipeline {
             &layers.vector,
             target,
             self.background,
-            &mut self.profiler,
             None,
         )?;
         self.last_frame = Some(layers.frame);
@@ -498,12 +456,10 @@ impl RenderPipeline {
             scene,
             settings,
             self.pictures.pictures(),
-            &mut self.profiler,
-            &mut self.clock,
         )?;
-        let lit =
-            self.compositor
-                .lit_effects(&self.gpu, encoder, &lit, &frame, &mut self.profiler)?;
+        let lit = self
+            .compositor
+            .lit_effects(&self.gpu, encoder, &lit, &frame)?;
         let camera = &settings.camera;
         let depth_of_field = (camera.aperture > 0.0).then_some(DepthOfField {
             focus_distance: camera.focus_distance as f32,
@@ -521,21 +477,13 @@ impl RenderPipeline {
             &vector,
             target,
             self.background,
-            &mut self.profiler,
             depth_of_field,
         )?;
         self.last_frame = Some(frame);
         Ok(())
     }
 
-    /// CPU milliseconds per stage since the last call.
-    pub fn stage_timings(&mut self) -> Vec<(&'static str, f64)> {
-        self.clock.read()
-    }
-
     fn submit(&mut self, encoder: wgpu::CommandEncoder) {
-        let start = Instant::now();
         self.gpu.queue.submit([encoder.finish()]);
-        self.clock.add("submit", start);
     }
 }

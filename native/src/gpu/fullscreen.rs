@@ -10,7 +10,6 @@ use std::collections::HashMap;
 
 use crate::error::Result;
 use crate::gpu::device::Gpu;
-use crate::gpu::profiler::GpuProfiler;
 
 const UNIFORM_STRIDE: u64 = 256; // minimum uniform buffer offset alignment
 const UNIFORM_SLOTS: u64 = 64;
@@ -139,17 +138,13 @@ impl Fullscreen {
         resources: &[wgpu::BindingResource],
         blend: Blend,
         clear: bool,
-        profiler: &mut GpuProfiler,
-        timing: &'static str,
     ) -> Result<()> {
         let pass = FullscreenPass {
             shader,
             entry_point,
             depth_samples: None,
         };
-        self.run_pass(
-            gpu, encoder, pass, target, format, resources, blend, clear, profiler, timing,
-        )
+        self.run_pass(gpu, encoder, pass, target, format, resources, blend, clear)
     }
 
     /// `run` for a variant of a shader (see `FullscreenPass`).
@@ -164,8 +159,6 @@ impl Fullscreen {
         resources: &[wgpu::BindingResource],
         blend: Blend,
         clear: bool,
-        profiler: &mut GpuProfiler,
-        timing: &'static str,
     ) -> Result<()> {
         let FullscreenPass {
             shader,
@@ -247,7 +240,7 @@ impl Fullscreen {
                 },
             })],
             depth_stencil_attachment: None,
-            timestamp_writes: profiler.pass_timing(timing),
+            timestamp_writes: None,
             occlusion_query_set: None,
             multiview_mask: None,
         });

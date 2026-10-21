@@ -12,7 +12,6 @@ pub mod targets;
 use crate::error::Result;
 use crate::gpu::buffer::GrowableBuffer;
 use crate::gpu::device::Gpu;
-use crate::gpu::profiler::GpuProfiler;
 use crate::render::draw::geometry::meshes::{MeshData, MeshGeometry};
 use crate::render::draw::geometry::vectors::{VectorData, VectorGeometry};
 use crate::render::draw::passes::lighting::LightingPass;
@@ -102,7 +101,7 @@ impl Drawer {
     /// Render `packet` (reading the records of `uploads`, and showing
     /// `pictures` on the camera views' shapes) and the camera's `frame`
     /// into the layers; the passes are recorded into `encoder`, which the
-    /// caller submits; `profiler` times the passes.
+    /// caller submits.
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
@@ -113,7 +112,6 @@ impl Drawer {
         frame: &Frame,
         settings: TargetSettings,
         encoder: &mut wgpu::CommandEncoder,
-        profiler: &mut GpuProfiler,
     ) -> Result<&RenderTargets> {
         self.ensure_targets(gpu, settings, packet.scope_parents.len() as u32);
         let generation = self.targets_generation;
@@ -193,7 +191,6 @@ impl Drawer {
                 encoder,
                 &mut self.meshes,
                 &mut self.vectors,
-                profiler,
                 &targets.mask_layers_view,
                 mesh_depth,
                 &packet.scope_parents,
@@ -206,26 +203,18 @@ impl Drawer {
             targets,
             &mut self.vectors,
             packet.scope_parents.len(),
-            profiler,
         );
         let translucent = has_meshes && self.meshes.has_translucent();
         if has_meshes || clear_3d {
             let meshes = has_meshes.then_some(&mut self.meshes);
-            gbuffer::draw(gpu, encoder, targets, meshes, profiler);
+            gbuffer::draw(gpu, encoder, targets, meshes);
             self.lighting_pass
-                .draw(gpu, encoder, targets, has_meshes, translucent, profiler)?;
+                .draw(gpu, encoder, targets, has_meshes, translucent)?;
         }
         self.empty_3d = if has_meshes { None } else { Some(generation) };
-        vector::draw(gpu, encoder, targets, &mut self.vectors, profiler);
+        vector::draw(gpu, encoder, targets, &mut self.vectors);
         if translucent {
-            translucent::draw(
-                gpu,
-                encoder,
-                targets,
-                &mut self.meshes,
-                &self.lighting_pass,
-                profiler,
-            );
+            translucent::draw(gpu, encoder, targets, &mut self.meshes, &self.lighting_pass);
         }
         Ok(targets)
     }

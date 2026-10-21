@@ -35,7 +35,6 @@ use crate::composite::effects::Effect;
 use crate::error::Result;
 use crate::gpu::device::{Gpu, HDR_FORMAT};
 use crate::gpu::fullscreen::{Blend, Fullscreen, TexturePool, UniformSlots};
-use crate::gpu::profiler::GpuProfiler;
 
 /// `CompositeParams` (composite.wgsl).
 #[repr(C)]
@@ -97,7 +96,6 @@ impl Compositor {
         encoder: &mut wgpu::CommandEncoder,
         lit: &wgpu::Texture,
         frame_uniform: &wgpu::Buffer,
-        profiler: &mut GpuProfiler,
     ) -> Result<wgpu::Texture> {
         let mut lit = lit.clone();
         for effect in &self.effects {
@@ -109,7 +107,6 @@ impl Compositor {
                     &mut self.textures,
                     &lit,
                     bloom,
-                    profiler,
                 )?,
                 Effect::Shader(effect) if !effect.frame_stage => self.shader_effects.apply(
                     gpu,
@@ -165,11 +162,10 @@ impl Compositor {
         vector: &wgpu::Texture,
         target: CompositeTarget,
         background: [f32; 4],
-        profiler: &mut GpuProfiler,
         depth_of_field: Option<DepthOfField>,
     ) -> Result<()> {
         let Some(lens) = depth_of_field else {
-            return self.composite_layers(gpu, encoder, lit, vector, target, background, profiler);
+            return self.composite_layers(gpu, encoder, lit, vector, target, background);
         };
         // Composite the view sharp first, then blur it into the target.
         let image = self.textures.get(
@@ -188,7 +184,7 @@ impl Compositor {
             background: target.background,
             blend: Blend::Replace,
         };
-        self.composite_layers(gpu, encoder, lit, vector, sharp, background, profiler)?;
+        self.composite_layers(gpu, encoder, lit, vector, sharp, background)?;
         let blurred = BlurTarget {
             view: target.view,
             weight: target.weight,
@@ -203,7 +199,6 @@ impl Compositor {
             &image_view,
             &lens,
             blurred,
-            profiler,
         )
     }
 
@@ -216,7 +211,6 @@ impl Compositor {
         vector: &wgpu::Texture,
         target: CompositeTarget,
         background: [f32; 4],
-        profiler: &mut GpuProfiler,
     ) -> Result<()> {
         let params = CompositeParams {
             background: if target.background {
@@ -248,8 +242,6 @@ impl Compositor {
             &resources,
             target.blend,
             target.clear,
-            profiler,
-            "composite",
         )
     }
 
@@ -263,7 +255,6 @@ impl Compositor {
         accumulator: &wgpu::TextureView,
         weight: f32,
         clear: bool,
-        profiler: &mut GpuProfiler,
     ) -> Result<()> {
         let params = CompositeParams {
             background: [0.0; 4],
@@ -286,8 +277,6 @@ impl Compositor {
             &resources,
             Blend::Additive,
             clear,
-            profiler,
-            "composite",
         )
     }
 }

@@ -25,7 +25,6 @@
 
 use crate::gpu::buffer::GrowableBuffer;
 use crate::gpu::device::{Gpu, SHADOW_FORMAT, TRANSLUCENT_DEPTH_FORMAT, TRANSMITTANCE_FORMAT};
-use crate::gpu::profiler::GpuProfiler;
 use crate::render::draw::geometry::meshes::MeshGeometry;
 use crate::render::draw::geometry::vectors::VectorGeometry;
 use crate::render::packet::records::{Frame, ShadowView};
@@ -124,14 +123,13 @@ impl ShadowPass {
         encoder: &mut wgpu::CommandEncoder,
         meshes: &mut MeshGeometry,
         vectors: &mut VectorGeometry,
-        profiler: &mut GpuProfiler,
         mask_layers: &wgpu::TextureView,
         mesh_depth: &wgpu::TextureView,
         scope_parents: &[i32],
     ) {
         let frames = &self.frames.buffer;
         for &layer in &self.draw_layers {
-            let mut pass = self.begin(encoder, layer, profiler, true);
+            let mut pass = self.begin(encoder, layer, true);
             let offset = (layer * FRAME_STRIDE) as u64;
             let scope = self.scopes[layer];
             let mut clips = meshes.shadow_clips(scope);
@@ -148,7 +146,7 @@ impl ShadowPass {
                     if reference + chain.len() as u32 > STENCIL_MAX {
                         // Out of stencil values: start the layer's stencil over.
                         drop(pass);
-                        pass = self.begin(encoder, layer, profiler, false);
+                        pass = self.begin(encoder, layer, false);
                         reference = 0;
                     }
                     reference += 1;
@@ -201,7 +199,7 @@ impl ShadowPass {
             // hold an earlier render's tint: the pass clears it.
             let tinted = meshes.has_translucent_shadows(scope);
             if tinted || self.tinted[layer] {
-                let mut pass = self.begin_translucent(encoder, layer, profiler);
+                let mut pass = self.begin_translucent(encoder, layer);
                 if tinted {
                     meshes.draw_translucent_shadow(
                         gpu,
@@ -221,7 +219,6 @@ impl ShadowPass {
         &self,
         encoder: &'e mut wgpu::CommandEncoder,
         layer: usize,
-        profiler: &mut GpuProfiler,
     ) -> wgpu::RenderPass<'e> {
         let (transmittance, depth) = &self.translucent_layers[layer];
         let clear = |view, value| {
@@ -257,7 +254,7 @@ impl ShadowPass {
                     store: wgpu::StoreOp::Discard,
                 }),
             }),
-            timestamp_writes: profiler.pass_timing("shadows"),
+            timestamp_writes: None,
             occlusion_query_set: None,
             multiview_mask: None,
         })
@@ -267,7 +264,6 @@ impl ShadowPass {
         &self,
         encoder: &'e mut wgpu::CommandEncoder,
         layer: usize,
-        profiler: &mut GpuProfiler,
         clear_depth: bool,
     ) -> wgpu::RenderPass<'e> {
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -288,7 +284,7 @@ impl ShadowPass {
                     store: wgpu::StoreOp::Discard,
                 }),
             }),
-            timestamp_writes: profiler.pass_timing("shadows"),
+            timestamp_writes: None,
             occlusion_query_set: None,
             multiview_mask: None,
         })

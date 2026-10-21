@@ -181,7 +181,6 @@ fn pipeline_options(key: &PipelineKey) -> PyResult<PipelineOptions> {
         shadow_resolution: key.shadow_resolution,
         effects: Vec::new(),
         in_flight: 1,
-        profile: false,
         pixel_format: PixelFormat::Rgba,
         page_bytes: None,
         gpu,

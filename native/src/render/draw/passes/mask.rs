@@ -3,7 +3,6 @@
 //! multiplied by its layer.
 
 use crate::gpu::device::Gpu;
-use crate::gpu::profiler::GpuProfiler;
 use crate::render::draw::geometry::vectors::VectorGeometry;
 use crate::render::draw::targets::RenderTargets;
 
@@ -13,7 +12,6 @@ pub fn draw(
     targets: &RenderTargets,
     vectors: &mut VectorGeometry,
     scope_count: usize,
-    profiler: &mut GpuProfiler,
 ) {
     for scope in 0..scope_count {
         {
@@ -21,7 +19,7 @@ pub fn draw(
                 label: Some("mask"),
                 color_attachments: &[Some(targets.mask_attachment())],
                 depth_stencil_attachment: None,
-                timestamp_writes: profiler.pass_timing("masks"),
+                timestamp_writes: None,
                 occlusion_query_set: None,
                 multiview_mask: None,
             });

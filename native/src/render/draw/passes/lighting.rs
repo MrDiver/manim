@@ -15,7 +15,6 @@ use std::collections::HashMap;
 use crate::error::Result;
 use crate::gpu::buffer::GrowableBuffer;
 use crate::gpu::device::{Gpu, EDGE_FORMAT, HDR_FORMAT};
-use crate::gpu::profiler::GpuProfiler;
 use crate::render::draw::passes::shadow::ShadowPass;
 use crate::render::draw::targets::RenderTargets;
 
@@ -174,13 +173,12 @@ impl LightingPass {
         targets: &RenderTargets,
         has_meshes: bool,
         translucent: bool,
-        profiler: &mut GpuProfiler,
     ) -> Result<()> {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("lighting"),
             color_attachments: &[Some(targets.lit_attachment(translucent))],
             depth_stencil_attachment: targets.edge_attachment(),
-            timestamp_writes: profiler.pass_timing("lighting"),
+            timestamp_writes: None,
             occlusion_query_set: None,
             multiview_mask: None,
         });

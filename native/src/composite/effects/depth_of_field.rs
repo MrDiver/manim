@@ -28,7 +28,6 @@ use bytemuck::{Pod, Zeroable};
 use crate::error::Result;
 use crate::gpu::device::{Gpu, HDR_FORMAT};
 use crate::gpu::fullscreen::{Blend, Fullscreen, FullscreenPass, TexturePool, UniformSlots};
-use crate::gpu::profiler::GpuProfiler;
 use crate::render::packet::records::Frame;
 
 /// `DepthOfFieldParams` (lens.wgsl).
@@ -96,7 +95,6 @@ impl DepthOfFieldPasses {
         image: &wgpu::TextureView,
         lens: &DepthOfField,
         target: BlurTarget,
-        profiler: &mut GpuProfiler,
     ) -> Result<()> {
         let frame_uniform = || {
             wgpu::BindingResource::Buffer(wgpu::BufferBinding {
@@ -135,8 +133,6 @@ impl DepthOfFieldPasses {
             &resources,
             Blend::Replace,
             true,
-            profiler,
-            "depth of field",
         )?;
 
         // 2. The largest blur in every tile.
@@ -172,8 +168,6 @@ impl DepthOfFieldPasses {
             &resources,
             Blend::Replace,
             true,
-            profiler,
-            "depth of field",
         )?;
 
         // 3. The blur.
@@ -194,8 +188,6 @@ impl DepthOfFieldPasses {
             &resources,
             target.blend,
             target.clear,
-            profiler,
-            "depth of field",
         )
     }
 }
