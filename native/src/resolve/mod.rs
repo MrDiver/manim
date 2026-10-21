@@ -38,12 +38,12 @@
 //! of how scenes are made or drawn.
 
 use std::collections::HashMap;
-use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use glam::DMat4;
 
+use crate::error::{Error, Result};
 use crate::flat::{Change, ClipScope, DrawItem, FlatScene, LightItem, Place, Update, NO_CLIP};
 use crate::robjects::{Kind, RNode};
 
@@ -51,21 +51,6 @@ static NEXT_REVISION: AtomicU64 = AtomicU64::new(1);
 
 /// Syncs after which a scene not synced since is dropped (`Resolvers`).
 const MAX_AGE: u64 = 1024;
-
-/// A tree no renderer can show: a mesh in a mask, a clipping group in a
-/// mask.
-#[derive(Debug)]
-pub struct Unsupported(pub String);
-
-impl fmt::Display for Unsupported {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for Unsupported {}
-
-pub type Result<T> = std::result::Result<T, Unsupported>;
 
 /// How many items, clip scopes and lights a scene has.
 #[derive(Clone, Copy, Default)]
@@ -217,7 +202,9 @@ impl Resolver {
                 Some(place)
             }
             Kind::Shape3D(_) | Kind::Particles { .. } if mask_of.is_some() => {
-                return Err(Unsupported("3D meshes cannot be part of a mask".into()));
+                return Err(Error::Unsupported(
+                    "3D meshes cannot be part of a mask".into(),
+                ));
             }
             Kind::Shape2D { .. }
             | Kind::Curve3D { .. }
@@ -262,7 +249,7 @@ impl Resolver {
                 one_sided,
             } => {
                 if mask_of.is_some() {
-                    return Err(Unsupported(
+                    return Err(Error::Unsupported(
                         "a clipping group inside a mask is not supported".into(),
                     ));
                 }

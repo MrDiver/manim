@@ -1,6 +1,6 @@
-//! The errors of the renderer and the compositor. They are libraries of
-//! their own: they report what went wrong as these, and the Python
-//! bindings (python/) turn them into Python exceptions.
+//! The errors of the resolver, the renderer and the compositor. They are
+//! libraries of their own: they report what went wrong as these, and the
+//! Python bindings (python/) turn them into Python exceptions.
 
 use std::fmt;
 

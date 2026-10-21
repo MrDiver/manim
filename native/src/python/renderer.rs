@@ -21,7 +21,7 @@ use crate::error::Error;
 use crate::gpu::device::Memory;
 use crate::python::robjects::{node_of, transform_from_py};
 use crate::render::settings::{Camera, CameraView, ShadowMethod, ViewSettings};
-use crate::resolve::{Resolvers, Unsupported};
+use crate::resolve::Resolvers;
 
 /// The tone map of lit meshes until the compositor's settings reach
 /// Python: Khronos PBR Neutral (`TONE_MAP_PBR_NEUTRAL` in color.wgsl).
@@ -34,12 +34,6 @@ impl From<Error> for PyErr {
             Error::Unsupported(message) => capability_exception(message),
             Error::Invalid(message) => PyValueError::new_err(message),
         }
-    }
-}
-
-impl From<Unsupported> for PyErr {
-    fn from(error: Unsupported) -> PyErr {
-        capability_exception(error.0)
     }
 }
 
