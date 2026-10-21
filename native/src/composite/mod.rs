@@ -23,6 +23,7 @@
 
 pub mod effects;
 pub mod frames;
+pub mod hold;
 pub mod output;
 pub mod pictures;
 

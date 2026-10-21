@@ -12,9 +12,10 @@
 //! the other on the caller's thread, while up to `in_flight` frames are
 //! on the GPU.
 //!
-//! A frame that shows exactly what the frame before showed is not
-//! rendered: equal scenes (equal revisions) seen with equal settings give
-//! equal pictures.
+//! The pipeline renders every frame it is asked for. It tells what a
+//! frame shows (`frame_key`: equal scenes, equal revisions, seen with
+//! equal settings give equal pictures); whether to render it at all is
+//! decided before, by its caller (`FrameHold`, hold.rs).
 
 use std::sync::Arc;
 
@@ -115,8 +116,6 @@ pub struct RenderPipeline {
     /// The `Frame` uniform of the last render (frame-stage effects read
     /// it).
     last_frame: Option<wgpu::Buffer>,
-    /// The key of the last rendered frame (None: never held).
-    last_key: Option<Vec<u64>>,
 }
 
 impl RenderPipeline {
@@ -149,42 +148,20 @@ impl RenderPipeline {
             settings,
             background: [0.0; 4],
             last_frame: None,
-            last_key: None,
         })
     }
 
-    /// Render frame `index` over `background` (straight RGBA, sRGB).
-    /// Returns true when the frame shows exactly what the frame before
-    /// showed: then nothing is rendered or read back for it.
+    /// Render frame `index` over `background` (straight RGBA, sRGB). The
+    /// views' updates are taken out of `sub_frames` and applied; whether
+    /// a frame needs rendering at all is the caller's question
+    /// (`frame_key`, `FrameHold`).
     pub fn render(
         &mut self,
         index: u64,
         background: [f32; 4],
-        sub_frames: Vec<SubFrame>,
-    ) -> Result<bool> {
+        sub_frames: &mut [SubFrame],
+    ) -> Result<()> {
         self.background = background;
-        self.render_frame(index, sub_frames)
-    }
-
-    /// Drop everything kept for `scene` (it is sent whole again if it
-    /// comes back).
-    pub fn forget(&mut self, scene: u64) {
-        self.renderer.forget(scene);
-    }
-
-    fn render_frame(&mut self, index: u64, mut sub_frames: Vec<SubFrame>) -> Result<bool> {
-        let key = self.frame_key(&sub_frames);
-        if key.is_some() && key == self.last_key {
-            // Equal revisions: none of the updates changes anything.
-            debug_assert!(sub_frames
-                .iter()
-                .flat_map(|sub_frame| &sub_frame.views)
-                .all(|view| matches!(&view.source, ViewSource::Scene(update) if update.changes.is_empty())));
-            return Ok(true);
-        }
-        // Set once the frame is rendered: a scene sent for the first time
-        // has a key only once it is kept.
-        self.last_key = None;
         let size = (self.settings.width, self.settings.height);
         let device = self.gpu.device.clone();
         let accumulator = self.compositor.textures.get(
@@ -262,9 +239,13 @@ impl RenderPipeline {
         let frame =
             self.compositor
                 .frame_effects(&self.gpu, &mut encoder, &accumulator, &frame_uniform)?;
-        self.output.send(&self.gpu, encoder, &frame, index)?;
-        self.last_key = self.frame_key(&sub_frames);
-        Ok(false)
+        self.output.send(&self.gpu, encoder, &frame, index)
+    }
+
+    /// Drop everything kept for `scene` (it is sent whole again if it
+    /// comes back).
+    pub fn forget(&mut self, scene: u64) {
+        self.renderer.forget(scene);
     }
 
     /// Frames finished so far, `(index, pixels)` in submission order;
@@ -273,20 +254,23 @@ impl RenderPipeline {
         self.output.finished(&self.gpu, wait)
     }
 
-    /// Equal keys promise equal frames: the background, per sub-frame its
-    /// weight and per
-    /// view its scene, the revision its update brings it to and the
-    /// settings' fingerprint. None with a shader effect, a surface shader
-    /// in a view (either may read the time), a scene not kept yet or a
-    /// picture of another renderer.
+    /// What a frame over `background` made of `sub_frames` shows: equal
+    /// keys promise equal frames. The key holds the background, per
+    /// sub-frame its weight and per view its scene, the revision its
+    /// update brings it to, its tone map and the settings' fingerprint.
+    /// None with a shader effect, a surface shader in a view (either may
+    /// read the time), a scene not kept yet or a picture of another
+    /// renderer.
     ///
-    /// Read before any update is applied: a scene whose revisions all
-    /// stay the same has no changes, so what it keeps is current.
-    fn frame_key(&self, sub_frames: &[SubFrame]) -> Option<Vec<u64>> {
+    /// Read before `render` applies the updates: a scene whose revisions
+    /// all stay the same has no changes, so what it keeps is current.
+    /// Read again after `render`: a scene sent for the first time has a
+    /// key only once it is kept.
+    pub fn frame_key(&self, background: [f32; 4], sub_frames: &[SubFrame]) -> Option<Vec<u64>> {
         if self.compositor.has_shader_effects() {
             return None;
         }
-        let mut key: Vec<u64> = self.background.map(|c| c.to_bits() as u64).to_vec();
+        let mut key: Vec<u64> = background.map(|c| c.to_bits() as u64).to_vec();
         for sub_frame in sub_frames {
             key.extend([
                 sub_frame.weight.to_bits() as u64,

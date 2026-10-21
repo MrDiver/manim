@@ -16,6 +16,7 @@ use pyo3::prelude::*;
 use crate::composite::frames::{
     PipelineOptions, RenderPipeline, Samples, SubFrame, View, ViewSource,
 };
+use crate::composite::hold::FrameHold;
 use crate::composite::output::PixelFormat;
 use crate::error::Error;
 use crate::gpu::device::Memory;
@@ -65,8 +66,9 @@ pub struct WgpuRenderer {
     /// Each scene's resolver: its trees turned into the changes sent.
     resolvers: Resolvers,
     /// The frame rendered last, returned again for a frame that shows the
-    /// same (the pipeline does not render it).
+    /// same (`hold`; the pipeline does not render it).
     last: Option<Vec<u8>>,
+    hold: FrameHold,
     frames: u64,
 }
 
@@ -78,6 +80,7 @@ impl WgpuRenderer {
             pipeline: None,
             resolvers: Resolvers::default(),
             last: None,
+            hold: FrameHold::default(),
             frames: 0,
         }
     }
@@ -98,6 +101,7 @@ impl WgpuRenderer {
             self.pipeline = Some((key, pipeline));
             self.resolvers = Resolvers::default();
             self.last = None;
+            self.hold = FrameHold::default();
         }
         let (_, pipeline) = self.pipeline.as_mut().expect("made above");
         let update = self.resolvers.sync(&node_of(root)?)?;
@@ -110,14 +114,20 @@ impl WgpuRenderer {
             // The `ToneMapOperator` member's value (TONE_MAP_* in color.wgsl).
             tone_map: config.getattr("tone_map")?.getattr("value")?.extract()?,
         };
-        let sub_frames = vec![SubFrame {
+        let mut sub_frames = vec![SubFrame {
             weight: 1.0,
             views: vec![view],
         }];
         let (r, g, b, a): (f32, f32, f32, f32) = config.getattr("background_rgba")?.extract()?;
-        self.frames += 1;
-        let held = pipeline.render(self.frames, [r, g, b, a], sub_frames)?;
-        if !held || self.last.is_none() {
+        let background = [r, g, b, a];
+        if !self
+            .hold
+            .holds(&pipeline.frame_key(background, &sub_frames))
+        {
+            self.frames += 1;
+            pipeline.render(self.frames, background, &mut sub_frames)?;
+            self.hold
+                .rendered(pipeline.frame_key(background, &sub_frames));
             let (_, pixels) = pipeline
                 .finished(true)?
                 .pop()
