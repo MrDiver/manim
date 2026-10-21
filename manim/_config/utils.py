@@ -28,12 +28,10 @@ import numpy as np
 
 from manim import constants
 from manim._config.output import OutputFormat
-from manim.constants import RendererType
 from manim.utils.color import ManimColor
 from manim.utils.tex import TexTemplate
 
 if TYPE_CHECKING:
-    from enum import EnumMeta
     from typing import Self
 
     from manim.typing import StrPath, Vector3D
@@ -304,7 +302,6 @@ class ManimConfig(MutableMapping):
         "tex_template_file",
         "text_dir",
         "upto_animation_number",
-        "renderer",
         "verbosity",
         "video_codec",
         "video_dir",
@@ -372,10 +369,7 @@ class ManimConfig(MutableMapping):
 
         """
         if isinstance(obj, ManimConfig):
-            renderer = obj.renderer
             self._d.update(obj._d)
-            if renderer is not None:
-                self.renderer = renderer
             if obj.tex_template:
                 self.tex_template = obj.tex_template
 
@@ -436,31 +430,6 @@ class ManimConfig(MutableMapping):
             self._d[key] = val
         else:
             raise ValueError(f"attempted to set {key} to {val}; must be in {values}")
-
-    def _set_from_enum(self, key: str, enum_value: Any, enum_class: EnumMeta) -> None:
-        """Set ``key`` to the enum object with value ``enum_value`` in the given
-        ``enum_class``.
-
-        Tests::
-
-            >>> from enum import Enum
-            >>> class Fruit(Enum):
-            ...     APPLE = 1
-            ...     BANANA = 2
-            ...     CANTALOUPE = 3
-            >>> test_config = ManimConfig()
-            >>> test_config._set_from_enum("fruit", 1, Fruit)
-            >>> test_config._d['fruit']
-            <Fruit.APPLE: 1>
-            >>> test_config._set_from_enum("fruit", Fruit.BANANA, Fruit)
-            >>> test_config._d['fruit']
-            <Fruit.BANANA: 2>
-            >>> test_config._set_from_enum("fruit", 42, Fruit)
-            Traceback (most recent call last):
-            ...
-            ValueError: 42 is not a valid Fruit
-        """
-        self._d[key] = enum_class(enum_value)
 
     def _set_boolean(self, key: str, val: Any) -> None:
         """Set ``key`` to ``val`` if ``val`` is Boolean."""
@@ -627,7 +596,6 @@ class ManimConfig(MutableMapping):
             "input_file",
             "output_file",
             "background_color",
-            "renderer",
             "window_position",
             "preview_command",
         ]:
@@ -754,7 +722,6 @@ class ManimConfig(MutableMapping):
             "transparent",
             "scene_names",
             "verbosity",
-            "renderer",
             "background_color",
             "fullscreen",
             "zero_pad",
@@ -1316,39 +1283,6 @@ class ManimConfig(MutableMapping):
     @dry_run.setter
     def dry_run(self, val: bool) -> None:
         self._set_boolean("dry_run", val)
-
-    @property
-    def renderer(self) -> RendererType:
-        """The currently active renderer.
-
-        Populated with one of the available renderers in :class:`.RendererType`.
-
-        Tests::
-
-            >>> test_config = ManimConfig()
-            >>> test_config.renderer is None  # a new ManimConfig is unpopulated
-            True
-            >>> test_config.renderer = 'cairo'
-            >>> test_config.renderer
-            <RendererType.CAIRO: 'cairo'>
-            >>> test_config.renderer = 42
-            Traceback (most recent call last):
-            ...
-            ValueError: 42 is not a valid RendererType
-
-        Check that capitalization of renderer types is irrelevant::
-
-            >>> test_config.renderer = 'cAirO'
-        """
-        return self._d["renderer"]
-
-    @renderer.setter
-    def renderer(self, value: str | RendererType) -> None:
-        """The setter of the renderer property."""
-        if isinstance(value, str):
-            value = value.lower()
-        renderer = RendererType(value)
-        self._set_from_enum("renderer", renderer, RendererType)
 
     @property
     def media_dir(self) -> str:

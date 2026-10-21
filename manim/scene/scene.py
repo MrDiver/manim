@@ -35,7 +35,7 @@ from ..animation.animation import Animation, Wait, prepare_animation
 from ..camera import Camera
 from ..constants import *
 from ..manager import Manager
-from ..renderer.cairo import CairoRenderer
+from ..renderer.insanity_adapter import InsanityAdapter
 from ..scene.scene_file_writer import _SceneFileWriterSettings
 from ..utils.family import extract_mobject_family_members
 from ..utils.iterables import list_difference_update, list_update
@@ -80,7 +80,7 @@ class Scene:
 
     def __init__(
         self,
-        renderer: CairoRenderer | None = None,
+        renderer: InsanityAdapter | None = None,
         camera_class: type[Camera] = Camera,
         always_update_mobjects: bool = False,
         random_seed: int | None = None,
@@ -102,7 +102,7 @@ class Scene:
         self.manager: Manager[Self] | None = None
 
         if renderer is None:
-            self._renderer: CairoRenderer = CairoRenderer(
+            self._renderer: InsanityAdapter = InsanityAdapter(
                 # TODO: Is it a suitable approach to make an instance of
                 # the self.camera_class here?
                 camera_class=self.camera_class,
@@ -158,7 +158,7 @@ class Scene:
         np.random.seed(self.random_seed)  # noqa: NPY002 (only way to set seed globally)
 
     @property
-    def renderer(self) -> CairoRenderer:
+    def renderer(self) -> InsanityAdapter:
         """The renderer selected at construction, shared by this scene's plays.
 
         This property is read-only. Choose a different renderer when creating
@@ -536,17 +536,6 @@ class Scene:
 
         The scene updater functions are run every frame,
         and they are the last type of updaters to run.
-
-        .. WARNING::
-
-            When using the Cairo renderer, scene updaters that
-            modify mobjects are not detected in the same way
-            that mobject updaters are. To be more concrete,
-            a mobject only modified via a scene updater will
-            not necessarily be added to the list of *moving
-            mobjects* and thus might not be updated every frame.
-
-            TL;DR: Use mobject updaters to update mobjects.
 
         Parameters
         ----------

@@ -6,15 +6,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import cairo
-import pytest
 from _pytest.fixtures import FixtureRequest
 
 from manim import Scene
 from manim._config import tempconfig
 from manim._config.utils import ManimConfig
 from manim.camera import ThreeDCamera
-from manim.renderer.cairo import CairoRenderer
+from manim.renderer.insanity_adapter import InsanityAdapter
 from manim.scene.three_d_scene import ThreeDScene
 from manim.typing import StrPath
 
@@ -29,14 +27,13 @@ from ._test_class_makers import (
 SCENE_PARAMETER_NAME = "scene"
 _tests_root_dir_path = Path(__file__).absolute().parents[2]
 PATH_CONTROL_DATA = _tests_root_dir_path / Path("control_data", "graphical_units_data")
-MIN_CAIRO_VERSION = 11800
 
 
 def frames_comparison(
     func: Callable | None = None,
     *,
     last_frame: bool = True,
-    renderer_class: type[CairoRenderer] = CairoRenderer,
+    renderer_class: type[InsanityAdapter] = InsanityAdapter,
     base_scene: type[Scene] = Scene,
     **custom_config: Any,
 ) -> Callable:
@@ -53,7 +50,7 @@ def frames_comparison(
     last_frame
         whether the test should test the last frame, by default True.
     renderer_class
-        The base renderer to use, by default CairoRenderer
+        The base renderer to use, by default InsanityAdapter
     base_scene
         The base class for the scene (ThreeDScene, etc.), by default Scene
 
@@ -89,12 +86,6 @@ def frames_comparison(
         def wrapper(
             *args: Any, request: FixtureRequest, tmp_path: StrPath, **kwargs: Any
         ) -> None:
-            # check for cairo version
-            if (
-                renderer_class is CairoRenderer
-                and cairo.cairo_version() < MIN_CAIRO_VERSION
-            ):
-                pytest.skip("Cairo version is too old. Skipping cairo graphical tests.")
             # Wraps the test_function to a construct method, to "freeze" the eventual additional arguments (parametrizations fixtures).
             construct = functools.partial(tested_scene_construct, *args, **kwargs)
 

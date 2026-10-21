@@ -139,7 +139,7 @@ class VectorScene(Scene):
         self.add(axes)
 
         # TODO
-        # error: Missing positional argument "scene" in call to "update_frame" of "CairoRenderer"  [call-arg]
+        # error: Missing positional argument "scene" in call to "update_frame"  [call-arg]
         self.renderer.update_frame()  # type: ignore[call-arg]
         self.renderer.camera = Camera(self.renderer.get_frame())
         self.clear()

@@ -1070,15 +1070,15 @@ class Mobject:
 
     # Displaying
     def get_image(self, camera: Camera | None = None) -> Image.Image:
-        """Draw this mobject and its submobjects using Cairo and return a PIL image.
+        """Draw this mobject and its submobjects and return a PIL image.
 
         Pass a ``camera`` to select the view, or omit it to create a default
         :class:`.Camera`. To use a scene's current view, pass ``camera=scene.camera``.
         """
         from manim.camera import Camera
-        from manim.renderer.cairo import CairoRenderer
+        from manim.renderer.insanity_adapter import InsanityAdapter
 
-        renderer = CairoRenderer(camera=Camera() if camera is None else camera)
+        renderer = InsanityAdapter(camera=Camera() if camera is None else camera)
         try:
             renderer.render_mobjects([self])
             return renderer.get_image()

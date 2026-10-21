@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from click import BadParameter
 from cloup import Choice, IntRange, option, option_group
 
-from manim.constants import QUALITIES, RendererType
+from manim.constants import QUALITIES
 
 if TYPE_CHECKING:
     from click import Context, Option
@@ -246,15 +246,6 @@ render_options = option_group(
         default=None,
         help="Maximum number of pending frame buffers held by each encoder "
         "(bounds the memory used by frames waiting to be encoded). Defaults to 8.",
-    ),
-    option(
-        "--renderer",
-        type=Choice(
-            [renderer_type.value for renderer_type in RendererType],
-            case_sensitive=False,
-        ),
-        help="Select a renderer for your Scene.",
-        default=None,
     ),
     option(
         "--save_sections",

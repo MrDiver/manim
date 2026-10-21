@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from .animation.animation import Animation
     from .camera import Camera
     from .mobject.mobject import Mobject, _AnimationBuilder
-    from .renderer.cairo import CairoRenderer
+    from .renderer.insanity_adapter import InsanityAdapter
     from .renderer.protocol import _AnimationRenderer
     from .scene.scene import Scene
     from .scene.scene_file_writer import SceneFileWriter
@@ -230,7 +230,7 @@ class Manager(Generic[SceneT]):
             logger.exception("Failed to clean up resources after a render failure")
 
     @property
-    def renderer(self) -> CairoRenderer:
+    def renderer(self) -> InsanityAdapter:
         """Return the renderer selected when the scene was created."""
         return self.scene.renderer
 
@@ -385,7 +385,7 @@ class Manager(Generic[SceneT]):
         """Return the frame displayed at ``timestamp`` by executing a fresh scene.
 
         Runs the scene's animation steps from the beginning, drawing each frame
-        with Cairo until the requested frame is reached. The returned
+        until the requested frame is reached. The returned
         image can be viewed or saved after the renderer closes. For an image of
         the scene's current state, use :meth:`get_image`.
 
@@ -897,23 +897,9 @@ class Manager(Generic[SceneT]):
             self.renderer.static_image = None
             scene.time_progression.close()
 
-    def _draw_animation_frame(self, frame_offset: float) -> RGBAPixelArray | None:
-        from .renderer.cairo.renderer import CairoRenderer
-
+    def _draw_animation_frame(self, frame_offset: float) -> RGBAPixelArray:
         self.renderer.render(self.scene, frame_offset, self.scene.moving_mobjects)
-        if (
-            self._frame_request is not None
-            or isinstance(self.renderer, CairoRenderer)
-            or (
-                not self.skip_animations
-                and (
-                    self.file_writer.output_spec.is_video
-                    or self.file_writer.output_spec.is_image_sequence
-                )
-            )
-        ):
-            return self.renderer.get_frame()
-        return None
+        return self.renderer.get_frame()
 
     def _deliver_animation_frame(
         self, frame: RGBAPixelArray | None, frame_offset: float
@@ -961,7 +947,7 @@ class Manager(Generic[SceneT]):
             raise _FrameCaptured
 
     def _legacy_add_frame(self, frame: RGBAPixelArray, num_frames: int = 1) -> None:
-        """Write frames and advance time for callers of CairoRenderer.add_frame."""
+        """Write frames and advance time for callers of the renderer's add_frame."""
         self._validate_execution()
         if not self.skip_animations:
             start_time = self.time

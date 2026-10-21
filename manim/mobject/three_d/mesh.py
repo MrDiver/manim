@@ -1,7 +1,6 @@
 """Mobjects made of triangles: surfaces with lighting and textures.
 
-The Cairo renderer draws them as one polygon per face, sorted far to near and
-lit per face. :class:`.Surface` and the 3D primitives (:class:`.Sphere`, :class:`.Torus`, ...) are
+:class:`.Surface` and the 3D primitives (:class:`.Sphere`, :class:`.Torus`, ...) are
 parametric surfaces of this kind.
 """
 

@@ -9,14 +9,9 @@ from pathlib import Path
 # Set before manim is imported, and inherited by subprocesses that run manim.
 os.environ.setdefault("MANIM_STRICT_FIELDS", "1")
 
-import cairo
 import pytest
 
 import manim
-
-
-def pytest_report_header(config):
-    return (f"\nCairo Version: {cairo.cairo_version()}",)
 
 
 def pytest_addoption(parser):
@@ -79,7 +74,6 @@ def manim_caplog(caplog):
 @pytest.fixture
 def config():
     saved = manim.config.copy()
-    manim.config.renderer = "cairo"
     # we need to return the actual config so that tests
     # using tempconfig pass
     yield manim.config

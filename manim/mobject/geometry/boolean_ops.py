@@ -58,8 +58,8 @@ class _BooleanOps(VMobject):
         return np.asarray(list_of_points)
 
     def _convert_vmobject_to_skia_path(self, vmobject: VMobject) -> SkiaPath:
-        """Converts a :class:`~.VMobject` to SkiaPath. This method only works for
-        cairo renderer because it treats the points as Cubic beizer curves.
+        """Converts a :class:`~.VMobject` to SkiaPath, treating its points as
+        cubic Bezier curves.
 
         Parameters
         ----------

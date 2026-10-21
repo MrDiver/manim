@@ -319,7 +319,7 @@ class ImageMobject(AbstractImageMobject):
 
 
 class ImageMobjectFromCamera(Mobject):
-    """A semantic camera view whose pixels are supplied by CairoRenderer.
+    """A semantic camera view whose pixels are supplied by the renderer.
 
     The mobject describes where a secondary camera view is composited. It owns
     geometry and sampling settings, but it never exposes or stores raster pixels.

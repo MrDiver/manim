@@ -33,7 +33,6 @@ KEYS_TO_FILTER_OUT = {
     "original_id",
     "background",
     "pixel_array",
-    "pixel_array_to_cairo_context",
 }
 
 
@@ -498,7 +497,7 @@ def get_hash_from_play_call(
     :class:`str`
         A filename-safe digest of all visual cache inputs.
     """
-    if backend not in {"cairo"}:
+    if backend != "wgpu":
         raise ValueError(f"Unsupported cache backend: {backend}")
     if not encoder_fingerprint:
         raise ValueError("An encoder fingerprint is required for cache identity.")

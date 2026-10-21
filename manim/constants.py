@@ -73,7 +73,6 @@ __all__ = [
     "CONTEXT_SETTINGS",
     "SHIFT_VALUE",
     "CTRL_VALUE",
-    "RendererType",
     "LineJointType",
     "CapStyleType",
 ]
@@ -253,17 +252,6 @@ CONTEXT_SETTINGS = Context.settings(
     align_sections=True,
     show_constraints=True,
 )
-
-
-class RendererType(Enum):
-    """An enumeration of all renderer types that can be assigned to
-    the ``config.renderer`` attribute.
-
-    Manim's configuration allows assigning string values to the renderer
-    setting, the values are then replaced by the corresponding enum object.
-    """
-
-    CAIRO = "cairo"  #: A renderer based on the cairo backend.
 
 
 class LineJointType(Enum):
