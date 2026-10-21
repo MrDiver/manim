@@ -26,9 +26,9 @@ from manim import (
     VGroup,
     VMobject,
 )
-from manim.renderer.snapshot import extract
 from manim.utils.bezier import bezier
 from manim.utils.color import color_to_rgba
+from manim.utils.family import extract_mobject_family_members
 
 # Geometry
 
@@ -199,12 +199,13 @@ def test_draw_order_is_family_order_stably_sorted_by_z_index(dry_run):
     # Adding a group that contains a takes a out of its first group.
     scene.add(d, Group(c, a))
 
-    drawn = scene.renderer.camera.get_mobjects_to_display(scene.mobjects)
+    drawn = extract_mobject_family_members(
+        scene.mobjects, use_z_index=True, only_those_with_points=True
+    )
 
     # Groups without points are not drawn; foreground mobjects come last only among
     # mobjects with the same z_index.
     assert drawn == [d, c, a, foreground, b]
-    assert [node.uid for node in extract(scene.mobjects)] == [m.uid for m in drawn]
 
 
 # Point clouds and images

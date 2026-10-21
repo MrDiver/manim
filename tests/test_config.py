@@ -12,17 +12,11 @@ from manim._config.output import OutputFormat, OutputSpec
 from manim._config.render_session import resolve_render_session
 from manim._config.utils import ManimConfig
 from manim.cli.render.commands import render
-from manim.constants import RendererType
-from manim.renderer.protocol import RendererCapabilities
 from tests.assert_utils import assert_dir_filled, assert_file_exists
 
 
 def _resolve_session(config):
-    return resolve_render_session(
-        config,
-        RendererCapabilities(live_preview=True),
-        renderer_name="TestRenderer",
-    )
+    return resolve_render_session(config)
 
 
 def _resolve_output(config):
@@ -58,13 +52,6 @@ def test_max_files_cached_uses_minus_one_for_unlimited(config):
 
     with pytest.raises(ValueError, match="non-negative integer or -1"):
         config.max_files_cached = float("inf")
-
-
-def test_tempconfig_restores_renderer(config):
-    with tempconfig({"renderer": "opengl"}):
-        assert config.renderer == RendererType.OPENGL
-
-    assert config.renderer == RendererType.CAIRO
 
 
 @pytest.mark.parametrize(
@@ -134,27 +121,11 @@ def test_explicit_no_output_is_not_dry_run(config):
     assert session.dry_run is False
 
 
-def test_live_preview_auto_output_resolves_to_none(config):
-    config.format = "auto"
+def test_live_preview_is_not_available(config):
     config.live_preview = True
 
-    session = _resolve_session(config)
-
-    assert session.output.format is OutputFormat.NONE
-    assert session.output.fallback_to_still is False
-    assert session.presentation.live_preview is True
-    assert session.dry_run is False
-
-
-def test_live_preview_requires_renderer_capability(config):
-    config.live_preview = True
-
-    with pytest.raises(ValueError, match="does not support live preview"):
-        resolve_render_session(
-            config,
-            RendererCapabilities(),
-            renderer_name="TestRenderer",
-        )
+    with pytest.raises(ValueError, match="Live preview is not available"):
+        resolve_render_session(config)
 
 
 def test_preview_requires_output(config):
@@ -162,11 +133,7 @@ def test_preview_requires_output(config):
     config.preview = True
 
     with pytest.raises(ValueError, match="requires a media artifact"):
-        resolve_render_session(
-            config,
-            RendererCapabilities(),
-            renderer_name="TestRenderer",
-        )
+        resolve_render_session(config)
 
 
 def test_explicit_transparent_mp4_is_rejected(config):
@@ -378,24 +345,6 @@ def test_cli_distinguishes_preview_from_live_preview(tmp_path):
     assert result.return_value.live_preview is True
 
 
-def test_opengl_cli_no_longer_disables_automatic_output(tmp_path, config):
-    scene_file = tmp_path / "scene.py"
-    scene_file.write_text("# --jupyter returns before loading this file\n")
-    result = CliRunner().invoke(
-        render,
-        [str(scene_file), "--jupyter", "--renderer=opengl"],
-        standalone_mode=False,
-    )
-    assert result.exception is None
-
-    config.format = "auto"
-    config.digest_args(result.return_value)
-
-    assert config.renderer is RendererType.OPENGL
-    assert config.format == "auto"
-    assert _resolve_output(config).format is OutputFormat.MP4
-
-
 def test_absent_cli_output_options_preserve_config_file_values(tmp_path):
     scene_file = tmp_path / "scene.py"
     scene_file.write_text("# --jupyter returns before loading this file\n")
@@ -457,7 +406,8 @@ def test_transparent_by_background_opacity(config, dry_run):
     with scene._get_manager():
         scene.render()
         frame = scene.renderer.get_frame()
-    np.testing.assert_allclose(frame[0, 0], [0, 0, 0, 127])
+    # 0.5 * 255 rounds to 128.
+    np.testing.assert_allclose(frame[0, 0], [0, 0, 0, 128])
     assert config.transparent is True
 
 

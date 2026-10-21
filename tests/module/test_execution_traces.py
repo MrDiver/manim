@@ -1,4 +1,4 @@
-"""Cairo and OpenGL expose the same animation times to user code."""
+"""Scenes expose consistent animation times to user code."""
 
 import numpy as np
 import pytest
@@ -6,14 +6,12 @@ import pytest
 from manim import Animation, Scene, Square, tempconfig
 
 
-@pytest.mark.parametrize("backend", ["cairo", "opengl"])
 @pytest.mark.parametrize("duration", [1, 0.3])
 @pytest.mark.parametrize("skip", [False, True])
-def test_animation_clock_trace(backend, duration, skip):
+def test_animation_clock_trace(duration, skip):
     trace = []
     with tempconfig(
         {
-            "renderer": backend,
             "format": "none",
             "live_preview": False,
             "pixel_width": 32,
@@ -24,7 +22,6 @@ def test_animation_clock_trace(backend, duration, skip):
         }
     ):
         scene = Scene(skip_animations=skip)
-        # OpenGL historically ignores Scene's skip_animations constructor argument.
         scene.renderer._original_skipping_status = skip
         scene.add(Square())
 
@@ -68,12 +65,10 @@ def test_animation_clock_trace(backend, duration, skip):
     assert plays == 1
 
 
-@pytest.mark.parametrize("backend", ["cairo", "opengl"])
 @pytest.mark.parametrize("skip", [False, True])
-def test_frozen_wait_clock_trace(backend, skip):
+def test_frozen_wait_clock_trace(skip):
     with tempconfig(
         {
-            "renderer": backend,
             "format": "none",
             "live_preview": False,
             "pixel_width": 32,
@@ -106,13 +101,11 @@ def test_sampled_duration_matches_rendered_sample_count():
                 assert sampled * fps == pytest.approx(rendered_samples), (fps, duration)
 
 
-@pytest.mark.parametrize("backend", ["cairo", "opengl"])
-def test_stop_condition_observes_consumed_time(backend):
+def test_stop_condition_observes_consumed_time():
     stops = []
     updates = []
     with tempconfig(
         {
-            "renderer": backend,
             "format": "none",
             "live_preview": False,
             "pixel_width": 32,

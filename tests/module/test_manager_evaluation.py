@@ -49,11 +49,10 @@ class TraceScene(Scene):
         self.trace.append(("teardown", self.time))
 
 
-@pytest.fixture(params=["cairo", "opengl"])
-def settings(request, tmp_path):
+@pytest.fixture
+def settings(tmp_path):
     with tempconfig(
         {
-            "renderer": request.param,
             "format": "none",
             "frame_rate": 4,
             "pixel_width": 32,
@@ -114,10 +113,7 @@ def test_declarations_do_not_open_media_logs_or_decode_audio(settings, monkeypat
         reject = Mock(side_effect=AssertionError("resource acquired"))
         monkeypatch.setattr(scene.renderer, "_file_writer_class", reject)
         monkeypatch.setattr("manim.manager.set_file_logger", reject)
-        if hasattr(scene.renderer, "open"):
-            monkeypatch.setattr(scene.renderer, "open", reject)
-        else:
-            monkeypatch.setattr(scene.renderer, "_get_target", reject)
+        monkeypatch.setattr(scene.renderer, "_draw", reject)
         manager.evaluate()
         assert scene.time == 0.5
         assert not list(settings.rglob("*"))
@@ -126,7 +122,7 @@ def test_declarations_do_not_open_media_logs_or_decode_audio(settings, monkeypat
 
 @pytest.mark.parametrize(
     "demand",
-    ["image", "frame", "writer", "render", "interactive", "mesh"],
+    ["image", "frame", "writer", "render"],
 )
 def test_explicit_resource_demands_fail_honestly(settings, demand):
     class Unsupported(Scene):
@@ -137,10 +133,6 @@ def test_explicit_resource_demands_fail_honestly(settings, demand):
                 self.renderer.get_frame()
             elif demand == "writer":
                 self.renderer.file_writer
-            elif demand == "interactive":
-                self.interactive_embed()
-            elif demand == "mesh":
-                self.meshes.append(Mock())
             else:
                 self.render()
 
@@ -193,16 +185,13 @@ def test_camera_query_updaters_match_without_raster(tmp_path):
 
             def update(dt):
                 self.camera.set_theta(self.time)
-                self.observed.append(
-                    self.camera.project_point(np.array([1.0, 0.0, 0.0]))
-                )
+                self.observed.append(self.camera.get_rotation_matrix().copy())
 
             self.add_updater(update)
             self.wait(1, frozen_frame=False)
 
     with tempconfig(
         {
-            "renderer": "cairo",
             "format": "none",
             "frame_rate": 4,
             "pixel_width": 32,

@@ -36,7 +36,6 @@ def fixture_scene(tmp_path):
     with tempconfig(
         {
             "assets_dir": str(tmp_path),
-            "renderer": "cairo",
             "format": "none",
             "frame_rate": 4,
             "pixel_width": 32,

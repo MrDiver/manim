@@ -8,11 +8,10 @@ import pytest
 from manim import Manager, Scene, logger, tempconfig
 
 
-@pytest.fixture(params=["cairo", "opengl"])
-def managed_scene(request, tmp_path):
+@pytest.fixture
+def managed_scene(tmp_path):
     with tempconfig(
         {
-            "renderer": request.param,
             "format": "none",
             "live_preview": False,
             "pixel_width": 64,

@@ -12,7 +12,6 @@ def scene():
     # Playback and the clock live in Manager; the trace tests cover both backends.
     with tempconfig(
         {
-            "renderer": "cairo",
             "format": "none",
             "live_preview": False,
             "pixel_width": 32,

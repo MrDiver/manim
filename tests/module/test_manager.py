@@ -2,20 +2,16 @@ from __future__ import annotations
 
 import copy
 import datetime
-import threading
 from unittest.mock import Mock, patch
 
 import pytest
 import srt
 
-from manim import Manager, Scene, tempconfig
+from manim import Manager, Scene
 from manim._config.output import OutputFormat
 from manim.animation.animation import Wait
-from manim.constants import RendererType
 from manim.renderer._execution import _ExecutionState
-from manim.renderer.protocol import RendererCapabilities
-from manim.scene.scene import SceneInteractRerun
-from manim.utils.exceptions import EndSceneEarlyException, RerunSceneException
+from manim.utils.exceptions import EndSceneEarlyException
 
 
 def test_manager_attaches_to_existing_scene(dry_run):
@@ -71,7 +67,6 @@ def test_manager_rejects_explicit_video_for_scene_without_play_calls(
     config.format = output_format
     renderer = Mock()
     renderer._claim_execution.return_value = _ExecutionState()
-    renderer.capabilities = RendererCapabilities()
     renderer.num_plays = 0
     scene = Scene(renderer)
     manager = Manager(scene)
@@ -89,7 +84,6 @@ def test_manager_warns_when_automatic_video_falls_back_to_still(config):
     config.format = "auto"
     renderer = Mock()
     renderer._claim_execution.return_value = _ExecutionState()
-    renderer.capabilities = RendererCapabilities()
     renderer.num_plays = 0
     scene = Scene(renderer)
     renderer.file_writer.final_file_path = "scene.png"
@@ -142,7 +136,7 @@ def test_scene_render_lazily_creates_manager(dry_run):
     scene = LifecycleScene()
     assert scene.manager is None
 
-    assert scene.render() is False
+    scene.render()
 
     assert isinstance(scene.manager, Manager)
     assert lifecycle == ["setup", "construct", "tear_down"]
@@ -178,7 +172,7 @@ def test_manager_render_uses_scene_lifecycle(dry_run):
 
     scene = LifecycleScene()
 
-    assert Manager(scene).render() is False
+    Manager(scene).render()
 
     assert lifecycle == ["setup", "construct", "tear_down"]
 
@@ -203,33 +197,9 @@ def test_manager_render_uses_lifecycle_hooks(dry_run):
             hooks.append("post_construct")
             super().post_construct()
 
-    assert HookManager(Scene()).render() is False
+    HookManager(Scene()).render()
 
     assert hooks == ["setup", "construct", "tear_down", "post_construct"]
-
-
-def test_manager_render_retires_rerun_without_finishing_scene(dry_run, monkeypatch):
-    lifecycle: list[str] = []
-
-    class RerunScene(Scene):
-        def construct(self):
-            raise RerunSceneException
-
-        def tear_down(self):
-            lifecycle.append("tear_down")
-
-    scene = RerunScene()
-    manager = Manager(scene)
-    scene.renderer.num_plays = 3
-    finish = Mock()
-    monkeypatch.setattr(scene.renderer, "scene_finished", finish)
-
-    assert manager.render() is True
-
-    assert scene.renderer.num_plays == 3
-    assert scene.renderer._closed
-    finish.assert_not_called()
-    assert lifecycle == []
 
 
 def test_manager_render_finalizes_after_early_scene_end(dry_run):
@@ -249,7 +219,7 @@ def test_manager_render_finalizes_after_early_scene_end(dry_run):
 
     scene = EarlyEndScene(renderer)
 
-    assert Manager(scene).render() is False
+    Manager(scene).render()
 
     renderer.scene_finished.assert_called_once_with(scene)
     assert lifecycle == ["tear_down", "post_construct"]
@@ -331,38 +301,6 @@ def test_scene_play_uses_animation_duration_for_default_subcaption_after_skip(
             end=datetime.timedelta(seconds=3.5),
         )
     ]
-
-
-def test_scene_play_queues_interactive_calls_without_attaching_manager(
-    dry_run, monkeypatch
-):
-    scene = Scene()
-    scene.interactive_mode = True
-    renderer_play = Mock()
-    monkeypatch.setattr(scene.renderer, "play", renderer_play)
-    worker_thread = threading.Thread(name="Worker")
-    monkeypatch.setattr(threading, "current_thread", lambda: worker_thread)
-
-    with tempconfig({"renderer": RendererType.OPENGL}):
-        scene.play(
-            Wait(),
-            run_time=2,
-            subcaption="Hello",
-            subcaption_duration=1.25,
-            subcaption_offset=0.5,
-        )
-
-    assert scene.manager is None
-    renderer_play.assert_not_called()
-    queued_call = scene.queue.get_nowait()
-    assert isinstance(queued_call, SceneInteractRerun)
-    assert queued_call.sender == "play"
-    assert queued_call.kwargs == {
-        "run_time": 2,
-        "subcaption": "Hello",
-        "subcaption_duration": 1.25,
-        "subcaption_offset": 0.5,
-    }
 
 
 def test_scene_next_section_records_metadata(dry_run):

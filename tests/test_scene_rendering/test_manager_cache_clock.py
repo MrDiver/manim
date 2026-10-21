@@ -4,7 +4,6 @@ from unittest.mock import Mock
 
 import av
 import numpy as np
-import pytest
 
 from manim import Animation, Scene, Square, tempconfig
 
@@ -32,11 +31,9 @@ def decoded_frames(path):
         return [frame.to_ndarray(format="rgba") for frame in video.decode(video=0)]
 
 
-@pytest.mark.parametrize("backend", ["cairo", "opengl"])
-def test_time_dependent_cache_and_fractional_downstream_epochs(tmp_path, backend):
+def test_time_dependent_cache_and_fractional_downstream_epochs(tmp_path):
     with tempconfig(
         {
-            "renderer": backend,
             "format": "mp4",
             "media_dir": str(tmp_path),
             "frame_rate": 4,
@@ -89,7 +86,6 @@ def test_excluded_plays_leave_later_plays_on_a_full_render_timeline(tmp_path):
     """
     with tempconfig(
         {
-            "renderer": "cairo",
             "format": "mp4",
             "media_dir": str(tmp_path),
             "frame_rate": 4,
@@ -121,7 +117,6 @@ def test_segments_rendered_under_exclusion_are_reused_by_a_full_render(
     """The point of the whole-frame clock: -n output is cache-compatible."""
     with tempconfig(
         {
-            "renderer": "cairo",
             "format": "mp4",
             "media_dir": str(tmp_path),
             "frame_rate": 4,
@@ -156,7 +151,6 @@ def test_still_output_ends_on_the_full_render_clock(tmp_path):
     """-s excludes every play, so its clock is pure shortcut arithmetic."""
     with tempconfig(
         {
-            "renderer": "cairo",
             "media_dir": str(tmp_path),
             "frame_rate": 4,
             "pixel_width": 64,
@@ -182,7 +176,6 @@ def test_still_output_ends_on_the_full_render_clock(tmp_path):
 def test_stopped_events_do_not_reuse_an_unknown_cached_span(monkeypatch):
     with tempconfig(
         {
-            "renderer": "cairo",
             "format": "none",
             "frame_rate": 4,
             "pixel_width": 32,

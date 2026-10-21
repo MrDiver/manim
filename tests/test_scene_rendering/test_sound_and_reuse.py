@@ -37,12 +37,10 @@ def decoded_audio(path):
     return samples.astype(np.float32)
 
 
-@pytest.mark.parametrize("backend", ["cairo", "opengl"])
-def test_reused_segments_produce_an_identical_audio_track(tmp_path, beep, backend):
+def test_reused_segments_produce_an_identical_audio_track(tmp_path, beep):
     def rendered_audio(media_dir):
         with tempconfig(
             {
-                "renderer": backend,
                 "format": "mp4",
                 "frame_rate": 4,
                 "pixel_width": 64,

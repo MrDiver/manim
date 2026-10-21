@@ -5,17 +5,16 @@ from unittest.mock import Mock
 
 import pytest
 
-from manim import CairoRenderer, Manager, Scene, Wait, tempconfig
-from manim.renderer.opengl import OpenGLRenderer
+from manim import Manager, Scene, Wait, tempconfig
+from manim.renderer.insanity_adapter import InsanityAdapter
 from manim.scene.scene_file_writer import SceneFileWriter
 
 
 @pytest.fixture
 def writer_scene(tmp_path, request):
-    backend, output = getattr(request, "param", ("cairo", "png"))
+    output = getattr(request, "param", "png")
     with tempconfig(
         {
-            "renderer": backend,
             "format": output,
             "dry_run": False,
             "live_preview": False,
@@ -27,8 +26,7 @@ def writer_scene(tmp_path, request):
         }
     ):
         factory = Mock(wraps=SceneFileWriter)
-        renderer_class = CairoRenderer if backend == "cairo" else OpenGLRenderer
-        scene = Scene(renderer=renderer_class(file_writer_class=factory))
+        scene = Scene(renderer=InsanityAdapter(file_writer_class=factory))
         try:
             yield scene, factory
         finally:
@@ -70,7 +68,7 @@ def test_render_creates_writer_before_setup_once(writer_scene, monkeypatch):
     assert manager.file_writer.final_file_path.exists()
 
 
-@pytest.mark.parametrize("writer_scene", [("cairo", "mp4")], indirect=True)
+@pytest.mark.parametrize("writer_scene", ["mp4"], indirect=True)
 def test_direct_plays_keep_the_same_writer(writer_scene):
     scene, factory = writer_scene
     scene.play(Wait(0.1))

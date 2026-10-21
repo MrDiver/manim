@@ -34,8 +34,9 @@ def test_background_color():
     S.camera.background_color = "#bbffbb"
     S.camera.background_opacity = 0.5
     S.renderer.update_frame(S)
+    # 0.5 * 255 rounds to 128.
     np.testing.assert_array_equal(
-        S.renderer.get_frame()[0, 0], np.array([187, 255, 187, 127])
+        S.renderer.get_frame()[0, 0], np.array([187, 255, 187, 128])
     )
 
 

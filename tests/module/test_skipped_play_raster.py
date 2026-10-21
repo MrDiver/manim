@@ -14,11 +14,10 @@ from manim import (
 RASTER_CALLS = ("render", "get_frame", "_prepare_animation", "_present_frozen_frame")
 
 
-@pytest.fixture(params=["cairo", "opengl"])
-def settings(request, tmp_path):
+@pytest.fixture
+def settings(tmp_path):
     with tempconfig(
         {
-            "renderer": request.param,
             "format": "mp4",
             "frame_rate": 4,
             "pixel_width": 32,
@@ -67,8 +66,6 @@ def test_excluded_plays_do_no_raster_work(settings, monkeypatch):
 
 
 def test_cached_plays_do_no_raster_work(settings, monkeypatch):
-    # Only stepped plays here: a frozen wait does not reuse its segment reliably on
-    # OpenGL, which predates this change and would make the assertion backend-specific.
     class Stepped(Scene):
         def construct(self):
             square = Square(fill_opacity=1)
@@ -101,7 +98,7 @@ def test_rendered_plays_in_a_partly_skipped_scene_still_draw(settings, monkeypat
 
 
 def test_static_layer_is_not_stale_after_an_excluded_play(settings):
-    """Skipping _prepare_animation must not leak a stale Cairo static image."""
+    """Skipping _prepare_animation must not leave a stale image behind."""
 
     class Static(Scene):
         def construct(self):

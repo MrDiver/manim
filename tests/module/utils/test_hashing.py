@@ -13,7 +13,7 @@ from manim import ImageMobject, Square
 
 ALREADY_PROCESSED_PLACEHOLDER = hashing._Memoizer.ALREADY_PROCESSED_PLACEHOLDER
 _CACHE_IDENTITY = {
-    "backend": "cairo",
+    "backend": "wgpu",
     "encoder_fingerprint": "encoder-token",
     "renderer_state": (),
 }
@@ -320,7 +320,7 @@ def test_play_hash_keeps_distinct_mobjects_with_equal_python_hashes():
     assert _play_hash(scene, camera, [], mobjects) != original
 
 
-def test_play_hash_includes_backend_encoder_and_renderer_state():
+def test_play_hash_includes_encoder_and_renderer_state():
     class HashableObject:
         def __init__(self, value):
             self.value = value
@@ -328,13 +328,13 @@ def test_play_hash_includes_backend_encoder_and_renderer_state():
     scene = HashableObject("scene")
     camera = HashableObject("camera")
 
-    def cache_key(*, backend="cairo", encoder="encoder", **renderer_state):
+    def cache_key(*, encoder="encoder", **renderer_state):
         return hashing.get_hash_from_play_call(
             scene,
             camera,
             [],
             [],
-            backend=backend,
+            backend="wgpu",
             encoder_fingerprint=encoder,
             renderer_state=renderer_state,
         )
@@ -346,7 +346,6 @@ def test_play_hash_includes_backend_encoder_and_renderer_state():
     }
     original = cache_key(**renderer_state)
     changed_inputs = [
-        cache_key(backend="opengl", **renderer_state),
         cache_key(encoder="other", **renderer_state),
         cache_key(**{**renderer_state, "meshes": [HashableObject("changed")]}),
         cache_key(

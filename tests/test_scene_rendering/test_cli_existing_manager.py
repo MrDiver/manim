@@ -4,10 +4,8 @@ import os
 import subprocess
 import sys
 
-import pytest
 
-
-def render(tmp_path, backend, source, *selection, output="png"):
+def render(tmp_path, source, *selection, output="png"):
     script = tmp_path / "scene.py"
     script.write_text(source, encoding="utf-8")
     return subprocess.run(
@@ -15,8 +13,6 @@ def render(tmp_path, backend, source, *selection, output="png"):
             sys.executable,
             "-m",
             "manim",
-            "--renderer",
-            backend,
             "--format",
             output,
             "-r",
@@ -38,11 +34,9 @@ def render(tmp_path, backend, source, *selection, output="png"):
     )
 
 
-@pytest.mark.parametrize("backend", ["cairo", "opengl"])
-def test_scenes_rendered_in_one_run_do_not_share_state(tmp_path, backend):
+def test_scenes_rendered_in_one_run_do_not_share_state(tmp_path):
     result = render(
         tmp_path,
-        backend,
         """from manim import RIGHT, Scene, Square
 class First(Scene):
     def construct(self):
@@ -65,7 +59,6 @@ class Second(First):
 def test_failed_constructor_play_does_not_strand_encoder(tmp_path):
     result = render(
         tmp_path,
-        "cairo",
         """from manim import Animation, Scene, Square
 class BrokenAnimation(Animation):
     def interpolate_mobject(self, alpha):

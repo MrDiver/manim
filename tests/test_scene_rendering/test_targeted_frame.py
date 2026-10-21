@@ -1,4 +1,4 @@
-"""Check frame selection against actual writer delivery on Cairo and OpenGL."""
+"""Check frame selection against actual writer delivery."""
 
 import math
 from contextlib import contextmanager
@@ -10,11 +10,10 @@ import pytest
 from manim import RIGHT, Manager, Scene, Square, linear, tempconfig
 
 
-@pytest.fixture(params=["cairo", "opengl"])
-def settings(request, tmp_path):
+@pytest.fixture
+def settings(tmp_path):
     with tempconfig(
         {
-            "renderer": request.param,
             "format": "mp4",
             "frame_rate": 4,
             "pixel_width": 96,
@@ -100,7 +99,6 @@ def test_final_endpoint_is_a_miss(settings):
     assert manager._file_writer is None
 
 
-@pytest.mark.parametrize("settings", ["cairo"], indirect=True)
 @pytest.mark.parametrize(
     ("timestamp", "index"), [(math.nextafter(15 / 22, 0), 14), (15 / 22, 15)]
 )
@@ -116,7 +114,6 @@ def test_frozen_hold_selects_exact_float_boundary(settings, timestamp, index):
     assert result.time == index / 22
 
 
-@pytest.mark.parametrize("settings", ["cairo"], indirect=True)
 @pytest.mark.parametrize("timestamp", [-1, math.nan, math.inf])
 def test_invalid_timestamp_leaves_scene_unused(settings, timestamp):
     with Manager(Scene()) as manager:
@@ -126,7 +123,6 @@ def test_invalid_timestamp_leaves_scene_unused(settings, timestamp):
         assert manager._file_writer is None
 
 
-@pytest.mark.parametrize("settings", ["cairo"], indirect=True)
 def test_playback_in_finally_block_keeps_captured_frame(settings):
     """Cleanup that waits, as manim-voiceover does, must not lose the frame."""
 

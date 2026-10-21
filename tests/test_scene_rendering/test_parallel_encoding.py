@@ -25,7 +25,6 @@ from manim._config.output_plan import (
 from manim._config.video_encoder import resolve_video_encoder
 from manim.cli.render.commands import render
 from manim.scene.scene_file_writer import SceneFileWriter, _SceneFileWriterSettings
-from manim.utils.exceptions import RerunSceneException
 
 _ENCODER_THREAD_PREFIX = "partial-movie-encoder-"
 _VIDEO_OUTPUT = OutputSpec(
@@ -721,70 +720,6 @@ def test_keyboard_interrupt_aborts_encode_jobs_and_reraises(config):
     writer.abort_encode_jobs.assert_called_once_with()
 
 
-def test_rerun_propagates_encoder_failure(config, tmp_path):
-    expected_exception = RuntimeError("in-flight encoder failed")
-    writer = _new_writer(config, tmp_path, "RerunFailureScene")
-    failing_inflight = Mock(path=tmp_path / "inflight.mp4")
-    failing_inflight.join.side_effect = expected_exception
-    _add_inflight_job(writer, failing_inflight)
-    scene = Scene(renderer=Mock(_closed=False, _retiring=False))
-    scene._get_manager()._file_writer = writer
-
-    def construct():
-        raise RerunSceneException
-
-    scene.construct = construct
-
-    with pytest.raises(RuntimeError) as exc_info:
-        scene.render()
-
-    assert exc_info.value is expected_exception
-    assert writer._inflight_encode_jobs == []
-    assert writer._inflight_by_path == {}
-
-
-def test_rerun_propagates_failed_current_job(config, tmp_path):
-    expected_exception = RuntimeError("encode failed")
-    encoder = _fake_segment_encoder(tmp_path, "rerun_current")
-    encoder.write_frame.side_effect = expected_exception
-    writer = _new_writer(config, tmp_path, "RerunCurrentFailureScene")
-    job = _new_encode_job(tmp_path, "rerun_current", encoder)
-    job.path.write_bytes(b"stale")
-    writer._current_encode_job = job
-    job.put(1, _frame())
-    for _ in range(500):
-        if job.failed:
-            break
-        time.sleep(0.01)
-
-    scene = Scene(renderer=Mock(_closed=False, _retiring=False))
-    scene._get_manager()._file_writer = writer
-
-    def construct():
-        raise RerunSceneException
-
-    scene.construct = construct
-
-    try:
-        assert job.failed, "Encoder failure was not captured in time"
-
-        with pytest.raises(RuntimeError) as exc_info:
-            scene.render()
-
-        assert exc_info.value is expected_exception
-        assert writer._current_encode_job is None
-        assert not job.path.exists()
-        assert not _alive_encoder_threads()
-    finally:
-        # An assertion failure above must not leave an unsealed non-daemon
-        # worker behind: it would hang pytest at exit.
-        if writer._current_encode_job is not None:
-            job.abort()
-            writer._current_encode_job = None
-        job.thread.join(timeout=5)
-
-
-@pytest.mark.slow
 def test_end_scene_early_keeps_completed_partials(config, tmp_path):
     class EarlyEndScene(Scene):
         def construct(self):
