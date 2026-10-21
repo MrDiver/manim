@@ -12,35 +12,15 @@ import copy
 import inspect
 import platform
 import random
-import threading
-import time
-from dataclasses import dataclass
-from pathlib import Path
-from queue import Queue
-
-from manim.scene.section import DefaultSectionType
-
-try:
-    import dearpygui.dearpygui as dpg
-
-    dearpygui_imported = True
-    dpg.create_context()
-    window = dpg.generate_uuid()
-except ImportError:
-    dearpygui_imported = False
-
 from collections.abc import Callable, Iterable, Sequence
-from types import FrameType
-from typing import TYPE_CHECKING, Any, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from tqdm import tqdm
-from watchdog.events import DirModifiedEvent, FileModifiedEvent, FileSystemEventHandler
-from watchdog.observers import Observer
 
-from manim import __version__
-from manim.data_structures import MethodWithArgs
 from manim.mobject.mobject import Mobject
+from manim.scene.section import DefaultSectionType
 
 from .. import config, logger
 from .._config.output_plan import (
@@ -54,92 +34,16 @@ from .._config.render_session import resolve_render_session
 from ..animation.animation import Animation, Wait, prepare_animation
 from ..constants import *
 from ..manager import Manager
-from ..mobject.types.point_cloud_mobject import Point
 from ..renderer.cairo import CairoRenderer
-from ..renderer.cairo.camera import Camera, ThreeDCamera
-from ..renderer.opengl.renderer import OpenGLRenderer
-from ..renderer.opengl.shader import Object3D
+from ..renderer.cairo.camera import Camera
 from ..scene.scene_file_writer import _SceneFileWriterSettings
-from ..utils.exceptions import RerunSceneException
 from ..utils.family import extract_mobject_family_members
 from ..utils.iterables import list_difference_update, list_update
-from ..utils.module_ops import scene_classes_from_file
 
 if TYPE_CHECKING:
-    from typing import Self, TypeAlias
+    from typing import Self
 
     from PIL.Image import Image
-
-    from manim.typing import Point3D
-
-    SceneInteractAction: TypeAlias = (
-        MethodWithArgs | "SceneInteractContinue" | "SceneInteractRerun"
-    )
-    """The SceneInteractAction type alias is used for elements in the queue
-    used by :meth:`.Scene.interact()`.
-
-    The elements can be one of the following three:
-
-    - a :class:`~.MethodWithArgs` object, which represents a :class:`Scene`
-      method to be called along with its args and kwargs,
-    - a :class:`~.SceneInteractContinue` object, indicating that the scene
-      interaction is over and the scene will continue rendering after that, or
-    - a :class:`~.SceneInteractRerun` object, indicating that the scene should
-      render again.
-    """
-
-
-@dataclass
-class SceneInteractContinue:
-    """Object which, when encountered in :meth:`.Scene.interact`, triggers
-    the end of the scene interaction, continuing with the rest of the
-    animations, if any. This object can be queued in :attr:`.Scene.queue`
-    for later use in :meth:`.Scene.interact`.
-
-    Attributes
-    ----------
-    sender : str
-        The name of the entity which issued the end of the scene interaction,
-        such as ``"gui"`` or ``"keyboard"``.
-    """
-
-    __slots__ = ["sender"]
-
-    sender: str
-
-
-class SceneInteractRerun:
-    """Object which, when encountered in :meth:`.Scene.interact`, triggers
-    the rerun of the scene. This object can be queued in :attr:`.Scene.queue`
-    for later use in :meth:`.Scene.interact`.
-
-    Attributes
-    ----------
-    sender : str
-        The name of the entity which issued the rerun of the scene, such as
-        ``"gui"``, ``"keyboard"``, ``"play"`` or ``"file"``.
-    kwargs : dict[str, Any]
-        Additional keyword arguments when rerunning the scene. Currently,
-        only ``"from_animation_number"`` is being used, which determines the
-        animation from which to start rerunning the scene.
-    """
-
-    __slots__ = ["sender", "kwargs"]
-
-    def __init__(self, sender: str, **kwargs: Any) -> None:
-        self.sender = sender
-        self.kwargs = kwargs
-
-
-class RerunSceneHandler(FileSystemEventHandler):
-    """A class to handle rerunning a Scene after the input file is modified."""
-
-    def __init__(self, queue: Queue[SceneInteractAction]) -> None:
-        super().__init__()
-        self.queue = queue
-
-    def on_modified(self, event: DirModifiedEvent | FileModifiedEvent) -> None:
-        self.queue.put(SceneInteractRerun("file"))
 
 
 class Scene:
@@ -176,7 +80,7 @@ class Scene:
 
     def __init__(
         self,
-        renderer: CairoRenderer | OpenGLRenderer | None = None,
+        renderer: CairoRenderer | None = None,
         camera_class: type[Camera] = Camera,
         always_update_mobjects: bool = False,
         random_seed: int | None = None,
@@ -194,26 +98,11 @@ class Scene:
         self.time_progression: tqdm[float] | None = None
         self.duration: float = 0.0
         self.last_t = 0.0
-        self.queue: Queue[SceneInteractAction] = Queue()
-        self.skip_animation_preview = False
-        self.meshes: list[Object3D] = []
-        self.widgets: list[dict[str, Any]] = []
-        self.dearpygui_imported = dearpygui_imported
         self.updaters: list[Callable[[float], None]] = []
-        self.key_to_function_map: dict[str, Callable[[], None]] = {}
-        self.mouse_press_callbacks: list[Callable[[], None]] = []
-        self.interactive_mode = False
         self.manager: Manager[Self] | None = None
 
-        if config.renderer == RendererType.OPENGL:
-            # Items associated with interaction
-            self.mouse_point = Point()
-            self.mouse_drag_point = Point()
-            if renderer is None:
-                renderer = OpenGLRenderer(camera_class=self.camera_class)
-
         if renderer is None:
-            self._renderer: CairoRenderer | OpenGLRenderer = CairoRenderer(
+            self._renderer: CairoRenderer = CairoRenderer(
                 # TODO: Is it a suitable approach to make an instance of
                 # the self.camera_class here?
                 camera_class=self.camera_class,
@@ -221,11 +110,7 @@ class Scene:
             )
         else:
             self._renderer = renderer
-        self.session_spec = resolve_render_session(
-            config,
-            self.renderer.capabilities,
-            renderer_name=type(self.renderer).__name__,
-        )
+        self.session_spec = resolve_render_session(config)
         scene_name = type(self).__name__
         module_name = resolve_module_name(config)
         working_directory = Path.cwd()
@@ -273,7 +158,7 @@ class Scene:
         np.random.seed(self.random_seed)  # noqa: NPY002 (only way to set seed globally)
 
     @property
-    def renderer(self) -> CairoRenderer | OpenGLRenderer:
+    def renderer(self) -> CairoRenderer:
         """The renderer selected at construction, shared by this scene's plays.
 
         This property is read-only. Choose a different renderer when creating
@@ -306,7 +191,7 @@ class Scene:
 
         return result
 
-    def render(self, preview: bool = False) -> bool:
+    def render(self, preview: bool = False) -> None:
         """Render this scene through its :class:`~manim.manager.Manager`.
 
         A manager is created and attached lazily if the scene does not already
@@ -316,13 +201,8 @@ class Scene:
         ----------
         preview
             Whether to open the rendered media after rendering.
-
-        Returns
-        -------
-        bool
-            Whether an interactive rerun was requested.
         """
-        return self._get_manager().render(preview)
+        self._get_manager().render(preview)
 
     def get_image(self) -> Image:
         """Return a snapshot of the scene's current mobjects as a PIL image.
@@ -342,8 +222,6 @@ class Scene:
         and cleanup, which can differ from the last frame written to the video.
 
         The returned image retains its pixels after the renderer is closed.
-        OpenGL snapshots must be requested on the thread that created the
-        rendering context.
         """
         return self._get_manager().get_image()
 
@@ -453,16 +331,10 @@ class Scene:
         for mobj in self.mobjects:
             mobj.update(dt)
 
-    def update_meshes(self, dt: float) -> None:
-        for obj in self.meshes:
-            for mesh in obj.get_family():
-                mesh.update(dt)
-
     def update_self(self, dt: float) -> None:
         """Run all scene updater functions.
 
-        Among all types of update functions (mobject updaters, mesh updaters,
-        scene updaters), scene update functions are called last.
+        Scene update functions are called after the mobject updaters.
 
         Parameters
         ----------
@@ -558,11 +430,6 @@ class Scene:
             The same scene after adding the Mobjects in.
 
         """
-        new_meshes = [cast(Object3D, m) for m in mobjects if isinstance(m, Object3D)]
-        if new_meshes:
-            self.remove(*new_meshes)  # type: ignore[arg-type]
-            self.meshes += new_meshes
-            mobjects = tuple(m for m in mobjects if not isinstance(m, Object3D))
         new_and_foreground_mobjects: list[Mobject] = [
             *mobjects,
             *self.foreground_mobjects,
@@ -600,10 +467,6 @@ class Scene:
         *mobjects
             The mobjects to remove.
         """
-        meshes_to_remove = {m for m in mobjects if isinstance(m, Object3D)}
-        if meshes_to_remove:
-            self.meshes = [m for m in self.meshes if m not in meshes_to_remove]
-            mobjects = tuple(m for m in mobjects if not isinstance(m, Object3D))
         for list_name in "mobjects", "foreground_mobjects":
             self.restructure_mobjects(mobjects, list_name, False)
         return self
@@ -1227,23 +1090,6 @@ class Scene:
             All other keywords are passed to the renderer.
 
         """
-        # If we are in interactive embedded mode, make sure this is running on the main thread (required for OpenGL)
-        if (
-            self.interactive_mode
-            and config.renderer == RendererType.OPENGL
-            and threading.current_thread().name != "MainThread"
-        ):
-            # TODO: are these actually being used?
-            kwargs.update(
-                {
-                    "subcaption": subcaption,
-                    "subcaption_duration": subcaption_duration,
-                    "subcaption_offset": subcaption_offset,
-                }
-            )
-            self.queue.put(SceneInteractRerun("play", **kwargs))
-            return
-
         self._get_manager().play(
             *args,
             subcaption=subcaption,
@@ -1391,318 +1237,6 @@ class Scene:
             and self.animations[0].is_static_wait
         )
 
-    def check_interactive_embed_is_valid(self) -> bool:
-        assert isinstance(self.renderer, OpenGLRenderer)
-        if self.skip_animation_preview:
-            logger.warning(
-                "Disabling interactive embed as 'skip_animation_preview' is enabled",
-            )
-            return False
-        elif self.renderer.file_writer.output_spec.enabled:
-            logger.warning(
-                "Disabling interactive embed while media output is enabled",
-            )
-            return False
-        elif not self.renderer.window:
-            logger.warning("Disabling interactive embed as no window was created")
-            return False
-        elif config.dry_run:
-            logger.warning("Disabling interactive embed as dry_run is enabled")
-            return False
-        return True
-
-    def interactive_embed(self) -> None:
-        """Like embed(), but allows for screen interaction."""
-        if self.manager is not None and (
-            self.manager._evaluating or self.manager._frame_request is not None
-        ):
-            raise RuntimeError(
-                "Interactive preview is unavailable during no-raster evaluation or frame capture."
-            )
-        assert isinstance(self.renderer, OpenGLRenderer)
-        if not self.check_interactive_embed_is_valid():
-            return
-        self.interactive_mode = True
-        from IPython.terminal.embed import InteractiveShellEmbed
-
-        def ipython(shell: InteractiveShellEmbed, namespace: dict[str, Any]) -> None:
-            import manim.opengl
-
-            def load_module_into_namespace(
-                module: Any, namespace: dict[str, Any]
-            ) -> None:
-                for name in dir(module):
-                    namespace[name] = getattr(module, name)
-
-            load_module_into_namespace(manim, namespace)
-            load_module_into_namespace(manim.opengl, namespace)
-
-            def embedded_rerun(*args: Any, **kwargs: Any) -> None:
-                self.queue.put(SceneInteractRerun("keyboard"))
-                shell.exiter()
-
-            namespace["rerun"] = embedded_rerun
-
-            shell(local_ns=namespace)
-            self.queue.put(SceneInteractContinue("keyboard"))
-
-        def get_embedded_method(method_name: str) -> Callable[..., None]:
-            method = getattr(self, method_name)
-
-            def embedded_method(*args: Any, **kwargs: Any) -> None:
-                self.queue.put(MethodWithArgs(method, args, kwargs))
-
-            return embedded_method
-
-        currentframe: FrameType = inspect.currentframe()  # type: ignore[assignment]
-        local_namespace = currentframe.f_back.f_locals  # type: ignore[union-attr]
-        for method in ("play", "wait", "add", "remove"):
-            embedded_method = get_embedded_method(method)
-            # Allow for calling scene methods without prepending 'self.'.
-            local_namespace[method] = embedded_method
-
-        from sqlite3 import connect
-
-        from IPython.core.getipython import get_ipython
-        from traitlets.config import Config
-
-        cfg = Config()
-        cfg.TerminalInteractiveShell.confirm_exit = False
-        if get_ipython() is None:
-            shell = InteractiveShellEmbed.instance(config=cfg)
-        else:
-            shell = InteractiveShellEmbed(config=cfg)
-        hist = get_ipython().history_manager
-        hist.db = connect(hist.hist_file, check_same_thread=False)
-
-        keyboard_thread = threading.Thread(
-            target=ipython,
-            args=(shell, local_namespace),
-        )
-        # run as daemon to kill thread when main thread exits
-        if not shell.pt_app:
-            keyboard_thread.daemon = True
-        keyboard_thread.start()
-
-        if self.dearpygui_imported and config["enable_gui"]:
-            if not dpg.is_dearpygui_running():
-                gui_thread = threading.Thread(
-                    target=self._configure_pygui,
-                    kwargs={"update": False},
-                )
-                gui_thread.start()
-            else:
-                self._configure_pygui(update=True)
-
-        self._save_camera_state()
-
-        self.interact(shell, keyboard_thread)
-
-    # from IPython.terminal.embed import InteractiveShellEmbed
-
-    def interact(self, shell: Any, keyboard_thread: threading.Thread) -> None:
-        if self.manager is not None and (
-            self.manager._evaluating or self.manager._frame_request is not None
-        ):
-            raise RuntimeError(
-                "Interactive preview is unavailable during no-raster evaluation or frame capture."
-            )
-        assert isinstance(self.renderer, OpenGLRenderer)
-        event_handler = RerunSceneHandler(self.queue)
-        file_observer = Observer()
-        file_observer.schedule(event_handler, config["input_file"], recursive=True)
-        file_observer.start()
-
-        self.quit_interaction = False
-        keyboard_thread_needs_join = shell.pt_app is not None
-        assert self.queue.qsize() == 0
-
-        last_time = time.time()
-        while not (
-            (self.renderer.window is not None and self.renderer.window.is_closing)
-            or self.quit_interaction
-        ):
-            if not self.queue.empty():
-                action = self.queue.get_nowait()
-                if isinstance(action, SceneInteractRerun):
-                    # Intentionally skip calling join() on the file thread to save time.
-                    if action.sender != "keyboard":
-                        if shell.pt_app:
-                            shell.pt_app.app.exit(exception=EOFError)
-                        file_observer.unschedule_all()
-                        raise RerunSceneException
-                    keyboard_thread.join()
-
-                    if "from_animation_number" in action.kwargs:
-                        config["from_animation_number"] = action.kwargs[
-                            "from_animation_number"
-                        ]
-                    # # TODO: This option only makes sense if interactive_embed() is run at the
-                    # # end of a scene by default.
-                    # if "upto_animation_number" in action.kwargs:
-                    #     config["upto_animation_number"] = action.kwargs[
-                    #         "upto_animation_number"
-                    #     ]
-
-                    keyboard_thread.join()
-                    file_observer.unschedule_all()
-                    raise RerunSceneException
-                elif isinstance(action, SceneInteractContinue):
-                    # Intentionally skip calling join() on the file thread to save time.
-                    if action.sender != "keyboard" and shell.pt_app:
-                        shell.pt_app.app.exit(exception=EOFError)
-                    keyboard_thread.join()
-                    # Remove exit_keyboard from the queue if necessary.
-                    while self.queue.qsize() > 0:
-                        self.queue.get()
-                    keyboard_thread_needs_join = False
-                    break
-                else:
-                    action.method(*action.args, **action.kwargs)
-            else:
-                self.renderer.animation_start_time = 0
-                dt = time.time() - last_time
-                last_time = time.time()
-                self._get_manager()._render_preview_frame(dt)
-                self.update_mobjects(dt)
-                self.update_meshes(dt)
-                self.update_self(dt)
-
-        # Join the keyboard thread if necessary.
-        if shell is not None and keyboard_thread_needs_join:
-            shell.pt_app.app.exit(exception=EOFError)
-            keyboard_thread.join()
-            # Remove exit_keyboard from the queue if necessary.
-            while self.queue.qsize() > 0:
-                self.queue.get()
-
-        file_observer.stop()
-        file_observer.join()
-
-        if self.dearpygui_imported and config["enable_gui"]:
-            dpg.stop_dearpygui()
-
-        if self.renderer.window is not None and self.renderer.window.is_closing:
-            self.renderer.window.destroy()
-
-    def embed(self) -> None:
-        if self.manager is not None and (
-            self.manager._evaluating or self.manager._frame_request is not None
-        ):
-            raise RuntimeError(
-                "Interactive preview is unavailable during no-raster evaluation or frame capture."
-            )
-        assert isinstance(self.renderer, OpenGLRenderer)
-        if not self.session_spec.presentation.live_preview:
-            logger.warning("Called embed() while no live preview window is available.")
-            return
-        if self.renderer.file_writer.output_spec.enabled:
-            logger.warning("embed() is skipped while writing to a file.")
-            return
-
-        self.renderer.animation_start_time = 0
-        self._get_manager()._render_preview_frame(-1)
-
-        # Configure IPython shell.
-        from IPython.terminal.embed import InteractiveShellEmbed
-
-        shell = InteractiveShellEmbed()
-
-        # Have the frame update after each command
-        shell.events.register(
-            "post_run_cell",
-            lambda *a, **kw: self._get_manager()._render_preview_frame(-1),
-        )
-
-        # Use the locals of the caller as the local namespace
-        # once embedded, and add a few custom shortcuts.
-        current_frame = inspect.currentframe()
-        assert isinstance(current_frame, FrameType)
-        local_ns = current_frame.f_back.f_locals  # type: ignore[union-attr]
-        # local_ns["touch"] = self.interact
-        for method in (
-            "play",
-            "wait",
-            "add",
-            "remove",
-            "interact",
-            # "clear",
-            # "save_state",
-            # "restore",
-        ):
-            local_ns[method] = getattr(self, method)
-        shell(local_ns=local_ns, stack_depth=2)
-
-        # End scene when exiting an embed.
-        raise Exception("Exiting scene.")
-
-    def _configure_pygui(self, update: bool = True) -> None:
-        if not self.dearpygui_imported:
-            raise RuntimeError("Attempted to use DearPyGUI when it isn't imported.")
-        if update:
-            dpg.delete_item(window)
-        else:
-            dpg.create_viewport()
-            dpg.setup_dearpygui()
-            dpg.show_viewport()
-
-        dpg.set_viewport_title(title=f"Manim Community v{__version__}")
-        dpg.set_viewport_width(1015)
-        dpg.set_viewport_height(540)
-
-        def rerun_callback(sender: Any, data: Any) -> None:
-            self.queue.put(SceneInteractRerun("gui"))
-
-        def continue_callback(sender: Any, data: Any) -> None:
-            self.queue.put(SceneInteractContinue("gui"))
-
-        def scene_selection_callback(sender: Any, data: Any) -> None:
-            config["scene_names"] = (dpg.get_value(sender),)
-            self.queue.put(SceneInteractRerun("gui"))
-
-        scene_classes = scene_classes_from_file(
-            Path(config["input_file"]), full_list=True
-        )  # type: ignore[call-overload]
-        scene_names = [scene_class.__name__ for scene_class in scene_classes]
-
-        with dpg.window(
-            id=window,
-            label="Manim GUI",
-            pos=[config["gui_location"][0], config["gui_location"][1]],
-            width=1000,
-            height=500,
-        ):
-            dpg.set_global_font_scale(2)
-            dpg.add_button(label="Rerun", callback=rerun_callback)
-            dpg.add_button(label="Continue", callback=continue_callback)
-            dpg.add_combo(
-                label="Selected scene",
-                items=scene_names,
-                callback=scene_selection_callback,
-                default_value=config["scene_names"][0],
-            )
-            dpg.add_separator()
-            if len(self.widgets) != 0:
-                with dpg.collapsing_header(
-                    label=f"{config['scene_names'][0]} widgets",
-                    default_open=True,
-                ):
-                    for widget_config in self.widgets:
-                        widget_config_copy = widget_config.copy()
-                        name = widget_config_copy["name"]
-                        widget = widget_config_copy["widget"]
-                        if widget != "separator":
-                            del widget_config_copy["name"]
-                            del widget_config_copy["widget"]
-                            getattr(dpg, f"add_{widget}")(
-                                label=name, **widget_config_copy
-                            )
-                        else:
-                            dpg.add_separator()
-
-        if not update:
-            dpg.start_dearpygui()
-
     def update_to_time(self, t: float) -> None:
         dt = t - self.last_t
         self.last_t = t
@@ -1712,7 +1246,6 @@ class Scene:
             alpha = t / animation.run_time
             animation.interpolate(alpha)
         self.update_mobjects(dt)
-        self.update_meshes(dt)
         self.update_self(dt)
 
     def add_subcaption(
@@ -1813,98 +1346,3 @@ class Scene:
         Download the resource for the previous example `here <https://github.com/ManimCommunity/manim/blob/main/docs/source/_static/click.wav>`_ .
         """
         self._get_manager().add_sound(sound_file, time_offset, gain, **kwargs)
-
-    def on_mouse_motion(self, point: Point3D, d_point: Point3D) -> None:
-        assert isinstance(self.renderer, OpenGLRenderer)
-        self.mouse_point.move_to(point)
-        if SHIFT_VALUE in self.renderer.pressed_keys:
-            self._pan_camera(d_point)
-
-    def on_mouse_scroll(self, point: Point3D, offset: Point3D) -> None:
-        self.mouse_scroll_orbit_controls(point, offset)
-
-    def on_key_press(self, symbol: int, modifiers: int) -> None:
-        try:
-            char = chr(symbol)
-        except OverflowError:
-            logger.warning("The value of the pressed key is too large.")
-            return
-
-        if char == "r":
-            self._restore_camera_state()
-        elif char == "q":
-            self.quit_interaction = True
-        else:
-            if char in self.key_to_function_map:
-                self.key_to_function_map[char]()
-
-    def on_key_release(self, symbol: int, modifiers: int) -> None:
-        pass
-
-    def on_mouse_drag(
-        self,
-        point: Point3D,
-        d_point: Point3D,
-        buttons: int,
-        modifiers: int,
-    ) -> None:
-        self.mouse_drag_point.move_to(point)
-        self.mouse_drag_orbit_controls(point, d_point, buttons, modifiers)
-
-    def mouse_scroll_orbit_controls(self, point: Point3D, offset: Point3D) -> None:
-        """Zoom the camera frame about its center."""
-        factor = 1 + np.arctan(-2.1 * offset[1])
-        self.camera.frame.scale(factor)
-
-    def mouse_drag_orbit_controls(
-        self,
-        point: Point3D,
-        d_point: Point3D,
-        buttons: int,
-        modifiers: int,
-    ) -> None:
-        """Rotate a :class:`.ThreeDCamera` with the left button; pan otherwise."""
-        if buttons == 1 and isinstance(self.camera, ThreeDCamera):
-            self.camera.set_theta(self.camera.get_theta() - d_point[0])
-            phi = self.camera.get_phi() + d_point[1]
-            self.camera.set_phi(float(np.clip(phi, -PI / 2, PI / 2)))
-        elif buttons in (1, 4):
-            self._pan_camera(d_point)
-
-    def _pan_camera(self, d_point: Point3D) -> None:
-        """Move the camera frame against the pointer, in the view's plane."""
-        shift = -np.array(d_point, dtype=float)
-        shift[0] *= self.camera.frame_width / 2
-        shift[1] *= self.camera.frame_height / 2
-        if isinstance(self.camera, ThreeDCamera):
-            shift = self.camera.get_rotation_matrix().T @ shift
-        self.camera.frame.shift(shift)
-
-    def _save_camera_state(self) -> None:
-        """Remember the camera for the ``r`` key of interactive mode."""
-        camera = self.camera
-        trackers = (
-            [tracker.get_value() for tracker in camera.get_value_trackers()]
-            if isinstance(camera, ThreeDCamera)
-            else []
-        )
-        self._camera_state = (camera.frame.copy(), trackers)
-
-    def _restore_camera_state(self) -> None:
-        state = getattr(self, "_camera_state", None)
-        if state is None:
-            return
-        frame, values = state
-        self.camera.frame.become(frame)
-        if isinstance(self.camera, ThreeDCamera):
-            for tracker, value in zip(
-                self.camera.get_value_trackers(), values, strict=True
-            ):
-                tracker.set_value(value)
-
-    def set_key_function(self, char: str, func: Callable[[], Any]) -> None:
-        self.key_to_function_map[char] = func
-
-    def on_mouse_press(self, point: Point3D, button: str, modifiers: int) -> None:
-        for func in self.mouse_press_callbacks:
-            func()

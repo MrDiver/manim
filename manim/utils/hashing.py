@@ -498,7 +498,7 @@ def get_hash_from_play_call(
     :class:`str`
         A filename-safe digest of all visual cache inputs.
     """
-    if backend not in {"cairo", "opengl"}:
+    if backend not in {"cairo"}:
         raise ValueError(f"Unsupported cache backend: {backend}")
     if not encoder_fingerprint:
         raise ValueError("An encoder fingerprint is required for cache identity.")

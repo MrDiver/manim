@@ -11,7 +11,6 @@ from ...mobject.types.image_mobject import ImageMobjectFromCamera
 from ...scene.scene_file_writer import SceneFileWriter
 from ...utils.iterables import list_update
 from .._execution import _RendererExecutionView
-from ..protocol import RendererCapabilities
 from .camera import Camera, MultiCamera
 from .rendering import _CairoDrawingContext
 from .target import _CairoRasterSettings, _CairoRenderTarget
@@ -34,8 +33,6 @@ class CairoRenderer(_RendererExecutionView):
     stationary mobjects. Construction saves the pixel dimensions; the buffers
     are allocated on the first draw or request for pixels.
     """
-
-    capabilities = RendererCapabilities(live_preview=False)
 
     def __init__(
         self,

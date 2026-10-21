@@ -86,9 +86,7 @@ class Surface(ParametricSurface):
     stroke_opacity
         Opacity of the outline of each face of :class:`Surface`.
     kwargs
-        Further arguments of :class:`.ParametricSurface`; for example ``gloss``
-        and ``shadow`` together with ``shade_in_3d=False`` light the surface on
-        the OpenGL renderer as a smooth mesh would be.
+        Further arguments of :class:`.ParametricSurface`.
 
     Examples
     --------

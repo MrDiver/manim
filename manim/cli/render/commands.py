@@ -166,15 +166,12 @@ def render(**kwargs: Any) -> ClickArgs | dict[str, Any]:
             return kwargs
 
         for SceneClass in scene_classes:
-            while True:
-                with tempconfig({}):
-                    scene = SceneClass()
-                    # Reuse a manager created by the scene's constructor. The
-                    # with block also cleans up after custom render() overrides.
-                    with scene._get_manager():
-                        rerun = scene.render()
-                if not rerun:
-                    break
+            with tempconfig({}):
+                scene = SceneClass()
+                # Reuse a manager created by the scene's constructor. The
+                # with block also cleans up after custom render() overrides.
+                with scene._get_manager():
+                    scene.render()
     except Exception:
         error_console.print_exception()
         sys.exit(1)

@@ -267,7 +267,6 @@ class ManimConfig(MutableMapping):
         "disable_caching_warning",
         "dry_run",
         "encoder_queue_size",
-        "enable_wireframe",
         "format",
         "frame_height",
         "frame_rate",
@@ -306,8 +305,6 @@ class ManimConfig(MutableMapping):
         "text_dir",
         "upto_animation_number",
         "renderer",
-        "enable_gui",
-        "gui_location",
         "verbosity",
         "video_codec",
         "video_dir",
@@ -472,12 +469,6 @@ class ManimConfig(MutableMapping):
         else:
             raise ValueError(f"{key} must be boolean")
 
-    def _set_tuple(self, key: str, val: tuple[Any]) -> None:
-        if isinstance(val, tuple):
-            self._d[key] = val
-        else:
-            raise ValueError(f"{key} must be tuple")
-
     def _set_str(self, key: str, val: Any) -> None:
         """Set ``key`` to ``val`` if ``val`` is a string."""
         if isinstance(val, str):
@@ -599,9 +590,7 @@ class ManimConfig(MutableMapping):
             "log_to_file",
             "disable_caching",
             "disable_caching_warning",
-            "enable_gui",
             "fullscreen",
-            "enable_wireframe",
             "no_latex_cleanup",
             "dry_run",
         ]:
@@ -653,12 +642,6 @@ class ManimConfig(MutableMapping):
             # "frame_height",
         ]:
             setattr(self, key, parser["CLI"].getfloat(key))
-
-        # tuple keys
-        gui_location = tuple(
-            map(int, re.split(r"[;,\-]", parser["CLI"]["gui_location"])),
-        )
-        self.gui_location = gui_location
 
         window_size = parser["CLI"][
             "window_size"
@@ -773,10 +756,8 @@ class ManimConfig(MutableMapping):
             "verbosity",
             "renderer",
             "background_color",
-            "enable_gui",
             "fullscreen",
             "zero_pad",
-            "enable_wireframe",
             "dry_run",
             "no_latex_cleanup",
             "preview_command",
@@ -833,10 +814,6 @@ class ManimConfig(MutableMapping):
         # Handle --tex_template
         if args.tex_template:
             self.tex_template = TexTemplate.from_file(args.tex_template)
-
-        # Handle --gui_location flag.
-        if args.gui_location is not None:
-            self.gui_location = args.gui_location
 
         return self
 
@@ -967,15 +944,6 @@ class ManimConfig(MutableMapping):
     @save_sections.setter
     def save_sections(self, value: bool) -> None:
         self._set_boolean("save_sections", value)
-
-    @property
-    def enable_wireframe(self) -> bool:
-        """Whether to enable wireframe debugging mode in opengl."""
-        return self._d["enable_wireframe"]
-
-    @enable_wireframe.setter
-    def enable_wireframe(self, value: bool) -> None:
-        self._set_boolean("enable_wireframe", value)
 
     @property
     def no_latex_cleanup(self) -> bool:
@@ -1360,9 +1328,9 @@ class ManimConfig(MutableMapping):
             >>> test_config = ManimConfig()
             >>> test_config.renderer is None  # a new ManimConfig is unpopulated
             True
-            >>> test_config.renderer = 'opengl'
+            >>> test_config.renderer = 'cairo'
             >>> test_config.renderer
-            <RendererType.OPENGL: 'opengl'>
+            <RendererType.CAIRO: 'cairo'>
             >>> test_config.renderer = 42
             Traceback (most recent call last):
             ...
@@ -1370,7 +1338,6 @@ class ManimConfig(MutableMapping):
 
         Check that capitalization of renderer types is irrelevant::
 
-            >>> test_config.renderer = 'OpenGL'
             >>> test_config.renderer = 'cAirO'
         """
         return self._d["renderer"]
@@ -1403,30 +1370,12 @@ class ManimConfig(MutableMapping):
 
     @property
     def window_size(self) -> str | tuple[int, ...]:
-        """The size of the opengl window. 'default' to automatically scale the window based on the display monitor."""
+        """The size of the preview window. 'default' to automatically scale the window based on the display monitor."""
         return self._d["window_size"]
 
     @window_size.setter
     def window_size(self, value: str | tuple[int, ...]) -> None:
         self._d.__setitem__("window_size", value)
-
-    @property
-    def enable_gui(self) -> bool:
-        """Enable GUI interaction."""
-        return self._d["enable_gui"]
-
-    @enable_gui.setter
-    def enable_gui(self, value: bool) -> None:
-        self._set_boolean("enable_gui", value)
-
-    @property
-    def gui_location(self) -> tuple[int, ...]:
-        """Location parameters for the GUI window (e.g., screen coordinates or layout settings)."""
-        return self._d["gui_location"]
-
-    @gui_location.setter
-    def gui_location(self, value: tuple[Any]) -> None:
-        self._set_tuple("gui_location", value)
 
     @property
     def fullscreen(self) -> bool:

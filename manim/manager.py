@@ -17,7 +17,7 @@ from ._config.logger_utils import set_file_logger
 from ._config.video_encoder import video_encoder_fingerprint
 from .scene.audio_mixer import _probe_duration
 from .scene.section import DefaultSectionType
-from .utils.exceptions import EndSceneEarlyException, RerunSceneException
+from .utils.exceptions import EndSceneEarlyException
 from .utils.file_ops import open_media_file
 from .utils.hashing import get_hash_from_play_call
 from .utils.sounds import get_full_sound_file_path
@@ -35,7 +35,6 @@ if TYPE_CHECKING:
     from .mobject.mobject import Mobject, _AnimationBuilder
     from .renderer.cairo import CairoRenderer
     from .renderer.cairo.camera import Camera
-    from .renderer.opengl.renderer import OpenGLRenderer
     from .renderer.protocol import _AnimationRenderer
     from .scene.scene import Scene
     from .scene.scene_file_writer import SceneFileWriter
@@ -231,7 +230,7 @@ class Manager(Generic[SceneT]):
             logger.exception("Failed to clean up resources after a render failure")
 
     @property
-    def renderer(self) -> CairoRenderer | OpenGLRenderer:
+    def renderer(self) -> CairoRenderer:
         """Return the renderer selected when the scene was created."""
         return self.scene.renderer
 
@@ -325,7 +324,7 @@ class Manager(Generic[SceneT]):
                 "under the desired configuration before executing it."
             )
 
-    def render(self, preview: bool = False) -> bool:
+    def render(self, preview: bool = False) -> None:
         """Run the complete render lifecycle for the managed scene.
 
         The lifecycle invokes :meth:`setup`, :meth:`construct`,
@@ -343,16 +342,7 @@ class Manager(Generic[SceneT]):
         ----------
         preview
             Whether the rendered media should be opened after rendering.
-
-        Returns
-        -------
-        bool
-            ``True`` when an interactive rerun was requested; otherwise
-            ``False``. This matches the return value of
-            :meth:`~manim.scene.scene.Scene.render`.
         """
-        from .renderer.opengl.renderer import OpenGLRenderer
-
         if self._evaluating:
             raise RuntimeError("Cannot render during no-raster evaluation.")
         if self._frame_request is not None:
@@ -367,22 +357,12 @@ class Manager(Generic[SceneT]):
 
             started = True
             self._open_log_handler()
-            if isinstance(self.renderer, OpenGLRenderer):
-                self.renderer.open()
             # Make the writer available to user setup() code.
             _ = self.file_writer
             self.setup()
-            try:
+            # Only a construction boundary is a normal early scene end.
+            with suppress(EndSceneEarlyException):
                 self.construct()
-            except EndSceneEarlyException:
-                # Only a construction boundary is a normal early scene end.
-                pass
-            except RerunSceneException:
-                # The caller will create a fresh Scene for the rerun.
-                # Report any encoder errors before allowing that restart.
-                self.file_writer.abort_encode_jobs(reraise_encoder_failures=True)
-                self._finish_resource_scope()
-                return True
             self.tear_down()
             self.post_construct()
 
@@ -394,7 +374,6 @@ class Manager(Generic[SceneT]):
                 )
 
             self._finish_resource_scope()
-            return False
         except BaseException:
             # An encoder waiting for more frames can prevent Python from exiting.
             # Stop it while preserving the original rendering error.
@@ -406,7 +385,7 @@ class Manager(Generic[SceneT]):
         """Return the frame displayed at ``timestamp`` by executing a fresh scene.
 
         Runs the scene's animation steps from the beginning, drawing each frame
-        with Cairo or OpenGL until the requested frame is reached. The returned
+        with Cairo until the requested frame is reached. The returned
         image can be viewed or saved after the renderer closes. For an image of
         the scene's current state, use :meth:`get_image`.
 
@@ -441,8 +420,7 @@ class Manager(Generic[SceneT]):
 
         A successful call closes the renderer, or keeps it open until an enclosing
         ``with manager:`` block ends. If scene code fails, Manager attempts resource
-        cleanup and raises the original error. For OpenGL, make the call on the
-        thread that opened the scene's context.
+        cleanup and raises the original error.
 
         Examples
         --------
@@ -717,8 +695,8 @@ class Manager(Generic[SceneT]):
                     duration=subcaption_duration,
                     offset=-run_time + subcaption_offset,
                 )
-        except (_FrameCaptured, EndSceneEarlyException, RerunSceneException):
-            # Let the execution entry point handle a requested stop or rerun.
+        except (_FrameCaptured, EndSceneEarlyException):
+            # Let the execution entry point handle a requested stop.
             raise
         except BaseException:
             # A direct play() can fail outside render(), so it needs cleanup here too.
@@ -892,7 +870,6 @@ class Manager(Generic[SceneT]):
                     not self._evaluating
                     and not self.skip_animations
                     and not skip_rendering
-                    and not scene.skip_animation_preview
                 )
                 frame = self._draw_animation_frame(t) if draw else None
                 # Count this step's frame interval even when evaluation draws no frame.
@@ -982,12 +959,6 @@ class Manager(Generic[SceneT]):
             )
             request.stopped = request.unwinding = True
             raise _FrameCaptured
-
-    def _render_preview_frame(self, frame_offset: float) -> None:
-        """Redraw and display an interactive frame without advancing animation time."""
-        self._validate_execution()
-        frame = self._draw_animation_frame(frame_offset)
-        self._deliver_animation_frame(frame, frame_offset)
 
     def _legacy_add_frame(self, frame: RGBAPixelArray, num_frames: int = 1) -> None:
         """Write frames and advance time for callers of CairoRenderer.add_frame."""

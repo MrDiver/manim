@@ -27,12 +27,6 @@ def using_temp_config(tmpdir, standard_config):
 
 
 @pytest.fixture
-def using_temp_opengl_config(tmpdir, standard_config, using_opengl_renderer):
-    """Standard fixture that makes tests use a standard_config.cfg with a temp dir."""
-    standard_config.media_dir = tmpdir
-
-
-@pytest.fixture
 def disabling_caching(config):
     config.disable_caching = True
 

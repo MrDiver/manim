@@ -15,7 +15,6 @@ from manim._config import tempconfig
 from manim._config.utils import ManimConfig
 from manim.renderer.cairo import CairoRenderer
 from manim.renderer.cairo.camera import ThreeDCamera
-from manim.renderer.opengl import OpenGLRenderer
 from manim.scene.three_d_scene import ThreeDScene
 from manim.typing import StrPath
 
@@ -37,7 +36,7 @@ def frames_comparison(
     func: Callable | None = None,
     *,
     last_frame: bool = True,
-    renderer_class: type[CairoRenderer | OpenGLRenderer] = CairoRenderer,
+    renderer_class: type[CairoRenderer] = CairoRenderer,
     base_scene: type[Scene] = Scene,
     **custom_config: Any,
 ) -> Callable:
@@ -54,7 +53,7 @@ def frames_comparison(
     last_frame
         whether the test should test the last frame, by default True.
     renderer_class
-        The base renderer to use (OpenGLRenderer/CairoRenderer), by default CairoRenderer
+        The base renderer to use, by default CairoRenderer
     base_scene
         The base class for the scene (ThreeDScene, etc.), by default Scene
 
@@ -220,7 +219,6 @@ def _make_test_comparing_frames(
                 # NOTE this is really ugly but it's due to the very bad design of the two renderers.
                 # If you pass a custom renderer to the Scene, the Camera class given as an argument in the Scene
                 # is not passed to the renderer. See __init__ of Scene.
-                # This potentially prevents OpenGL testing.
                 test_renderer=(
                     testRenderer(file_writer_class=file_writer_class)
                     if base_scene is not ThreeDScene

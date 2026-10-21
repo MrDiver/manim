@@ -261,18 +261,9 @@ class RendererType(Enum):
 
     Manim's configuration allows assigning string values to the renderer
     setting, the values are then replaced by the corresponding enum object.
-    In other words, you can run::
-
-        config.renderer = "opengl"
-
-    and checking the renderer afterwards reveals that the attribute has
-    assumed the value::
-
-        <RendererType.OPENGL: 'opengl'>
     """
 
     CAIRO = "cairo"  #: A renderer based on the cairo backend.
-    OPENGL = "opengl"  #: An OpenGL-based renderer.
 
 
 class LineJointType(Enum):

@@ -11,8 +11,6 @@ __all__ = [
 from dataclasses import dataclass
 from typing import Protocol
 
-from manim.renderer.protocol import RendererCapabilities
-
 from .output import OutputFormat, OutputSpec
 from .video_encoder import VideoEncoderSpec, resolve_video_encoder
 
@@ -44,7 +42,6 @@ class _SessionConfigSource(Protocol):
     preview: bool
     live_preview: bool
     show_in_file_browser: bool
-    enable_gui: bool
     dry_run: bool
     pixel_width: int
     pixel_height: int
@@ -54,14 +51,9 @@ class _SessionConfigSource(Protocol):
     video_encoder_options: dict[str, str]
 
 
-def resolve_render_session(
-    config: _SessionConfigSource,
-    capabilities: RendererCapabilities,
-    *,
-    renderer_name: str,
-) -> RenderSessionSpec:
+def resolve_render_session(config: _SessionConfigSource) -> RenderSessionSpec:
     """Resolve and validate one renderer-independent session request."""
-    live_preview = config.live_preview or config.enable_gui
+    live_preview = config.live_preview
     dry_run = config.dry_run
     requested_format = OutputFormat.parse(config.format)
     fallback_to_still = False
@@ -91,22 +83,11 @@ def resolve_render_session(
         show_in_file_browser=config.show_in_file_browser,
     )
 
-    if live_preview and not capabilities.live_preview:
-        raise ValueError(
-            f"{renderer_name} does not support live preview. "
-            "Select a renderer with live-preview support or remove --live-preview.",
-        )
-    if live_preview and dry_run:
-        raise ValueError("--live-preview cannot be combined with --dry_run.")
-    if live_preview and output.is_still:
-        raise ValueError(
-            "Live preview cannot be combined with last-frame PNG output.",
-        )
+    if live_preview:
+        # The preview window comes back with the native renderer's window.
+        raise ValueError("Live preview is not available; remove --live-preview.")
     if presentation.open_after_render and not output.enabled:
-        raise ValueError(
-            "--preview requires a media artifact. Choose a concrete --format when "
-            "using --live-preview.",
-        )
+        raise ValueError("--preview requires a media artifact.")
     if presentation.show_in_file_browser and not output.enabled:
         raise ValueError("--show_in_file_browser requires a media artifact.")
 

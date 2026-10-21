@@ -59,7 +59,6 @@ class Section:
     --------
     :class:`.DefaultSectionType`
     :meth:`.CairoRenderer.update_skipping_status`
-    :meth:`.OpenGLRenderer.update_skipping_status`
     """
 
     def __init__(
