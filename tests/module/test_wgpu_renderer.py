@@ -134,3 +134,35 @@ def test_what_the_renderer_cannot_draw_raises_a_capability_exception():
     )
     with pytest.raises(CapabilityException, match="part of a mask"):
         native.WgpuRenderer().render(mesh_in_mask, config())
+
+
+def edge_shades(frame: np.ndarray) -> int:
+    """How many shades of red lie between the background and a white fill."""
+    red = frame[..., 0].astype(int)
+    return len(np.unique(red[(red > BACKGROUND[0]) & (red < 255)]))
+
+
+def test_more_samples_give_smoother_edges_and_minus_one_takes_the_most():
+    def frame(samples: int) -> np.ndarray:
+        turned = native.RShape2D(
+            Transform(rotation=quaternion.from_rotation_vector([0, 0, 0.3])),
+            points=square_points(2.0),
+            fill=native.Fill(color=[1.0, 1.0, 1.0], opacity=1.0),
+            stroke=native.Stroke(width=0.0),
+        )
+        settings = RenderConfig(
+            pixel_width=WIDTH,
+            pixel_height=HEIGHT,
+            background_color="#1E1E2E",
+            msaa_samples=samples,
+        )
+        return native.WgpuRenderer().render(turned, settings)
+
+    assert edge_shades(frame(1)) == 0
+    assert edge_shades(frame(-1)) >= edge_shades(frame(4)) > 0
+
+
+def test_a_sample_count_the_gpu_lacks_raises_a_capability_exception():
+    settings = RenderConfig(pixel_width=WIDTH, pixel_height=HEIGHT, msaa_samples=3)
+    with pytest.raises(CapabilityException, match="3 MSAA samples"):
+        native.WgpuRenderer().render(scene(), settings)

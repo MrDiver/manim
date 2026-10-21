@@ -13,7 +13,9 @@ use numpy::{IntoPyArray, PyArrayMethods};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
-use crate::composite::frames::{PipelineOptions, RenderPipeline, SubFrame, View, ViewSource};
+use crate::composite::frames::{
+    PipelineOptions, RenderPipeline, Samples, SubFrame, View, ViewSource,
+};
 use crate::composite::output::PixelFormat;
 use crate::error::Error;
 use crate::python::robjects::{node_of, transform_from_py};
@@ -60,7 +62,7 @@ fn capability_exception(message: String) -> PyErr {
 struct PipelineKey {
     width: u32,
     height: u32,
-    samples: u32,
+    samples: Samples,
     shadow_resolution: u32,
     background: [u32; 4],
     gpu: String,
@@ -141,11 +143,23 @@ fn pipeline_key(config: &Bound<'_, PyAny>) -> PyResult<PipelineKey> {
     Ok(PipelineKey {
         width: config.getattr("pixel_width")?.extract()?,
         height: config.getattr("pixel_height")?.extract()?,
-        samples: config.getattr("msaa_samples")?.extract()?,
+        samples: samples(config.getattr("msaa_samples")?.extract()?)?,
         shadow_resolution: config.getattr("shadow_resolution")?.extract()?,
         background: [background.0, background.1, background.2, background.3].map(f32::to_bits),
         gpu: config.getattr("gpu")?.extract()?,
     })
+}
+
+/// `RenderConfig.msaa_samples`: a sample count, or -1 for the most the
+/// GPU supports.
+fn samples(value: i64) -> PyResult<Samples> {
+    match value {
+        -1 => Ok(Samples::Most),
+        count @ 1.. => Ok(Samples::Count(count as u32)),
+        other => Err(PyValueError::new_err(format!(
+            "msaa_samples must be a sample count or -1 (the most the GPU supports), got {other}"
+        ))),
+    }
 }
 
 fn pipeline_options(key: &PipelineKey) -> PyResult<PipelineOptions> {

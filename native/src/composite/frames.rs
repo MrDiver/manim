@@ -56,12 +56,35 @@ pub struct SubFrame {
     pub views: Vec<View>,
 }
 
+/// MSAA samples per pixel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Samples {
+    /// Exactly this many; the GPU must support it (`Gpu::sample_counts`).
+    Count(u32),
+    /// The most the GPU supports.
+    Most,
+}
+
+impl Samples {
+    /// The sample count on `gpu`.
+    fn resolve(self, gpu: &Gpu) -> Result<u32> {
+        let supported = &gpu.sample_counts;
+        match self {
+            Samples::Most => Ok(*supported.last().expect("1 is always supported")),
+            Samples::Count(count) if supported.contains(&count) => Ok(count),
+            Samples::Count(count) => Err(Error::Unsupported(format!(
+                "{count} MSAA samples per pixel; this GPU renders with {supported:?}"
+            ))),
+        }
+    }
+}
+
 /// What stays the same for every frame of a pipeline.
 pub struct PipelineOptions {
     pub width: u32,
     pub height: u32,
     /// MSAA samples per pixel.
-    pub samples: u32,
+    pub samples: Samples,
     pub shadow_resolution: u32,
     /// Straight RGBA, sRGB.
     pub background: [f32; 4],
@@ -119,7 +142,7 @@ impl RenderPipeline {
         let settings = TargetSettings {
             width: size.0,
             height: size.1,
-            samples: options.samples,
+            samples: options.samples.resolve(&gpu)?,
             shadow_resolution: options.shadow_resolution,
         };
         Ok(RenderPipeline {

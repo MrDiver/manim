@@ -117,6 +117,9 @@ class RenderConfig:
     ``"low-power"`` an integrated one (when the dedicated one is busy, or
     to save power); the only one when there is just one."""
     msaa_samples: int = 4
+    """Samples per pixel (multisample anti-aliasing): 1 and 4 work on every
+    GPU, 2, 8 and 16 where the GPU has them; -1 takes the most it has. More
+    samples smooth edges further and cost render time and memory."""
     time: float = 0.0
     """Seconds, exposed to shaders as ``frame.time``."""
     layer_depth_step: float = 2e-7

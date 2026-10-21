@@ -214,14 +214,18 @@ impl LightingPass {
         if let Entry::Vacant(slot) = self.variants.entry(sample_count) {
             let multisampled = sample_count > 1;
             let samples = format!("const GBUFFER_SAMPLES: i32 = {sample_count};");
-            let mut replacements = vec![("const GBUFFER_SAMPLES: i32 = 4;", samples.as_str())];
+            let (x, y) = first_sample(sample_count);
+            let first = format!("const FIRST_SAMPLE: vec2<f32> = vec2<f32>({x:?}, {y:?});");
+            let mut replacements = vec![
+                ("const GBUFFER_SAMPLES: i32 = 4;", samples.as_str()),
+                (
+                    "const FIRST_SAMPLE: vec2<f32> = vec2<f32>(0.375, 0.125);",
+                    first.as_str(),
+                ),
+            ];
             if !multisampled {
                 replacements.push(("texture_depth_multisampled_2d", "texture_depth_2d"));
                 replacements.push(("texture_multisampled_2d<f32>", "texture_2d<f32>"));
-                replacements.push((
-                    "const FIRST_SAMPLE: vec2<f32> = vec2<f32>(0.375, 0.125);",
-                    "const FIRST_SAMPLE: vec2<f32> = vec2<f32>(0.5);",
-                ));
             }
             let shader = gpu.shader("deferred_lighting.wgsl", &replacements)?;
             let layout = create_layout(&gpu.device, multisampled);
@@ -307,6 +311,20 @@ impl LightingPass {
             slot.insert((layout, pipelines));
         }
         Ok(&self.variants[&sample_count])
+    }
+}
+
+/// Where in its pixel sample 0 lies, from the top left: the standard
+/// sample locations of Vulkan, D3D and Metal (WebGPU fixes those of 1 and
+/// 4 samples; Mesa lists all of them, src/intel/common/intel_sample_positions.c,
+/// <https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/intel/common/intel_sample_positions.c>).
+fn first_sample(sample_count: u32) -> (f32, f32) {
+    match sample_count {
+        2 => (0.75, 0.75),
+        4 => (0.375, 0.125),
+        8 => (0.5625, 0.3125),
+        16 => (0.5625, 0.5625),
+        _ => (0.5, 0.5),
     }
 }
 

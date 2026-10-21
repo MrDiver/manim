@@ -79,10 +79,27 @@ pub fn shadow_depth_stencil(stencil: ShadowStencil) -> wgpu::DepthStencilState {
     }
 }
 
+/// The formats rendered into with several samples per pixel (see
+/// render/draw/targets.rs): a sample count must suit all of them.
+const MULTISAMPLED_FORMATS: [wgpu::TextureFormat; 8] = [
+    GBUFFER_FORMATS[0],
+    GBUFFER_FORMATS[1],
+    GBUFFER_FORMATS[2],
+    GBUFFER_FORMATS[3],
+    DEPTH_FORMAT,
+    HDR_FORMAT,
+    COLOR_FORMAT,
+    EDGE_FORMAT,
+];
+
 pub struct Gpu {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub timestamps: bool,
+    /// The samples per pixel this device can render with, ascending: 1
+    /// and 4 everywhere (WebGPU guarantees them), 2, 8 and 16 where the
+    /// GPU has them for every multisampled format.
+    pub sample_counts: Vec<u32>,
 }
 
 /// The process's devices, made on first use, one per kind of GPU asked
@@ -126,10 +143,29 @@ impl Gpu {
             ));
         }
         let timestamps = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
-        let features = if timestamps {
+        let mut features = if timestamps {
             required | wgpu::Features::TIMESTAMP_QUERY
         } else {
             required
+        };
+        // Sample counts beyond WebGPU's 1 and 4 (where the GPU has them)
+        // need the adapter's own format features.
+        let adapter_formats = wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+        let sample_counts = if adapter.features().contains(adapter_formats) {
+            features |= adapter_formats;
+            [1, 2, 4, 8, 16]
+                .into_iter()
+                .filter(|&count| {
+                    MULTISAMPLED_FORMATS.iter().all(|&format| {
+                        adapter
+                            .get_texture_format_features(format)
+                            .flags
+                            .sample_count_supported(count)
+                    })
+                })
+                .collect()
+        } else {
+            vec![1, 4]
         };
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("manim"),
@@ -142,6 +178,7 @@ impl Gpu {
             device,
             queue,
             timestamps,
+            sample_counts,
         })
     }
 
