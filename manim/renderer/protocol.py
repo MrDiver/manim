@@ -116,6 +116,12 @@ class RenderConfig:
     """Which GPU renders: ``"high-performance"`` a dedicated one,
     ``"low-power"`` an integrated one (when the dedicated one is busy, or
     to save power); the only one when there is just one."""
+    gpu_memory: str = "compact"
+    """How the GPU memory is reserved: ``"compact"`` in small blocks, so
+    many renderers and processes (parallel tests, render workers) fit on
+    one GPU; ``"fast"`` in large blocks, with fewer allocations. A process
+    keeps the blocks it reserved, so try ``"compact"`` when the GPU runs
+    out of memory."""
     msaa_samples: int = 4
     """Samples per pixel (multisample anti-aliasing): 1 and 4 work on every
     GPU, 2, 8 and 16 where the GPU has them; -1 takes the most it has. More

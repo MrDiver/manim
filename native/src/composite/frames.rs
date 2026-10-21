@@ -26,7 +26,7 @@ use crate::composite::pictures::CameraViewTexture;
 use crate::composite::{CompositeTarget, Compositor};
 use crate::error::{Error, Result};
 use crate::flat::Update;
-use crate::gpu::device::{Gpu, HDR_FORMAT};
+use crate::gpu::device::{Gpu, Memory, HDR_FORMAT};
 use crate::gpu::fullscreen::Blend;
 use crate::gpu::profiler::{GpuProfiler, StageClock};
 use crate::render::draw::TargetSettings;
@@ -102,6 +102,8 @@ pub struct PipelineOptions {
     /// Which GPU renders: a dedicated one or an integrated one
     /// (`Gpu::shared`).
     pub gpu: wgpu::PowerPreference,
+    /// How the device reserves GPU memory (`Memory`).
+    pub memory: Memory,
 }
 
 pub struct RenderPipeline {
@@ -131,7 +133,7 @@ impl RenderPipeline {
                 "a pipeline needs at least one frame in flight".into(),
             ));
         }
-        let gpu = Gpu::shared(options.gpu)?;
+        let gpu = Gpu::shared(options.gpu, options.memory)?;
         let size = (options.width, options.height);
         let limits = gpu.device.limits();
         let page_bytes = options.page_bytes.unwrap_or_else(|| {

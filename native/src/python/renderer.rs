@@ -18,6 +18,7 @@ use crate::composite::frames::{
 };
 use crate::composite::output::PixelFormat;
 use crate::error::Error;
+use crate::gpu::device::Memory;
 use crate::python::robjects::{node_of, transform_from_py};
 use crate::render::settings::{Camera, CameraView, ShadowMethod, ViewSettings};
 use crate::resolve::{Resolvers, Unsupported};
@@ -66,6 +67,7 @@ struct PipelineKey {
     shadow_resolution: u32,
     background: [u32; 4],
     gpu: String,
+    gpu_memory: String,
 }
 
 #[pyclass(module = "manim._native", name = "WgpuRenderer")]
@@ -147,6 +149,7 @@ fn pipeline_key(config: &Bound<'_, PyAny>) -> PyResult<PipelineKey> {
         shadow_resolution: config.getattr("shadow_resolution")?.extract()?,
         background: [background.0, background.1, background.2, background.3].map(f32::to_bits),
         gpu: config.getattr("gpu")?.extract()?,
+        gpu_memory: config.getattr("gpu_memory")?.extract()?,
     })
 }
 
@@ -172,6 +175,15 @@ fn pipeline_options(key: &PipelineKey) -> PyResult<PipelineOptions> {
             )))
         }
     };
+    let memory = match key.gpu_memory.as_str() {
+        "compact" => Memory::Compact,
+        "fast" => Memory::Fast,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown GPU memory choice {other:?}; use \"compact\" or \"fast\""
+            )))
+        }
+    };
     Ok(PipelineOptions {
         width: key.width,
         height: key.height,
@@ -185,6 +197,7 @@ fn pipeline_options(key: &PipelineKey) -> PyResult<PipelineOptions> {
         pixel_format: PixelFormat::Rgba,
         page_bytes: None,
         gpu,
+        memory,
     })
 }
 

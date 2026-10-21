@@ -166,3 +166,17 @@ def test_a_sample_count_the_gpu_lacks_raises_a_capability_exception():
     settings = RenderConfig(pixel_width=WIDTH, pixel_height=HEIGHT, msaa_samples=3)
     with pytest.raises(CapabilityException, match="3 MSAA samples"):
         native.WgpuRenderer().render(scene(), settings)
+
+
+def test_both_gpu_memory_choices_render_and_others_are_refused():
+    for memory in ("compact", "fast"):
+        settings = RenderConfig(
+            pixel_width=WIDTH,
+            pixel_height=HEIGHT,
+            background_color="#1E1E2E",
+            gpu_memory=memory,
+        )
+        frame = native.WgpuRenderer().render(scene(), settings)
+        assert np.abs(frame[pixel(-3.5, 0.0)][:3] - [88, 196, 221]).max() <= 1
+    with pytest.raises(ValueError, match="compact"):
+        native.WgpuRenderer().render(scene(), RenderConfig(gpu_memory="huge"))

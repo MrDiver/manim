@@ -102,31 +102,53 @@ pub struct Gpu {
     pub sample_counts: Vec<u32>,
 }
 
-/// The process's devices, made on first use, one per kind of GPU asked
-/// for (see `Gpu::shared`).
-static SHARED: Mutex<Vec<(wgpu::PowerPreference, Arc<Gpu>)>> = Mutex::new(Vec::new());
+/// How the device's allocator reserves GPU memory
+/// (`RenderConfig.gpu_memory`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Memory {
+    /// Blocks of 8 to 64 MiB: little memory held beyond what is used, so
+    /// many processes (parallel tests, render workers) share one GPU.
+    Compact,
+    /// Blocks of 128 to 256 MiB (wgpu's default): fewer allocations.
+    Fast,
+}
+
+impl Memory {
+    fn hints(self) -> wgpu::MemoryHints {
+        match self {
+            Memory::Compact => wgpu::MemoryHints::MemoryUsage,
+            Memory::Fast => wgpu::MemoryHints::Performance,
+        }
+    }
+}
+
+/// The process's devices, made on first use, one per kind of GPU and
+/// memory use asked for (see `Gpu::shared`).
+type SharedGpus = Vec<((wgpu::PowerPreference, Memory), Arc<Gpu>)>;
+static SHARED: Mutex<SharedGpus> = Mutex::new(Vec::new());
 
 impl Gpu {
     /// The device every renderer of this process that asks for this kind
-    /// of GPU uses: drivers refuse more than a few devices at once, and
-    /// pipelines and textures are cheaper shared. `preference` chooses
-    /// the GPU: `HighPerformance` a dedicated one, `LowPower` an
-    /// integrated one (when the dedicated one is busy, or to save power);
-    /// whichever there is when there is only one.
-    pub fn shared(preference: wgpu::PowerPreference) -> Result<Arc<Gpu>> {
+    /// of GPU and memory use uses: drivers refuse more than a few devices
+    /// at once, and pipelines and textures are cheaper shared.
+    /// `preference` chooses the GPU: `HighPerformance` a dedicated one,
+    /// `LowPower` an integrated one (when the dedicated one is busy, or to
+    /// save power); whichever there is when there is only one.
+    pub fn shared(preference: wgpu::PowerPreference, memory: Memory) -> Result<Arc<Gpu>> {
         let mut shared = SHARED.lock().expect("not poisoned");
-        if let Some((_, gpu)) = shared.iter().find(|(kind, _)| *kind == preference) {
+        let kind = (preference, memory);
+        if let Some((_, gpu)) = shared.iter().find(|(other, _)| *other == kind) {
             return Ok(gpu.clone());
         }
-        let gpu = Arc::new(Gpu::create(preference)?);
-        shared.push((preference, gpu.clone()));
+        let gpu = Arc::new(Gpu::create(preference, memory)?);
+        shared.push((kind, gpu.clone()));
         Ok(gpu)
     }
 
     /// A device of the GPU `preference` chooses, with
     /// `indirect-first-instance` (draws select their instance records with
     /// it), and timestamp queries when the adapter has them.
-    pub fn create(preference: wgpu::PowerPreference) -> Result<Gpu> {
+    pub fn create(preference: wgpu::PowerPreference, memory: Memory) -> Result<Gpu> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: preference,
@@ -167,21 +189,28 @@ impl Gpu {
         } else {
             vec![1, 4]
         };
-        // The allocator reserves device memory in blocks of 8 to 64 MiB
-        // instead of wgpu's default 128 to 256 MiB, and keeps them after
-        // the renderer that needed them is gone: many processes (parallel
-        // tests, render workers) then share one GPU without running out.
-        // TODO: make this a RenderConfig setting (memory or speed), and
-        // name that setting in the "no GPU device" error when the GPU is
-        // out of memory.
+        // The allocator keeps the blocks it reserved after the renderer
+        // that needed them is gone, so their size decides what a process
+        // holds (Memory).
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("manim"),
             required_features: features,
             required_limits: adapter.limits(),
-            memory_hints: wgpu::MemoryHints::MemoryUsage,
+            memory_hints: memory.hints(),
             ..Default::default()
         }))
-        .map_err(|error| Error::Gpu(format!("no GPU device: {error}")))?;
+        .map_err(|error| {
+            // The usual cause is a GPU whose memory other processes hold.
+            let hint = match memory {
+                Memory::Fast => {
+                    "; if the GPU is out of memory, try RenderConfig(gpu_memory=\"compact\")"
+                }
+                Memory::Compact => {
+                    "; if the GPU is out of memory, free it or try RenderConfig(gpu=\"low-power\")"
+                }
+            };
+            Error::Gpu(format!("no GPU device: {error}{hint}"))
+        })?;
         Ok(Gpu {
             device,
             queue,
