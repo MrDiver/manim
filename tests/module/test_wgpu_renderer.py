@@ -12,7 +12,11 @@ import pytest
 import quaternion
 
 from manim import _native as native
-from manim.renderer.protocol import CapabilityException, RenderConfig
+from manim.renderer.protocol import (
+    CapabilityException,
+    RenderConfig,
+    ToneMapOperator,
+)
 from manim.utils.transform import Transform
 
 WIDTH, HEIGHT = 320, 180
@@ -206,3 +210,20 @@ def test_the_renderer_reads_every_render_config_field():
     native.WgpuRenderer().render(scene(), recorder)
     fields = {field.name for field in dataclasses.fields(RenderConfig)}
     assert fields - recorder.read == set()
+
+
+def test_the_tone_map_changes_lit_meshes_and_leaves_2d_shapes():
+    renderer = native.WgpuRenderer()
+
+    def frame(tone_map: ToneMapOperator) -> np.ndarray:
+        settings = RenderConfig(
+            pixel_width=WIDTH,
+            pixel_height=HEIGHT,
+            background_color="#1E1E2E",
+            tone_map=tone_map,
+        )
+        return renderer.render(scene(), settings)
+
+    neutral, clamped = frame(ToneMapOperator.PBR_NEUTRAL), frame(ToneMapOperator.NONE)
+    assert not np.array_equal(neutral[pixel(3.5, 0.0)], clamped[pixel(3.5, 0.0)])
+    assert np.array_equal(neutral[pixel(-3.5, 0.0)], clamped[pixel(-3.5, 0.0)])

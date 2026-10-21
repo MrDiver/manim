@@ -23,10 +23,6 @@ use crate::python::robjects::{node_of, transform_from_py};
 use crate::render::settings::{Camera, CameraView, ShadowMethod, ViewSettings};
 use crate::resolve::Resolvers;
 
-/// The tone map of lit meshes until the compositor's settings reach
-/// Python: Khronos PBR Neutral (`TONE_MAP_PBR_NEUTRAL` in color.wgsl).
-const TONE_MAP: u32 = 1;
-
 impl From<Error> for PyErr {
     fn from(error: Error) -> PyErr {
         match error {
@@ -111,6 +107,8 @@ impl WgpuRenderer {
         let view = View {
             source: ViewSource::Scene(update),
             settings: view_settings(config)?,
+            // The `ToneMapOperator` member's value (TONE_MAP_* in color.wgsl).
+            tone_map: config.getattr("tone_map")?.getattr("value")?.extract()?,
         };
         let sub_frames = vec![SubFrame {
             weight: 1.0,
@@ -181,7 +179,6 @@ fn pipeline_options(key: &PipelineKey) -> PyResult<PipelineOptions> {
         height: key.height,
         samples: key.samples,
         shadow_resolution: key.shadow_resolution,
-        tone_map: TONE_MAP,
         effects: Vec::new(),
         in_flight: 1,
         profile: false,

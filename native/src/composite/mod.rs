@@ -58,7 +58,8 @@ pub struct CompositeTarget<'a> {
 
 pub struct Compositor {
     pub effects: Vec<Effect>,
-    /// `ToneMapOperator` value (color.wgsl).
+    /// `ToneMapOperator` value (color.wgsl) of the view being composited
+    /// (`View::tone_map`).
     pub tone_map: u32,
     pub textures: TexturePool,
     fullscreen: Fullscreen,
@@ -69,11 +70,11 @@ pub struct Compositor {
 }
 
 impl Compositor {
-    pub fn new(gpu: &Gpu, effects: Vec<Effect>, tone_map: u32) -> Compositor {
+    pub fn new(gpu: &Gpu, effects: Vec<Effect>) -> Compositor {
         let device = &gpu.device;
         Compositor {
             effects,
-            tone_map,
+            tone_map: 0,
             textures: TexturePool::default(),
             fullscreen: Fullscreen::new(device),
             composite_params: UniformSlots::new(device, "composite params"),

@@ -27,6 +27,7 @@ __all__ = [
     "RenderConfig",
     "Renderer",
     "ShadowMethod",
+    "ToneMapOperator",
 ]
 
 DEFAULT_FRAME_HEIGHT = 8.0
@@ -62,6 +63,23 @@ class Camera:
     @property
     def position(self) -> np.ndarray:
         return np.asarray(self.transform.position)
+
+
+class ToneMapOperator(enum.Enum):
+    """How lit 3D colors (HDR radiance) are mapped to the screen. Values
+    match the TONE_MAP_* constants in ``native/shaders/color.wgsl``.
+    """
+
+    NONE = 0
+    """Clamp to [0, 1]."""
+    PBR_NEUTRAL = 1
+    """Khronos PBR Neutral: base colors stay faithful (the default)."""
+    ACES = 2
+    """Filmic ACES fit: strong contrast, desaturated highlights."""
+    AGX = 3
+    """AgX, Blender's default: smooth highlight roll-off."""
+    REINHARD = 4
+    """x / (1 + x): simple, low contrast."""
 
 
 class ShadowMethod(enum.Enum):
@@ -106,6 +124,8 @@ class RenderConfig:
     """Constant ambient light on meshes, on top of the scene's lights."""
     exposure: float = 1.0
     """Multiplies lit mesh colors before tone mapping."""
+    tone_map: ToneMapOperator = ToneMapOperator.PBR_NEUTRAL
+    """How lit mesh colors are mapped to the screen."""
     default_lights: bool = True
     """Light meshes with a key light when the scene contains no lights."""
     shadows: bool = True

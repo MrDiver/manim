@@ -37,6 +37,9 @@ use crate::render::settings::ViewSettings;
 pub struct View {
     pub source: ViewSource,
     pub settings: ViewSettings,
+    /// How the lit layer's HDR colors are mapped to the screen: a
+    /// `ToneMapOperator` value (TONE_MAP_* in color.wgsl).
+    pub tone_map: u32,
 }
 
 pub enum ViewSource {
@@ -86,8 +89,6 @@ pub struct PipelineOptions {
     /// MSAA samples per pixel.
     pub samples: Samples,
     pub shadow_resolution: u32,
-    /// The `ToneMapOperator` value.
-    pub tone_map: u32,
     /// The image effects, in chain order.
     pub effects: Vec<Effect>,
     pub in_flight: usize,
@@ -149,7 +150,7 @@ impl RenderPipeline {
         };
         Ok(RenderPipeline {
             renderer: Renderer::new(&gpu, settings, page_bytes)?,
-            compositor: Compositor::new(&gpu, options.effects, options.tone_map),
+            compositor: Compositor::new(&gpu, options.effects),
             pictures: CameraViewTexture::new(&gpu.device),
             output: Output::new(&gpu, size, options.pixel_format, options.in_flight)?,
             profiler: GpuProfiler::new(&gpu.device, options.profile && gpu.timestamps),
@@ -329,7 +330,7 @@ impl RenderPipeline {
                 if uses_time {
                     return None;
                 }
-                key.extend([update.scene, update.revision]);
+                key.extend([update.scene, update.revision, view.tone_map as u64]);
                 view.settings.fingerprint(&mut key);
             }
         }
@@ -438,6 +439,7 @@ impl RenderPipeline {
         view: &mut View,
         target: CompositeTarget,
     ) -> Result<()> {
+        self.compositor.tone_map = view.tone_map;
         let update = match &mut view.source {
             ViewSource::Scene(update) => update,
             ViewSource::Picture(pixels) => return self.composite_picture(encoder, pixels, target),
