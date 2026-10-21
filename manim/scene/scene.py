@@ -32,10 +32,10 @@ from .._config.output_plan import (
 )
 from .._config.render_session import resolve_render_session
 from ..animation.animation import Animation, Wait, prepare_animation
+from ..camera import Camera
 from ..constants import *
 from ..manager import Manager
 from ..renderer.cairo import CairoRenderer
-from ..renderer.cairo.camera import Camera
 from ..scene.scene_file_writer import _SceneFileWriterSettings
 from ..utils.family import extract_mobject_family_members
 from ..utils.iterables import list_difference_update, list_update

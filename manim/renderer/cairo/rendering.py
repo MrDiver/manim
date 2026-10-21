@@ -29,7 +29,7 @@ from manim.renderer.snapshot import (
 )
 from manim.utils.space_ops import cross2d
 
-from .camera import Camera
+from ...camera import Camera
 from .mesh_faces import mesh_faces
 from .target import _CairoRenderTarget, _PathCache
 

@@ -1,4 +1,6 @@
-"""Camera views and projection controls for the Cairo renderer."""
+"""The scene's cameras: the animatable frame, and the projection controls of
+:class:`ThreeDCamera`.
+"""
 
 from __future__ import annotations
 

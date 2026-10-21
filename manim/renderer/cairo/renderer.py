@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING, Any
 from PIL import Image
 
 from ... import config
+from ...camera import Camera, MultiCamera
 from ...mobject.mobject import Mobject, _AnimationBuilder
 from ...mobject.types.image_mobject import ImageMobjectFromCamera
 from ...scene.scene_file_writer import SceneFileWriter
 from ...utils.iterables import list_update
 from .._execution import _RendererExecutionView
-from .camera import Camera, MultiCamera
 from .rendering import _CairoDrawingContext
 from .target import _CairoRasterSettings, _CairoRenderTarget
 

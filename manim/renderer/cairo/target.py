@@ -17,7 +17,7 @@ from manim.utils.images import get_full_raster_image_path
 if TYPE_CHECKING:
     from manim.typing import RGBAPixelArray
 
-    from .camera import Camera
+    from ...camera import Camera
 
 
 @dataclass(frozen=True, slots=True)
