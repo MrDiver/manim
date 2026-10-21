@@ -57,7 +57,9 @@ def temp_media_dir(tmpdir, monkeypatch, request):
         monkeypatch.chdir(tmpdir)
         yield tmpdir
     else:
-        with manim.tempconfig({"media_dir": str(tmpdir)}):
+        # A fixed seed: scenes that use randomness (Graph's spring layout)
+        # draw the same frames on every run.
+        with manim.tempconfig({"media_dir": str(tmpdir), "seed": 0}):
             assert manim.config.media_dir == str(tmpdir)
             yield tmpdir
 
