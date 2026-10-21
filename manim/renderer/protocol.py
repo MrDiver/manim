@@ -6,7 +6,6 @@ given next to the render object tree (``RNode`` and its subclasses in
 from __future__ import annotations
 
 import enum
-import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -63,34 +62,6 @@ class Camera:
     @property
     def position(self) -> np.ndarray:
         return np.asarray(self.transform.position)
-
-    def view_matrix(self) -> np.ndarray:
-        """World to view space (the inverse of the camera's placement)."""
-        return np.linalg.inv(self.transform.matrix())
-
-    def projection_matrix(self, aspect_ratio: float) -> np.ndarray:
-        """View to clip space with WebGPU's depth range ``[0, 1]``."""
-        near, far = self.near, self.far
-        if self.field_of_view is None:
-            half_height = self.frame_height / 2
-            half_width = half_height * aspect_ratio
-            return np.array(
-                [
-                    [1 / half_width, 0, 0, 0],
-                    [0, 1 / half_height, 0, 0],
-                    [0, 0, -1 / (far - near), -near / (far - near)],
-                    [0, 0, 0, 1],
-                ]
-            )
-        focal = 1 / math.tan(self.field_of_view / 2)
-        return np.array(
-            [
-                [focal / aspect_ratio, 0, 0, 0],
-                [0, focal, 0, 0],
-                [0, 0, far / (near - far), near * far / (near - far)],
-                [0, 0, -1, 0],
-            ]
-        )
 
 
 class ShadowMethod(enum.Enum):
