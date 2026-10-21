@@ -31,9 +31,9 @@ the stroke once.
 ![A translucent stroke crossing itself](stroke_aa/translucent_crossing.png)
 
 **Joints of translucent strokes** show the same double blend where the
-joint overlaps the ribbons next to it. Joints and caps are not faded by
-coverage, only smoothed by MSAA, so miter tips look harder than the
-ribbons.
+joint overlaps the ribbons next to it. Round joints, round caps and
+bevels fade at their rim like the ribbon; the far end of a square cap and
+the end of a butt cap are smoothed by MSAA only.
 
 ![Joints of translucent strokes](stroke_aa/translucent_joints.png)
 

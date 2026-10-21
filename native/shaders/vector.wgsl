@@ -139,7 +139,8 @@ struct VertexOutput {
     @location(6) @interpolate(flat) view: i32,
     @location(7) picture: vec2<f32>,
     // Strokes: where across the ribbon this fragment is, in half widths
-    // (-1 and +1 on its edges, see stroke_coverage); 0 everywhere else.
+    // (-1 and +1 on its edges, see stroke_coverage), or how far from the
+    // center of a joint or cap; 0 everywhere else.
     @location(8) edge: f32,
 };
 
@@ -573,6 +574,7 @@ fn stroke_vertex(object: Object, record: StrokeCurve, vertex_index: u32) -> Vert
 
     var offset: vec3<f32>;
     var valid: bool;
+    var square = false;
     if at_end && record.next_point != NO_NEIGHBOR {
         let next = load_curve(object, u32(record.next_point));
         let next_tangent = curve_tangent(next, 0.0);
@@ -588,12 +590,26 @@ fn stroke_vertex(object: Object, record: StrokeCurve, vertex_index: u32) -> Vert
         let result = cap_fan(left, outward, curve.normal, cap, fan_vertex);
         offset = result.xyz;
         valid = result.w > 0.0;
+        square = cap == CAP_SQUARE;
     }
 
     if !valid {
         out.clip_position = CULLED;
         out.color = vec4<f32>(0.0);
         return out;
+    }
+    // Widened by one pixel and faded by coverage like the ribbon: round
+    // fans and bevels from their center (edge 0) out to their rim, square
+    // caps across, as the ribbon they continue. The far end of a square
+    // cap is smoothed by MSAA only.
+    let widen = (half_width + pixel_size(center)) / max(half_width, 1e-9);
+    if square {
+        let across = dot(offset, left);
+        offset += left * across * (widen - 1.0);
+        out.edge = across * widen;
+    } else {
+        offset *= widen;
+        out.edge = length(offset);
     }
     out.clip_position = project(center + offset * half_width);
     out.color = faded(curve_color(curve, t), object);
