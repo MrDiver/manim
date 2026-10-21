@@ -323,7 +323,9 @@ mod tests {
         let (mut resolver, mut packer) = (Resolver::default(), Packer::new());
         packer.apply(resolver.sync(&root).unwrap()).unwrap();
         let packet = packer.pack_frame(root.uid, &settings()).unwrap();
-        assert_eq!(packet.draws.opaque.runs, vec![(0, 2)]);
+        // The fill is opaque; a stroke is always blended (its edges fade).
+        assert_eq!(packet.draws.opaque.runs, vec![(0, 1)]);
+        assert_eq!(packet.draws.transparent.runs, vec![(0, 1)]);
         assert!(packet.meshes.is_none()); // no mesh: no 3D passes
         assert!(packer.uploads(false).vector_pages[0]
             .iter()
@@ -333,7 +335,8 @@ mod tests {
         assert!(again.changes.is_empty());
         packer.apply(again).unwrap();
         let packet = packer.pack_frame(root.uid, &settings()).unwrap();
-        assert_eq!(packet.draws.opaque.runs, vec![(0, 2)]);
+        assert_eq!(packet.draws.opaque.runs, vec![(0, 1)]);
+        assert_eq!(packet.draws.transparent.runs, vec![(0, 1)]);
         for records in packer.uploads(false).vector_pages[0].iter() {
             assert_eq!(records.written, Some(Vec::new()));
         }

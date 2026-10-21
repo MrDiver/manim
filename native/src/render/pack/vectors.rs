@@ -1239,8 +1239,9 @@ mod tests {
             places: Vec::new(),
         };
         let draws = packer.pack(&flat, &mut items, &all, &frame(&views));
-        assert_eq!(draws.opaque.runs, vec![(0, 2)]);
-        assert!(draws.transparent.runs.is_empty());
+        // The fill is opaque; a stroke is always blended (its edges fade).
+        assert_eq!(draws.opaque.runs, vec![(0, 1)]);
+        assert_eq!(draws.transparent.runs, vec![(0, 1)]);
     }
 
     #[test]
@@ -1263,7 +1264,8 @@ mod tests {
             arena.1.ranges(); // as uploaded
         }
         let draws = packer.pack(&flat, &mut items, &Changes::default(), &frame(&views));
-        assert_eq!(draws.opaque.runs, vec![(0, 2)]);
+        assert_eq!(draws.opaque.runs, vec![(0, 1)]);
+        assert_eq!(draws.transparent.runs, vec![(0, 1)]);
         for (name, arena) in packer.pages[0].arenas_mut() {
             assert_eq!(arena.ranges(), Some(Vec::new()), "{name} written again");
         }

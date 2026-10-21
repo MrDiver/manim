@@ -442,14 +442,19 @@ impl VectorGeometry {
         let (depth_stencil, entry_point, targets) = match role {
             Role::Shadow(stencil) => (Some(shadow_depth_stencil(stencil)), "fs_shadow", vec![]),
             Role::Mask => (None, "fs_mask", vec![Some(color_target(true))]),
-            // Transparent draws also write depth: with the strict "less"
-            // test an object never blends over itself (where its stroke
-            // ribbon overlaps a joint), only over earlier objects.
+            // Transparent draws also write depth, so later objects blend
+            // over them. The test is "less or equal": an object's pieces
+            // share one depth, so where a stroke crosses itself its covered
+            // inside draws over its own faded edge instead of leaving a seam
+            // (stroke_coverage in vector.wgsl). The price: where a
+            // translucent stroke crosses itself or its joints overlap, it
+            // blends over itself and shows darker or brighter there
+            // (native/docs/stroke_aa.md).
             Role::Opaque | Role::Transparent => (
                 Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
                     depth_write_enabled: Some(true),
-                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
                     stencil: Default::default(),
                     bias: Default::default(),
                 }),

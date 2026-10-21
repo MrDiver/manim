@@ -138,6 +138,9 @@ struct VertexOutput {
     // the picture this fragment is.
     @location(6) @interpolate(flat) view: i32,
     @location(7) picture: vec2<f32>,
+    // Strokes: where across the ribbon this fragment is, in half widths
+    // (-1 and +1 on its edges, see stroke_coverage); 0 everywhere else.
+    @location(8) edge: f32,
 };
 
 fn project(world: vec3<f32>) -> vec4<f32> {
@@ -231,13 +234,30 @@ fn fs_main(in: VertexOutput, @builtin(sample_index) sample: u32) -> FragmentOutp
     let slope = fwidth(in.clip_position.z);
     let fine_slope = layer_slope(in);
     let gradients = picture_gradients(in);
+    let coverage = stroke_coverage(in.edge, fwidth(in.edge));
     if hidden_by_meshes(in.clip_position, sample, slope) {
         discard;
     }
+    var covered = in;
+    covered.color.a *= coverage;
     var out: FragmentOutput;
-    out.color = premultiplied(shade(in, gradients));
+    out.color = premultiplied(shade(covered, gradients));
     out.depth = layered_depth(in.clip_position.z, in.layer, fine_slope);
     return out;
+}
+
+/// How much of this pixel a stroke's ribbon covers, from `edge` (in half
+/// widths across the ribbon, ±1 on its edges) and how much it changes per
+/// pixel: the distance to the nearer edge in pixels, plus one half for the
+/// pixel's own half width (a box filter, as Cairo's coverage), and at most
+/// the stroke's width in pixels, so lines thinner than a pixel fade instead
+/// of covering it. 1 off strokes, where `edge` does not change.
+fn stroke_coverage(edge: f32, per_pixel: f32) -> f32 {
+    if per_pixel <= 0.0 {
+        return 1.0;
+    }
+    let half_width = 1.0 / per_pixel;
+    return clamp(min((1.0 - abs(edge)) * half_width + 0.5, 2.0 * half_width), 0.0, 1.0);
 }
 
 /// Whether a mesh is in front of this sample. Shapes lying on a mesh surface
@@ -257,7 +277,10 @@ fn hidden_by_meshes(position: vec4<f32>, sample: u32, slope: f32) -> bool {
 /// Mask passes render without a depth buffer: color (alpha) only.
 @fragment
 fn fs_mask(in: VertexOutput) -> @location(0) vec4<f32> {
-    return premultiplied(shade(in, picture_gradients(in)));
+    let gradients = picture_gradients(in);
+    var covered = in;
+    covered.color.a *= stroke_coverage(in.edge, fwidth(in.edge));
+    return premultiplied(shade(covered, gradients));
 }
 
 /// How `in.picture` changes per pixel across and down (for the mip level
@@ -532,9 +555,10 @@ fn stroke_vertex(object: Object, record: StrokeCurve, vertex_index: u32) -> Vert
     out.clip = object.clip;
 
     if vertex_index < RIBBON_VERTICES {
-        let world = ribbon_position(object, curve, record, vertex_index);
-        out.clip_position = project(world.xyz);
-        out.color = faded(curve_color(curve, world.w), object);
+        let vertex = ribbon_vertex(object, curve, record, vertex_index);
+        out.clip_position = project(vertex.world);
+        out.color = faded(curve_color(curve, vertex.t), object);
+        out.edge = vertex.edge;
         return out;
     }
 
@@ -576,8 +600,22 @@ fn stroke_vertex(object: Object, record: StrokeCurve, vertex_index: u32) -> Vert
     return out;
 }
 
-/// World position (xyz) and curve parameter (w) of a ribbon vertex.
-fn ribbon_position(object: Object, base: Curve, record: StrokeCurve, vertex_index: u32) -> vec4<f32> {
+/// A ribbon vertex: where it is, its curve parameter, and where across the
+/// ribbon it lies in half widths (see `edge` in VertexOutput).
+struct RibbonVertex {
+    world: vec3<f32>,
+    t: f32,
+    edge: f32,
+};
+
+/// The size of one pixel in world units at `world` (vertically).
+fn pixel_size(world: vec3<f32>) -> f32 {
+    return 2.0 * project(world).w * frame.viewport.w / frame.projection[1][1];
+}
+
+/// A ribbon vertex, one pixel beyond the stroke's half width on its side,
+/// so the fragment shader can fade the edge by coverage (stroke_coverage).
+fn ribbon_vertex(object: Object, base: Curve, record: StrokeCurve, vertex_index: u32) -> RibbonVertex {
     // Two triangles per segment: (a-left, a-right, b-left), (b-left, a-right, b-right).
     let segment = vertex_index / 6u;
     let corner = vertex_index % 6u;
@@ -601,8 +639,11 @@ fn ribbon_position(object: Object, base: Curve, record: StrokeCurve, vertex_inde
     }
 
     let side = select(-1.0, 1.0, on_left);
-    let world = curve_point(curve, t) + side * offset * curve_half_width(curve, t);
-    return vec4<f32>(world, t);
+    let center = curve_point(curve, t);
+    let half_width = curve_half_width(curve, t);
+    let widened = half_width + pixel_size(center);
+    let world = center + side * offset * widened;
+    return RibbonVertex(world, t, side * widened / max(half_width, 1e-9));
 }
 
 /// Offset (xyz, in half widths) of a fan vertex filling the outer gap of a
@@ -674,7 +715,8 @@ fn fan_corner(start: vec3<f32>, normal: vec3<f32>, angle: f32, triangle: u32, co
 
 @fragment
 fn fs_shadow(in: VertexOutput) {
-    if in.color.a < 0.5 {
+    // The widened ribbon edge (stroke_coverage) casts no shadow.
+    if in.color.a * stroke_coverage(in.edge, fwidth(in.edge)) < 0.5 {
         discard;
     }
 }

@@ -60,7 +60,9 @@ pub fn stroke_records(points: &[f64], dimension: usize, style: &StrokeStyle) -> 
             opaque: false,
         };
     }
-    let opaque = opacities.iter().all(|&o| o >= 1.0);
+    // Never opaque: a stroke's edges fade by coverage (stroke_coverage in
+    // vector.wgsl), so every stroke is blended.
+    let opaque = false;
     let count = points.len() / dimension;
     let point = |index: usize| -> [f64; 3] {
         let at = &points[index * dimension..(index + 1) * dimension];
