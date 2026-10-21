@@ -86,8 +86,6 @@ pub struct PipelineOptions {
     /// MSAA samples per pixel.
     pub samples: Samples,
     pub shadow_resolution: u32,
-    /// Straight RGBA, sRGB.
-    pub background: [f32; 4],
     /// The `ToneMapOperator` value.
     pub tone_map: u32,
     /// The image effects, in chain order.
@@ -114,6 +112,8 @@ pub struct RenderPipeline {
     pictures: CameraViewTexture,
     output: Output,
     settings: TargetSettings,
+    /// The background of the frame being rendered: straight RGBA, sRGB
+    /// (`render`).
     background: [f32; 4],
     /// The `Frame` uniform of the last render (frame-stage effects read
     /// it).
@@ -155,18 +155,24 @@ impl RenderPipeline {
             profiler: GpuProfiler::new(&gpu.device, options.profile && gpu.timestamps),
             gpu,
             settings,
-            background: options.background,
+            background: [0.0; 4],
             last_frame: None,
             clock: StageClock::default(),
             last_key: None,
         })
     }
 
-    /// Render frame `index`. Returns true when the frame shows exactly
-    /// what the frame before showed: then nothing is rendered or read
-    /// back for it.
-    pub fn render(&mut self, index: u64, sub_frames: Vec<SubFrame>) -> Result<bool> {
+    /// Render frame `index` over `background` (straight RGBA, sRGB).
+    /// Returns true when the frame shows exactly what the frame before
+    /// showed: then nothing is rendered or read back for it.
+    pub fn render(
+        &mut self,
+        index: u64,
+        background: [f32; 4],
+        sub_frames: Vec<SubFrame>,
+    ) -> Result<bool> {
         let start = Instant::now();
+        self.background = background;
         let held = self.render_frame(index, sub_frames);
         self.clock.add("render (all)", start);
         held
@@ -296,7 +302,8 @@ impl RenderPipeline {
             .collect()
     }
 
-    /// Equal keys promise equal frames: per sub-frame its weight and per
+    /// Equal keys promise equal frames: the background, per sub-frame its
+    /// weight and per
     /// view its scene, the revision its update brings it to and the
     /// settings' fingerprint. None with a shader effect, a surface shader
     /// in a view (either may read the time), a scene not kept yet or a
@@ -308,7 +315,7 @@ impl RenderPipeline {
         if self.compositor.has_shader_effects() {
             return None;
         }
-        let mut key = Vec::new();
+        let mut key: Vec<u64> = self.background.map(|c| c.to_bits() as u64).to_vec();
         for sub_frame in sub_frames {
             key.extend([
                 sub_frame.weight.to_bits() as u64,

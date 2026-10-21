@@ -59,7 +59,6 @@ struct PipelineKey {
     height: u32,
     samples: Samples,
     shadow_resolution: u32,
-    background: [u32; 4],
     gpu: String,
     gpu_memory: String,
 }
@@ -117,8 +116,9 @@ impl WgpuRenderer {
             weight: 1.0,
             views: vec![view],
         }];
+        let (r, g, b, a): (f32, f32, f32, f32) = config.getattr("background_rgba")?.extract()?;
         self.frames += 1;
-        let held = pipeline.render(self.frames, sub_frames)?;
+        let held = pipeline.render(self.frames, [r, g, b, a], sub_frames)?;
         if !held || self.last.is_none() {
             let (_, pixels) = pipeline
                 .finished(true)?
@@ -135,13 +135,11 @@ impl WgpuRenderer {
 }
 
 fn pipeline_key(config: &Bound<'_, PyAny>) -> PyResult<PipelineKey> {
-    let background: (f32, f32, f32, f32) = config.getattr("background_rgba")?.extract()?;
     Ok(PipelineKey {
         width: config.getattr("pixel_width")?.extract()?,
         height: config.getattr("pixel_height")?.extract()?,
         samples: samples(config.getattr("msaa_samples")?.extract()?)?,
         shadow_resolution: config.getattr("shadow_resolution")?.extract()?,
-        background: [background.0, background.1, background.2, background.3].map(f32::to_bits),
         gpu: config.getattr("gpu")?.extract()?,
         gpu_memory: config.getattr("gpu_memory")?.extract()?,
     })
@@ -183,7 +181,6 @@ fn pipeline_options(key: &PipelineKey) -> PyResult<PipelineOptions> {
         height: key.height,
         samples: key.samples,
         shadow_resolution: key.shadow_resolution,
-        background: key.background.map(f32::from_bits),
         tone_map: TONE_MAP,
         effects: Vec::new(),
         in_flight: 1,
