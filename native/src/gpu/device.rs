@@ -167,10 +167,18 @@ impl Gpu {
         } else {
             vec![1, 4]
         };
+        // The allocator reserves device memory in blocks of 8 to 64 MiB
+        // instead of wgpu's default 128 to 256 MiB, and keeps them after
+        // the renderer that needed them is gone: many processes (parallel
+        // tests, render workers) then share one GPU without running out.
+        // TODO: make this a RenderConfig setting (memory or speed), and
+        // name that setting in the "no GPU device" error when the GPU is
+        // out of memory.
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("manim"),
             required_features: features,
             required_limits: adapter.limits(),
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
             ..Default::default()
         }))
         .map_err(|error| Error::Gpu(format!("no GPU device: {error}")))?;
