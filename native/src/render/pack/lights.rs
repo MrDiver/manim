@@ -69,7 +69,7 @@ impl LightSource {
     }
 }
 
-/// The scene's lights, or the default light when it has none and
+/// The scene's lights, or the default key and fill lights when it has none and
 /// `default_lights` is on (`camera` is the camera's world matrix).
 pub fn light_sources(scene: &FlatScene, default_lights: bool, camera: &DMat4) -> Vec<LightSource> {
     let mut sources = Vec::with_capacity(scene.lights.len());
@@ -92,12 +92,35 @@ pub fn light_sources(scene: &FlatScene, default_lights: bool, camera: &DMat4) ->
     }
     if sources.is_empty() && default_lights {
         sources.push(default_light(camera));
+        sources.push(fill_light(camera));
     }
     sources
 }
 
+/// The fill light of a scene without lights: a white directional light of
+/// intensity 1.2 from below and to the right, opposite the key light,
+/// without shadows, so the sides the key light misses are not black.
+fn fill_light(camera: &DMat4) -> LightSource {
+    let right = camera.x_axis.truncate();
+    let up = camera.y_axis.truncate();
+    let backwards = camera.z_axis.truncate();
+    let direction = -(-0.5 * up + 0.8 * right + 0.6 * backwards);
+    LightSource {
+        light: LightKind::Directional,
+        world: DMat4::from_quat(rotation_towards(direction)),
+        clip: NO_CLIP,
+        alpha: 1.0,
+        color_linear: [1.0; 3],
+        intensity: 1.2,
+        size: 0.03,
+        cast_shadows: false,
+        range: 0.0,
+        cone: (0.0, 0.0),
+    }
+}
+
 /// The key light of a scene without lights: a white directional light of
-/// intensity 3 from above, to the right of and behind the camera, so
+/// intensity 3 from above, to the left of and behind the camera, so
 /// meshes are lit from the front.
 fn default_light(camera: &DMat4) -> LightSource {
     let right = camera.x_axis.truncate();
