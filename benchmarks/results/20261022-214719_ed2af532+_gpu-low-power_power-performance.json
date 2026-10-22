@@ -1,0 +1,74 @@
+{
+  "tree": "/home/tristan/repositories/manim-trunk",
+  "commit": "ed2af532+",
+  "size": "1920x1080",
+  "gpu": "low-power",
+  "power": "performance",
+  "profile": null,
+  "date": "2026-10-22 21:46:52",
+  "scenes": {
+    "100 squares, still": {
+      "renderer": "InsanityAdapter",
+      "seconds": 0.3093476530048065,
+      "draw_seconds": 0.2814429649733938,
+      "frames": 1,
+      "peak_mib": 436.76171875
+    },
+    "100 squares, moving": {
+      "renderer": "InsanityAdapter",
+      "seconds": 1.0919830390485004,
+      "draw_seconds": 0.9667999999364838,
+      "frames": 15,
+      "peak_mib": 449.234375
+    },
+    "1000 squares, still": {
+      "renderer": "InsanityAdapter",
+      "seconds": 0.5124650880461559,
+      "draw_seconds": 0.2733138999901712,
+      "frames": 1,
+      "peak_mib": 449.8203125
+    },
+    "1000 squares, moving": {
+      "renderer": "InsanityAdapter",
+      "seconds": 1.878006460960023,
+      "draw_seconds": 0.921654413046781,
+      "frames": 15,
+      "peak_mib": 483.7421875
+    },
+    "10000 squares, still": {
+      "renderer": "InsanityAdapter",
+      "seconds": 2.8721262979670428,
+      "draw_seconds": 0.38174316502409056,
+      "frames": 1,
+      "peak_mib": 580.0234375
+    },
+    "10000 squares, moving": {
+      "renderer": "InsanityAdapter",
+      "seconds": 12.14709075895371,
+      "draw_seconds": 2.15831304207677,
+      "frames": 15,
+      "peak_mib": 834.83203125
+    },
+    "plot": {
+      "renderer": "InsanityAdapter",
+      "seconds": 0.9267978880088776,
+      "draw_seconds": 0.8670358700328507,
+      "frames": 15,
+      "peak_mib": 449.80859375
+    },
+    "text": {
+      "renderer": "InsanityAdapter",
+      "seconds": 1.397805492975749,
+      "draw_seconds": 0.8836585090029985,
+      "frames": 15,
+      "peak_mib": 494.4765625
+    },
+    "3D": {
+      "renderer": "InsanityAdapter",
+      "seconds": 1.0871689729974605,
+      "draw_seconds": 1.0269537221174687,
+      "frames": 15,
+      "peak_mib": 459.5859375
+    }
+  }
+}

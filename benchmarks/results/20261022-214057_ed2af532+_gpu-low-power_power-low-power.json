@@ -1,0 +1,74 @@
+{
+  "tree": "/home/tristan/repositories/manim-trunk",
+  "commit": "ed2af532+",
+  "size": "1920x1080",
+  "gpu": "low-power",
+  "power": "low-power",
+  "profile": null,
+  "date": "2026-10-22 21:40:01",
+  "scenes": {
+    "100 squares, still": {
+      "renderer": "InsanityAdapter",
+      "seconds": 0.5822326169582084,
+      "draw_seconds": 0.5205985130160116,
+      "frames": 1,
+      "peak_mib": 437.2734375
+    },
+    "100 squares, moving": {
+      "renderer": "InsanityAdapter",
+      "seconds": 2.121816619997844,
+      "draw_seconds": 1.8286372440052219,
+      "frames": 15,
+      "peak_mib": 456.890625
+    },
+    "1000 squares, still": {
+      "renderer": "InsanityAdapter",
+      "seconds": 1.1450251549831592,
+      "draw_seconds": 0.5799114379915409,
+      "frames": 1,
+      "peak_mib": 449.66015625
+    },
+    "1000 squares, moving": {
+      "renderer": "InsanityAdapter",
+      "seconds": 4.032903899962548,
+      "draw_seconds": 1.9312988938763738,
+      "frames": 15,
+      "peak_mib": 491.1796875
+    },
+    "10000 squares, still": {
+      "renderer": "InsanityAdapter",
+      "seconds": 6.108548099000473,
+      "draw_seconds": 0.7186023499816656,
+      "frames": 1,
+      "peak_mib": 580.6015625
+    },
+    "10000 squares, moving": {
+      "renderer": "InsanityAdapter",
+      "seconds": 25.68004424998071,
+      "draw_seconds": 3.891865726094693,
+      "frames": 15,
+      "peak_mib": 831.28515625
+    },
+    "plot": {
+      "renderer": "InsanityAdapter",
+      "seconds": 1.9120247479877435,
+      "draw_seconds": 1.7239855200750753,
+      "frames": 15,
+      "peak_mib": 454.8359375
+    },
+    "text": {
+      "renderer": "InsanityAdapter",
+      "seconds": 2.89975725999102,
+      "draw_seconds": 1.7771682069287635,
+      "frames": 15,
+      "peak_mib": 494.63671875
+    },
+    "3D": {
+      "renderer": "InsanityAdapter",
+      "seconds": 2.3224941579974256,
+      "draw_seconds": 2.124354993982706,
+      "frames": 15,
+      "peak_mib": 459.546875
+    }
+  }
+}

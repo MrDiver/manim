@@ -134,3 +134,7 @@ dist/
 
 # Ignore the built dependencies
 third_party/*
+
+# Profiles made by scripts/benchmark_render.py (large; the results are kept)
+benchmarks/py-spy/
+benchmarks/memray/

@@ -1,0 +1,74 @@
+{
+  "tree": "/tmp/claude-1000/-home-tristan-repositories-manim/f32f98f0-106f-4802-a91e-0966173603f0/scratchpad/old_trunk",
+  "commit": "0041b6bb",
+  "size": "1920x1080",
+  "gpu": "default",
+  "power": "performance",
+  "profile": null,
+  "date": "2026-10-22 21:47:19",
+  "scenes": {
+    "100 squares, still": {
+      "renderer": "CairoRenderer",
+      "seconds": 0.044321668974589556,
+      "draw_seconds": 0.003280324977822602,
+      "frames": 2,
+      "peak_mib": 159.015625
+    },
+    "100 squares, moving": {
+      "renderer": "CairoRenderer",
+      "seconds": 0.18294936197344214,
+      "draw_seconds": 0.07268065901007503,
+      "frames": 15,
+      "peak_mib": 169.7109375
+    },
+    "1000 squares, still": {
+      "renderer": "CairoRenderer",
+      "seconds": 0.26186278800014406,
+      "draw_seconds": 0.020574988040607423,
+      "frames": 2,
+      "peak_mib": 168.8515625
+    },
+    "1000 squares, moving": {
+      "renderer": "CairoRenderer",
+      "seconds": 1.3152244609664194,
+      "draw_seconds": 0.4574656990589574,
+      "frames": 15,
+      "peak_mib": 192.65625
+    },
+    "10000 squares, still": {
+      "renderer": "CairoRenderer",
+      "seconds": 2.5580744089675136,
+      "draw_seconds": 0.19398326001828536,
+      "frames": 2,
+      "peak_mib": 268.625
+    },
+    "10000 squares, moving": {
+      "renderer": "CairoRenderer",
+      "seconds": 12.376050387974828,
+      "draw_seconds": 3.673633962054737,
+      "frames": 15,
+      "peak_mib": 500.984375
+    },
+    "plot": {
+      "renderer": "CairoRenderer",
+      "seconds": 0.05463938898174092,
+      "draw_seconds": 0.005160125030670315,
+      "frames": 16,
+      "peak_mib": 167.18359375
+    },
+    "text": {
+      "renderer": "CairoRenderer",
+      "seconds": 0.5368405790068209,
+      "draw_seconds": 0.09164234093623236,
+      "frames": 15,
+      "peak_mib": 190.609375
+    },
+    "3D": {
+      "renderer": "CairoRenderer",
+      "seconds": 2.167427217005752,
+      "draw_seconds": 2.091140526928939,
+      "frames": 15,
+      "peak_mib": 168.41796875
+    }
+  }
+}

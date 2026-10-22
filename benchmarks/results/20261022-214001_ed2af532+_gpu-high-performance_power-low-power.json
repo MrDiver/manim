@@ -1,0 +1,74 @@
+{
+  "tree": "/home/tristan/repositories/manim-trunk",
+  "commit": "ed2af532+",
+  "size": "1920x1080",
+  "gpu": "high-performance",
+  "power": "low-power",
+  "profile": null,
+  "date": "2026-10-22 21:39:13",
+  "scenes": {
+    "100 squares, still": {
+      "renderer": "InsanityAdapter",
+      "seconds": 0.5685660830349661,
+      "draw_seconds": 0.5019119490170851,
+      "frames": 1,
+      "peak_mib": 453.046875
+    },
+    "100 squares, moving": {
+      "renderer": "InsanityAdapter",
+      "seconds": 0.7779393530217931,
+      "draw_seconds": 0.5206765870680101,
+      "frames": 15,
+      "peak_mib": 472.8671875
+    },
+    "1000 squares, still": {
+      "renderer": "InsanityAdapter",
+      "seconds": 0.9632301370147616,
+      "draw_seconds": 0.4265070909750648,
+      "frames": 1,
+      "peak_mib": 466.25390625
+    },
+    "1000 squares, moving": {
+      "renderer": "InsanityAdapter",
+      "seconds": 2.6811874809791334,
+      "draw_seconds": 0.6280616099247709,
+      "frames": 15,
+      "peak_mib": 506.83984375
+    },
+    "10000 squares, still": {
+      "renderer": "InsanityAdapter",
+      "seconds": 5.964296924008522,
+      "draw_seconds": 0.5404360240208916,
+      "frames": 1,
+      "peak_mib": 599.453125
+    },
+    "10000 squares, moving": {
+      "renderer": "InsanityAdapter",
+      "seconds": 23.368713208998088,
+      "draw_seconds": 1.9984269469277933,
+      "frames": 15,
+      "peak_mib": 850.8828125
+    },
+    "plot": {
+      "renderer": "InsanityAdapter",
+      "seconds": 0.6902771859895438,
+      "draw_seconds": 0.5739907660172321,
+      "frames": 15,
+      "peak_mib": 467.359375
+    },
+    "text": {
+      "renderer": "InsanityAdapter",
+      "seconds": 1.7446444749948569,
+      "draw_seconds": 0.653570001013577,
+      "frames": 15,
+      "peak_mib": 510.02734375
+    },
+    "3D": {
+      "renderer": "InsanityAdapter",
+      "seconds": 0.7154420490260236,
+      "draw_seconds": 0.6087948940694332,
+      "frames": 15,
+      "peak_mib": 475.48828125
+    }
+  }
+}
